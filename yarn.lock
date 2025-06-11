@@ -10113,9 +10113,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"zerounbound-mainnet@workspace:.":
+"zerounbound@workspace:.":
   version: 0.0.0-use.local
-  resolution: "zerounbound-mainnet@workspace:."
+  resolution: "zerounbound@workspace:."
   dependencies:
     "@airgap/beacon-sdk": "npm:4.5.2"
     "@babel/core": "npm:7.22.0"

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" preserveAspectRatio="xMidYMid meet" overflow="hidden">
+  <defs>
+    <clipPath id="frame-clip">
+      <rect width="48" height="48" />
+    </clipPath>
+  </defs>
+  <image href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAwAAAAAwCAMAAACRze2MAAAAG1BMVEUAAADq/gAA/v7+lAAU/gD+AP7+AAB6AP4AAP6GbaN+AAAAAXRSTlMAQObYZgAAA6RJREFUeNrtnc1u3DAQgyfeiVfv/7TS2mv1YhQNjYbmJbIRfrfWmJ8K5EyhAEpwOPNOnOSxEyf52ImT5E6cpOzESZ47cZLPnTjJtBPm+swAFT9AxQ8EIYEgFICKH6DiB86K3yb4GSaUc0iAgCkgYFoxU6tYCquIcmYVUc6sIsqZVARYRY4tozGNkz+vmqlVLYVX5WLMJGIkVVGMtsBdDDCHxiM0QIi0cIqFi1gYhEgLgxBp4SmCF0Z4YY4dcJ5p0PjnSyBTq10KqS0M4kxhEENtHMReApdmGjP++RJIsXwRyxMJpjiFy38O1kvg4kxD9M8dkGIDhTYgCjBFAZbDudoBd2AaoX/ugBRbKGILz6CkKL8Cx2oHDGSelWMar39sIsUmyqkmRPGlKL7y5VTtgIHMEbNPyfxqZsEAoxcAtpxiG0VoQ5i9Kc7e8s+hegUMZBYcMA3QP3NAio0UoRFJeCkKr/w9UzvgArN/9hkZ/y+IMI1fANhxiq0UoRVx7qY4d8t+pF4B15D97CMy3gFkJt77n/QS99VbPJAu/sBsJQ3ivqrY4OP7fhr+xfT9RFuwwff3+TdscA34M9liKKhKthj238iIxvNZxAm/eQMYYwMYYwMYc28DjL/CQlJsqIgNPcWGPlPUQwlg9EWWDWCMDWCMDWCMDWCMDWCMDWCMDWDMbzbAKzTeodFDYxUbqmJDTWxoWUNiq6HRQmMJjc0GMMYGMMYGMMaIsMfbZ+D4eDt8B46Pt8N34Ph4O3wHjo+3w3fg+Hg7fAeOj7fDd+D4eDt8B9gD8N4AxtgAV70zEoO6eNG0ihdNdQ+SrmiqeEXTtCsa/V7HBjDGBrjDAhDD+h4mLABpBdQ9TLyjr+IdfdNmub4CbICb6F8M7BDIWCGQUSGQ0SCQsUDgWSHrDrABjLEBrr4AxNAOoYwVQhkVQhkNQhkLhApzXF4BNsAN9C8GdwhmrBDMqBDMaBDMWCBYEbHuABvg8voXwzuGE1YMJ1QMJzQMJywQrklYd4ANcCf98wSdJiAC7lT/kgMaTUAE3DQB6w6wAX6Q10uU/1vL0TvJAawryQHUSnIArZEcwLKQHMC2sRycbbMB7jH+eZpO0iArSYNUkgZpJM3J6d206a0vARvgBuOfZ+qdZCKjm2WqlSwSMrohkzC6W9NGt74EfA07nBkIwgMIwgcQhASCUIAgPIEgfAJBmL7g39h9C0D8FBA/BcRPAfFTQPwUED8FxE+5k/j/ADWy7iRHr/RlAAAAAElFTkSuQmCC" width="768" height="48" clip-path="url(#frame-clip)" style="image-rendering: pixelated;">
+    <animate attributeName="x" values="0;-48;-96;-144;-192;-240;-288;-336;-384;-432;-480;-528;-576;-624;-672;-720;0" keyTimes="0.0000;0.0625;0.1250;0.1875;0.2500;0.3125;0.3750;0.4375;0.5000;0.5625;0.6250;0.6875;0.7500;0.8125;0.8750;0.9375;1.0000" calcMode="discrete" dur="1.2s" repeatCount="indefinite"/>
+  </image>
+</svg>

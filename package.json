@@ -1,0 +1,101 @@
+{
+  "name": "zerounbound",
+  "version": "1.4.5",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "set:ghostnet": "node scripts/setTarget.js ghostnet",
+    "set:mainnet":  "node scripts/setTarget.js mainnet",
+    "bundle": "node scripts/generateBundles.js",
+
+    "dev":   "yarn set:ghostnet && node scripts/ensureDevManifest.js && node scripts/startDev.js",
+    "build": "node scripts/generateManifest.js && node scripts/updatePkgName.js && next build",
+    "start": "next start -p 4000",
+
+    "lint":  "eslint --ext .js,jsx,ts,tsx src --max-warnings 0"
+  },
+  "dependencies": {
+    "@airgap/beacon-sdk": "4.5.2",
+    "@stablelib/ed25519": "1.0.3",
+    "@stablelib/nacl": "1.0.4",
+    "@stablelib/random": "1.0.2",
+    "@stablelib/utf8": "1.0.2",
+    "@stablelib/x25519-session": "1.0.4",
+    "@taquito/beacon-wallet": "21.0.4",
+    "@taquito/taquito": "21.0.4",
+    "@taquito/tzip12": "^21.0.4",
+    "@taquito/tzip16": "^21.0.4",
+    "@walletconnect/core": "^2.20.2",
+    "@walletconnect/jsonrpc-ws-connection": "^1.0.16",
+    "@walletconnect/keyvaluestorage": "^1.1.1",
+    "clsx": "^1.2.1",
+    "embla-carousel-react": "^8.6.0",
+    "next": "15.3.2",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "react-feather": "^2.0.10",
+    "styled-components": "^6.1.18",
+    "zod": "^3.25.7"
+  },
+  "devDependencies": {
+    "@babel/core": "7.22.0",
+    "@types/babel__core": "^7",
+    "@types/node": "^20.11.30",
+    "@types/react": "19.1.4",
+    "@types/styled-components": "^5.1.26",
+    "eslint": "^9.26.0",
+    "eslint-config-next": "^15.3.2",
+    "eslint-plugin-styled-components-a11y": "^2.2.1",
+    "fast-glob": "^3.3.3",
+    "glob": "^11.0.2",
+    "prettier": "^3.5.3",
+    "typescript": "5.8.3",
+    "webpack": "5.91.0",
+    "workbox-webpack-plugin": "^7.3.0",
+    "yargs": "^17.7.2"
+  },
+  "eslintConfig": {
+    "extends": [
+      "next/core-web-vitals",
+      "plugin:styled-components-a11y/recommended"
+    ],
+    "rules": {
+      "no-console": [
+        "error",
+        {
+          "allow": [
+            "warn",
+            "error"
+          ]
+        }
+      ],
+      "max-len": [
+        "error",
+        {
+          "code": 100
+        }
+      ],
+      "no-undef": "error"
+    }
+  },
+  "browserslist": [
+    "last 2 Chrome versions",
+    "last 2 Firefox versions",
+    "last 2 Safari versions"
+  ],
+  "resolutions": {
+    "internal-slot": "1.1.0",
+    "@stablelib/ed25519": "1.0.3",
+    "@stablelib/nacl": "1.0.4",
+    "@stablelib/random": "1.0.2",
+    "@stablelib/utf8": "1.0.2",
+    "@stablelib/x25519-session": "1.0.4",
+    "@stablelib/blake2b": "1.0.1",
+    "@stablelib/bytes": "1.0.1",
+    "styled-components": "^6.1.18"
+  },
+  "peerDependencies": {
+    "webpack": "^5.85.0"
+  },
+  "packageManager": "yarn@4.9.1"
+}

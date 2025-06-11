@@ -1,0 +1,169 @@
+{
+  "terminal-dark-🌗": {
+    "--zu-bg": "#0b0e14",
+    "--zu-bg-alt": "#14171d",
+    "--zu-fg": "#c3c7cb",
+    "--zu-heading": "#ffffff",
+    "--zu-accent": "#50fa7b",
+    "--zu-accent-hover": "#77ff9a",
+    "--zu-accent-sec": "#8be9fd",
+    "--zu-accent-sec-hover": "#b1f0ff",
+    "--zu-btn-fg": "#000000"
+  },
+  "terminal-classic-🌗": { 
+    "--zu-bg":"#000000",
+    "--zu-bg-alt":"#050505",
+    "--zu-fg":"#33ff33",
+    "--zu-heading":"#ffcc00",
+    "--zu-accent":"#33ff33",
+    "--zu-accent-hover":"#66ff66",
+    "--zu-accent-sec":"#ff3333",
+    "--zu-accent-sec-hover":"#ff6666",
+    "--zu-btn-fg": "#000000"
+  },
+  "terminal-light-🌗": {
+    "--zu-bg": "#f8f8f2",
+    "--zu-bg-alt": "#e7e7e1",
+    "--zu-fg": "#202124",
+    "--zu-heading": "#000000",
+    "--zu-accent": "#50fa7b",
+    "--zu-accent-hover": "#77ff9a",
+    "--zu-accent-sec": "#6272a4",
+    "--zu-accent-sec-hover": "#8290c1",
+    "--zu-btn-fg": "#000000"
+  },
+  "mint-green-🌗": {
+    "--zu-bg": "#001c12",
+    "--zu-bg-alt": "#023623",
+    "--zu-fg": "#e7fff6",
+    "--zu-heading": "#ffffff",
+    "--zu-accent": "#00e16e",
+    "--zu-accent-hover": "#29f18d",
+    "--zu-accent-sec": "#00af6c",
+    "--zu-accent-sec-hover": "#00c67c",
+    "--zu-btn-fg": "#000000"
+  },
+  "retro-purple-🌗": {
+    "--zu-bg": "#110022",
+    "--zu-bg-alt": "#20003d",
+    "--zu-fg": "#e0d7ff",
+    "--zu-heading": "#ffffff",
+    "--zu-accent": "#ba55ff",
+    "--zu-accent-hover": "#c97dff",
+    "--zu-accent-sec": "#6f79ff",
+    "--zu-accent-sec-hover": "#8c98ff",
+    "--zu-btn-fg": "#ffffff"
+  },
+  "arcade-dark-🌗": {
+    "--zu-bg": "#0d0d0d",
+    "--zu-bg-alt": "#141414",
+    "--zu-fg": "#d0d0d0",
+    "--zu-heading": "#ffffff",
+    "--zu-accent": "#2d2dff",
+    "--zu-accent-hover": "#5353ff",
+    "--zu-accent-sec": "#ff0078",
+    "--zu-accent-sec-hover": "#ff45a6",
+    "--zu-btn-fg": "#ffffff"
+  },
+  "arcade-light-🌗": {
+    "--zu-bg": "#fafafa",
+    "--zu-bg-alt": "#e7e7e7",
+    "--zu-fg": "#222222",
+    "--zu-heading": "#111111",
+    "--zu-accent": "#0047ff",
+    "--zu-accent-hover": "#326aff",
+    "--zu-accent-sec": "#c400ff",
+    "--zu-accent-sec-hover": "#e243ff",
+    "--zu-btn-fg": "#ffffff"
+  },
+  "neon-dark-🌗": {
+    "--zu-bg": "#050013",
+    "--zu-bg-alt": "#0e0031",
+    "--zu-fg": "#e5e5ff",
+    "--zu-heading": "#ff5cf4",
+    "--zu-accent": "#00e5ff",
+    "--zu-accent-hover": "#29f7ff",
+    "--zu-accent-sec": "#ff0078",
+    "--zu-accent-sec-hover": "#ff45a6",
+    "--zu-btn-fg": "#000000"
+  },
+  "sunset-dark-🌗":   { 
+    "--zu-bg":"#1a0000",
+    "--zu-bg-alt":"#330303",
+    "--zu-fg":"#ffd9b3",
+    "--zu-heading":"#ffeedd",
+    "--zu-accent":"#ff5e00",
+    "--zu-accent-hover":"#ff8524",
+    "--zu-accent-sec":"#d600ff",
+    "--zu-accent-sec-hover":"#e642ff",
+    "--zu-btn-fg": "#000000"
+   },
+
+  "retro-green-🌗": {
+    "--zu-bg": "#0a1207",
+    "--zu-bg-alt": "#13220e",
+    "--zu-fg": "#8bff70",
+    "--zu-heading": "#baff9d",
+    "--zu-accent": "#00b050",
+    "--zu-accent-hover": "#00cf5d",
+    "--zu-accent-sec": "#ff7600",
+    "--zu-accent-sec-hover": "#ffa33d",
+    "--zu-btn-fg": "#000000"
+  },
+
+  "pastel-mint-🌗": {
+    "--zu-bg": "#e7fff6",
+    "--zu-bg-alt": "#d4f8ec",
+    "--zu-fg": "#06230f",
+    "--zu-heading": "#000000",
+    "--zu-accent": "#00af6c",
+    "--zu-accent-hover": "#00c67c",
+    "--zu-accent-sec": "#008459",
+    "--zu-accent-sec-hover": "#009f6c",
+    "--zu-btn-fg": "#000000"
+  },
+  "cream-rose-🌗": {
+    "--zu-bg": "#fff9f6",
+    "--zu-bg-alt": "#faede8",
+    "--zu-fg": "#3a1d1d",
+    "--zu-heading": "#1d0e0e",
+    "--zu-accent": "#ff006e",
+    "--zu-accent-hover": "#ff338d",
+    "--zu-accent-sec": "#c20056",
+    "--zu-accent-sec-hover": "#d4336f",
+    "--zu-btn-fg": "#ffffff"
+  },
+  "solar-light-🌗": {
+    "--zu-bg": "#fdf6e3",
+    "--zu-bg-alt": "#f1e8c9",
+    "--zu-fg": "#073642",
+    "--zu-heading": "#002b36",
+    "--zu-accent": "#268bd2",
+    "--zu-accent-hover": "#4fa3e4",
+    "--zu-accent-sec": "#2aa198",
+    "--zu-accent-sec-hover": "#51b9b1",
+    "--zu-btn-fg": "#ffffff"
+  },
+  "accessible-dark-🌗": {
+    "--zu-bg": "#000000",
+    "--zu-bg-alt": "#1a1a1a",
+    "--zu-fg": "#dcdcdc",
+    "--zu-heading": "#ffffff",
+    "--zu-accent": "#1976d2",
+    "--zu-accent-hover": "#4791e1",
+    "--zu-accent-sec": "#d81b60",
+    "--zu-accent-sec-hover": "#ec407a",
+    "--zu-btn-fg": "#ffffff"
+  },
+  "accessible-light-🌗": {
+    "--zu-bg": "#ffffff",
+    "--zu-bg-alt": "#f5f5f5",
+    "--zu-fg": "#212121",
+    "--zu-heading": "#000000",
+    "--zu-accent": "#1976d2",
+    "--zu-accent-hover": "#4791e1",
+    "--zu-accent-sec": "#d81b60",
+    "--zu-accent-sec-hover": "#ec407a",
+    "--zu-btn-fg": "#ffffff"
+  }
+}

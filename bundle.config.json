@@ -1,0 +1,61 @@
+{
+  "outputDir": "summarized_files",
+
+  "bundles": [
+    {
+      "bundleName": "contracts_bundle",
+      "patterns": ["contracts/**/*.tz", "contracts/**/*.json"]
+    },
+
+    {
+      "bundleName": "assets_bundle",
+      "patterns": [
+        "public/**",
+        "!public/**/*.{png,jpg,jpeg,ico,ttf,woff,woff2}",
+        "!public/manifest.json",
+        "public/embla-*.svg"
+      ]
+    },
+
+    {
+      "bundleName": "engine_bundle",
+      "patterns": [
+        "scripts/**",
+        "src/core/**",
+        "src/lib/**",
+        "src/data/**",
+        "src/config/**",
+        "src/constants/**",
+        "src/workers/**"
+      ]
+    },
+
+    {
+      "bundleName": "frontend_bundle",
+      "patterns": [
+        "src/contexts/**",
+        "src/components/**",
+        "src/ui/**",
+        "src/ui/Entrypoints/**",
+        "src/hooks/**",
+        "src/styles/**",
+        "src/pages/**",
+        "src/utils/**"
+      ]
+    },
+
+    {
+      "bundleName": "infra_bundle",
+      "patterns": [
+        "next.config.js",
+        "package.json",
+        "tsconfig.json",
+        "bundle.config.json",
+        ".yarnrc.yml",
+        ".prettierrc",
+        ".eslintrc.cjs",
+        ".gitignore"
+      ]
+    }
+  ]
+}

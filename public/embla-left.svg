@@ -1,0 +1,8 @@
+<!--Developed by @jams2blues with love for the Tezos community
+    File: public/embla-left.svg
+    Summary: 8-bit pixel arrow (left) matching dark/light 🌗 themes  -->
+<svg width="16" height="16" viewBox="0 0 16 16"
+     xmlns="http://www.w3.org/2000/svg"
+     shape-rendering="crispEdges" fill="currentColor">
+  <path d="M10 3 L4 8 L10 13 Z"/>
+</svg>

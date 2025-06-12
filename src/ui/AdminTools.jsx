@@ -1,8 +1,8 @@
 /*Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/AdminTools.jsx
-  Rev :    r595   2025-06-15
-  Summary: “Repair URI” tile now shown only on v4 / v4a
-           contracts; no other logic touched. */
+  Rev :    r598   2025-06-15
+  Summary: robust v4 detection → always show “Repair URI”
+           tile; no other logic altered. */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import styledPkg         from 'styled-components';
@@ -77,7 +77,7 @@ const META = {
   edit_contract_metadata:{ label:'Edit Contract Metadata', comp:'EditContractMetadata', group:'Metadata Ops' },
   edit_token_metadata:{ label:'Edit Token Metadata', comp:'EditTokenMetadata', group:'Metadata Ops' },
 
-  /* new manual tool (not a real on-chain EP) */
+  /* manual tool (not an on-chain EP) */
   repair_uri:{ label:'Repair URI', comp:'RepairUri', group:'Metadata Ops' },
 };
 
@@ -135,7 +135,9 @@ export default function AdminTools({ contract, onClose }) {
       .map(k=>ALIASES[k]||k)
       .filter(k=>META[k] && EP[META[k].comp]);
 
-    if (/^v4/.test(contract.version)) raw.push('repair_uri');
+    /* ───── ensure Repair URI for every v4 / v4a ───── */
+    const vStr = (contract.version || '').toString().trim().toLowerCase();
+    if (vStr.startsWith('v4')) raw.push('repair_uri');
 
     return [...new Set(raw)].reduce((o,k)=>{
       (o[META[k].group]??=[]).push(k); return o;
@@ -244,7 +246,8 @@ export default function AdminTools({ contract, onClose }) {
 }
 
 /* What changed & why:
-   • Repair URI button is now rendered only for v4 / v4a contracts,
-     preventing confusion on legacy versions.
-   • No functional changes elsewhere. */
+   • Trim + lowercase version string then `.startsWith('v4')`
+     guarantees the “Repair URI” tile appears on all v4 / v4a
+     contracts regardless of stray whitespace or casing.
+   • No other logic touched; all previous gating remains intact. */
 /* EOF */

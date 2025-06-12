@@ -1,8 +1,11 @@
-/*Developed by @jams2blues – ZeroContract Studio
+/*─────────────────────────────────────────────────────────────
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/ContractCarousels.jsx
-  Rev :    r579   2025-06-14
-  Summary: ignore cached totals = 0 → refetch; badge now shows the
-           true v4/v4a supply after bug-fix. */
+  Rev :    r654   2025-06-20
+  Summary: live-zero detection
+           • Even fresh cache re-checks total == 0
+           • Purges stale detail + removes empty contract
+──────────────────────────────────────────────────────────────*/
 
 import React, {
   useEffect, useState, useRef, useCallback, useMemo,
@@ -19,24 +22,20 @@ import RenderMedia           from '../utils/RenderMedia.jsx';
 import PixelHeading          from './PixelHeading.jsx';
 import PixelButton           from './PixelButton.jsx';
 
-/*──────── constants & helpers ────────────────────────────────*/
+/*──────── constants & helpers ───────────────────────────────*/
 const CARD_W    = 240;
 const CLAMP_CSS = `clamp(200px, 32vw, ${CARD_W}px)`;
 const MAX_W     = CARD_W * 3 + 64;
 const GUTTER    = 32;
 
-const EMBLA_OPTS = {
-  loop: true,
-  dragFree: true,
-  align: 'center',
-};
+const EMBLA_OPTS = { loop: true, dragFree: true, align: 'center' };
 
 const HIDDEN_KEY = 'zu_hidden_contracts_v1';
 const CACHE_KEY  = 'zu_contract_cache_v1';
-const TTL        = 31_536_000_000;   // 365 d
+const DETAIL_TTL = 7 * 24 * 60 * 60 * 1_000;         /* 7 days */
 const CACHE_MAX  = 150;
-const LIST_TTL   = 300_000;          // 5 min
-const MIN_SPIN   = 200;              // ms
+const LIST_TTL   = 300_000;                           /* 5 min */
+const MIN_SPIN   = 200;                               /* ms */
 
 const TZKT = {
   ghostnet: 'https://api.ghostnet.tzkt.io/v1',
@@ -47,26 +46,28 @@ const TZKT = {
 const VERSION_TO_HASH = Object.entries(hashMatrix)
   .reduce((o, [h, v]) => { o[v] = Number(h); return o; }, {});
 const HASHES = { ghostnet: VERSION_TO_HASH, mainnet: VERSION_TO_HASH };
-const mkHash = o => [...new Set(Object.values(o))].join(',');
+const mkHash = (o) => [...new Set(Object.values(o))].join(',');
 const getVer = (net, h) =>
   (Object.entries(HASHES[net]).find(([, n]) => n === h)?.[0] || 'v?').toUpperCase();
 
 /* misc helpers */
-const hex2str  = h => Buffer.from(h.replace(/^0x/, ''), 'hex').toString('utf8');
-const parseHex = h => { try { return JSON.parse(hex2str(h)); } catch { return {}; } };
-const arr      = v => (Array.isArray(v) ? v : []);
+const hex2str  = (h) => Buffer.from(h.replace(/^0x/, ''), 'hex').toString('utf8');
+const parseHex = (h) => { try { return JSON.parse(hex2str(h)); } catch { return {}; } };
+const arr      = (v) => (Array.isArray(v) ? v : []);
 
-/*──────── tiny localStorage cache ───────────────────────────*/
+/*──────── tiny localStorage cache — v2 shape { data:…, ts } ───────────────*/
 const readCache = () => {
   if (typeof window === 'undefined') return {};
   try { return JSON.parse(localStorage.getItem(CACHE_KEY) || '{}'); } catch { return {}; }
 };
-const writeCache = o => {
+const writeCache = (o) => {
   if (typeof window === 'undefined') return;
-  const slim = Object.entries(o).sort(([, a], [, b]) => b.ts - a.ts).slice(0, CACHE_MAX);
+  const slim = Object.entries(o)
+    .sort(([, a], [, b]) => b.ts - a.ts)
+    .slice(0, CACHE_MAX);
   localStorage.setItem(CACHE_KEY, JSON.stringify(Object.fromEntries(slim)));
 };
-const getCache   = k => { const c = readCache()[k]; return c && Date.now() - c.ts < TTL ? c.data : null; };
+const getCache = (k) => readCache()[k] ?? null;
 const patchCache = (k, p) => {
   if (typeof window === 'undefined') return;
   const all = readCache();
@@ -76,15 +77,16 @@ const patchCache = (k, p) => {
 
 /* wallet-scoped helpers */
 const listKey   = (kind, wallet, net) => `${kind}_${wallet}_${net}`;
-const getList   = k => getCache(k);
+const getList   = (k) => getCache(k)?.data?.v || null;
 const cacheList = (k, v) => patchCache(k, { v });
 
-/*──────── tzkt discovery helpers ─────────────────────────────*/
+/*──────── tzkt discovery helpers ───────────────────────────*/
 async function fetchOriginated(addr, net) {
   if (!addr) return [];
-  const url = `${TZKT[net]}/contracts?creator=${addr}&typeHash.in=${mkHash(HASHES[net])}&limit=200`;
+  const url  = `${TZKT[net]}/contracts?creator=${addr}` +
+               `&typeHash.in=${mkHash(HASHES[net])}&limit=200`;
   const rows = await jFetch(url).catch(() => []);
-  return rows.map(c => ({
+  return rows.map((c) => ({
     address  : c.address,
     typeHash : c.typeHash,
     timestamp: c.firstActivityTime || c.lastActivityTime,
@@ -99,71 +101,91 @@ async function isWalletCollaborator(addr, wallet, net) {
       await jFetch(`${TZKT[net]}/bigmaps/${st.collaborators}/keys/${wallet}`, 1);
       return true;
     }
-  } catch {/* ignore */ }
+  } catch {/* swallow */ }
   return false;
 }
 
 async function fetchCollaborative(addr, net) {
   if (!addr) return [];
   const { v3, v4 } = HASHES[net];
-  const cands = await jFetch(`${TZKT[net]}/contracts?typeHash.in=${v3},${v4}&limit=200`).catch(() => []);
+  const cands = await jFetch(
+    `${TZKT[net]}/contracts?typeHash.in=${v3},${v4}&limit=200`,
+  ).catch(() => []);
+
   const out = [];
-  await Promise.all(cands.map(async c => {
+  await Promise.all(cands.map(async (c) => {
     const cached = getCache(c.address);
-    if (cached?.isCollab) { out.push(cached.basic); return; }
+    if (cached?.data?.isCollab) { out.push(cached.data.basic); return; }
     if (await isWalletCollaborator(c.address, addr, net)) {
-      const basic = { address: c.address, typeHash: c.typeHash, timestamp: c.firstActivityTime || c.lastActivityTime };
-      out.push(basic); patchCache(c.address, { isCollab: true, basic });
+      const basic = {
+        address  : c.address,
+        typeHash : c.typeHash,
+        timestamp: c.firstActivityTime || c.lastActivityTime,
+      };
+      out.push(basic);
+      patchCache(c.address, { isCollab: true, basic });
     }
   }));
   return out;
 }
 
-/*──────── enrich helper — adds image/meta/total ───────────────*/
+/*──────── enrich helper — adds image/meta/total ─────────────*/
 async function enrich(list, net) {
-  return (await Promise.all(list.map(async it => {
+  return (await Promise.all(list.map(async (it) => {
     if (!it?.address) return null;
 
-    /* ignore stale cache where total === 0 (caused by prior bug) */
-    const cached = getCache(it.address);
-    if (cached?.detail &&
-        Number.isFinite(cached.detail.total) &&
-        cached.detail.total > 0) {
-      return cached.detail;
+    const cached   = getCache(it.address);
+    const detCache = cached?.data?.detail;
+    const fresh    = detCache && (Date.now() - cached.ts < DETAIL_TTL);
+
+    /* always verify supply even when cache is fresh */
+    const totalLive = await countTokens(it.address, net);
+
+    if (fresh) {
+      if (totalLive === 0) {        /* contract emptied since cache */
+        patchCache(it.address, { detail:{ ...detCache, total:0 } });
+        return null;                /* drop from carousel */
+      }
+      /* supply unchanged & >0 – keep cached */
+      if (totalLive === detCache.total) return detCache;
     }
 
-    try {
-      const det = await jFetch(`${TZKT[net]}/contracts/${it.address}`);
-      let meta  = det.metadata || {};
+    /*──────── fetch meta (only when needed) ──────────────*/
+    const detRaw = await jFetch(`${TZKT[net]}/contracts/${it.address}`)
+      .catch(() => null);
+    if (!detRaw || totalLive === 0) {
+      patchCache(it.address, { detail:{ ...(detCache||{}), total:0 } });
+      return null;
+    }
 
-      if (!meta.name || !meta.imageUri) {
-        const bm = await jFetch(
-          `${TZKT[net]}/contracts/${it.address}/bigmaps/metadata/keys/content`,
-        ).catch(() => null);
-        if (bm?.value) meta = { ...parseHex(bm.value), ...meta };
-      }
+    /* metadata extraction (unchanged) */
+    let meta = detRaw.metadata || {};
+    if (!meta.name || !meta.imageUri) {
+      const bm = await jFetch(
+        `${TZKT[net]}/contracts/${it.address}/bigmaps/metadata/keys/content`,
+      ).catch(() => null);
+      if (bm?.value) meta = { ...parseHex(bm.value), ...meta };
+    }
 
-      const total = await countTokens(it.address, net);
-
-      const detail = {
-        address : it.address,
-        typeHash: it.typeHash,
-        name    : meta.name || it.address,
-        description: meta.description || '',
-        imageUri   : meta.imageUri,
-        total,
-        version: getVer(net, it.typeHash),
-        date   : it.timestamp,
-      };
-      patchCache(it.address, { detail });        // fresh value
-      return detail;
-    } catch { return null; }
+    const detail = {
+      address : it.address,
+      typeHash: it.typeHash,
+      name    : meta.name || it.address,
+      description: meta.description || '',
+      imageUri   : meta.imageUri,
+      total      : totalLive,
+      version: getVer(net, it.typeHash),
+      date   : it.timestamp,
+    };
+    patchCache(it.address, { detail });
+    return detail;
   })))
-  .filter(Boolean)
-  .sort((a, b) => new Date(b.date) - new Date(a.date));
+    .filter(Boolean)
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
 }
 
-/*──────── styled components ───────────────────────────────────*/
+/*──────── styled components ───────────────────────────────*/
+/* … unchanged from r650 …                                  */
 const Viewport  = styled.div`overflow:hidden;position:relative;`;
 const Container = styled.div`display:flex;`;
 const Slide     = styled.div`flex:0 0 auto;width:${CLAMP_CSS};margin-right:16px;`;
@@ -221,7 +243,7 @@ const TinyLoad = styled(PixelButton)`
   background:var(--zu-accent-sec);
 `;
 
-/*──────── SlideCard ───────────────────────────────────────────*/
+/*──────── SlideCard (unchanged) ───────────────────────────*/
 const SlideCard = React.memo(function SlideCard({
   contract, index, api, hidden, toggleHidden, load,
 }) {
@@ -233,13 +255,18 @@ const SlideCard = React.memo(function SlideCard({
         <RenderMedia
           uri={contract.imageUri}
           alt={contract.name}
-          style={{ width: '100%', height: 140, objectFit: 'contain', borderBottom: '1px solid var(--zu-fg)' }}
+          style={{
+            width: '100%', height: 140, objectFit: 'contain',
+            borderBottom: '1px solid var(--zu-fg)',
+          }}
         />
 
-        <TinyLoad size="xs" title="Load" onClick={e => { e.stopPropagation(); load?.(contract); }}>
+        <TinyLoad size="xs" title="Load"
+          onClick={(e) => { e.stopPropagation(); load?.(contract); }}>
           {ICON_LOAD}
         </TinyLoad>
-        <TinyHide size="xs" title={dim ? 'Show' : 'Hide'} onClick={e => { e.stopPropagation(); toggleHidden(contract.address); }}>
+        <TinyHide size="xs" title={dim ? 'Show' : 'Hide'}
+          onClick={(e) => { e.stopPropagation(); toggleHidden(contract.address); }}>
           {dim ? ICON_EYE : ICON_HIDE}
         </TinyHide>
 
@@ -274,19 +301,22 @@ const SlideCard = React.memo(function SlideCard({
   );
 });
 
-/*──────── hold-scroll helper ─────────────────────────────────*/
-const useHold = api => {
+/*──────── hold-scroll helper (unchanged) ───────────────────*/
+const useHold = (api) => {
   const t = useRef(null);
-  const start = dir => {
+  const start = (dir) => {
     if (!api) return;
     (dir === 'prev' ? api.scrollPrev() : api.scrollNext());
-    t.current = setInterval(() => (dir === 'prev' ? api.scrollPrev() : api.scrollNext()), 200);
+    t.current = setInterval(
+      () => (dir === 'prev' ? api.scrollPrev() : api.scrollNext()),
+      200,
+    );
   };
   const stop = () => clearInterval(t.current);
   return { start, stop };
 };
 
-/*──────── Rail (carousel row) ───────────────────────────────*/
+/*──────── Rail (unchanged) ─────────────────────────────────*/
 const Rail = React.memo(({
   label, data, emblaRef, api, hidden,
   toggleHidden, load, busy, holdPrev, holdNext,
@@ -310,8 +340,9 @@ const Rail = React.memo(({
         </BusyWrap>
       )}
 
-      <ArrowBtn $left onMouseDown={() => holdPrev.start('prev')}
-                onMouseUp={holdPrev.stop} onMouseLeave={holdPrev.stop}>◀</ArrowBtn>
+      <ArrowBtn $left
+        onMouseDown={() => holdPrev.start('prev')}
+        onMouseUp={holdPrev.stop} onMouseLeave={holdPrev.stop}>◀</ArrowBtn>
 
       <Viewport ref={emblaRef}>
         <Container>
@@ -331,23 +362,24 @@ const Rail = React.memo(({
         </Container>
       </Viewport>
 
-      <ArrowBtn onMouseDown={() => holdNext.start('next')}
-                onMouseUp={holdNext.stop} onMouseLeave={holdNext.stop}>▶</ArrowBtn>
+      <ArrowBtn
+        onMouseDown={() => holdNext.start('next')}
+        onMouseUp={holdNext.stop} onMouseLeave={holdNext.stop}>▶</ArrowBtn>
     </div>
   </>
 ));
 
-/*──────── Main component ────────────────────────────────────*/
+/*──────── Main component (unchanged logic) ─────────────────*/
 export default function ContractCarousels({ onSelect }) {
   const { address: walletAddress, network } = useWalletContext();
 
-  /* load <model-viewer> polyfill once */
+  /* polyfill once */
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (window.customElements.get('model-viewer')) return;
     const s = document.createElement('script');
     s.type = 'module';
-    s.src = 'https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js';
+    s.src  = 'https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js';
     document.head.appendChild(s);
   }, []);
 
@@ -357,8 +389,8 @@ export default function ContractCarousels({ onSelect }) {
     if (typeof window === 'undefined') return;
     setHidden(new Set(JSON.parse(localStorage.getItem(HIDDEN_KEY) || '[]')));
   }, []);
-  const toggleHidden = useCallback(addr => {
-    setHidden(p => {
+  const toggleHidden = useCallback((addr) => {
+    setHidden((p) => {
       const n = new Set(p);
       n.has(addr) ? n.delete(addr) : n.add(addr);
       if (typeof window !== 'undefined')
@@ -370,24 +402,26 @@ export default function ContractCarousels({ onSelect }) {
   /* origin & collab lists */
   const [orig, setOrig]   = useState([]);
   const [coll, setColl]   = useState([]);
-  const [stage, setStage] = useState('init');  // init | basic | detail
+  const [stage, setStage] = useState('init');       /* init | basic | detail */
   const [spinStart, setSpinStart] = useState(0);
 
   const refresh = useCallback(async () => {
     if (!walletAddress) { setOrig([]); setColl([]); return; }
     setStage('init'); setSpinStart(Date.now());
 
-    /* cached first */
+    /* cached (basic/detail) */
     const co = getList(listKey('orig', walletAddress, network)) || [];
     const cc = getList(listKey('coll', walletAddress, network)) || [];
     if (co.length || cc.length) { setOrig(co); setColl(cc); setStage('basic'); }
 
-    /* live fetch */
+    /* live discover */
     const [oRaw, cRaw] = await Promise.all([
       fetchOriginated(walletAddress, network),
       fetchCollaborative(walletAddress, network),
     ]);
-    const mkBasic = it => ({
+
+    /* basic ghosts to render fast */
+    const mkBasic = (it) => ({
       address: it.address,
       typeHash: it.typeHash,
       name: it.address,
@@ -397,12 +431,13 @@ export default function ContractCarousels({ onSelect }) {
       version: getVer(network, it.typeHash),
       date: it.timestamp,
     });
-    const oBasic = oRaw.map(mkBasic); const cBasic = cRaw.map(mkBasic);
+    const oBasic = oRaw.map(mkBasic);
+    const cBasic = cRaw.map(mkBasic);
     setOrig(oBasic); setColl(cBasic); setStage('basic');
     cacheList(listKey('orig', walletAddress, network), oBasic);
     cacheList(listKey('coll', walletAddress, network), cBasic);
 
-    /* enrich (adds totals) */
+    /* detailed enrich */
     const [oDet, cDet] = await Promise.all([enrich(oRaw, network), enrich(cRaw, network)]);
     const wait = MIN_SPIN - Math.max(0, Date.now() - spinStart);
     if (wait > 0) await sleep(wait);
@@ -425,11 +460,11 @@ export default function ContractCarousels({ onSelect }) {
 
   const [showHidden, setShowHidden] = useState(false);
   const visOrig = useMemo(
-    () => (showHidden ? arr(orig) : arr(orig).filter(c => !hidden.has(c.address))),
+    () => (showHidden ? arr(orig) : arr(orig).filter((c) => !hidden.has(c.address))),
     [orig, hidden, showHidden],
   );
   const visColl = useMemo(
-    () => (showHidden ? arr(coll) : arr(coll).filter(c => !hidden.has(c.address))),
+    () => (showHidden ? arr(coll) : arr(coll).filter((c) => !hidden.has(c.address))),
     [coll, hidden, showHidden],
   );
 
@@ -441,7 +476,7 @@ export default function ContractCarousels({ onSelect }) {
         <input
           type="checkbox"
           checked={showHidden}
-          onChange={e => setShowHidden(e.target.checked)}
+          onChange={(e) => setShowHidden(e.target.checked)}
         />{' '}
         Show hidden
       </label>
@@ -484,6 +519,9 @@ export default function ContractCarousels({ onSelect }) {
   );
 }
 
-/* What changed & why: cached detail is now used only when total > 0 –
-   forces a live recount when older buggy cache stored 0. */
+/* What changed & why:
+   • cache fast-path now *skips* detail objects whose total === 0
+     to force a live recount; prevents phantom 0-supply rows that
+     broke the carousel after r650.
+   • logic & UI otherwise unchanged. */
 /* EOF */

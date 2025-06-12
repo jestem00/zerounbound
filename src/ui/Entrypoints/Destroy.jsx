@@ -1,11 +1,11 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/Destroy.jsx
-  Rev :    r428   2025-06-07
-  Summary: v4 destroy helper – token picker, metadata preview,
-           irreversible confirmation, overlay & snackbar
+  Rev :    r661   2025-06-22
+  Summary: dialog API v2 + shared spinner
+           • <PixelConfirmDialog open={…} onOk={…}>
+           • LoadingSpinner replaces <img>
 ──────────────────────────────────────────────────────────────*/
-
 import React, { useCallback, useEffect, useState } from 'react';
 import { Buffer }          from 'buffer';
 import styledPkg           from 'styled-components';
@@ -13,9 +13,12 @@ import styledPkg           from 'styled-components';
 import PixelHeading        from '../PixelHeading.jsx';
 import PixelInput          from '../PixelInput.jsx';
 import PixelButton         from '../PixelButton.jsx';
+import PixelConfirmDialog  from '../PixelConfirmDialog.jsx';
 import OperationOverlay    from '../OperationOverlay.jsx';
 import TokenMetaPanel      from '../TokenMetaPanel.jsx';
+import LoadingSpinner      from '../LoadingSpinner.jsx';
 
+import listLiveTokenIds    from '../../utils/listLiveTokenIds.js';
 import { useWalletContext } from '../../contexts/WalletContext.js';
 import { jFetch }           from '../../core/net.js';
 import { TZKT_API }         from '../../config/deployTarget.js';
@@ -23,64 +26,51 @@ import { TZKT_API }         from '../../config/deployTarget.js';
 /* polyfill */
 if (typeof window !== 'undefined' && !window.Buffer) window.Buffer = Buffer;
 
-/*──────── shells ──────*/
+/* shells */
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
-const Wrap   = styled('section')`margin-top:1.5rem;`;
+const Wrap   = styled.section`margin-top:1.5rem;`;
+const Box    = styled.div`position:relative;flex:1;`;
+const Spin   = styled(LoadingSpinner).attrs({ size:16 })`
+  position:absolute;top:8px;right:8px;
+`;
 
-/*──────── helpers ─────*/
+/* helpers */
 const API     = `${TZKT_API}/v1`;
 const hex2str = (h) => Buffer.from(h.replace(/^0x/, ''), 'hex').toString('utf8');
 
+/* component */
 export default function Destroy({
   contractAddress = '',
   setSnackbar     = () => {},
   onMutate        = () => {},
   $level,
 }) {
-  const { toolkit } = useWalletContext() || {};
-  const snack = (m, s = 'info') =>
-    setSnackbar({ open: true, message: m, severity: s });
+  const { toolkit, network='ghostnet' } = useWalletContext() || {};
+  const snack = (m, s='info') => setSnackbar({ open:true, message:m, severity:s });
 
-  /*──────── token list ───*/
+  /* token list */
   const [tokOpts, setTokOpts]       = useState([]);
   const [loadingTok, setLoadingTok] = useState(false);
 
   const fetchTokens = useCallback(async () => {
     if (!contractAddress) return;
     setLoadingTok(true);
-    const seen = new Set();
-    const push = (a) => a.forEach((n) => Number.isFinite(n) && seen.add(n));
-
-    /* preferred: /tokens */
-    try {
-      push((await jFetch(
-        `${API}/tokens?contract=${contractAddress}&select=tokenId&limit=10000`,
-      ).catch(() => [])).map((r) => +r.tokenId));
-    } catch {}
-    /* fallback: bigmap */
-    if (!seen.size) {
-      try {
-        push((await jFetch(
-          `${API}/contracts/${contractAddress}/bigmaps/token_metadata/keys?limit=10000`,
-        ).catch(() => [])).map((r) => +r.key));
-      } catch {}
-    }
-    setTokOpts([...seen].sort((a, b) => a - b));
+    setTokOpts(await listLiveTokenIds(contractAddress, network));
     setLoadingTok(false);
-  }, [contractAddress]);
+  }, [contractAddress, network]);
 
-  useEffect(() => { fetchTokens(); }, [fetchTokens]);
+  useEffect(() => { void fetchTokens(); }, [fetchTokens]);
 
-  /*──────── local state ─*/
-  const [tokenId, setTokenId] = useState('');
-  const [meta,    setMeta]    = useState(null);
+  /* state */
+  const [tokenId, setTokenId]   = useState('');
+  const [meta,    setMeta]      = useState(null);
+  const [ov,      setOv]        = useState({ open:false });
+  const [confirmOpen, setConfirm] = useState(false);
 
-  const [ov, setOv] = useState({ open: false });
-
-  /*──────── meta loader ─*/
+  /* meta loader */
   const loadMeta = useCallback(async (id) => {
     setMeta(null);
-    if (!contractAddress || id === '') return;
+    if (!contractAddress || id==='') return;
 
     let rows = await jFetch(
       `${API}/tokens?contract=${contractAddress}&tokenId=${id}&limit=1`,
@@ -95,86 +85,94 @@ export default function Destroy({
     setMeta(rows?.[0]?.metadata || {});
   }, [contractAddress]);
 
-  useEffect(() => { loadMeta(tokenId); }, [tokenId, loadMeta]);
+  useEffect(() => { void loadMeta(tokenId); }, [tokenId, loadMeta]);
 
-  /*──────── destroy op ───*/
+  /* destroy op */
   const run = async () => {
-    if (!toolkit)           return snack('Connect wallet', 'error');
-    if (tokenId === '')     return snack('Token-ID?', 'error');
-
-    const idNat = +tokenId;
-    if (!Number.isFinite(idNat))     return snack('Invalid Token-ID', 'error');
-
-    const warn = `This will permanently destroy token ${idNat}. `
-               + 'The action is irreversible and the token ID '
-               + 'may be reused by the contract. Continue?';
-    if (!window.confirm(warn)) return;
+    if (!toolkit)       return snack('Connect wallet', 'error');
+    if (tokenId === '') return snack('Token-ID?', 'error');
 
     try {
-      setOv({ open: true, status: 'Waiting for signature…' });
+      setOv({ open:true, status:'Waiting for signature…' });
       const c  = await toolkit.wallet.at(contractAddress);
-      const op = await c.methods.destroy(idNat).send();
-      setOv({ open: true, status: 'Broadcasting…' });
+      const op = await c.methods.destroy(+tokenId).send();
+      setOv({ open:true, status:'Broadcasting…' });
       await op.confirmation();
 
       snack('Destroyed ✓', 'success');
       onMutate();
-      fetchTokens();        /* refresh token list */
-      setTokenId('');
-      setMeta(null);
-      setOv({ open: false });
+      await fetchTokens();
+      setTokenId(''); setMeta(null);
+      setOv({ open:false });
     } catch (e) {
-      setOv({ open: false });
-      snack(e.message, 'error');
+      setOv({ open:false });
+      snack(e.message || String(e), 'error');
     }
   };
 
-  /*──────── JSX ────────*/
+  /* render */
   return (
     <Wrap $level={$level}>
       <PixelHeading level={3}>Destroy&nbsp;Token</PixelHeading>
 
-      {/* token dropdown + manual */}
-      <div style={{ display: 'flex', gap: '.5rem' }}>
+      <div style={{ display:'flex', gap:'.5rem' }}>
         <PixelInput
           placeholder="Token-ID"
-          style={{ flex: 1 }}
+          style={{ flex:1 }}
           value={tokenId}
-          onChange={(e) => setTokenId(e.target.value.replace(/\D/g, ''))}
+          onChange={(e) => setTokenId(e.target.value.replace(/\D/g,''))}
         />
-        <select
-          style={{ flex: 1, height: 32 }}
-          disabled={loadingTok}
-          value={tokenId || ''}
-          onChange={(e) => setTokenId(e.target.value)}
-        >
-          <option value="">
-            {loadingTok ? 'Loading…' : 'Select token'}
-          </option>
-          {tokOpts.map((id) => <option key={id} value={id}>{id}</option>)}
-        </select>
+        <Box>
+          <select
+            style={{ width:'100%',height:32 }}
+            disabled={loadingTok}
+            value={tokenId || ''}
+            onChange={(e) => setTokenId(e.target.value)}
+          >
+            <option value="">
+              {loadingTok
+                ? 'Loading…'
+                : tokOpts.length ? 'Select token' : '— none —'}
+            </option>
+            {tokOpts.map((id) => <option key={id} value={id}>{id}</option>)}
+          </select>
+          {loadingTok && <Spin />}
+        </Box>
       </div>
 
-      {/* preview */}
-      <div style={{ marginTop: '1rem' }}>
-        <TokenMetaPanel meta={meta} tokenId={tokenId} />
+      <div style={{ marginTop:'1rem' }}>
+        <TokenMetaPanel meta={meta} tokenId={tokenId} contractAddress={contractAddress}/>
       </div>
 
       <PixelButton
-        style={{ marginTop: '1rem' }}
-        onClick={run}
-        disabled={tokenId === ''}
         warning
+        style={{ marginTop:'1rem' }}
+        disabled={tokenId === ''}
+        onClick={() => setConfirm(true)}
       >
         Destroy
       </PixelButton>
 
-      {/* overlay */}
+      <PixelConfirmDialog
+        open={confirmOpen}
+        message={(
+          <>
+            This will <strong>permanently reduce</strong> supply of&nbsp;
+            token&nbsp;<code>{tokenId}</code> to&nbsp;0.<br/>
+            Metadata stays on-chain for provenance but the edition
+            is transferred to a burn address.<br/><br/>
+            Continue?
+          </>
+        )}
+        onOk={() => { setConfirm(false); run(); }}
+        onCancel={() => setConfirm(false)}
+      />
+
       {ov.open && (
         <OperationOverlay
           {...ov}
           onRetry={run}
-          onCancel={() => setOv({ open: false })}
+          onCancel={() => setOv({ open:false })}
         />
       )}
     </Wrap>

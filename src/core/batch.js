@@ -8,9 +8,9 @@ import { OpKind } from '@taquito/taquito';
 
 /*────────────────── public constants ──────────────────*/
 /** Maximum **payload bytes** permitted in ONE Michelson `bytes`
- *  literal. 14 000 B → forged op ≈ 28 kB (incl. header), keeping
- *  ~4 kB head-room below the 32 768 B proto cap.                 */
-export const SLICE_SAFE_BYTES  = 14_000;
+ *  literal. 28 000 B → forged op ≈ 28 kB (incl. header), keeping
+ *  head-room below the 32 768 B proto cap.                 */
+export const SLICE_SAFE_BYTES  = 28_000;
 
 /** Hard ceiling (binary, after forging) for a WHOLE operation.
  *  28 000 B leaves ≈15 % slack once the shell & signatures are

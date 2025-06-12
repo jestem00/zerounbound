@@ -1,7 +1,7 @@
 /*Developed by @jams2blues with love for the Tezos community
   File: src/ui/DeployCollectionForm.jsx
-  Rev:   r532
-  Summary: Include views in metadata size calc and enforce thumbnail size limit */
+  Rev:   r677
+  Summary: derive MAX_THUMB_BYTES from updated OVERHEAD_BYTES */
 
 import React, { useEffect, useMemo, useState } from 'react';
 import styledPkg from 'styled-components';
@@ -39,8 +39,13 @@ const LEN = {
   homepage: 160,
 };
 
-// After 32 768 B limit minus 17 160 B overhead, raw thumb = floor(15608*3/4)
-const MAX_THUMB_BYTES = 11706;
+/*───────────────────────────────────────────────────────────────
+  Thumbnail limit
+  ── Protocol cap 32 768 B minus current OVERHEAD_BYTES leaves the
+     payload budget for the metadata JSON body.
+  ── The thumbnail is embedded as base-64, which expands by 4 ⁄ 3.
+  ── Max raw bytes = floor((MAX_META_BYTES − OVERHEAD_BYTES) × ¾). */
+const MAX_THUMB_BYTES = Math.floor((MAX_META_BYTES - OVERHEAD_BYTES) * 3 / 4);
 const MAX_THUMB_KB    = (MAX_THUMB_BYTES / 1024).toFixed(1);
 
 export default function DeployCollectionForm({ onDeploy }) {
@@ -99,7 +104,7 @@ export default function DeployCollectionForm({ onDeploy }) {
     }));
   }, [address]);
 
-  // Build core metadata
+  /*──────── metadata builders ───────*/
   const meta = useMemo(() => ({
     name:        clean(data.name, LEN.name),
     symbol:      clean(data.symbol, LEN.symbol),
@@ -114,19 +119,15 @@ export default function DeployCollectionForm({ onDeploy }) {
     imageUri:    data.imageUri,
   }), [data]);
 
-  // Include version + off-chain views for accurate origination payload
   const ordered = useMemo(() => ({
     ...meta,
     version: 'ZeroContractV4',
     views:   viewsJson.views,
   }), [meta]);
 
-  // Calculate byte size of hex-encoded JSON + overhead
   const bytes = useMemo(() => {
-    const json      = JSON.stringify(ordered);
-    const bodyHex   = char2Bytes(json);
-    const bodyBytes = bodyHex.length / 2;
-    return bodyBytes + OVERHEAD_BYTES;
+    const bodyHex   = char2Bytes(JSON.stringify(ordered));
+    return bodyHex.length / 2 + OVERHEAD_BYTES;
   }, [ordered]);
 
   const tooBig  = bytes > MAX_META_BYTES;

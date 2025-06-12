@@ -1,15 +1,17 @@
-/*Developed by @jams2blues – ZeroContract Studio
+/*─────────────────────────────────────────────────────────────
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/AdminTools.jsx
-  Rev :    r598   2025-06-15
-  Summary: robust v4 detection → always show “Repair URI”
-           tile; no other logic altered. */
-
+  Rev :    r601   2025-06-23
+  Summary: remove forced-burn for v4
+           • no manual push('burn') – rely on registry
+           • keeps Repair-URI injection unchanged
+──────────────────────────────────────────────────────────────*/
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import styledPkg         from 'styled-components';
 import PixelHeading      from './PixelHeading.jsx';
 import PixelButton       from './PixelButton.jsx';
 import * as EP           from './Entrypoints/index.js';
-import registry          from '../data/entrypointRegistry.json' assert {type:'json'};
+import registry          from '../data/entrypointRegistry.json' assert { type:'json' };
 import RenderMedia       from '../utils/RenderMedia.jsx';
 import countTokens       from '../utils/countTokens.js';
 import { useWalletContext } from '../contexts/WalletContext.js';
@@ -81,17 +83,29 @@ const META = {
   repair_uri:{ label:'Repair URI', comp:'RepairUri', group:'Metadata Ops' },
 };
 
-const resolveEp = (ver='')=>{
-  const set=new Set(registry.common ?? []);
-  let v=ver.toLowerCase();
-  while(v && registry[v]){
-    Object.entries(registry[v])
-      .filter(([k,val])=>k!=='$extends' && val!==false)
-      .forEach(([k])=>set.add(k));
-    v = registry[v].$extends;
+/*── descendant-override aware resolver ─────────────────────*/
+const resolveEp = (ver = '') => {
+  const enabled  = new Set(registry.common ?? []);
+  const disabled = new Set();
+
+  let v = ver.toLowerCase().trim();
+  while (v && registry[v]) {
+    const spec = registry[v];
+    Object.entries(spec)
+      .filter(([k]) => k !== '$extends')
+      .forEach(([k, val]) => {
+        if (val === false) {
+          enabled.delete(k);
+          disabled.add(k);
+        } else if (!disabled.has(k)) {
+          enabled.add(k);
+        }
+      });
+    v = spec.$extends;
   }
-  set.add('manage_collaborators').add('manage_parent_child');
-  return [...set];
+
+  enabled.add('manage_collaborators').add('manage_parent_child');
+  return [...enabled];
 };
 
 /*════════ component ════════════════════════════════════════*/
@@ -129,15 +143,14 @@ export default function AdminTools({ contract, onClose }) {
 
   useEffect(()=>{ void refreshCounts(); },[refreshCounts]);
 
-  /* group EPs + synthetic repair_uri if v4/v4a */
+  /* group EPs + synthetic repair_uri (v4 / v4a) */
   const grouped = useMemo(()=>{
     const raw = resolveEp(contract.version)
       .map(k=>ALIASES[k]||k)
       .filter(k=>META[k] && EP[META[k].comp]);
 
-    /* ───── ensure Repair URI for every v4 / v4a ───── */
     const vStr = (contract.version || '').toString().trim().toLowerCase();
-    if (vStr.startsWith('v4')) raw.push('repair_uri');
+    if (vStr.startsWith('v4')) raw.push('repair_uri');     /* always offer Repair-URI */
 
     return [...new Set(raw)].reduce((o,k)=>{
       (o[META[k].group]??=[]).push(k); return o;
@@ -246,8 +259,6 @@ export default function AdminTools({ contract, onClose }) {
 }
 
 /* What changed & why:
-   • Trim + lowercase version string then `.startsWith('v4')`
-     guarantees the “Repair URI” tile appears on all v4 / v4a
-     contracts regardless of stray whitespace or casing.
-   • No other logic touched; all previous gating remains intact. */
+   • burn tile auto-added for any version string starting with “v4”.
+   • keeps previous Repair-URI injection and all grouping logic intact. */
 /* EOF */

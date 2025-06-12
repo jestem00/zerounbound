@@ -27,19 +27,20 @@
   "v3": {
     "$extends": "v2a",
     "add_collaborator": ["address"],
-    "remove_collaborator": ["address"]
+    "remove_collaborator": ["address"],
+    "lock_metadata": false
   },
 
   "v4": {
     "$extends": "v3",
-    "burn": false,
     "destroy": ["nat"],
+    "burn": false,
     "append_artifact_uri": ["nat", "bytes"],
     "append_extrauri": ["string", "string", "string", "nat", "bytes"],
     "clear_uri": ["nat", "string"],
     "edit_contract_metadata": ["bytes"],
     "edit_token_metadata": ["map(string,bytes)", "nat"],
-
+    "lock_metadata": false,
     "repair_uri": false
   },
 
@@ -50,7 +51,7 @@
     "update_contract_metadata": ["bytes"],
     "add_collaborators": ["set<address>"],
     "remove_collaborators": ["set<address>"],
-
+    "lock_metadata": false,
     "repair_uri": false
   }
 }

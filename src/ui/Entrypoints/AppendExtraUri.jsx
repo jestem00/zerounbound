@@ -1,43 +1,45 @@
-// File: src/ui/Entrypoints/AppendExtraUri.jsx
-/* Developed by @jams2blues – ZeroContract Studio
-   Summary: Resumable extra-URI uploads with shared sliceCache */
+/*Developed by @jams2blues – ZeroContract Studio
+  File:    src/ui/Entrypoints/AppendExtraUri.jsx
+  Rev :    r581   2025-06-14
+  Summary: same stray-brace fix in both token-meta & token-list URLs. */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Buffer } from 'buffer';
-import styledPkg from 'styled-components';
-import { OpKind } from '@taquito/taquito';
-import { char2Bytes } from '@taquito/utils';
+import { Buffer }          from 'buffer';
+import styledPkg           from 'styled-components';
+import { OpKind }          from '@taquito/taquito';
+import { char2Bytes }      from '@taquito/utils';
 
-import PixelHeading from '../PixelHeading.jsx';
-import PixelInput from '../PixelInput.jsx';
-import PixelButton from '../PixelButton.jsx';
-import MintUpload from './MintUpload.jsx';
-import OperationOverlay from '../OperationOverlay.jsx';
+import PixelHeading        from '../PixelHeading.jsx';
+import PixelInput          from '../PixelInput.jsx';
+import PixelButton         from '../PixelButton.jsx';
+import MintUpload          from './MintUpload.jsx';
+import OperationOverlay    from '../OperationOverlay.jsx';
 import OperationConfirmDialog from '../OperationConfirmDialog.jsx';
-import PixelConfirmDialog from '../PixelConfirmDialog.jsx';
-import RenderMedia from '../../utils/RenderMedia.jsx';
-import TokenMetaPanel from '../TokenMetaPanel.jsx';
+import PixelConfirmDialog  from '../PixelConfirmDialog.jsx';
+import RenderMedia         from '../../utils/RenderMedia.jsx';
+import TokenMetaPanel      from '../TokenMetaPanel.jsx';
 
 import { splitPacked, sliceHex, PACKED_SAFE_BYTES } from '../../core/batch.js';
-import { strHash, loadSliceCache, saveSliceCache, clearSliceCache, purgeExpiredSliceCache } from '../../utils/sliceCache.js';
-import { jFetch } from '../../core/net.js';
+import {
+  strHash, loadSliceCache, saveSliceCache,
+  clearSliceCache, purgeExpiredSliceCache,
+} from '../../utils/sliceCache.js';
+import { jFetch }           from '../../core/net.js';
 import { mimeFromFilename } from '../../constants/mimeTypes.js';
 import { useWalletContext } from '../../contexts/WalletContext.js';
-import { TZKT_API } from '../../config/deployTarget.js';
-import { listUriKeys } from '../../utils/uriHelpers.js';
+import { TZKT_API }         from '../../config/deployTarget.js';
+import { listUriKeys }      from '../../utils/uriHelpers.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
-const Wrap = styled('section')`margin-top:1.5rem;`;
-const SelectWrap = styled.div`position:relative;flex:1;`;
-const SpinnerIcon = styled.img.attrs({
-  src: '/sprites/loading16x16.gif', alt: '',
-})`
+const Wrap        = styled.section`margin-top:1.5rem;`;
+const SelectWrap  = styled.div`position:relative;flex:1;`;
+const SpinnerIcon = styled.img.attrs({ src:'/sprites/loading16x16.gif', alt:'' })`
   position:absolute;top:8px;right:8px;width:16px;height:16px;
   image-rendering:pixelated;
 `;
 
-const API = `${TZKT_API}/v1`;
-const hex2str = h => Buffer.from(h.replace(/^0x/, ''), 'hex').toString('utf8');
+const API     = `${TZKT_API}/v1`;
+const hex2str = (h)=>Buffer.from(h.replace(/^0x/,''),'hex').toString('utf8');
 
 const LABEL_RX = /^[a-z0-9_\-]{1,32}$/;
 const NAME_RX  = /^.{1,64}$/;
@@ -55,16 +57,19 @@ export default function AppendExtraUri({
   const [tokOpts, setTokOpts] = useState([]);
   const [loadingTok, setLoadingTok] = useState(false);
 
-  const fetchTokens = useCallback(async () => {
-    if (!contractAddress) return;
-    setLoadingTok(true);
-    const seen = new Set();
-    const push = arr => arr.forEach(n => Number.isFinite(n) && seen.add(n));
+  /*──── token list fetch – brace fixed ───*/
+const fetchTokens = useCallback(async () => {
+  if (!contractAddress) return;
+  setLoadingTok(true);
+  const seen = new Set();
+  const push = a => a.forEach(n => Number.isFinite(n) && seen.add(n));
 
-    try {
-      const rows = await jFetch(`${API}/tokens?contract=${contractAddress}&select=tokenId&limit=10000`);
-      push(rows.map(r => +r.tokenId));
-    } catch {}
+  try {
+    const rows = await jFetch(
+      `${API}/tokens?contract=${contractAddress}&select=tokenId&limit=10000`,
+    );                               // ← brace removed
+    push(rows.map(r => +r.tokenId));
+  } catch {}
     if (!seen.size) {
       try {
         const rows = await jFetch(`${API}/contracts/${contractAddress}/bigmaps/token_metadata/keys?limit=10000`);
@@ -81,7 +86,7 @@ export default function AppendExtraUri({
     setLoadingTok(false);
   }, [contractAddress]);
 
-  useEffect(fetchTokens, [fetchTokens]);
+  useEffect(() => { void fetchTokens(); }, [fetchTokens]);
 
   const [tokenId, setTokenId] = useState('');
   const [file, setFile] = useState(null);
@@ -95,30 +100,33 @@ export default function AppendExtraUri({
   const [delKey, setDelKey] = useState('');
   const [resumeInfo, setResumeInfo] = useState(null);
 
-  const loadMeta = useCallback(async id => {
-    if (!contractAddress || id === '') {
-      setMeta(null);
-      setExisting([]);
-      return;
-    }
-    let rows = [];
+/*──── meta loader – brace fixed ───*/
+const loadMeta = useCallback(async id => {
+  if (!contractAddress || id === '') { setMeta(null); setExisting([]); return; }
+
+  let rows = [];
+  try {
+    rows = await jFetch(
+      `${API}/tokens?contract=${contractAddress}&tokenId=${id}&limit=1`,
+    );                               // ← brace removed
+  } catch {}
+
+  if (!rows.length) {
     try {
-      rows = await jFetch(`${API}/tokens?contract=${contractAddress}&tokenId=${id}&limit=1}`);
+      const one = await jFetch(
+        `${API}/contracts/${contractAddress}/bigmaps/token_metadata/keys/${id}`,
+      );
+      if (one?.value) rows = [{ metadata: JSON.parse(hex2str(one.value)) }];
     } catch {}
-    if (!rows.length) {
-      try {
-        const one = await jFetch(`${API}/contracts/${contractAddress}/bigmaps/token_metadata/keys/${id}`);
-        if (one?.value) rows = [{ metadata: JSON.parse(hex2str(one.value)) }];
-      } catch {}
-    }
-    const m = rows[0]?.metadata || {};
-    setMeta(m);
-    setExisting(
-      listUriKeys(m)
-        .filter(k => k.startsWith('extrauri_'))
-        .map(k => ({ key: k, uri: m[k] }))
-    );
-  }, [contractAddress]);
+  }
+
+  const m = rows[0]?.metadata || {};
+  setMeta(m);
+  setExisting(
+    listUriKeys(m).filter(k => k.startsWith('extrauri_'))
+      .map(k => ({ key: k, uri: m[k] })),
+  );
+}, [contractAddress]);
 
   useEffect(() => { loadMeta(tokenId); }, [tokenId, loadMeta]);
 

@@ -1,48 +1,55 @@
-/*Developed by @jams2blues with love for the Tezos community
-  File: src/core/batch.js
-  Summary: hex-chunk helpers + sub-32 kB safe-split batching */
+/*Developed by @jams2blues – ZeroContract Studio
+  File:    src/core/batch.js
+  Rev :    r582   2025-06-14
+  Summary: slice & packed limits tightened; sliceHex now accepts
+           a per-call size so Mint.jsx “safe” arg finally works. */
 
 import { OpKind } from '@taquito/taquito';
 
 /*────────────────── public constants ──────────────────*/
-/** Maximum **payload bytes** we ever embed in one Michelson
- *  `bytes` literal when slicing an artifact URI.
- *  14 000 B ⇒ forged op ≈ 28 kB  (+ header), well under
- *  `max_operation_data_length` (32 768 B). */
-export const SLICE_SAFE_BYTES  = 32_000;
+/** Maximum **payload bytes** permitted in ONE Michelson `bytes`
+ *  literal. 14 000 B → forged op ≈ 28 kB (incl. header), keeping
+ *  ~4 kB head-room below the 32 768 B proto cap.                 */
+export const SLICE_SAFE_BYTES  = 14_000;
 
-/** Hard ceiling (binary, after forging) for a whole operation.
- *  30 000 B keeps ~8 % head-room below the 32 768 B protocol cap. */
-export const PACKED_SAFE_BYTES = 30_000;
+/** Hard ceiling (binary, after forging) for a WHOLE operation.
+ *  28 000 B leaves ≈15 % slack once the shell & signatures are
+ *  added by the RPC.                                             */
+export const PACKED_SAFE_BYTES = 28_000;
 
-/** Split an 0x-prefixed hex-string into ≤15 kB slices (safe for contract) */
-export function sliceHex (hx = '') {
+/*────────────────── slice helper ─────────────────────────────
+ *  sliceHex('0xABC…',           ) → chunks sized by constant
+ *  sliceHex('0xABC…', 8_192     ) → caller-defined byte size   */
+export function sliceHex (hx = '', sliceBytes = SLICE_SAFE_BYTES) {
   if (!hx.startsWith('0x')) throw new Error('hex must start with 0x');
-  const body  = hx.slice(2);
-  const step  = SLICE_SAFE_BYTES * 2;            // two hex chars per byte
-  const parts = [];
+  const body   = hx.slice(2);
+  const step   = sliceBytes * 2;        // two hex chars per byte
+  const parts  = [];
   for (let i = 0; i < body.length; i += step) {
     parts.push('0x' + body.slice(i, i + step));
   }
   return parts;
 }
 
-/*────────────────── packed splitter ──────────────────
- *  (still available to other components)               */
+/*────────────────── packed splitter ──────────────────*/
 export async function splitPacked (toolkit, flat, limit = PACKED_SAFE_BYTES) {
   const batches = [];
   let current   = [];
 
   for (const p of flat) {
     current.push(p);
-    /* Taquito returns an array of estimates – we sum `opSize` fields */
-    const estArr = await toolkit.estimate.batch(current);
-    const packed = estArr.reduce((t, e) => t + (e.opSize ?? 0), 0);
 
-    if (packed > limit) {
+    /* Taquito returns an array of estimates – sum opSize */
+    const estArr = await toolkit.estimate.batch(
+      current.map((q) => ({ kind: OpKind.TRANSACTION, ...q })),
+    );
+    const forged = estArr.reduce((t, e) => t + (e.opSize ?? 0), 0);
+
+    if (forged > limit) {
       current.pop();
-      if (!current.length)
+      if (!current.length) {
         throw new Error('Single operation exceeds protocol size cap');
+      }
       batches.push(current);
       current = [p];
     }
@@ -55,7 +62,12 @@ export async function splitPacked (toolkit, flat, limit = PACKED_SAFE_BYTES) {
 export const tx = (p) => ({ kind: OpKind.TRANSACTION, ...p });
 
 /* What changed & why:
-   • SLICE_SAFE_BYTES ↓ to 14 kB → every forged op < 32 kB.
-   • PACKED_SAFE_BYTES ↓ to 30 kB, still exposed for other helpers.
-   • splitPacked now measures size via `estimate.batch().opSize`. */
+   • SLICE_SAFE_BYTES cut to 14 kB → every append/* slice crafts
+     an op < 32 kB on every protocol.
+   • PACKED_SAFE_BYTES reduced to 28 kB to match forged size
+     (still liberal enough for 14 kB * 2-slice batches).
+   • sliceHex now takes an optional sliceBytes param – Mint.jsx
+     already passes its own ‘safe’ value; that call now works.
+   • splitPacked keeps the same logic but compares against the
+     new lower limit. */
 /* EOF */

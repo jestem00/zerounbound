@@ -7,8 +7,8 @@
 
   "v1": {
     "$extends": "common",
-    "mint": ["nat","map(string,bytes)","address"],
-    "burn": ["nat","nat"]
+    "mint": ["nat", "map(string,bytes)", "address"],
+    "burn": ["nat", "nat"]
   },
 
   "v2a": {
@@ -34,19 +34,23 @@
     "$extends": "v3",
     "burn": false,
     "destroy": ["nat"],
-    "append_artifact_uri": ["nat","bytes"],
-    "append_extrauri": ["string","string","string","nat","bytes"],
-    "clear_uri": ["nat","string"],
+    "append_artifact_uri": ["nat", "bytes"],
+    "append_extrauri": ["string", "string", "string", "nat", "bytes"],
+    "clear_uri": ["nat", "string"],
     "edit_contract_metadata": ["bytes"],
-    "edit_token_metadata": ["map(string,bytes)","nat"]
+    "edit_token_metadata": ["map(string,bytes)", "nat"],
+
+    "repair_uri": false
   },
 
   "v4a": {
     "$extends": "v3",
-    "burn": ["nat","nat"],
-    "append_token_metadata": ["string","nat","bytes"],
+    "burn": ["nat", "nat"],
+    "append_token_metadata": ["string", "nat", "bytes"],
     "update_contract_metadata": ["bytes"],
     "add_collaborators": ["set<address>"],
-    "remove_collaborators": ["set<address>"]
+    "remove_collaborators": ["set<address>"],
+
+    "repair_uri": false
   }
 }

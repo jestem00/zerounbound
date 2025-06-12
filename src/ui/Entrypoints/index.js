@@ -1,6 +1,7 @@
-/*Developed by @jams2blues with love for the Tezos community
-  File: src/ui/Entrypoints/index.js
-  Summary: export v4 metadata-operation components */
+/*Developed by @jams2blues – ZeroContract Studio
+  File:    src/ui/Entrypoints/index.js
+  Rev :    r594   2025-06-15
+  Summary: export RepairUri entry component. */
 
 export { default as AddRemoveCollaborator } from './AddRemoveCollaborator.jsx';
 export { default as AddRemoveParentChild }  from './AddRemoveParentChild.jsx';
@@ -20,4 +21,5 @@ export { default as AppendExtraUri }        from './AppendExtraUri.jsx';
 export { default as ClearUri }              from './ClearUri.jsx';
 export { default as EditContractMetadata }  from './EditContractMetadata.jsx';
 export { default as EditTokenMetadata }     from './EditTokenMetadata.jsx';
-/* What changed & why: surfaced v4 metadata entrypoints */
+export { default as RepairUri              } from './RepairUri.jsx';
+/* What changed & why: surfaced v4 metadata entrypoints, added RepairUri.jsx r594 */

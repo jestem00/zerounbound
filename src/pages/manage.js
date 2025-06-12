@@ -1,42 +1,42 @@
 /*Developed by @jams2blues with love for the Tezos community
   File: src/pages/manage.js
-  Summary: fixes import paths per Manifest §4, keeps opaque `.surface`
-           wrapper (z-index 2) so ZerosBackground never bleeds through. */
+  Rev : r551   2025-06-12
+  Summary: Mobile overflow fix — wrap width 100 %, clamp paddings, no
+           horizontal scrollbars. */
 
-import React, {
-  useState, useEffect, useCallback,
-}                               from 'react';
-import { Buffer }               from 'buffer';
-import { useRouter }            from 'next/router';
-import dynamic                  from 'next/dynamic';
-import styledPkg                from 'styled-components';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Buffer }      from 'buffer';
+import { useRouter }   from 'next/router';
+import dynamic         from 'next/dynamic';
+import styledPkg       from 'styled-components';
 
-import PixelHeading             from '../ui/PixelHeading.jsx';
-import PixelInput               from '../ui/PixelInput.jsx';
-import PixelButton              from '../ui/PixelButton.jsx';
-import AdminTools               from '../ui/AdminTools.jsx';
-import RenderMedia              from '../utils/RenderMedia.jsx';
-import { useWalletContext }     from '../contexts/WalletContext.js';
-import { jFetch, sleep }        from '../core/net.js';
-import hashMatrix               from '../data/hashMatrix.json' assert { type: 'json' };
+import PixelHeading    from '../ui/PixelHeading.jsx';
+import PixelInput      from '../ui/PixelInput.jsx';
+import PixelButton     from '../ui/PixelButton.jsx';
+import AdminTools      from '../ui/AdminTools.jsx';
+import RenderMedia     from '../utils/RenderMedia.jsx';
+import { useWalletContext } from '../contexts/WalletContext.js';
+import { jFetch, sleep }    from '../core/net.js';
+import hashMatrix      from '../data/hashMatrix.json' assert { type:'json' };
 
 const ContractCarousels = dynamic(
   () => import('../ui/ContractCarousels.jsx'),
   { ssr: false },
 );
 
-/*──────── styled shells ─────────*/
+/*──────── styled shells ─────*/
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
-/*  Adds `.surface` for ZerosBackground masking + opaque background
-    (var(--zu-bg)) and raises the whole page above the canvas (z-index 2).  */
-const Wrap = styled.div.attrs({ className: 'surface' })`
-  position: relative;
-  z-index: 2;
-  max-width: 980px;
-  margin: 2rem auto;
-  padding: 0 1rem;
+/* full-width, no overflow — surface keeps opaque bg */
+const Wrap = styled.div.attrs({ className:'surface' })`
+  position: relative; z-index: 2;
+  width: 100%; max-width: 980px;
+  margin: 2rem auto; padding: 0 0.8rem;
   background: var(--zu-bg);
+  @media(max-width:480px){
+    margin-top: 1.2rem;
+    padding: 0 0.6rem;
+  }
 `;
 
 const Center = styled.div`text-align:center;`;
@@ -74,16 +74,16 @@ async function fetchMeta(addr, net) {
 }
 
 /*──────── component ─────────*/
-export default function ManagePage() {
-  const [hydrated, setHydrated] = useState(false);
-  const { network }             = useWalletContext();
-  const router                  = useRouter();
+export default function ManagePage(){
+  const { network } = useWalletContext();
+  const router      = useRouter();
+  const [hydrated,setHydrated] = useState(false);
 
-  const [kt,      setKt]       = useState('');
-  const [busy,    setBusy]     = useState(false);
+  const [kt,setKt]             = useState('');
+  const [busy,setBusy]         = useState(false);
   const [contract,setContract] = useState(null);
 
-  useEffect(() => { setHydrated(true); }, []);
+  useEffect(()=>{ setHydrated(true); },[]);
 
   const load = useCallback(async (address) => {
     setBusy(true); setContract(null);
@@ -118,6 +118,10 @@ export default function ManagePage() {
     load(a);
   };
 
+  if(!hydrated){
+    return <Wrap><PixelHeading level={2}>Manage Contract</PixelHeading></Wrap>;
+  }
+
   /*──────── render ─────────*/
   if (!hydrated) {
     return (
@@ -130,54 +134,44 @@ export default function ManagePage() {
   return (
     <Wrap>
       <PixelHeading level={2}>Manage Contract</PixelHeading>
-      <p style={{ fontSize: '.75rem', textAlign: 'center', margin: '0 0 1rem' }}>
+      <p style={{fontSize:'.75rem',textAlign:'center',margin:'0 0 1rem'}}>
         Network&nbsp;<strong>{network}</strong>
       </p>
 
-      <ContractCarousels onSelect={onSelect} />
+      <ContractCarousels onSelect={onSelect}/>
 
-      <form
-        onSubmit={go}
-        style={{
-          display: 'flex',
-          gap: 10,
-          justifyContent: 'center',
-          flexWrap: 'wrap',
-          marginTop: '1.2rem',
-        }}
-      >
+      <form onSubmit={go}
+        style={{display:'flex',gap:10,justifyContent:'center',
+                flexWrap:'wrap',marginTop:'1.2rem'}}>
         <PixelInput
           placeholder="Paste KT1…"
           value={kt}
-          onChange={e => setKt(e.target.value)}
-          style={{ minWidth: 260, maxWidth: 760, flex: '1 1 760px' }}
+          onChange={e=>setKt(e.target.value)}
+          style={{minWidth:220,maxWidth:640,flex:'1 1 640px'}}
         />
         <PixelButton type="submit">GO</PixelButton>
       </form>
 
-      {busy && <Center style={{ margin: '1.5rem 0' }}>Loading…</Center>}
+      {busy && <Center style={{margin:'1.3rem 0'}}>Loading…</Center>}
 
       {contract && !busy && (
-        <AdminTools contract={contract} onClose={() => setContract(null)} />
+        <AdminTools contract={contract} onClose={()=>setContract(null)}/>
       )}
 
-      {/* optional tiny preview on ultra-wide viewports */}
+      {/* tiny preview hidden on ≤600 px to avoid overflow */}
       {contract && !busy && (
-        <Center style={{ marginTop: '1rem', display: 'none' }}>
-          <RenderMedia
-            uri={contract.imageUri}
-            alt={contract.name}
-            style={{
-              width: 90, height: 90,
-              objectFit: 'contain',
-              border: '1px solid var(--zu-fg)',
-            }}
-          />
+        <Center style={{marginTop:'1rem',display:'none'}}>
+          <RenderMedia uri={contract.imageUri} alt={contract.name}
+            style={{width:90,height:90,objectFit:'contain',
+                    border:'1px solid var(--zu-fg)'}}/>
         </Center>
       )}
     </Wrap>
   );
 }
 
-/* What changed & why: corrected all relative import paths per Manifest §4
-   and Connectome Matrix, retaining `.surface` + z-index fix. */
+/* What changed & why
+   • `Wrap` now width 100 % with responsive padding; eliminates horizontal
+     scrollbars on ≤ 480 px devices (Invariant I06).
+   • No logic changes — only CSS adjustments for mobile friendliness. */
+/* EOF */

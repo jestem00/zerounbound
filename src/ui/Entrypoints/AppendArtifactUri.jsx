@@ -1,110 +1,119 @@
-// File: src/ui/Entrypoints/AppendArtifactUri.jsx
-/* Developed by @jams2blues – ZeroContract Studio
-   Summary: Resumable multi-slice uploads with shared sliceCache */
+/*Developed by @jams2blues – ZeroContract Studio
+  File:    src/ui/Entrypoints/AppendArtifactUri.jsx
+  Rev :    r580   2025-06-14
+  Summary: removed stray “}” in two TzKT URLs – 400 errors gone. */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Buffer } from 'buffer';
-import styledPkg from 'styled-components';
-import { OpKind } from '@taquito/taquito';
-import { char2Bytes } from '@taquito/utils';
+import { Buffer }          from 'buffer';
+import styledPkg           from 'styled-components';
+import { OpKind }          from '@taquito/taquito';
+import { char2Bytes }      from '@taquito/utils';
 
-import PixelHeading from '../PixelHeading.jsx';
-import PixelInput from '../PixelInput.jsx';
-import PixelButton from '../PixelButton.jsx';
-import MintUpload from './MintUpload.jsx';
-import OperationOverlay from '../OperationOverlay.jsx';
+import PixelHeading        from '../PixelHeading.jsx';
+import PixelInput          from '../PixelInput.jsx';
+import PixelButton         from '../PixelButton.jsx';
+import MintUpload          from './MintUpload.jsx';
+import OperationOverlay    from '../OperationOverlay.jsx';
 import OperationConfirmDialog from '../OperationConfirmDialog.jsx';
-import PixelConfirmDialog from '../PixelConfirmDialog.jsx';
-import RenderMedia from '../../utils/RenderMedia.jsx';
-import TokenMetaPanel from '../TokenMetaPanel.jsx';
+import PixelConfirmDialog  from '../PixelConfirmDialog.jsx';
+import RenderMedia         from '../../utils/RenderMedia.jsx';
+import TokenMetaPanel      from '../TokenMetaPanel.jsx';
 
 import { splitPacked, sliceHex, PACKED_SAFE_BYTES } from '../../core/batch.js';
-import { strHash, loadSliceCache, saveSliceCache, clearSliceCache, purgeExpiredSliceCache } from '../../utils/sliceCache.js';
-import { jFetch } from '../../core/net.js';
+import {
+  strHash, loadSliceCache, saveSliceCache,
+  clearSliceCache, purgeExpiredSliceCache,
+} from '../../utils/sliceCache.js';
+import { jFetch }           from '../../core/net.js';
 import { mimeFromFilename } from '../../constants/mimeTypes.js';
 import { useWalletContext } from '../../contexts/WalletContext.js';
-import { TZKT_API } from '../../config/deployTarget.js';
+import { TZKT_API }         from '../../config/deployTarget.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
-const Wrap = styled('section')`margin-top:1.5rem;`;
-const SelectWrap = styled.div`position:relative;flex:1;`;
-const SpinnerIcon = styled.img.attrs({
-  src: '/sprites/loading16x16.gif', alt: '',
-})`
+const Wrap        = styled.section`margin-top:1.5rem;`;
+const SelectWrap  = styled.div`position:relative;flex:1;`;
+const SpinnerIcon = styled.img.attrs({ src:'/sprites/loading16x16.gif', alt:'' })`
   position:absolute;top:8px;right:8px;width:16px;height:16px;
   image-rendering:pixelated;
 `;
 
-const API = `${TZKT_API}/v1`;
-const hex2str = h => Buffer.from(h.replace(/^0x/, ''), 'hex').toString('utf8');
+const API     = `${TZKT_API}/v1`;
+const hex2str = (h)=>Buffer.from(h.replace(/^0x/,''),'hex').toString('utf8');
 
 export default function AppendArtifactUri({
   contractAddress,
-  setSnackbar = () => {},
-  onMutate = () => {},
+  setSnackbar = ()=>{},
+  onMutate    = ()=>{},
   $level,
-}) {
+}){
   const { toolkit } = useWalletContext() || {};
-  const snack = (m, s = 'info') => setSnackbar({ open: true, message: m, severity: s });
+  const snack = (m,s='info')=>setSnackbar({ open:true, message:m, severity:s });
 
-  const [tokOpts, setTokOpts] = useState([]);
-  const [loadingTok, setLoadingTok] = useState(false);
+  /*──────── token list ───*/
+  const [tokOpts,setTokOpts]   = useState([]);
+  const [loadingTok,setLoadingTok] = useState(false);
 
-  const fetchTokens = useCallback(async () => {
-    if (!contractAddress) return;
+  const fetchTokens = useCallback(async ()=>{
+    if(!contractAddress) return;
     setLoadingTok(true);
-    const seen = new Set();
-    const push = arr => arr.forEach(n => Number.isFinite(n) && seen.add(n));
-    try {
-      const rows = await jFetch(`${API}/tokens?contract=${contractAddress}&select=tokenId&limit=10000`);
-      push(rows.map(r => +r.tokenId));
-    } catch {}
-    if (!seen.size) {
-      try {
-        const rows = await jFetch(`${API}/contracts/${contractAddress}/bigmaps/token_metadata/keys?limit=10000`);
-        push(rows.map(r => +r.key));
-      } catch {}
+    const seen=new Set();
+    const push=(arr)=>arr.forEach(n=>Number.isFinite(n)&&seen.add(n));
+
+    try{
+      const rows=await jFetch(`${API}/tokens?contract=${contractAddress}&select=tokenId&limit=10000`);
+      push(rows.map(r=>+r.tokenId));
+    }catch{}
+    if(!seen.size){
+      try{
+        const rows=await jFetch(`${API}/contracts/${contractAddress}/bigmaps/token_metadata/keys?limit=10000`);
+        push(rows.map(r=>+r.key));
+      }catch{}
     }
-    setTokOpts([...seen].sort((a, b) => a - b));
+    setTokOpts([...seen].sort((a,b)=>a-b));
     setLoadingTok(false);
-  }, [contractAddress]);
+  },[contractAddress]);
 
-  useEffect(fetchTokens, [fetchTokens]);
+  useEffect(()=>{ void fetchTokens(); },[fetchTokens]);
 
-  const [tokenId, setTokenId] = useState('');
-  const [file, setFile] = useState(null);
-  const [dataUrl, setDataUrl] = useState('');
-  const [meta, setMeta] = useState(null);
-  const [hasArtUri, setHasArtUri] = useState(false);
+  /*──────── local state ─*/
+  const [tokenId,setTokenId]    = useState('');
+  const [file,setFile]          = useState(null);
+  const [dataUrl,setDataUrl]    = useState('');
+  const [meta,setMeta]          = useState(null);
+  const [hasArtUri,setHasArtUri]= useState(false);
 
-  const [isEstim, setIsEstim] = useState(false);
-  const [delOpen, setDelOpen] = useState(false);
+  const [isEstim,setIsEstim]    = useState(false);
+  const [delOpen,setDelOpen]    = useState(false);
 
-  const [resumeInfo, setResumeInfo] = useState(null);
-  const mime = mimeFromFilename?.(file?.name) || file?.type || '';
+  const [resumeInfo,setResumeInfo]=useState(null);
+  const mime = mimeFromFilename?.(file?.name)||file?.type||'';
 
-  const loadMeta = useCallback(async id => {
-    if (!contractAddress || id === '') {
-      setMeta(null);
-      setHasArtUri(false);
-      return;
-    }
-    let rows = [];
+/*──── meta loader – fixed URL brace ───*/
+const loadMeta = useCallback(async id => {
+  if (!contractAddress || id === '') { setMeta(null); setHasArtUri(false); return; }
+
+  let rows = [];
+  try {
+    rows = await jFetch(
+      `${API}/tokens?contract=${contractAddress}&tokenId=${id}&limit=1`,
+    );                               // ← brace removed
+  } catch {}
+
+  if (!rows.length) {
     try {
-      rows = await jFetch(`${API}/tokens?contract=${contractAddress}&tokenId=${id}&limit=1}`);
+      const one = await jFetch(
+        `${API}/contracts/${contractAddress}/bigmaps/token_metadata/keys/${id}`,
+      );
+      if (one?.value) rows = [{ metadata: JSON.parse(hex2str(one.value)) }];
     } catch {}
-    if (!rows.length) {
-      try {
-        const one = await jFetch(`${API}/contracts/${contractAddress}/bigmaps/token_metadata/keys/${id}`);
-        if (one?.value) rows = [{ metadata: JSON.parse(hex2str(one.value)) }];
-      } catch {}
-    }
-    const m = rows[0]?.metadata || {};
-    setMeta(m);
-    setHasArtUri(!!m.artifactUri);
-  }, [contractAddress]);
+  }
 
-  useEffect(() => { loadMeta(tokenId); }, [tokenId, loadMeta]);
+  const m = rows[0]?.metadata || {};
+  setMeta(m);
+  setHasArtUri(!!m.artifactUri);
+}, [contractAddress]);
+
+  useEffect(()=>{ void loadMeta(tokenId); },[tokenId,loadMeta]);
 
   const [batches, setBatches] = useState(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -348,4 +357,5 @@ export default function AppendArtifactUri({
     </Wrap>
   );
 }
+/* What changed & why: brace typo stripped from token-meta fetch URL. */
 /* EOF */

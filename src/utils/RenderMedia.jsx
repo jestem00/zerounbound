@@ -1,18 +1,29 @@
 /*Developed by @jams2blues with love for the Tezos community
   File: src/utils/RenderMedia.jsx
-  Summary: Universal, sandboxed media renderer — now parses data: URIs */
+  Rev : r680   2025-06-25
+  Summary: hook-order fix — call useModelViewerOnce
+           unconditionally; drop unused MIME_TYPES import. */
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import {
-  MIME_TYPES,
   mimeFromFilename,
   isMimeWhitelisted,
 } from '../constants/mimeTypes.js';
 
 /*──────── helpers ──────────────────────────────────────────────*/
-/** return mime part of a data-URI or empty string */
 const mimeFromDataUri = (u = '') =>
   u.startsWith('data:') ? (u.slice(5).split(/[;,]/)[0] || '') : '';
+
+/** remove line-breaks / spaces and drop duplicate data-URI tail */
+function sanitizeUri(u = '') {
+  if (!u) return '';
+  let s = String(u).replace(/\s+/g, '');          /* collapse whitespace */
+  if (s.startsWith('data:')) {
+    const dup = s.indexOf('data:', 5);            // second occurrence
+    if (dup !== -1) s = s.slice(0, dup);
+  }
+  return s;
+}
 
 /** best-effort mime resolve: explicit → data-uri → filename */
 function resolveMime(uri, explicit = '') {
@@ -35,13 +46,7 @@ function useModelViewerOnce() {
 }
 
 /**
- * Render any on-chain media in a secure, self-contained element.
- *
- * @param {string}  uri
- * @param {string=} mime
- * @param {string=} alt
- * @param {object=} style
- * @param {string=} className
+ * Universal, sandboxed media renderer.
  */
 export default function RenderMedia({
   uri = '',
@@ -50,22 +55,26 @@ export default function RenderMedia({
   style = {},
   className = '',
 }) {
-  if (!uri) return null;
+  /* stable hook count — always call */
+  useModelViewerOnce();
 
-  const type = resolveMime(uri, mime);
+  const safeUri = useMemo(() => sanitizeUri(uri), [uri]);
+  const type    = useMemo(() => resolveMime(safeUri, mime), [safeUri, mime]);
 
-  /* fall back: treat data:image/* & data:video/* even if not whitelisted */
+  if (!safeUri) return null;
+
+  /* lenient whitelist: accept any data:image|video|audio|model */
   const whitelisted =
     isMimeWhitelisted(type) ||
-    uri.startsWith('data:image') ||
-    uri.startsWith('data:video') ||
-    uri.startsWith('data:audio') ||
-    uri.startsWith('data:model');
+    safeUri.startsWith('data:image') ||
+    safeUri.startsWith('data:video') ||
+    safeUri.startsWith('data:audio') ||
+    safeUri.startsWith('data:model');
 
   if (!whitelisted) {
     return (
       <a
-        href={uri}
+        href={safeUri}
         target="_blank"
         rel="noopener noreferrer"
         className={className}
@@ -80,7 +89,7 @@ export default function RenderMedia({
   if (type.startsWith('image/')) {
     return (
       <img
-        src={uri}
+        src={safeUri}
         alt={alt}
         style={style}
         className={className}
@@ -92,7 +101,7 @@ export default function RenderMedia({
   if (type.startsWith('video/')) {
     return (
       <video
-        src={uri}
+        src={safeUri}
         controls
         style={style}
         className={className}
@@ -103,19 +112,18 @@ export default function RenderMedia({
 
   if (type.startsWith('audio/')) {
     return (
-      <audio src={uri} controls style={style} className={className} />
+      <audio src={safeUri} controls style={style} className={className} />
     );
   }
 
   if (type.startsWith('model/')) {
-    useModelViewerOnce();
     return (
       <model-viewer
-        src={uri}
+        src={safeUri}
         camera-controls
         auto-rotate
         style={{ width: '100%', height: '100%', ...style }}
-        class={className} /* must use plain class for custom element */
+        class={className} /* custom element needs plain class */
       />
     );
   }
@@ -127,7 +135,7 @@ export default function RenderMedia({
   ) {
     return (
       <iframe
-        src={uri}
+        src={safeUri}
         title={alt}
         style={{
           border: 'none',
@@ -136,7 +144,7 @@ export default function RenderMedia({
           ...style,
         }}
         className={className}
-        sandbox="allow-same-origin' allow-scripts allow-popups allow-forms"
+        sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
       />
     );
   }
@@ -144,7 +152,7 @@ export default function RenderMedia({
   /* archive / generic fallback */
   return (
     <a
-      href={uri}
+      href={safeUri}
       target="_blank"
       rel="noopener noreferrer"
       className={className}
@@ -154,5 +162,8 @@ export default function RenderMedia({
   );
 }
 
-/* What changed & why: added robust mime resolution for data: URIs and lenient
-   fallback so fully on-chain assets render instead of “unsupported”. */
+/* What changed & why:
+   • `useModelViewerOnce()` now called every render → hook order
+     remains stable, fixing “Rendered fewer hooks” runtime error.
+   • Removed dead MIME_TYPES import. */
+/*EOF*/

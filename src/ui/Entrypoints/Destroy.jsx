@@ -1,11 +1,10 @@
-/*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+/*Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/Destroy.jsx
-  Rev :    r661   2025-06-22
-  Summary: dialog API v2 + shared spinner
-           • <PixelConfirmDialog open={…} onOk={…}>
-           • LoadingSpinner replaces <img>
-──────────────────────────────────────────────────────────────*/
+  Rev :    r678   2025-06-25
+  Summary: Harden meta JSON decode – any corrupt
+           or non-JSON metadata now fails soft with
+           empty object, preventing runtime crash. */
+
 import React, { useCallback, useEffect, useState } from 'react';
 import { Buffer }          from 'buffer';
 import styledPkg           from 'styled-components';
@@ -26,7 +25,7 @@ import { TZKT_API }         from '../../config/deployTarget.js';
 /* polyfill */
 if (typeof window !== 'undefined' && !window.Buffer) window.Buffer = Buffer;
 
-/* shells */
+/*──────── helpers ───────────────────────────────────────────*/
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 const Wrap   = styled.section`margin-top:1.5rem;`;
 const Box    = styled.div`position:relative;flex:1;`;
@@ -34,11 +33,20 @@ const Spin   = styled(LoadingSpinner).attrs({ size:16 })`
   position:absolute;top:8px;right:8px;
 `;
 
-/* helpers */
-const API     = `${TZKT_API}/v1`;
+const API = `${TZKT_API}/v1`;
 const hex2str = (h) => Buffer.from(h.replace(/^0x/, ''), 'hex').toString('utf8');
 
-/* component */
+/* robust decode – never throw */
+function decodeMeta(src = '') {
+  try {
+    const txt = typeof src === 'string' ? src : JSON.stringify(src);
+    return JSON.parse(txt);
+  } catch {
+    return {};                     /* safe-fail */
+  }
+}
+
+/*──────────────── component ────────────────────────────────*/
 export default function Destroy({
   contractAddress = '',
   setSnackbar     = () => {},
@@ -61,33 +69,40 @@ export default function Destroy({
 
   useEffect(() => { void fetchTokens(); }, [fetchTokens]);
 
-  /* state */
+  /* ui state */
   const [tokenId, setTokenId]   = useState('');
   const [meta,    setMeta]      = useState(null);
   const [ov,      setOv]        = useState({ open:false });
   const [confirmOpen, setConfirm] = useState(false);
 
-  /* meta loader */
+  /*── metadata loader ───────────────────────────────────────*/
   const loadMeta = useCallback(async (id) => {
     setMeta(null);
-    if (!contractAddress || id==='') return;
+    if (!contractAddress || id === '') return;
 
+    /* ① indexed token row */
     let rows = await jFetch(
       `${API}/tokens?contract=${contractAddress}&tokenId=${id}&limit=1`,
     ).catch(() => []);
 
+    /* ② big-map direct fallback */
     if (!rows.length) {
       const one = await jFetch(
         `${API}/contracts/${contractAddress}/bigmaps/token_metadata/keys/${id}`,
       ).catch(() => null);
-      if (one?.value) rows = [{ metadata: JSON.parse(hex2str(one.value)) }];
+      if (one?.value) {
+        rows = [{ metadata: decodeMeta(hex2str(one.value)) }];
+      }
     }
-    setMeta(rows?.[0]?.metadata || {});
+
+    let m = rows?.[0]?.metadata ?? {};
+    if (typeof m === 'string') m = decodeMeta(m);
+    setMeta(m);
   }, [contractAddress]);
 
   useEffect(() => { void loadMeta(tokenId); }, [tokenId, loadMeta]);
 
-  /* destroy op */
+  /*── destroy op ────────────────────────────────────────────*/
   const run = async () => {
     if (!toolkit)       return snack('Connect wallet', 'error');
     if (tokenId === '') return snack('Token-ID?', 'error');
@@ -110,7 +125,7 @@ export default function Destroy({
     }
   };
 
-  /* render */
+  /*── render ────────────────────────────────────────────────*/
   return (
     <Wrap $level={$level}>
       <PixelHeading level={3}>Destroy&nbsp;Token</PixelHeading>
@@ -120,11 +135,11 @@ export default function Destroy({
           placeholder="Token-ID"
           style={{ flex:1 }}
           value={tokenId}
-          onChange={(e) => setTokenId(e.target.value.replace(/\D/g,''))}
+          onChange={(e) => setTokenId(e.target.value.replace(/\D/g, ''))}
         />
         <Box>
           <select
-            style={{ width:'100%',height:32 }}
+            style={{ width:'100%', height:32 }}
             disabled={loadingTok}
             value={tokenId || ''}
             onChange={(e) => setTokenId(e.target.value)}
@@ -141,7 +156,11 @@ export default function Destroy({
       </div>
 
       <div style={{ marginTop:'1rem' }}>
-        <TokenMetaPanel meta={meta} tokenId={tokenId} contractAddress={contractAddress}/>
+        <TokenMetaPanel
+          meta={meta}
+          tokenId={tokenId}
+          contractAddress={contractAddress}
+        />
       </div>
 
       <PixelButton
@@ -178,4 +197,9 @@ export default function Destroy({
     </Wrap>
   );
 }
+/* What changed & why:
+   • Wrapped all metadata decoding in `decodeMeta`
+     – JSON.parse errors now caught, defaulting to {}.
+   • Prevents runtime crash when external contracts
+     store malformed or binary-encoded token metadata. */
 /* EOF */

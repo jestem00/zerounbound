@@ -1,25 +1,33 @@
-/*Developed by @jams2blues – ZeroContract Studio
+/*─────────────────────────────────────────────────────────────
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/index.js
-  Rev :    r594   2025-06-15
-  Summary: export RepairUri entry component. */
+  Rev :    r717   2025-06-27
+  Summary: export ManageCollaboratorsv4a
+──────────────────────────────────────────────────────────────*/
+export { default as AddRemoveCollaborator }       from './AddRemoveCollaborator.jsx';
+export { default as AddRemoveParentChild }        from './AddRemoveParentChild.jsx';
+export { default as BalanceOf }                   from './BalanceOf.jsx';
+export { default as Burn }                        from './Burn.jsx';
+export { default as Destroy }                     from './Destroy.jsx';
+export { default as ManageCollaborators }         from './ManageCollaborators.jsx';
+export { default as ManageCollaboratorsv4a }      from './ManageCollaboratorsv4a.jsx';
+export { default as ManageParentChild }           from './ManageParentChild.jsx';
+export { default as Transfer }                    from './Transfer.jsx';
+export { default as Mint }                        from './Mint.jsx';
+export { default as MintPreview }                 from './MintPreview.jsx';
+export { default as MintUpload }                  from './MintUpload.jsx';
+export { default as UpdateOperators }             from './UpdateOperators.jsx';
 
-export { default as AddRemoveCollaborator } from './AddRemoveCollaborator.jsx';
-export { default as AddRemoveParentChild }  from './AddRemoveParentChild.jsx';
-export { default as BalanceOf }             from './BalanceOf.jsx';
-export { default as Burn }                  from './Burn.jsx';
-export { default as Destroy }               from './Destroy.jsx';
-export { default as ManageCollaborators }   from './ManageCollaborators.jsx';
-export { default as ManageParentChild }     from './ManageParentChild.jsx';
-export { default as Transfer }              from './Transfer.jsx';
-export { default as Mint }                  from './Mint.jsx';
-export { default as MintPreview }           from './MintPreview.jsx';
-export { default as MintUpload }            from './MintUpload.jsx';
-export { default as UpdateOperators }       from './UpdateOperators.jsx';
-/* new v4 ops */
-export { default as AppendArtifactUri }     from './AppendArtifactUri.jsx';
-export { default as AppendExtraUri }        from './AppendExtraUri.jsx';
-export { default as ClearUri }              from './ClearUri.jsx';
-export { default as EditContractMetadata }  from './EditContractMetadata.jsx';
-export { default as EditTokenMetadata }     from './EditTokenMetadata.jsx';
-export { default as RepairUri              } from './RepairUri.jsx';
-/* What changed & why: surfaced v4 metadata entrypoints, added RepairUri.jsx r594 */
+/* v4 */
+export { default as AppendArtifactUri }           from './AppendArtifactUri.jsx';
+export { default as AppendExtraUri }              from './AppendExtraUri.jsx';
+export { default as ClearUri }                    from './ClearUri.jsx';
+export { default as EditContractMetadata }        from './EditContractMetadata.jsx';
+export { default as EditTokenMetadata }           from './EditTokenMetadata.jsx';
+export { default as RepairUri }                   from './RepairUri.jsx';
+
+/* v4a */
+export { default as AddRemoveCollaboratorsv4a }   from './AddRemoveCollaboratorsv4a.jsx';
+export { default as AppendTokenMetadatav4a }      from './AppendTokenMetadatav4a.jsx';
+export { default as UpdateContractMetadatav4a }   from './UpdateContractMetadatav4a.jsx';
+/* EOF */

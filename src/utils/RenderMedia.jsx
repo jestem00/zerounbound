@@ -1,31 +1,30 @@
-/*Developed by @jams2blues with love for the Tezos community
-  File: src/utils/RenderMedia.jsx
-  Rev : r680   2025-06-25
-  Summary: hook-order fix — call useModelViewerOnce
-           unconditionally; drop unused MIME_TYPES import. */
-
-import React, { useEffect, useMemo } from 'react';
+/*─────────────────────────────────────────────────────────────
+  Developed by @jams2blues – ZeroContract Studio
+  File:    src/utils/RenderMedia.jsx
+  Rev :    r736   2025-06-28
+  Summary: pixel-perfect SVG thumbs (image-rendering)
+──────────────────────────────────────────────────────────────*/
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   mimeFromFilename,
   isMimeWhitelisted,
 } from '../constants/mimeTypes.js';
 
-/*──────── helpers ──────────────────────────────────────────────*/
+/*──────── helpers ───────────────────────────────────────────*/
 const mimeFromDataUri = (u = '') =>
   u.startsWith('data:') ? (u.slice(5).split(/[;,]/)[0] || '') : '';
 
-/** remove line-breaks / spaces and drop duplicate data-URI tail */
 function sanitizeUri(u = '') {
-  if (!u) return '';
-  let s = String(u).replace(/\s+/g, '');          /* collapse whitespace */
+  if (!u) return { uri: '', trimmed: false };
+  let s = String(u).replace(/\s+/g, '');
+  const orig = s;
   if (s.startsWith('data:')) {
-    const dup = s.indexOf('data:', 5);            // second occurrence
+    const dup = s.indexOf('data:', 5);
     if (dup !== -1) s = s.slice(0, dup);
   }
-  return s;
+  return { uri: s, trimmed: s !== orig };
 }
 
-/** best-effort mime resolve: explicit → data-uri → filename */
 function resolveMime(uri, explicit = '') {
   if (explicit) return explicit;
   const fromData = mimeFromDataUri(uri);
@@ -33,7 +32,6 @@ function resolveMime(uri, explicit = '') {
   return mimeFromFilename(uri);
 }
 
-/* one-time <model-viewer> loader (SSR-safe) */
 function useModelViewerOnce() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -47,6 +45,11 @@ function useModelViewerOnce() {
 
 /**
  * Universal, sandboxed media renderer.
+ *
+ * onInvalid(reason) reasons:
+ *  • sanitised   – duplicate data:/whitespace fixed
+ *  • unsupported – MIME not whitelisted
+ *  • load-error  – browser could not decode media
  */
 export default function RenderMedia({
   uri = '',
@@ -54,29 +57,33 @@ export default function RenderMedia({
   alt = '',
   style = {},
   className = '',
+  onInvalid = () => {},
 }) {
-  /* stable hook count — always call */
   useModelViewerOnce();
 
-  const safeUri = useMemo(() => sanitizeUri(uri), [uri]);
-  const type    = useMemo(() => resolveMime(safeUri, mime), [safeUri, mime]);
+  const { uri: safeUri, trimmed } = sanitizeUri(uri);
+  const type = useMemo(() => resolveMime(safeUri, mime), [safeUri, mime]);
+  const [errored, setErrored] = useState(false);
+
+  useEffect(() => { if (trimmed) onInvalid('sanitised'); }, [trimmed, onInvalid]);
 
   if (!safeUri) return null;
 
-  /* lenient whitelist: accept any data:image|video|audio|model */
   const whitelisted =
-    isMimeWhitelisted(type) ||
-    safeUri.startsWith('data:image') ||
-    safeUri.startsWith('data:video') ||
-    safeUri.startsWith('data:audio') ||
-    safeUri.startsWith('data:model');
+    isMimeWhitelisted(type)
+    || safeUri.startsWith('data:image')
+    || safeUri.startsWith('data:video')
+    || safeUri.startsWith('data:audio')
+    || safeUri.startsWith('data:model');
 
   if (!whitelisted) {
+    onInvalid('unsupported');
     return (
       <a
         href={safeUri}
         target="_blank"
         rel="noopener noreferrer"
+        download
         className={className}
         style={{ color: 'var(--zu-accent-sec)' }}
       >
@@ -85,35 +92,51 @@ export default function RenderMedia({
     );
   }
 
-  /*──────── renderers ─────────────────────────────────────────*/
-  if (type.startsWith('image/')) {
+  const commonImgProps = {
+    style,
+    className,
+    onError: () => {
+      if (!errored) {
+        setErrored(true);
+        onInvalid('load-error');
+      }
+    },
+  };
+
+  /*────────────────── render branches ──────────────────*/
+  if (type === 'image/svg+xml') {
+    /*  <img> halts SMIL/CSS animation in many engines.
+        <object> keeps animation but default scaling causes
+        blurry pixel-art sprites. Force nearest-neighbour. */
+    const svgStyle = {
+      imageRendering: 'pixelated',
+      width: '100%',
+      height: '100%',
+      ...style,
+    };
     return (
-      <img
-        src={safeUri}
-        alt={alt}
-        style={style}
+      <object
+        data={safeUri}
+        type="image/svg+xml"
+        style={svgStyle}
         className={className}
-        loading="lazy"
-      />
+      >
+        {/* fallback static frame if <object> fails */}
+        <img src={safeUri} alt={alt} loading="lazy" {...commonImgProps} />
+      </object>
     );
+  }
+
+  if (type.startsWith('image/')) {
+    return <img src={safeUri} alt={alt} loading="lazy" {...commonImgProps} />;
   }
 
   if (type.startsWith('video/')) {
-    return (
-      <video
-        src={safeUri}
-        controls
-        style={style}
-        className={className}
-        preload="metadata"
-      />
-    );
+    return <video src={safeUri} controls preload="metadata" {...commonImgProps} />;
   }
 
   if (type.startsWith('audio/')) {
-    return (
-      <audio src={safeUri} controls style={style} className={className} />
-    );
+    return <audio src={safeUri} controls {...commonImgProps} />;
   }
 
   if (type.startsWith('model/')) {
@@ -123,7 +146,7 @@ export default function RenderMedia({
         camera-controls
         auto-rotate
         style={{ width: '100%', height: '100%', ...style }}
-        class={className} /* custom element needs plain class */
+        class={className}
       />
     );
   }
@@ -137,33 +160,18 @@ export default function RenderMedia({
       <iframe
         src={safeUri}
         title={alt}
-        style={{
-          border: 'none',
-          width: '100%',
-          height: '100%',
-          ...style,
-        }}
-        className={className}
         sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
+        style={{ border: 'none', width: '100%', height: '100%', ...style }}
+        className={className}
       />
     );
   }
 
-  /* archive / generic fallback */
+  onInvalid('unsupported');
   return (
-    <a
-      href={safeUri}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={className}
-    >
+    <a href={safeUri} target="_blank" rel="noopener noreferrer" className={className}>
       Download
     </a>
   );
 }
-
-/* What changed & why:
-   • `useModelViewerOnce()` now called every render → hook order
-     remains stable, fixing “Rendered fewer hooks” runtime error.
-   • Removed dead MIME_TYPES import. */
-/*EOF*/
+/* EOF */

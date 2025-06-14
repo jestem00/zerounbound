@@ -1,10 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/Burn.jsx
-  Rev :    r664   2025-06-22
-  Summary: owned-token dropdown fix
-           • handles numeric rows from ?select=token.tokenId
-           • dropdown now lists wallet-owned ids correctly
+  Rev :    r693   2025-06-25
+  Summary: $level-safe Wrap, clearer overlay flow, minor lint
 ──────────────────────────────────────────────────────────────*/
 import React, { useCallback, useEffect, useState } from 'react';
 import { Buffer }            from 'buffer';
@@ -29,7 +27,9 @@ if (typeof window !== 'undefined' && !window.Buffer) window.Buffer = Buffer;
 
 /*──────── styled shells ─────*/
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
-const Wrap   = styled.section`margin-top:1.5rem;`;
+const Wrap   = styled('section').withConfig({ shouldForwardProp: (p) => p !== '$level' })`
+  margin-top:1.5rem;position:relative;z-index:${(p) => p.$level ?? 'auto'};
+`;
 const Picker = styled.div`display:flex;gap:.5rem;`;
 const Box    = styled.div`position:relative;flex:1;`;
 const Spin   = styled(LoadingSpinner).attrs({ size:16 })`
@@ -54,9 +54,9 @@ export default function Burn({
   } = useWalletContext() || {};
 
   const snack = (m, s = 'info') =>
-    setSnackbar({ open: true, message: m, severity: s });
+    setSnackbar({ open:true, message:m, severity:s });
 
-  /*──────── token list (wallet-owned only) ───────────*/
+  /*──────── token list (wallet-owned only) ──────────*/
   const [tokOpts, setTokOpts]       = useState([]);
   const [loadingTok, setLoadingTok] = useState(false);
 
@@ -65,14 +65,14 @@ export default function Burn({
     setLoadingTok(true);
 
     try {
-      const live = await listLiveTokenIds(contractAddress, network);
+      const live = await listLiveTokenIds(contractAddress, network, true);
       if (!live.length) { setTokOpts([]); return; }
 
       const base = network === 'mainnet'
         ? 'https://api.tzkt.io/v1'
         : 'https://api.ghostnet.tzkt.io/v1';
 
-      /* ① fast path (with ?select) */
+      /* fast path ( ?select ) */
       let rows = await jFetch(
         `${base}/tokens/balances`
         + `?account=${walletAddress}`
@@ -81,7 +81,7 @@ export default function Burn({
         + `&select=token.tokenId&limit=10000`,
       ).catch(() => []);
 
-      /* ② legacy path (older TzKT: ?select bug) */
+      /* legacy path */
       if (!rows.length) {
         rows = await jFetch(
           `${base}/tokens/balances`
@@ -96,14 +96,17 @@ export default function Burn({
         .map((r) => {
           if (typeof r === 'number' || typeof r === 'string') return +r;
           const id =
-            r['token.tokenId']       /* ?select style          */
-            ?? r.token?.tokenId      /* full object style      */
-            ?? r.token_id;           /* v1–v2 legacy key       */
+            r['token.tokenId']
+            ?? r.token?.tokenId
+            ?? r.token_id;
           return +id;
         })
         .filter(Number.isFinite);
 
-      const ids = live.filter((n) => ownedIds.includes(n)).sort((a, b) => a - b);
+      const ids = live
+        .filter((t) => ownedIds.includes(typeof t === 'object' ? t.id : t))
+        .sort((a, b) => (typeof a === 'object' ? a.id : a)
+                      - (typeof b === 'object' ? b.id : b));
       setTokOpts(ids);
     } finally { setLoadingTok(false); }
   }, [contractAddress, walletAddress, network]);
@@ -117,9 +120,9 @@ export default function Burn({
   const [owned,   setOwned]   = useState(null);
 
   const [confirmOpen, setConfirm] = useState(false);
-  const [ov, setOv] = useState({ open: false });
+  const [ov, setOv] = useState({ open:false });
 
-  /*──────── metadata + owned qty ─────────────────────*/
+  /*──────── metadata + owned qty ────────────*/
   const loadMeta = useCallback(async (id) => {
     setMeta(null); setOwned(null); setQty('');
     if (!contractAddress || id === '') return;
@@ -163,12 +166,9 @@ export default function Burn({
 
   useEffect(() => { void loadMeta(tokenId); }, [tokenId, loadMeta]);
 
-  /*──────── burn operation ───────────────────────────*/
+  /*──────── burn operation ────────────────*/
   const chooseMethod = (ms = {}) =>
-         ms?.burn        ??  /* v1-v4a */
-         ms?.burn_tokens ??  /* older forks */
-         ms?.retire      ??  /* experimental wrapper */
-         null;
+         ms?.burn        ?? ms?.burn_tokens ?? ms?.retire ?? null;
 
   const toNat = (v) => new BigNumber(v).toFixed();
   const argPerms = (tid, amt) => {
@@ -180,11 +180,11 @@ export default function Burn({
   };
 
   const run = async () => {
-    if (!toolkit)          return snack('Connect wallet', 'error');
-    if (tokenId === '')    return snack('Pick a token', 'error');
+    if (!toolkit)       return snack('Connect wallet', 'error');
+    if (tokenId === '') return snack('Pick a token', 'warning');
 
     const nQty = +qty;
-    if (!nQty) return snack('Enter quantity', 'error');
+    if (!nQty) return snack('Enter quantity', 'warning');
     if (owned != null && nQty > owned)
       return snack(`You own only ${owned}`, 'error');
 
@@ -192,6 +192,8 @@ export default function Burn({
       const c  = await toolkit.wallet.at(contractAddress);
       const fn = chooseMethod(c?.methods);
       if (!fn) return snack('No burn entry-point', 'error');
+
+      setOv({ open:true, status:'Waiting for signature…' });
 
       let tx = null; let lastErr;
       for (const arg of argPerms(tokenId, nQty)) {
@@ -205,6 +207,7 @@ export default function Burn({
 
       setOv({ open:true, status:'Broadcasting…' });
       await tx.confirmation();
+
       snack('Burned ✓', 'success');
       onMutate();
       await fetchTokens();
@@ -216,7 +219,7 @@ export default function Burn({
     }
   };
 
-  /*──────── UI ───────────────────────────────────────*/
+  /*──────── UI ───────────────────────────*/
   return (
     <Wrap $level={$level}>
       <PixelHeading level={3}>Burn&nbsp;Tokens</PixelHeading>
@@ -230,7 +233,7 @@ export default function Burn({
         />
         <Box>
           <select
-            style={{ width:'100%',height:32 }}
+            style={{ width:'100%', height:32 }}
             disabled={loadingTok}
             value={tokenId || ''}
             onChange={(e) => setTokenId(e.target.value)}
@@ -240,7 +243,15 @@ export default function Burn({
                 ? 'Loading…'
                 : tokOpts.length ? 'Select token' : '— none —'}
             </option>
-            {tokOpts.map((id) => <option key={id} value={id}>{id}</option>)}
+            {tokOpts.map((t) => {
+              const id   = typeof t === 'object' ? t.id   : t;
+              const name = typeof t === 'object' ? t.name : '';
+              return (
+                <option key={id} value={id}>
+                  {name ? `${id} — ${name}` : id}
+                </option>
+              );
+            })}
           </select>
           {loadingTok && <Spin />}
         </Box>
@@ -292,8 +303,4 @@ export default function Burn({
     </Wrap>
   );
 }
-/* What changed & why:
-   • fetchTokens(): handles numeric/string rows returned by
-     `?select=token.tokenId` so ownedIds populates correctly.
-   • Dropdown now lists wallet-owned tokens on all contract versions. */
 /* EOF */

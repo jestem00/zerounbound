@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/ClearUri.jsx
-  Rev :    r664   2025-06-22
-  Summary: deleted dead PixelButton import (lint clean).
+  Rev :    r693   2025-06-25
+  Summary: $level-safe Wrap, style parity, minor lint polish
 ──────────────────────────────────────────────────────────────*/
 import React, { useCallback, useEffect, useState } from 'react';
 import { Buffer }            from 'buffer';
@@ -22,76 +22,85 @@ import { TZKT_API }          from '../../config/deployTarget.js';
 import listLiveTokenIds      from '../../utils/listLiveTokenIds.js';
 
 /*──────── styled shells ─────*/
-const styled   = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
-const Wrap     = styled.section`margin-top:1.5rem;`;
-const SelectWrap= styled.div`position:relative;flex:1;`;
-const Spinner  = styled(LoadingSpinner).attrs({ size:16 })`
+const styled  = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
+const Wrap    = styled('section').withConfig({ shouldForwardProp: (p) => p !== '$level' })`
+  margin-top:1.5rem;position:relative;z-index:${(p) => p.$level ?? 'auto'};
+`;
+const SelectWrap = styled.div`position:relative;flex:1;`;
+const Spinner = styled(LoadingSpinner).attrs({ size:16 })`
   position:absolute;top:8px;right:8px;
 `;
 
 /*──────── helpers ─────*/
-if(typeof window!=='undefined' && !window.Buffer) window.Buffer=Buffer;
+if (typeof window !== 'undefined' && !window.Buffer) window.Buffer = Buffer;
 const API     = `${TZKT_API}/v1`;
-const hex2str = (h)=>Buffer.from(h.replace(/^0x/,''),'hex').toString('utf8');
+const hex2str = (h) => Buffer.from(h.replace(/^0x/, ''), 'hex').toString('utf8');
 
 /*════════ component ════════════════════════════════════════*/
 export default function ClearUri({
-  contractAddress='',
-  setSnackbar     =()=>{},
-  onMutate        =()=>{},
+  contractAddress = '',
+  setSnackbar     = () => {},
+  onMutate        = () => {},
   $level,
 }) {
   const { toolkit } = useWalletContext() || {};
-  const snack = (m,s='info')=>setSnackbar({ open:true,message:m,severity:s });
+  const snack = (m, s='info') => setSnackbar({ open:true, message:m, severity:s });
 
   /* token list */
-  const [tokOpts,setTokOpts]   = useState([]);
-  const [loadingTok,setLoadingTok]=useState(false);
+  const [tokOpts, setTokOpts]       = useState([]);
+  const [loadingTok, setLoadingTok] = useState(false);
 
-  const fetchTokens = useCallback(async ()=>{
-    if(!contractAddress) return;
+  const fetchTokens = useCallback(async () => {
+    if (!contractAddress) return;
     setLoadingTok(true);
-    setTokOpts(await listLiveTokenIds(contractAddress));
+    setTokOpts(await listLiveTokenIds(contractAddress, undefined, true));
     setLoadingTok(false);
-  },[contractAddress]);
+  }, [contractAddress]);
 
-  useEffect(()=>{ void fetchTokens(); },[fetchTokens]);
+  useEffect(() => { void fetchTokens(); }, [fetchTokens]);
 
   /* local state */
-  const [tokenId,setTokenId]   = useState('');
-  const [meta,setMeta]         = useState(null);
-  const [keys,setKeys]         = useState([]);
-  const [confirmKey,setConfirmKey]=useState('');
-  const [ov,setOv]             = useState({ open:false });
+  const [tokenId,   setTokenId]   = useState('');
+  const [meta,      setMeta]      = useState(null);
+  const [keys,      setKeys]      = useState([]);
+  const [confirmKey,setConfirmKey]= useState('');
+  const [ov,        setOv]        = useState({ open:false });
 
   /* meta loader */
-  const loadMeta = useCallback(async id=>{
+  const loadMeta = useCallback(async (id) => {
     setMeta(null); setKeys([]); setConfirmKey('');
-    if(!contractAddress||id==='') return;
+    if (!contractAddress || id === '') return;
 
-    let rows = await jFetch(`${API}/tokens?contract=${contractAddress}&tokenId=${id}&limit=1`).catch(()=>[]);
-    if(!rows.length){
-      const one = await jFetch(`${API}/contracts/${contractAddress}/bigmaps/token_metadata/keys/${id}`).catch(()=>null);
-      if(one?.value) rows=[{ metadata:JSON.parse(hex2str(one.value)) }];
+    let rows = await jFetch(
+      `${API}/tokens?contract=${contractAddress}&tokenId=${id}&limit=1`,
+    ).catch(() => []);
+
+    if (!rows.length) {
+      const one = await jFetch(
+        `${API}/contracts/${contractAddress}/bigmaps/token_metadata/keys/${id}`,
+      ).catch(() => null);
+      if (one?.value) rows = [{ metadata: JSON.parse(hex2str(one.value)) }];
     }
-    const m=rows[0]?.metadata||{};
+    const m = rows[0]?.metadata || {};
     setMeta(m); setKeys(listUriKeys(m));
-  },[contractAddress]);
+  }, [contractAddress]);
 
-  useEffect(()=>{ loadMeta(tokenId); },[tokenId,loadMeta]);
+  useEffect(() => { void loadMeta(tokenId); }, [tokenId, loadMeta]);
 
   /* clear op */
-  const clearUri = async (k)=>{
-    if(!toolkit) return snack('Connect wallet','error');
-    try{
-      setOv({ open:true,status:'Waiting for signature…' });
-      const c=await toolkit.wallet.at(contractAddress);
-      const op=await c.methods.clear_uri(+tokenId,k).send();
-      setOv({ open:true,status:'Broadcasting…' });
+  const clearUri = async (k) => {
+    if (!toolkit) return snack('Connect wallet', 'error');
+    try {
+      setOv({ open:true, status:'Waiting for signature…' });
+      const c = await toolkit.wallet.at(contractAddress);
+      const op = await c.methods.clear_uri(+tokenId, k).send();
+      setOv({ open:true, status:'Broadcasting…' });
       await op.confirmation();
-      snack('Cleared ✓','success');
+      snack('Cleared ✓', 'success');
       onMutate(); loadMeta(tokenId); setOv({ open:false });
-    }catch(e){ setOv({ open:false }); snack(e.message,'error'); }
+    } catch (e) {
+      setOv({ open:false }); snack(e.message, 'error');
+    }
   };
 
   /*──────── JSX ───*/
@@ -99,25 +108,34 @@ export default function ClearUri({
     <Wrap $level={$level}>
       <PixelHeading level={3}>Clear&nbsp;URI</PixelHeading>
 
-      <div style={{ display:'flex',gap:'.5rem' }}>
+      <div style={{ display:'flex', gap:'.5rem' }}>
         <PixelInput
           placeholder="Token-ID"
           style={{ flex:1 }}
           value={tokenId}
-          onChange={e=>setTokenId(e.target.value.replace(/\D/g,''))}
+          onChange={(e) => setTokenId(e.target.value.replace(/\D/g, ''))}
         />
         <SelectWrap>
           <select
-            style={{ width:'100%',height:32 }}
+            style={{ width:'100%', height:32 }}
             disabled={loadingTok}
-            value={tokenId||''}
-            onChange={e=>setTokenId(e.target.value)}
+            value={tokenId || ''}
+            onChange={(e) => setTokenId(e.target.value)}
           >
             <option value="">
-              {loadingTok ? 'Loading…'
-                          : tokOpts.length ? 'Select token':'— none —'}
+              {loadingTok
+                ? 'Loading…'
+                : tokOpts.length ? 'Select token' : '— none —'}
             </option>
-            {tokOpts.map(id=><option key={id} value={id}>{id}</option>)}
+            {tokOpts.map((t) => {
+              const id   = typeof t === 'object' ? t.id   : t;
+              const name = typeof t === 'object' ? t.name : '';
+              return (
+                <option key={id} value={id}>
+                  {name ? `${id} — ${name}` : id}
+                </option>
+              );
+            })}
           </select>
           {loadingTok && <Spinner />}
         </SelectWrap>
@@ -129,13 +147,17 @@ export default function ClearUri({
           meta={meta}
           tokenId={tokenId}
           contractAddress={contractAddress}
-          onRemove={(k)=>setConfirmKey(k)}
+          onRemove={(k) => setConfirmKey(k)}
         />
       </div>
 
       {tokenId && (
-        <p style={{ fontSize:'.7rem',textAlign:'center',marginTop:'.4rem' }}>
-          <a href={`/contracts/${contractAddress}`} target="_blank" rel="noopener noreferrer">
+        <p style={{ fontSize:'.7rem', textAlign:'center', marginTop:'.4rem' }}>
+          <a
+            href={`/contracts/${contractAddress}`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
             open&nbsp;in&nbsp;/contracts/{contractAddress}
           </a>
         </p>
@@ -144,15 +166,15 @@ export default function ClearUri({
       <PixelConfirmDialog
         open={!!confirmKey}
         message={`Remove “${confirmKey}” from token ${tokenId}?`}
-        onOk   ={()=>{ const k=confirmKey; setConfirmKey(''); clearUri(k); }}
-        onCancel={()=> setConfirmKey('')}
+        onOk={() => { const k = confirmKey; setConfirmKey(''); clearUri(k); }}
+        onCancel={() => setConfirmKey('')}
       />
 
       {ov.open && (
         <OperationOverlay
           {...ov}
-          onRetry   ={()=>{ if(confirmKey) clearUri(confirmKey); }}
-          onCancel  ={()=> setOv({ open:false })}
+          onRetry={() => { if (confirmKey) clearUri(confirmKey); }}
+          onCancel={() => setOv({ open:false })}
         />
       )}
     </Wrap>

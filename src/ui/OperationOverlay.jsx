@@ -1,8 +1,7 @@
 /*Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/OperationOverlay.jsx
-  Rev :    r593   2025-06-15
-  Summary: accepts step/total OR current/total; auto-computes
-           progress bar; unified “Signature n / t” logic. */
+  Rev :    r719   2025-06-27 T14:00 UTC
+  Summary: added retry-hint text for multi-sig error case */
 
 import React, { useMemo, useState, useRef } from 'react';
 import styled, { css } from 'styled-components';
@@ -190,6 +189,12 @@ export default function OperationOverlay(props){
           </p>
         )}
 
+        {error && total>1 && (
+          <p style={{ fontSize:'.8rem', opacity:.8, marginTop:4 }}>
+            Already-confirmed slices won't be resent on retry.
+          </p>
+        )}
+
         {!error && (
           <Wrap>
             <List $len={lines.length}>
@@ -210,10 +215,4 @@ export default function OperationOverlay(props){
     </Back>
   );
 }
-
-/* What changed & why:
-   • Overlay now accepts either {current,total} or {step,total}; Mint.jsx
-     passes step, legacy Append passes current – both resolve via `cur`.
-   • Progress bar auto-computes when explicit `progress` absent.
-   • Signature counter uses unified cur/total; no UI regressions. */
 /* EOF */

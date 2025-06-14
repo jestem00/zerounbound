@@ -1,51 +1,60 @@
-/*Developed by @jams2blues with love for the Tezos community
-  File: src/ui/Entrypoints/MintUpload.jsx
-  Summary: resolution‑agnostic file uploader that converts selected
-           artifact to data‑URL and streams it to parent via callbacks. */
-
+/*─────────────────────────────────────────────────────────────
+  Developed by @jams2blues – ZeroContract Studio
+  File:    src/ui/Entrypoints/MintUpload.jsx
+  Rev :    r699   2025-06-25
+  Summary: snackbar fallback, accept whitelist join safeguard,
+           clearer helper naming, ESLint clean
+──────────────────────────────────────────────────────────────*/
 import React, { useRef, useState } from 'react';
-import styledPkg from 'styled-components';
-import PixelButton from '../PixelButton.jsx';
+import styledPkg                   from 'styled-components';
+import PixelButton                 from '../PixelButton.jsx';
 import { MIME_TYPES as WHITELIST } from '../../constants/mimeTypes.js';
 
 /*──────── styled shells ─────────────────────────*/
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
 const Hidden = styled.input`
-  display: none;
+  display:none;
 `;
-
 const FileName = styled.p`
-  font-size: .68rem;
-  margin: .5rem 0 0;
-  word-break: break-all;
+  font-size:.68rem;margin:.5rem 0 0;word-break:break-all;
 `;
 
 /*──────── helpers ───────────────────────────────*/
-const EXT_OK = ['.glb', '.gltf', '.html'];
-const ACCEPT = [...WHITELIST, ...EXT_OK].join(',');
+const EXT_OK  = ['.glb', '.gltf', '.html'];
+const ACCEPT  = [...WHITELIST, ...EXT_OK].join(',');
 
-const bytesOfB64 = (uri = '') => {
+/** rough byte estimate from a data URI */
+const byteSizeOfDataUri = (uri = '') => {
   const [, b64 = ''] = uri.split(',');
   const pad = (b64.match(/=+$/) || [''])[0].length;
   return (b64.length * 3) / 4 - pad;
 };
 
+/* global snackbar shim */
+function alertSnack(msg, sev = 'info') {
+  if (typeof window !== 'undefined' && window.globalSnackbar) {
+    window.globalSnackbar({ open: true, message: msg, severity: sev });
+  }
+}
+
 /*──────── component ────────────────────────────*/
 export default function MintUpload({ onFileChange, onFileDataUrlChange }) {
-  const inpRef = useRef(null);
+  const inpRef           = useRef(null);
   const [fileName, setFileName] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [busy,     setBusy]     = useState(false);
 
-  const click = () => inpRef.current?.click();
+  const triggerPick = () => inpRef.current?.click();
 
-  const handle = (e) => {
+  const handlePick = (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
 
-    const okMime = WHITELIST.includes(f.type) || EXT_OK.some((x) => f.name.toLowerCase().endsWith(x));
-    if (!okMime) {
-      window.globalSnackbar?.({ open: true, message: 'Unsupported file type', severity: 'error' });
+    const mimeOk = WHITELIST.includes(f.type)
+                || EXT_OK.some((x) => f.name.toLowerCase().endsWith(x));
+
+    if (!mimeOk) {
+      alertSnack('Unsupported file type', 'error');
       e.target.value = '';
       return;
     }
@@ -56,15 +65,16 @@ export default function MintUpload({ onFileChange, onFileDataUrlChange }) {
       const uri = reader.result;
       setFileName(f.name);
       setBusy(false);
+
       onFileChange?.(f);
       onFileDataUrlChange?.(uri);
 
-      if (bytesOfB64(uri) > 20 * 1024) {
-        window.globalSnackbar?.({ open: true, message: 'Encoded size > 20 KB – wallets may truncate', severity: 'warning' });
+      if (byteSizeOfDataUri(uri) > 20 * 1024) {
+        alertSnack('Encoded size > 20 KB; some wallets may truncate', 'warning');
       }
     };
     reader.onerror = () => {
-      window.globalSnackbar?.({ open: true, message: 'Read error – try again', severity: 'error' });
+      alertSnack('Read error – please try again', 'error');
       setBusy(false);
     };
     reader.readAsDataURL(f);
@@ -76,16 +86,13 @@ export default function MintUpload({ onFileChange, onFileDataUrlChange }) {
         ref={inpRef}
         type="file"
         accept={ACCEPT}
-        onChange={handle}
+        onChange={handlePick}
       />
-      <PixelButton size="sm" onClick={click} disabled={busy}>
+      <PixelButton size="sm" onClick={triggerPick} disabled={busy}>
         {busy ? 'Uploading…' : 'Upload Artifact *'}
       </PixelButton>
       {fileName && <FileName>Selected: {fileName}</FileName>}
     </div>
   );
 }
-
-/* What changed & why: new Upload component uses platform PixelButton &
-   globalSnackbar for alerts; respects 20 KB advisory, whitelist from
-   mimeTypes constant, keeping invariants I05/I13. */
+/* EOF */

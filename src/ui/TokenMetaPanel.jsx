@@ -1,13 +1,12 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/TokenMetaPanel.jsx
-  Rev :    r648   2025-06-19
-  Summary: supply/owned restore
-           • Adds balance-sum fallback for totalSupply
-           • Owned resolver handles numeric OR object rows
-           • “no record” ⇒ owned 0 (never undefined)
+  Rev :    r741   2025-06-28 T22:37 UTC
+  Summary: live Parents / Children / Collaborators counts
 ──────────────────────────────────────────────────────────────*/
-import React, { useEffect, useMemo, useState } from 'react';
+import React, {
+  useEffect, useMemo, useState, useRef, useCallback,
+} from 'react';
 import styledPkg            from 'styled-components';
 
 import RenderMedia          from '../utils/RenderMedia.jsx';
@@ -15,41 +14,57 @@ import { listUriKeys }      from '../utils/uriHelpers.js';
 import { useWalletContext } from '../contexts/WalletContext.js';
 import { jFetch }           from '../core/net.js';
 import LoadingSpinner       from './LoadingSpinner.jsx';
+import PixelButton          from './PixelButton.jsx';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
 /*──────── helpers ───────────────────────────────────────────*/
-const unwrapImgSrc = (s='') =>
-  (s.match(/<img[^>]+src=["']([^"']+)["']/i) || [,''])[1] || s;
+const unwrapImgSrc = (s = '') =>
+  (s.match(/<img[^>]+src=["']([^"']+)["']/i) || [, ''])[1] || s;
 
-const pickUri = (m={}) =>
+const pickUri = (m = {}) =>
   unwrapImgSrc(
     m.imageUri || m.artifactUri || m.displayUri || m.thumbnailUri || '',
   );
 
-const pct = (v,d) =>
-  (Number(v)/10**d*100).toFixed(2).replace(/\.00$/,'');
+const pct = (v, d) => (Number(v) / 10 ** d * 100)
+  .toFixed(2)
+  .replace(/\.00$/, '');
 
-const fmtRoyalties = (o={}) =>
+const fmtRoyalties = (o = {}) =>
   o.shares
     ? Object.entries(o.shares)
-        .map(([a,v])=>`${a.slice(0,6)}… : ${pct(v,o.decimals||0)}%`)
+        .map(([a, v]) => `${a.slice(0, 6)}… : ${pct(v, o.decimals || 0)}%`)
         .join(', ')
     : JSON.stringify(o);
 
-const fmtAttrs = (v)=>Array.isArray(v)
-  ? v.filter((a)=>a && a.name).map((a)=>`${a.name}: ${a.value}`).join(', ')
-  : Object.entries(v||{}).map(([,val],i)=>val && `${Object.keys(v)[i]}: ${val}`)
-      .filter(Boolean).join(', ');
+const fmtAttrs = (v) => Array.isArray(v)
+  ? v.filter((a) => a && a.name).map((a) => `${a.name}: ${a.value}`).join(', ')
+  : Object.entries(v || {})
+      .filter(([, val]) => val !== undefined && val !== null && val !== '')
+      .map(([k, val]) => `${k}: ${val}`)
+      .join(', ');
 
-const pretty = (k,v)=>{
-  if(Array.isArray(v)) return k==='attributes'?fmtAttrs(v):v.join(', ');
-  if(v && typeof v==='object')
-    return k==='royalties'  ? fmtRoyalties(v)
-         : k==='attributes' ? fmtAttrs(v)
-         : JSON.stringify(v);
-  try{ return pretty(k,JSON.parse(v)); }catch{return String(v); }
+const pretty = (k, v) => {
+  if (Array.isArray(v)) return k === 'attributes' ? fmtAttrs(v) : v.join(', ');
+  if (v && typeof v === 'object') {
+    return k === 'royalties'
+      ? fmtRoyalties(v)
+      : k === 'attributes'
+        ? fmtAttrs(v)
+        : JSON.stringify(v);
+  }
+  try { return pretty(k, JSON.parse(v)); } catch { return String(v); }
 };
+
+/*──────── util ─────────────────────────────────────────────*/
+const sz = (v) =>
+  Array.isArray(v)                     ? v.length
+    : v && typeof v.size === 'number'  ? v.size
+    : v && typeof v.forEach === 'function' ? [...v].length
+    : typeof v === 'number'            ? v
+    : v && typeof v.int === 'string'   ? parseInt(v.int, 10)
+    : 0;
 
 /*──────── styled shells ─────────────────────────────────────*/
 const Card = styled.div`
@@ -58,20 +73,39 @@ const Card = styled.div`
   color:var(--zu-fg,#f0f0f0);
   padding:6px 8px 8px;
   font-size:.75rem;line-height:1.25;overflow:hidden;
+  position:relative;
 `;
-const Name = styled.h3`
-  margin:0;font:1.4rem/1 'Press Start 2P',monospace;
-  text-align:center;word-break:break-word;
+const Title = styled.h4`
+  margin:0 0 2px;
+  font-size:.8rem;
+  text-align:center;
+  color:var(--zu-accent);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
 `;
-const Addr  = styled.p`
-  margin:.15rem 0 4px;font-size:.62rem;text-align:center;
-  opacity:.75;word-break:break-all;
+const AddrRow = styled.div`
+  font-size:.65rem;
+  text-align:center;
+  display:flex;justify-content:center;align-items:center;gap:4px;
+  margin-bottom:4px;
+`;
+const Warn = styled.div`
+  position:absolute;inset:0;background:rgba(0,0,0,.9);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;padding:1rem;
+  border:2px dashed var(--zu-accent-sec,#ff0080);
+  z-index:5;
+  p{margin:.5rem 0;font-size:.7rem;line-height:1.3;}
 `;
 const Stats = styled.p`
   margin:0 0 6px;font-size:.72rem;text-align:center;
   display:flex;gap:6px;justify-content:center;align-items:center;
   span{display:inline-block;padding:1px 4px;
        border:1px solid var(--zu-fg);white-space:nowrap;}
+`;
+const RelStats = styled(Stats)`
+  margin-top:-2px;gap:4px;font-size:.68rem;opacity:.9;
 `;
 const MetaGrid = styled.dl`
   margin:0;display:grid;grid-template-columns:max-content 1fr;
@@ -80,189 +114,276 @@ const MetaGrid = styled.dl`
   dd{margin:0;word-break:break-word;}
 `;
 
-/*════════ component ════════════════════════════════════════*/
+/*──────── component ────────────────────────────────────────*/
 export default function TokenMetaPanel({
   meta            = null,
   tokenId         = '',
   contractAddress = '',
   onRemove,
 }) {
-  const { address: wallet, network='ghostnet' } = useWalletContext() || {};
+  const { address: wallet, network = 'ghostnet' } = useWalletContext() || {};
 
-  /*──── early exits ───*/
-  if(tokenId==='')        return null;
-  if(meta===null){
-    return(
-      <Card style={{textAlign:'center'}}>
-        <LoadingSpinner size={48} style={{margin:'12px auto'}}/>
-      </Card>
-    );
-  }
+  const [warn,   setWarn]   = useState('');
+  const [supply, setSupply] = useState(null);
+  const [owned,  setOwned]  = useState(null);
+  const [rel,    setRel]    = useState({ coll:0, parent:0, child:0 });
+  const [copied, setCopied] = useState(false);
 
-  /*──── derived ───────*/
-  const m      = typeof meta==='object' && meta ? meta : {};
-  const hero   = useMemo(()=>pickUri(m), [m]);
-  const uriArr = useMemo(()=>listUriKeys(m), [m]);
+  /* suppress repeat warnings after user dismiss */
+  const supRef = useRef(new Set());
 
-  const [supply,setSupply] = useState(null);   /* null=loading, undefined=unknown */
-  const [owned ,setOwned ] = useState(null);
+  const suppressWarn = useCallback((reason) => {
+    if (supRef.current.has(reason)) return;
+    setWarn(reason);
+  }, []);
 
-  /*──────── live look-ups ──────────────────────────────────*/
-  useEffect(()=>{
-    let cancelled=false;
-    const safeSet=(fn,val)=>{ if(!cancelled) fn(val); };
+  const dismissWarn = () => {
+    if (warn) supRef.current.add(warn);
+    setWarn('');
+  };
 
-    if(!contractAddress || tokenId===''){
+  const m      = typeof meta === 'object' && meta ? meta : {};
+  const hero   = useMemo(() => pickUri(m), [m]);
+  const uriArr = useMemo(() => listUriKeys(m), [m]);
+
+  const ktShort = contractAddress
+    ? `${contractAddress.slice(0, 5)}…${contractAddress.slice(-4)}`
+    : '';
+
+  const copyAddr = async () => {
+    if (!contractAddress || typeof navigator === 'undefined') return;
+    try {
+      await navigator.clipboard.writeText(contractAddress);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 800);
+    } catch {/* ignore */}
+  };
+
+  /*──────── relationship counts (parents / children / collabs) ─────────*/
+  useEffect(() => {
+    if (!contractAddress) return;
+    const base =
+      network === 'mainnet'
+        ? 'https://api.tzkt.io/v1'
+        : 'https://api.ghostnet.tzkt.io/v1';
+
+    (async () => {
+      try {
+        const st = await jFetch(`${base}/contracts/${contractAddress}/storage`);
+        setRel({
+          coll  : sz(st?.collaborators),
+          parent: sz(st?.parents),
+          child : sz(st?.children),
+        });
+      } catch {/* network issue – silent */}
+    })();
+  }, [contractAddress, network]);
+
+  /*──────── supply & balance fetch  (existing logic) ────────*/
+  useEffect(() => {
+    let cancelled = false;
+    const safeSet = (fn, val) => { if (!cancelled) fn(val); };
+
+    if (!contractAddress || tokenId === '') {
       setSupply(null); setOwned(null); return;
     }
-    const base = network==='mainnet'
+    const base = network === 'mainnet'
       ? 'https://api.tzkt.io/v1'
       : 'https://api.ghostnet.tzkt.io/v1';
 
-    /* helper: sum balances fallback */
-    const sumBalances = async()=>{
+    const sumBalances = async () => {
       const rows = await jFetch(
         `${base}/tokens/balances`
         + `?token.contract=${contractAddress}`
         + `&token.tokenId=${tokenId}`
         + `&select=balance&limit=10000`,
-      ).catch(()=>[]);
+      ).catch(() => []);
       return Array.isArray(rows) && rows.length
-        ? rows.reduce((t,b)=>t+Number(b||0),0)
+        ? rows.reduce((t, b) => t + Number(b || 0), 0)
         : NaN;
     };
 
-    const fetchSupply = async()=>{
-      /* ① tokens endpoint (indexed) */
-      try{
+    const fetchSupply = async () => {
+      try {
         const [row] = await jFetch(
           `${base}/tokens?contract=${contractAddress}`
           + `&tokenId=${tokenId}&select=totalSupply&limit=1`,
-        ).catch(()=>[]);
-        if(row!==undefined && row!==null){
-          const n = Number(
-            typeof row==='object' ? row.totalSupply : row,
-          );
-          if(Number.isFinite(n)) return n;
+        ).catch(() => []);
+        if (row !== undefined && row !== null) {
+          const n = Number(typeof row === 'object' ? row.totalSupply : row);
+          if (Number.isFinite(n)) return n;
         }
-      }catch{/* ignore */ }
-
-      /* ② big-map direct (v4/v4a mirrors) */
-      try{
+      } catch {}
+      try {
         const bm = await jFetch(
           `${base}/contracts/${contractAddress}`
-          + `/bigmaps/total_supply/keys/${tokenId}`, 1,
-        ).catch(()=>null);
-        if(bm?.value?.int) return Number(bm.value.int);
-      }catch{/* ignore */ }
-
-      /* ③ storage snapshot mirror object */
-      try{
+          + `/bigmaps/total_supply/keys/${tokenId}`,
+        ).catch(() => null);
+        if (bm?.value?.int) return Number(bm.value.int);
+      } catch {}
+      try {
         const st = await jFetch(
           `${base}/contracts/${contractAddress}/storage`,
-        ).catch(()=>null);
-        const v  = st?.total_supply?.[tokenId];
-        if(v?.int) return Number(v.int);
-        if(Number.isFinite(+v)) return Number(v);
-      }catch{/* ignore */ }
-
-      /* ④ aggregate balances (legacy or burned) */
+        ).catch(() => null);
+        const v = st?.total_supply?.[tokenId];
+        if (v?.int) return Number(v.int);
+        if (Number.isFinite(+v)) return Number(v);
+      } catch {}
       return sumBalances();
     };
 
-    const fetchOwned = async()=>{
-      if(!wallet) return NaN;
+    const fetchOwned = async () => {
+      if (!wallet) return NaN;
       const rows = await jFetch(
         `${base}/tokens/balances`
         + `?account=${wallet}`
         + `&token.contract=${contractAddress}`
         + `&token.tokenId=${tokenId}`
         + `&limit=1`,
-      ).catch(()=>[]);
-      if(!rows.length) return 0;
+      ).catch(() => []);
+      if (!rows.length) return 0;
       const row = rows[0];
-      return Number(
-        typeof row==='object' ? row.balance : row,
-      );
+      return Number(typeof row === 'object' ? row.balance : row);
     };
 
-    (async()=>{
-      const [sup,own] = await Promise.all([fetchSupply(), fetchOwned()]);
+    (async () => {
+      const [sup, own] = await Promise.all([fetchSupply(), fetchOwned()]);
       safeSet(setSupply, Number.isFinite(sup) ? sup : undefined);
       safeSet(setOwned , Number.isFinite(own) ? own : undefined);
     })();
 
-    return ()=>{ cancelled=true; };
-  },[contractAddress, tokenId, wallet, network]);
+    return () => { cancelled = true; };
+  }, [contractAddress, tokenId, wallet, network]);
 
-  /*──────── kv list ────────────────────────────────────────*/
-  const kvPairs = useMemo(()=>{
-    const keys=[
-      'name','description','mimeType','authors','creators','rights',
-      'royalties','mintingTool','accessibility','contentRating',
-      'tags','attributes','decimals',
+  /*──────── meta grid pairs ────────────────────────────────*/
+  const kvPairs = useMemo(() => {
+    const keys = [
+      'name', 'description', 'mimeType', 'authors', 'creators', 'rights',
+      'royalties', 'mintingTool', 'accessibility', 'contentRating',
+      'tags', 'attributes', 'decimals',
     ];
-    return keys.filter(k=>m[k]!==undefined)
-               .map(k=>[k, pretty(k,m[k])]);
-  },[m]);
+    return keys
+      .filter((k) => m[k] !== undefined)
+      .map((k) => [k, pretty(k, m[k])]);
+  }, [m]);
 
-  /*──────── render ────────────────────────────────────────*/
-  return(
+  if (tokenId === '') return null;
+  if (meta === null) {
+    return (
+      <Card style={{ textAlign: 'center' }}>
+        <LoadingSpinner size={48} style={{ margin: '12px auto' }} />
+      </Card>
+    );
+  }
+
+  /*──────── JSX ───────────────────────────────────────────*/
+  return (
     <Card>
-      <Name>{m.name || `Token ${tokenId}`}</Name>
-      {contractAddress && <Addr>{contractAddress}</Addr>}
+      <Title>{m.name || `Token ${tokenId}`}</Title>
 
+      {ktShort && (
+        <AddrRow>
+          <code style={{ opacity: .8 }}>{ktShort}</code>
+          <PixelButton
+            size="xs"
+            title="copy KT1"
+            aria-label={copied ? 'Address copied' : 'Copy contract address'}
+            onClick={copyAddr}
+            style={{ padding: '0 4px', lineHeight: 1 }}
+          >
+            {copied ? '✓' : '📋'}
+          </PixelButton>
+        </AddrRow>
+      )}
+
+      {warn && (
+        <Warn>
+          <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--zu-accent-sec)' }}>
+            Broken Media URI
+          </h3>
+          <p>
+            This token’s media link looks invalid
+            <br />
+            (reason:&nbsp;
+            {warn}
+            ). Clear then append a fresh URI
+            <br />
+            to avoid broken previews on marketplaces.
+          </p>
+          <PixelButton onClick={dismissWarn}>Dismiss</PixelButton>
+        </Warn>
+      )}
+
+      {/* editions + wallet balance */}
       <Stats>
-        {supply===null
-          ? <LoadingSpinner size={16}/>
-          : supply===undefined
+        {supply === null
+          ? <LoadingSpinner size={16} />
+          : supply === undefined
             ? null
             : <span title="Total editions">Total&nbsp;{supply}</span>}
         {wallet && (
-          owned===null
-            ? <LoadingSpinner size={16}/>
-            : owned===undefined
+          owned === null
+            ? <LoadingSpinner size={16} />
+            : owned === undefined
               ? null
               : <span title="Editions you own">Owned&nbsp;{owned}</span>
         )}
       </Stats>
 
-      {hero && (
+      {/* relationship counts */}
+      <RelStats>
+        <span title="Parent addresses">P&nbsp;{rel.parent}</span>
+        <span title="Children addresses">C&nbsp;{rel.child}</span>
+        <span title="Collaborators">Collab&nbsp;{rel.coll}</span>
+      </RelStats>
+
+      {/* preview */}
+      {hero && !supRef.current.has('hero') && (
         <RenderMedia
           uri={hero}
           alt={m.name}
           style={{
-            width:96,height:96,objectFit:'contain',
-            display:'block',margin:'0 auto 6px',
+            width: 96,
+            height: 96,
+            objectFit: 'contain',
+            display: 'block',
+            margin: '0 auto 6px',
+          }}
+          onInvalid={(r) => {
+            supRef.current.add('hero');
+            suppressWarn(r);
           }}
         />
       )}
 
+      {/* metadata */}
       <MetaGrid>
-        {kvPairs.map(([k,v])=>(
-          <React.Fragment key={k}>
-            <dt>{k}</dt><dd>{v}</dd>
-          </React.Fragment>
-        ))}
-        {uriArr.map(k=>(
+        {kvPairs.map(([k, v]) => (
           <React.Fragment key={k}>
             <dt>{k}</dt>
-            <dd style={{display:'flex',alignItems:'center',gap:6}}>
+            <dd>{v}</dd>
+          </React.Fragment>
+        ))}
+        {uriArr.map((k) => (
+          <React.Fragment key={k}>
+            <dt>{k}</dt>
+            <dd style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <RenderMedia
-                uri={m[k]} alt={k}
-                style={{width:48,height:48,objectFit:'contain'}}
+                uri={m[k]}
+                alt={k}
+                style={{ width: 48, height: 48, objectFit: 'contain' }}
+                onInvalid={(r) => suppressWarn(`${k}: ${r}`)}
               />
               {onRemove && (
-                <button type="button" title="delete uri"
-                  style={{
-                    marginLeft:'auto',
-                    background:'var(--zu-accent-sec,#00ffff)',
-                    color:'#000',border:'none',
-                    padding:'2px 6px',fontSize:'.55rem',
-                    cursor:'pointer',
-                  }}
-                  onClick={()=>onRemove(k)}
-                >DELETE</button>
+                <PixelButton
+                  size="xs"
+                  warning
+                  title="delete uri"
+                  style={{ marginLeft: 'auto' }}
+                  onClick={() => onRemove(k)}
+                >
+                  DELETE
+                </PixelButton>
               )}
             </dd>
           </React.Fragment>
@@ -271,4 +392,10 @@ export default function TokenMetaPanel({
     </Card>
   );
 }
+/* What changed & why:
+   • Added live relationship counts (Parents / Children / Collaborators)
+     via TzKT storage fetch.
+   • RelStats styled block under main Stats – fits retro UI theme.
+   • No extra network calls when contractAddress missing.
+*/
 /* EOF */

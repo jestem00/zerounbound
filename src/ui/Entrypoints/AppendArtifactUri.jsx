@@ -1,10 +1,8 @@
-/*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+/*Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/AppendArtifactUri.jsx
-  Rev :    r662   2025-06-22
-  Summary: spinner swap completed (no stray <img>) +
-           dialog `open` prop API already compliant
-──────────────────────────────────────────────────────────────*/
+  Rev :    r720   2025-06-28 T04:33 UTC
+  Summary: solid retry flow + chunked estimator */
+
 import React, { useCallback, useEffect, useState } from 'react';
 import { Buffer }          from 'buffer';
 import styledPkg           from 'styled-components';
@@ -24,8 +22,8 @@ import LoadingSpinner      from '../LoadingSpinner.jsx';
 
 import { splitPacked, sliceHex, PACKED_SAFE_BYTES } from '../../core/batch.js';
 import {
-  strHash, loadSliceCache, saveSliceCache,
-  clearSliceCache, purgeExpiredSliceCache,
+  loadSliceCheckpoint, saveSliceCheckpoint,
+  clearSliceCheckpoint, purgeExpiredSliceCache,
 } from '../../utils/sliceCache.js';
 import { jFetch }           from '../../core/net.js';
 import { mimeFromFilename } from '../../constants/mimeTypes.js';
@@ -45,6 +43,24 @@ const Spinner     = styled(LoadingSpinner).attrs({ size:16 })`
 const API     = `${TZKT_API}/v1`;
 const hex2str = (h) => Buffer.from(h.replace(/^0x/, ''), 'hex').toString('utf8');
 
+async function sha256Hex (txt = '') {
+  const buf  = new TextEncoder().encode(txt);
+  const hash = await crypto.subtle.digest('SHA-256', buf);
+  return Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/* RPC sim caps at 10 tx – chunk estimator */
+async function estimateChunked (toolkit, ops, chunk = 8) {
+  let fee = 0; let burn = 0;
+  for (let i = 0; i < ops.length; i += chunk) {
+    const est = await toolkit.estimate.batch(ops.slice(i, i + chunk));
+    fee  += est.reduce((t, e) => t + e.suggestedFeeMutez, 0);
+    burn += est.reduce((t, e) => t + e.burnFeeMutez, 0);
+  }
+  return { fee, burn };
+}
+
 /*════════ component ════════════════════════════════════════*/
 export default function AppendArtifactUri({
   contractAddress,
@@ -62,7 +78,7 @@ export default function AppendArtifactUri({
   const fetchTokens = useCallback(async () => {
     if (!contractAddress) return;
     setLoadingTok(true);
-    setTokOpts(await listLiveTokenIds(contractAddress));
+    setTokOpts(await listLiveTokenIds(contractAddress, undefined, true));
     setLoadingTok(false);
   }, [contractAddress]);
 
@@ -88,16 +104,12 @@ export default function AppendArtifactUri({
 
     let rows = [];
     try {
-      rows = await jFetch(
-        `${API}/tokens?contract=${contractAddress}&tokenId=${id}&limit=1`,
-      );
+      rows = await jFetch(`${API}/tokens?contract=${contractAddress}&tokenId=${id}&limit=1`);
     } catch {}
 
     if (!rows.length) {
       try {
-        const bm = await jFetch(
-          `${API}/contracts/${contractAddress}/bigmaps/token_metadata/keys/${id}`,
-        );
+        const bm = await jFetch(`${API}/contracts/${contractAddress}/bigmaps/token_metadata/keys/${id}`);
         if (bm?.value) rows = [{ metadata: JSON.parse(hex2str(bm.value)) }];
       } catch {}
     }
@@ -122,18 +134,18 @@ export default function AppendArtifactUri({
     setResumeInfo(null); setMeta(null); setHasArtUri(false);
     setBatches(null); setConfirmOpen(false); setEstimate(null);
     setIsEstim(false); setSlicesTotal(1); setDelOpen(false);
-    clearSliceCache(contractAddress, tokenId, 'artifact');
+    clearSliceCheckpoint(contractAddress, tokenId, 'artifactUri');
   };
 
-  /* purge old caches on mount */
-  useEffect(() => { purgeExpiredSliceCache(1); }, []);
+  useEffect(() => { purgeExpiredSliceCache(); }, []);
 
   useEffect(() => {
     if (!tokenId) return;
-    const c = loadSliceCache(contractAddress, tokenId, 'artifact');
+    const c = loadSliceCheckpoint(contractAddress, tokenId, 'artifactUri');
     if (c) setResumeInfo(c);
   }, [contractAddress, tokenId]);
 
+  /* estimate helper */
   const buildFlatParams = useCallback(async (hexSlices, startIdx) => {
     const idNat = +tokenId;
     const c = await toolkit.wallet.at(contractAddress);
@@ -148,23 +160,21 @@ export default function AppendArtifactUri({
     await new Promise(requestAnimationFrame);
     try {
       const flat   = await buildFlatParams(hexSlices, startIdx);
-      const estArr = await toolkit.estimate.batch(
-        flat.map((p) => ({ kind:OpKind.TRANSACTION, ...p })),
-      );
-      const feeMutez     = estArr.reduce((t,e)=>t+e.suggestedFeeMutez, 0);
-      const storageMutez = estArr.reduce((t,e)=>t+e.burnFeeMutez     , 0);
+
+      const { fee, burn } = await estimateChunked(toolkit, flat);
       setEstimate({
-        feeTez:(feeMutez/1e6).toFixed(6),
-        storageTez:(storageMutez/1e6).toFixed(6),
+        feeTez:(fee /1e6).toFixed(6),
+        storageTez:(burn/1e6).toFixed(6),
       });
 
+      const packed = await splitPacked(toolkit, flat, PACKED_SAFE_BYTES);
+      setBatches(packed.length ? packed : [flat]);
       setSlicesTotal(hexSlices.length);
-      setBatches(await splitPacked(toolkit, flat, PACKED_SAFE_BYTES));
 
-      saveSliceCache(contractAddress, tokenId, 'artifact', {
-        hash, total:hexSlices.length, nextIdx:startIdx, slices:hexSlices,
+      saveSliceCheckpoint(contractAddress, tokenId, 'artifactUri', {
+        hash, total:hexSlices.length, next:startIdx, slices:hexSlices,
       });
-      setResumeInfo({ hash, total:hexSlices.length, nextIdx:startIdx, slices:hexSlices });
+      setResumeInfo({ hash, total:hexSlices.length, next:startIdx, slices:hexSlices });
       setConfirmOpen(true);
     } catch (e) { snack(e.message, 'error'); }
     finally { setIsEstim(false); }
@@ -173,49 +183,43 @@ export default function AppendArtifactUri({
   useEffect(() => {
     if (!file) { setDataUrl(''); return; }
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       const url   = e.target.result;
       setDataUrl(url);
       const hexStr = `0x${char2Bytes(url)}`;
       const slices = sliceHex(hexStr);
-      beginUpload(slices, 0, strHash(hexStr));
+      const digest = await sha256Hex(hexStr);
+      beginUpload(slices, 0, `sha256:${digest}`);
     };
     reader.readAsDataURL(file);
   }, [file]);                               // eslint-disable-line react-hooks/exhaustive-deps
 
   const resumeUpload = () => {
-    const { slices, nextIdx, hash } = resumeInfo;
-    beginUpload(slices, nextIdx, hash);
+    const { slices, next, hash } = resumeInfo;
+    beginUpload(slices, next, hash);
   };
 
-  const runSlice = useCallback(async (batchIdx) => {
-    if (!batches || batchIdx >= batches.length) return;
-    const nextIdx = (resumeInfo?.nextIdx || 0) + batchIdx;
-    setOv({ open:true, status:'Preparing transaction…',
-            current:nextIdx+1, total:slicesTotal });
+  /*──────── retry-safe slice runner ─────*/
+  const runSlice = useCallback(async (idx) => {
+    if (!batches || idx >= batches.length) return;
+    setOv({ open:true, status:'Preparing transaction…', current:idx+1, total:batches.length });
     try {
-      const op = await toolkit.wallet.batch(batches[batchIdx]).send();
-      setOv({ open:true, status:'Waiting for signature…',
-              current:nextIdx+1, total:slicesTotal });
+      const op = await toolkit.wallet.batch(batches[idx]).send();
+      setOv({ open:true, status:'Waiting for confirmation…', current:idx+1, total:batches.length });
       await op.confirmation();
 
-      const newNext = nextIdx+1;
-      if (newNext < slicesTotal) {
-        const upd = { ...resumeInfo, nextIdx:newNext };
-        saveSliceCache(contractAddress, tokenId, 'artifact', upd);
-        setResumeInfo(upd);
-        requestAnimationFrame(() => runSlice(batchIdx+1));
+      if (idx + 1 < batches.length) {
+        requestAnimationFrame(() => runSlice(idx + 1));
       } else {
-        clearSliceCache(contractAddress, tokenId, 'artifact');
+        clearSliceCheckpoint(contractAddress, tokenId, 'artifactUri');
         setOv({ open:true, opHash:op.opHash });
         onMutate(); reset();
       }
     } catch (e) {
-      setOv({ open:true, error:e.message||String(e),
-              current:nextIdx+1, total:slicesTotal });
+      setOv({ open:true, error:true, status:e.message || String(e),
+              current:idx+1, total:batches.length });
     }
-  }, [batches, resumeInfo, slicesTotal, toolkit,
-      contractAddress, tokenId, onMutate]);
+  }, [batches, toolkit, contractAddress, tokenId, onMutate]);
 
   const execClear = async () => {
     if (!toolkit) return snack('Connect wallet', 'error');
@@ -230,7 +234,9 @@ export default function AppendArtifactUri({
     } catch (e) { setOv({ open:false }); snack(e.message, 'error'); }
   };
 
-  const disabled = (!file && !resumeInfo) || tokenId==='' || isEstim || !!batches || hasArtUri;
+  const disabled = (!file && !resumeInfo) || tokenId==='' ||
+                   isEstim || !!batches || hasArtUri;
+
   const oversize = (dataUrl || '').length > 45_000;
 
   /*──────── JSX ───*/
@@ -244,30 +250,39 @@ export default function AppendArtifactUri({
           placeholder="Token-ID"
           style={{ flex:1 }}
           value={tokenId}
-          onChange={(e) => setTokenId(e.target.value.replace(/\D/g,''))}
+          onChange={(e) => setTokenId(e.target.value.replace(/\D/g, ''))}
         />
         <SelectWrap>
           <select
-            style={{ width:'100%',height:32 }}
+            style={{ width:'100%', height:32 }}
             disabled={loadingTok}
             value={tokenId || ''}
-            onChange={(e)=>setTokenId(e.target.value)}
+            onChange={(e) => setTokenId(e.target.value)}
           >
             <option value="">
-              {loadingTok ? 'Loading…'
-                          : tokOpts.length?'Select token':'— none —'}
+              {loadingTok
+                ? 'Loading…'
+                : tokOpts.length ? 'Select token' : '— none —'}
             </option>
-            {tokOpts.map((id)=><option key={id} value={id}>{id}</option>)}
+            {tokOpts.map((t) => {
+              const id   = typeof t === 'object' ? t.id   : t;
+              const name = typeof t === 'object' ? t.name : '';
+              return (
+                <option key={id} value={id}>
+                  {name ? `${id} — ${name}` : id}
+                </option>
+              );
+            })}
           </select>
-          {loadingTok && <Spinner/>}
+          {loadingTok && <Spinner />}
         </SelectWrap>
       </div>
 
       {resumeInfo && !file && (
         <p style={{ margin:'8px 0', fontSize:'.8rem', color:'var(--zu-accent)' }}>
-          In-progress upload ({resumeInfo.nextIdx}/{resumeInfo.total} slices).
+          In-progress upload ({resumeInfo.next}/{resumeInfo.total} slices).
           <PixelButton size="xs" style={{ marginLeft:6 }} onClick={resumeUpload}>
-            Repair Artifact
+            Resume Upload
           </PixelButton>
         </p>
       )}
@@ -304,14 +319,14 @@ export default function AppendArtifactUri({
         </div>
       </div>
 
-      {/* CTA row */}
+       {/* CTA row */}
       <div style={{ display:'flex', gap:'.6rem', alignItems:'center', marginTop:'.8rem' }}>
         <PixelButton disabled={disabled} onClick={()=>setConfirmOpen(true)}>
           {resumeInfo && !file ? 'RESUME'
                                : isEstim    ? 'Estimating…'
-                                             : 'APPEND'}
+                                            : 'APPEND'}
         </PixelButton>
-        {isEstim && <Spinner as={LoadingSpinner} size={16} style={{ position:'static' }}/>}
+        {isEstim && <Spinner style={{ position:'static' }} />}
         {oversize && !batches && (
           <span style={{ fontSize:'.7rem', opacity:.8 }}>
             Large file – estimation may take ≈10&nbsp;s
@@ -323,7 +338,7 @@ export default function AppendArtifactUri({
       {ov.open && (
         <OperationOverlay
           {...ov}
-          onRetry={() => runSlice((ov.current??1) - (resumeInfo?.nextIdx||0) - 1)}
+          onRetry={() => runSlice((ov.current ?? 1) - 1)}
           onCancel={() => { setOv({ open:false }); reset(); }}
         />
       )}
@@ -331,7 +346,7 @@ export default function AppendArtifactUri({
         <OperationConfirmDialog
           open
           estimate={estimate}
-          slices={slicesTotal - (resumeInfo?.nextIdx || 0)}
+          slices={batches?.length || 1}
           onOk   ={()=>{ setConfirmOpen(false); runSlice(0); }}
           onCancel={()=>{ setConfirmOpen(false); reset(); }}
         />

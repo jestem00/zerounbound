@@ -1,24 +1,28 @@
-/*Developed by @jams2blues with love for the Tezos community
-  File: src/ui/Header.jsx
-  Summary: injects wallet debug logging at mount time
-           to validate wallet context and button handlers. */
+/* Developed by @jams2blues – ZeroContract Studio
+   File:    src/ui/Header.jsx
+   Rev :    r742‑b1  2025‑06‑29 T00:41 UTC
+   Summary: real nav links in order + cleanup */
 
-import React, { useCallback, useMemo, useRef, useState, useEffect } from 'react';
+import React, {
+  useCallback, useEffect, useMemo, useRef, useState,
+} from 'react';
 import styled, { css, keyframes } from 'styled-components';
-import Link from 'next/link';
-import PixelButton from './PixelButton.jsx';
-import { useWallet } from '../contexts/WalletContext.js';
+import Link           from 'next/link';
+import PixelButton    from './PixelButton.jsx';
+import { useWallet }  from '../contexts/WalletContext.js';
 import { useTheme, PALETTE_KEYS } from '../contexts/ThemeContext.js';
-import useIso from '../utils/useIsoLayoutEffect.js';
+import useIso         from '../utils/useIsoLayoutEffect.js';
 
 /*──────── constants ─────*/
 const NET_COL = {
-  mainnet: 'var(--zu-mainnet)',
+  mainnet : 'var(--zu-mainnet)',
   ghostnet: 'var(--zu-ghostnet)',
-  sandbox: 'var(--zu-sandbox)',
+  sandbox : 'var(--zu-sandbox)',
 };
-const BREAK = 800;
+const BREAK        = 800;
+const COPY_TIMEOUT = 1800;
 
+/*──────── styled shells ─────*/
 const selectCSS = css`
   font: 0.78rem/1 'PixeloidSans', monospace;
   background: var(--zu-bg); color: var(--zu-fg);
@@ -49,9 +53,10 @@ const Note = styled.span`
 `;
 const Links = styled.nav`
   display: flex; gap: 0.8rem; flex-wrap: wrap;
-  a,span { font: 0.8rem/1 'PixeloidSans', monospace; color: var(--zu-fg); }
+  a { font: 0.8rem/1 'PixeloidSans', monospace; color: var(--zu-fg); }
   @media (max-width:${BREAK - 1}px) { display: none; }
 `;
+
 const Burger = styled.button`
   display: none;
   @media(max-width:${BREAK - 1}px){
@@ -62,6 +67,7 @@ const Burger = styled.button`
     cursor: pointer;
   }
 `;
+
 const slide = keyframes`from{transform:translateX(100%)}to{transform:translateX(0)}`;
 const Drawer = styled.aside`
   position: fixed; inset-block: 0; inset-inline-end: 0;
@@ -72,22 +78,33 @@ const Drawer = styled.aside`
   animation: ${slide} 230ms ease-out;
 `;
 
+const Controls = styled.div`
+  display: flex; flex-wrap: wrap; gap: 0.45rem;
+  align-items: center; justify-content: flex-end;
+  @media (max-width:${BREAK - 1}px){
+    flex-direction: column; align-items: stretch; width: 100%;
+  }
+`;
+
+const CopyBtn = styled(PixelButton).attrs({ size: 'xs' })`
+  padding: 0 0.55rem; font-size: 0.85rem;
+  background: var(--zu-accent-sec);
+`;
+
+/*──────── component ───────────────────────*/
 export default function Header() {
   const wrapRef = useRef(null);
-  const [drawer, setDrawer] = useState(false);
-  const walletCtx = useWallet();  // pull full context object
+  const [drawer, setDrawer]   = useState(false);
+  const [copied, setCopied]   = useState(false);
+  const walletCtx             = useWallet();
   const { theme, set: setTheme } = useTheme();
-
-  // Log wallet context object at mount time
-  useEffect(() => {
-    console.warn('🧠 Header walletCtx:', walletCtx);
-  }, [walletCtx]);
 
   const {
     address, network = 'ghostnet',
     connect, disconnect,
   } = walletCtx || {};
 
+  /* publish header height → CSS var --hdr (Invariant I44) */
   useIso(() => {
     const el = wrapRef.current;
     if (!el) return;
@@ -99,9 +116,10 @@ export default function Header() {
     return () => ro.disconnect();
   }, []);
 
+  /* border colour per network */
   useEffect(() => {
-    document.documentElement.style.setProperty('--zu-net-border',
-      NET_COL[network] || 'var(--zu-accent-sec)');
+    document.documentElement.style
+      .setProperty('--zu-net-border', NET_COL[network] || 'var(--zu-accent-sec)');
   }, [network]);
 
   const shortAddr = useMemo(
@@ -117,61 +135,94 @@ export default function Header() {
     );
   }, []);
 
+  const copyAddr = useCallback(() => {
+    if (!address || copied) return;
+    navigator?.clipboard?.writeText(address).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), COPY_TIMEOUT);
+    });
+  }, [address, copied]);
+
+  /*──────── render ─────*/
+  const NavLinks = (
+    <>
+      <Link href="/deploy">Create Collection</Link>
+      <Link href="/manage">Manage Collections</Link>
+      <Link href="/explore">Explore FOC</Link>
+      <Link href="/terms">Terms</Link>
+    </>
+  );
+
   return (
     <>
       <Shell>
         <Wrap ref={wrapRef}>
+          {/* logo + net label */}
           <div style={{ display:'flex', flexDirection:'column' }}>
-            <BrandLine href="/">ZERO UNBOUND</BrandLine>
+            <BrandLine href="/">ZERO UNBOUND</BrandLine>
             <Note>you are on <b>{network.toUpperCase()}</b></Note>
           </div>
 
-          <Links>
-            <Link href="/terms">Terms</Link>
-            <span style={{ opacity: 0.6 }}>more links</span>
-            <span style={{ opacity: 0.6 }}>more links</span>
-          </Links>
+          {/* desktop nav */}
+          <Links>{NavLinks}</Links>
 
-          <div style={{
-            display:'flex', flexDirection:'column', gap:'0.25rem',
-            width:'min(260px, 35vw)',
-          }}>
-            <NetSelect value={network} onChange={navNet}>
+          {/* controls */}
+          <Controls>
+            <NetSelect value={network} onChange={navNet} aria-label="Network">
               <option value="ghostnet">Ghostnet</option>
               <option value="mainnet">Mainnet</option>
             </NetSelect>
 
-            <ThemeSelect value={theme} onChange={(e) => setTheme(e.target.value)}>
-              {PALETTE_KEYS.map(k => <option key={k} value={k}>{k.replace(/-/g, ' ')}</option>)}
+            <ThemeSelect
+              value={theme}
+              onChange={(e) => setTheme(e.target.value)}
+              aria-label="Theme palette"
+            >
+              {PALETTE_KEYS.map(k => (
+                <option key={k} value={k}>{k.replace(/-/g, ' ')}</option>
+              ))}
             </ThemeSelect>
 
-            {address
-              ? <>
-                  <PixelButton title={address}>{shortAddr}</PixelButton>
-                  <PixelButton onClick={disconnect} data-sec>Disconnect</PixelButton>
-                </>
-              : <PixelButton onClick={connect}>Connect Wallet</PixelButton>}
-          </div>
+            {address ? (
+              <>
+                <PixelButton title={address}>{shortAddr}</PixelButton>
+                <CopyBtn
+                  aria-label="Copy wallet address"
+                  title={copied ? 'Copied!' : 'Copy address'}
+                  onClick={copyAddr}
+                >
+                  {copied ? '✓' : '📋'}
+                </CopyBtn>
+                <PixelButton onClick={disconnect} data-sec>Disconnect</PixelButton>
+              </>
+            ) : (
+              <PixelButton onClick={connect}>Connect Wallet</PixelButton>
+            )}
+          </Controls>
 
           <Burger aria-label="menu" onClick={() => setDrawer(true)}>≡</Burger>
         </Wrap>
       </Shell>
 
-      {drawer &&
+      {/* mobile drawer */}
+      {drawer && (
         <Drawer>
-          <PixelButton onClick={() => setDrawer(false)} data-sec>Close ×</PixelButton>
-          <Link href="/terms" onClick={() => setDrawer(false)}>Terms</Link>
-          <span style={{ opacity: 0.6 }}>more links</span>
-          <ThemeSelect value={theme} onChange={(e) => setTheme(e.target.value)}>
-            {PALETTE_KEYS.map(k => <option key={k} value={k}>{k.replace(/-/g, ' ')}</option>)}
+          <PixelButton onClick={() => setDrawer(false)} data-sec>Close ×</PixelButton>
+          {NavLinks}
+          <ThemeSelect
+            value={theme}
+            onChange={(e) => setTheme(e.target.value)}
+            aria-label="Theme palette mobile"
+          >
+            {PALETTE_KEYS.map(k => (
+              <option key={k} value={k}>{k.replace(/-/g, ' ')}</option>
+            ))}
           </ThemeSelect>
-        </Drawer>}
+        </Drawer>
+      )}
     </>
   );
 }
 
-/* What changed & why:
-   • Injected `console.warn('🧠 Header walletCtx:', …)` to validate what
-     `useWallet()` returns during mount. Verifies if `connect` is defined.
-   • This confirms if provider wiring or context chain is broken. */
-/* EOF */
+/* What changed & why: replaced placeholder links with live routes in the
+   requested order; removed debug logging; retains clipboard button. */

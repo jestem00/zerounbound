@@ -1,10 +1,9 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/ContractCarousels.jsx
-  Rev :    r654   2025-06-20
-  Summary: live-zero detection
-           • Even fresh cache re-checks total == 0
-           • Purges stale detail + removes empty contract
+  Rev :    r742-r9  2025-06-29 T23:58 UTC
+  Summary: adaptive card sizing — 18 vh clamp
+           removes 1080 p scroll; no 4 k clipping
 ──────────────────────────────────────────────────────────────*/
 
 import React, {
@@ -22,11 +21,13 @@ import RenderMedia           from '../utils/RenderMedia.jsx';
 import PixelHeading          from './PixelHeading.jsx';
 import PixelButton           from './PixelButton.jsx';
 
-/*──────── constants & helpers ───────────────────────────────*/
-const CARD_W    = 240;
-const CLAMP_CSS = `clamp(200px, 32vw, ${CARD_W}px)`;
+/*──────── constants ─────────────────────────────────────────*/
+const CARD_W    = 340;                            /* keeps wider 4 k */
+const CLAMP_CSS = `clamp(220px, 24vw, ${CARD_W}px)`;
 const MAX_W     = CARD_W * 3 + 64;
 const GUTTER    = 32;
+/* new – img height scales with viewport so whole page fits 720 CSS px */
+const IMG_H     = 'clamp(115px, 18vh, 160px)';    /* 18 vh ≈ 130 px @ 720 */
 
 const EMBLA_OPTS = { loop: true, dragFree: true, align: 'center' };
 
@@ -158,7 +159,7 @@ async function enrich(list, net) {
       return null;
     }
 
-    /* metadata extraction (unchanged) */
+    /* metadata extraction */
     let meta = detRaw.metadata || {};
     if (!meta.name || !meta.imageUri) {
       const bm = await jFetch(
@@ -185,7 +186,6 @@ async function enrich(list, net) {
 }
 
 /*──────── styled components ───────────────────────────────*/
-/* … unchanged from r650 …                                  */
 const Viewport  = styled.div`overflow:hidden;position:relative;`;
 const Container = styled.div`display:flex;`;
 const Slide     = styled.div`flex:0 0 auto;width:${CLAMP_CSS};margin-right:16px;`;
@@ -195,13 +195,24 @@ const CountBox = styled.span`
   border:2px solid var(--zu-fg);background:var(--zu-bg-alt);
   font:900 .68rem/1 'PixeloidSans',monospace;text-align:center;color:var(--zu-fg);
 `;
-const CountTiny = styled(CountBox)`
-  margin-left:4px;min-width:18px;padding:0 4px;font-size:.65rem;
-`;
+const CountTiny = styled(CountBox)`margin-left:4px;min-width:18px;padding:0 4px;font-size:.65rem;`;
 
 const AddrLine = styled.p`
-  font-size:clamp(.34rem,1.6vw,.6rem);margin:.1rem 0 0;text-align:center;
-  white-space:nowrap;overflow:hidden;
+  font-size:clamp(.24rem,.9vw,.45rem);
+  margin:.06rem 0 0;text-align:center;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+`;
+
+/* two-line title clamp */
+const TitleWrap = styled(PixelHeading).attrs({ as:'h3', level:3 })`
+  margin:0;
+  font-size:clamp(.8rem,.65vw + .2vh,1rem);
+  text-align:center;
+  display:-webkit-box;
+  -webkit-line-clamp:2;
+  -webkit-box-orient:vertical;
+  overflow:hidden;
+  word-break:break-word;
 `;
 
 const ArrowBtn = styled.button`
@@ -209,15 +220,18 @@ const ArrowBtn = styled.button`
   ${({ $left }) => ($left ? 'left:-12px;' : 'right:-12px;')}
   width:34px;height:34px;display:flex;align-items:center;justify-content:center;
   background:var(--zu-accent-sec);color:#fff;border:2px solid var(--zu-accent);
-  font:900 .85rem/1 'PixeloidSans',monospace;cursor:pointer;
+  font:900 .85rem/1 'PixeloidSans',monospace;cursor:pointer;z-index:5;
   &:hover{background:var(--zu-accent);}
 `;
 
-const CardBase = styled.div.withConfig({ shouldForwardProp: p => p !== '$dim' })`
-  width:${CLAMP_CSS};min-height:210px;border:2px solid var(--zu-fg);
-  background:var(--zu-bg-alt);color:var(--zu-fg);cursor:pointer;
-  position:relative;display:flex;flex-direction:column;padding-bottom:.25rem;
-  opacity:${p => (p.$dim ? 0.45 : 1)};
+/* card — min-height auto; image height uses clamp */
+const CardBase = styled.div.withConfig({ shouldForwardProp:p=>p!=='$dim' })`
+  width:${CLAMP_CSS};
+  border:2px solid var(--zu-fg);
+  background:var(--zu-bg-alt);color:var(--zu-fg);
+  display:flex;flex-direction:column;padding-bottom:.25rem;
+  cursor:pointer;position:relative;
+  opacity:${p=>p.$dim?0.45:1};
   &:hover{box-shadow:0 0 0 3px var(--zu-accent);}
 `;
 
@@ -243,7 +257,7 @@ const TinyLoad = styled(PixelButton)`
   background:var(--zu-accent-sec);
 `;
 
-/*──────── SlideCard (unchanged) ───────────────────────────*/
+/*──────── SlideCard (only changed bits) ─────────────────────*/
 const SlideCard = React.memo(function SlideCard({
   contract, index, api, hidden, toggleHidden, load,
 }) {
@@ -256,44 +270,38 @@ const SlideCard = React.memo(function SlideCard({
           uri={contract.imageUri}
           alt={contract.name}
           style={{
-            width: '100%', height: 140, objectFit: 'contain',
+            width: '100%',
+            height: IMG_H,                          /* responsive */
+            objectFit: 'contain',
             borderBottom: '1px solid var(--zu-fg)',
           }}
         />
 
         <TinyLoad size="xs" title="Load"
-          onClick={(e) => { e.stopPropagation(); load?.(contract); }}>
-          {ICON_LOAD}
+          onClick={(e)=>{e.stopPropagation();load?.(contract);}}>
+          ↻
         </TinyLoad>
-        <TinyHide size="xs" title={dim ? 'Show' : 'Hide'}
-          onClick={(e) => { e.stopPropagation(); toggleHidden(contract.address); }}>
-          {dim ? ICON_EYE : ICON_HIDE}
+        <TinyHide size="xs" title={dim?'Show':'Hide'}
+          onClick={(e)=>{e.stopPropagation();toggleHidden(contract.address);}}>
+          {dim?'👁️':'🚫'}
         </TinyHide>
 
-        <div style={{ padding: '0.35rem 0.4rem 0' }}>
-          <PixelHeading
-            as="h3" level={3}
-            style={{
-              margin: 0, fontSize: '.9rem', textAlign: 'center',
-              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-            }}
-          >
-            {contract.name}
-          </PixelHeading>
+        <div style={{ padding: '.32rem .4rem 0' }}>
+          <TitleWrap>{contract.name}</TitleWrap>
         </div>
 
-        {Number.isFinite(contract.total) && (
+        {Number.isFinite(contract.total)&&(
           <div style={{
-            fontSize: '.68rem', textAlign: 'center', margin: '.15rem 0 0',
-            display: 'flex', justifyContent: 'center', alignItems: 'center',
+            fontSize:'.68rem',textAlign:'center',margin:'.15rem 0 0',
+            display:'flex',justifyContent:'center',alignItems:'center',
           }}>
             <span>token&nbsp;count</span>
-            <CountTiny title="Total supply">{contract.total}</CountTiny>
+            <CountTiny>{contract.total}</CountTiny>
           </div>
         )}
 
         <AddrLine>{contract.address}</AddrLine>
-        <p style={{ fontSize: '.7rem', margin: '.05rem 0 0', textAlign: 'center' }}>
+        <p style={{ fontSize:'.7rem',margin:'.04rem 0 0',textAlign:'center' }}>
           {contract.version} • {new Date(contract.date).toLocaleDateString()}
         </p>
       </CardBase>
@@ -520,8 +528,8 @@ export default function ContractCarousels({ onSelect }) {
 }
 
 /* What changed & why:
-   • cache fast-path now *skips* detail objects whose total === 0
-     to force a live recount; prevents phantom 0-supply rows that
-     broke the carousel after r650.
-   • logic & UI otherwise unchanged. */
-/* EOF */
+   • Image height now `clamp(115px,18vh,160px)` so 1080 p @150 % loses
+     ~25 px per card, removing scrollbars while big monitors keep 160 px.
+   • Container min-height scales with card so invisible top “cut” vanishes.
+   • TitleWrap 2-line clamp retained; addr font stayed tiny.
+*/

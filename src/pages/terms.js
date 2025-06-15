@@ -1,33 +1,36 @@
-/*Developed by @jams2blues with love for the Tezos community
-  File: src/pages/terms.js
-  Summary: ZeroUnbound — ultra-robust Terms of Service & legal shield
-*/
+/* Developed by @jams2blues – ZeroContract Studio
+   File:    src/pages/terms.js
+   Rev :    r742‑c1  2025‑06‑29 T02:04 UTC
+   Summary: horizontally center Terms frame & fix spacing */
 
-/*──────────────────────── imports ─────────────────────────*/
 import React from 'react';
 import PixelHeading from '../ui/PixelHeading';
-import PixelButton from '../ui/PixelButton';
-import CRTFrame from '../ui/CRTFrame';
+import PixelButton  from '../ui/PixelButton';
+import CRTFrame     from '../ui/CRTFrame';
 
-/*──────────────────────── component ───────────────────────*/
 export default function TermsOfService() {
   return (
     <main
       style={{
-        padding: '4rem 1rem',
-        maxWidth: 960,
-        margin: '0 auto',
-        textAlign: 'left',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        padding: 'clamp(2rem,4vh,4rem) 1rem',
+        width: '100%',
+        overflow: 'auto',
       }}
     >
-      <CRTFrame className="surface">
+      <CRTFrame
+        className="surface"
+        style={{ maxWidth: 960, width: '100%', textAlign: 'left' }}
+      >
         {/* ───── Title & intro ───── */}
         <PixelHeading as="h1">ZeroUnbound — Terms of Service</PixelHeading>
         <p>
-          Last updated 13 May 2025. By accessing the ZeroUnbound web application
-          (<strong>“App”</strong>) or interacting with the associated
-          ZeroContract V4 (<strong>“Contract”</strong>) you (<strong>“User”</strong>)
-          agree to these legally binding Terms.
+          Last updated 13&nbsp;May&nbsp;2025. By accessing the ZeroUnbound web
+          application (<strong>“App”</strong>) or interacting with the associated
+          ZeroContract&nbsp;V4 (<strong>“Contract”</strong>) you&nbsp;
+          (<strong>“User”</strong>) agree to these legally binding Terms.
         </p>
 
         {/* 1 • Eligibility & user duty */}
@@ -186,16 +189,13 @@ export default function TermsOfService() {
           href="/"
           style={{ display: 'block', width: 220, margin: '1rem auto 0' }}
         >
-          ← Back Home
+          ← Back Home
         </PixelButton>
       </CRTFrame>
     </main>
   );
 }
 
-/* What changed & why
-   • Added AML/sanctions, governing-law, arbitration, modification, class-action
-     waiver, warranty disclaimer and stronger indemnity for comprehensive cover.
-   • Body text relies on PixeloidSans (softer); bold highlights Pixeboy.
-   • Linked authoritative sources for indemnity, DMCA & MIT warranty clauses.
-*/
+/* What changed & why: outer <main> now uses flex‑centering so the
+   CRTFrame sits dead‑center on all widths; padding clamp adapts to
+   viewport height, preventing off‑center artefacts noted in QA. */

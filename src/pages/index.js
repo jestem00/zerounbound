@@ -1,6 +1,7 @@
-/*Developed by @jams2blues with love for the Tezos community
-  File: src/pages/index.js
-  Summary: home page – flex-centred, no min-height scroll bug         */
+/* Developed by @jams2blues – ZeroContract Studio
+   File:    src/pages/index.js
+   Rev :    r742‑d1  2025‑06‑29 T03:18 UTC
+   Summary: heading no‑crop + QA copy tweak */
 
 import React        from 'react';
 import PixelButton  from '../ui/PixelButton.jsx';
@@ -32,19 +33,21 @@ export default function Home () {
         />
 
         {/* tagline */}
-        <PixelHeading level={2} style={{ marginBottom: '1rem' }}>
-          Fully-On-Chain NFT Studio
+        <PixelHeading
+          level={2}
+          style={{ marginBottom: '1rem', whiteSpace: 'pre-line' }}
+        >
+          {`Fully‑on‑chain NFT\nStudio`}
         </PixelHeading>
 
         <p style={{
           margin: '0 0 2rem',
-          maxWidth: '32ch',
+          maxWidth: '34ch',
           marginInline: 'auto',
           lineHeight: 1.45,
         }}>
-          Create fully&nbsp;on-chain NFT collections,&nbsp;mint and explore
-          pure&nbsp;Tezos bytes.<br/>
-          <strong>No IPFS. No indexers.</strong>
+          Create fully on‑chain NFT collections, mint and explore pure Tezos
+          bytes.<br/><strong>No IPFS. No indexers.</strong>
         </p>
 
         {/* CTAs */}
@@ -63,3 +66,6 @@ export default function Home () {
     </main>
   );
 }
+
+/* What changed & why: forced line‑break to prevent “Studic” crop,
+   tweaked copy per QA page 1; container width unchanged. */

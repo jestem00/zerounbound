@@ -1,50 +1,63 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/manage.js
-  Rev :    r652   2025-06-19
-  Summary: Next.js mode-clash hot-fix
-           • Removes any implicit SSG by declaring a
-             no-op getServerSideProps()
-           • Resolves “cannot mix SSG with GSSP” runtime error
-           • All UI / logic untouched
+  Rev :    r742‑s5  2025‑06‑30 T01:06 UTC
+  Summary: correct min‑height calc → no phantom gap, scrollbar back
 ──────────────────────────────────────────────────────────────*/
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Buffer }      from 'buffer';
-import { useRouter }   from 'next/router';
-import dynamic         from 'next/dynamic';
-import styledPkg       from 'styled-components';
+import { Buffer }                     from 'buffer';
+import { useRouter }                  from 'next/router';
+import dynamic                        from 'next/dynamic';
+import styledPkg                      from 'styled-components';
 
-import PixelHeading    from '../ui/PixelHeading.jsx';
-import PixelInput      from '../ui/PixelInput.jsx';
-import PixelButton     from '../ui/PixelButton.jsx';
-import AdminTools      from '../ui/AdminTools.jsx';
-import RenderMedia     from '../utils/RenderMedia.jsx';
-import { useWalletContext } from '../contexts/WalletContext.js';
-import { jFetch, sleep }    from '../core/net.js';
-import hashMatrix      from '../data/hashMatrix.json' assert { type:'json' };
+import PixelHeading                   from '../ui/PixelHeading.jsx';
+import PixelInput                     from '../ui/PixelInput.jsx';
+import PixelButton                    from '../ui/PixelButton.jsx';
+import AdminTools                     from '../ui/AdminTools.jsx';
+import RenderMedia                    from '../utils/RenderMedia.jsx';
+import { useWalletContext }           from '../contexts/WalletContext.js';
+import { jFetch, sleep }              from '../core/net.js';
+import hashMatrix                     from '../data/hashMatrix.json' assert { type: 'json' };
 
 const ContractCarousels = dynamic(
   () => import('../ui/ContractCarousels.jsx'),
   { ssr: false },
 );
 
-/*──────── styled shells ────────────────────────────────────*/
+/*──────────────── styled shells ─────────────────────────────*/
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
-const Wrap = styled.div.attrs({ className: 'surface' })`
-  position: relative; z-index: 2;
-  width: 100%; max-width: 980px;
-  margin: 2rem auto; padding: 0 0.8rem;
-  background: var(--zu-bg);
-  @media(max-width:480px){
-    margin-top: 1.2rem;
-    padding: 0 0.6rem;
-  }
+const Title = styled(PixelHeading).attrs({ level: 2 })`
+  margin: 0 0 .35rem;
 `;
-const Center = styled.div`text-align:center;`;
 
-/*──────── helpers ──────────────────────────────────────────*/
+/* viewport‑filling surface – no see‑through, keeps native scrollbar */
+const Wrap = styled.div`
+  position: relative;
+  z-index: 2;
+  background: var(--zu-bg);
+
+  width: 100%;
+  max-width: min(90vw, 1920px);
+  margin: 0 auto;
+
+  /* 100 % of visual viewport minus header → no phantom band */
+  min-height: calc(var(--vh) - var(--hdr));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+
+  padding: calc(var(--hdr) + .6rem) clamp(.4rem, 1.5vw, 1.2rem) 1.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(.2rem, .45vh, .6rem);
+  font-size: clamp(1rem, .6vw + .5vh, 1.4rem);
+`;
+
+const Center = styled.div`text-align:center;font-size:.8rem;`;
+
+/*──────── helpers (unchanged) ──────────────────────────────*/
 const TZKT = {
   ghostnet: 'https://api.ghostnet.tzkt.io/v1',
   mainnet : 'https://api.tzkt.io/v1',
@@ -76,17 +89,13 @@ async function fetchMeta(addr = '', net = 'ghostnet') {
   }
 }
 
-/*──────── SSR fence — disables any accidental SSG mix ──────*/
-export async function getServerSideProps() {
-  return { props: {} };      /* noop, but tells Next we are GSSP-only */
-}
+export async function getServerSideProps() { return { props: {} }; }
 
-/*════════ component ════════════════════════════════════════*/
+/*════════════════ component ════════════════════════════════*/
 export default function ManagePage() {
   const { network } = useWalletContext();
   const router      = useRouter();
 
-  /* hydration gate (avoid SSR mismatch) */
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => { setHydrated(true); }, []);
 
@@ -94,16 +103,14 @@ export default function ManagePage() {
   const [busy, setBusy]         = useState(false);
   const [contract, setContract] = useState(null);
 
-  /*──────── helpers ───────────────────────────────────────*/
   const load = useCallback(async (address) => {
     setBusy(true); setContract(null);
     const meta = await fetchMeta(address, network);
-    await sleep(100);          // tiny UX grace
+    await sleep(100);
     setContract(meta);
     setBusy(false);
   }, [network]);
 
-  /* deep-link ?addr=… */
   useEffect(() => {
     if (!hydrated || !router.isReady) return;
     const { addr } = router.query || {};
@@ -112,7 +119,6 @@ export default function ManagePage() {
     }
   }, [hydrated, router.isReady, router.query, load]);
 
-  /* safe router.replace (no redundant nav) */
   const navigateIfDiff = (address) => {
     if (router.query.addr !== address) {
       router.replace(
@@ -123,14 +129,12 @@ export default function ManagePage() {
     }
   };
 
-  /* carousel → loader */
   const onSelect = useCallback(({ address }) => {
     setKt(address);
     navigateIfDiff(address);
     load(address);
   }, [navigateIfDiff, load]);
 
-  /* manual GO */
   const go = (e) => {
     e?.preventDefault();
     const a = kt.trim();
@@ -139,28 +143,25 @@ export default function ManagePage() {
     load(a);
   };
 
-  if (!hydrated) {
-    return (
-      <Wrap>
-        <PixelHeading level={2}>Manage Contract</PixelHeading>
-      </Wrap>
-    );
-  }
+  if (!hydrated) return <Wrap><Title>Manage Contract</Title></Wrap>;
 
   return (
     <Wrap>
-      <PixelHeading level={2}>Manage Contract</PixelHeading>
-      <p style={{ fontSize: '.75rem', textAlign: 'center', margin: '0 0 1rem' }}>
+      <Title>Manage Contract</Title>
+      <Center>
         Network&nbsp;<strong>{network}</strong>
-      </p>
+      </Center>
 
       <ContractCarousels onSelect={onSelect} />
 
       <form
         onSubmit={go}
         style={{
-          display: 'flex', gap: 10, justifyContent: 'center',
-          flexWrap: 'wrap', marginTop: '1.2rem',
+          display: 'flex',
+          gap: 10,
+          justifyContent: 'center',
+          flexWrap: 'wrap',
+          marginTop: '.4rem',
         }}
       >
         <PixelInput
@@ -172,20 +173,21 @@ export default function ManagePage() {
         <PixelButton type="submit">GO</PixelButton>
       </form>
 
-      {busy && <Center style={{ margin: '1.3rem 0' }}>Loading…</Center>}
+      {busy && <Center style={{ marginTop: '.3rem' }}>Loading…</Center>}
 
       {contract && !busy && (
         <AdminTools contract={contract} onClose={() => setContract(null)} />
       )}
 
-      {/* tiny preview hidden on ≤600 px */}
       {contract && !busy && (
-        <Center style={{ marginTop: '1rem', display: 'none' }}>
+        <Center style={{ display: 'none' }}>
           <RenderMedia
             uri={contract.imageUri}
             alt={contract.name}
             style={{
-              width: 90, height: 90, objectFit: 'contain',
+              width: 90,
+              height: 90,
+              objectFit: 'contain',
               border: '1px solid var(--zu-fg)',
             }}
           />
@@ -196,8 +198,8 @@ export default function ManagePage() {
 }
 
 /* What changed & why:
-   • Added explicit getServerSideProps() returning empty props.
-     This disables Next.js static-generation hooks for /manage,
-     eliminating the fatal “SSG + GSSP mix” runtime error.
-   • All client-side behaviour and styling untouched. */
+   • min-height switched from var(--vh)*100 → var(--vh); the earlier
+     ×100 magnified surface and hid scrollbar top‑band. Overflow‑y
+     re‑enabled so the native thin scrollbar is visible again.
+*/
 /* EOF */

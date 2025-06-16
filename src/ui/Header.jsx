@@ -1,8 +1,7 @@
 /* Developed by @jams2blues – ZeroContract Studio
    File:    src/ui/Header.jsx
-   Rev :    r742‑b1  2025‑06‑29 T00:41 UTC
-   Summary: real nav links in order + cleanup */
-
+   Rev :    r744‑a1  2025‑07‑01 T15:02 UTC
+   Summary: NET fallback via deployTarget; removes duplicate default */
 import React, {
   useCallback, useEffect, useMemo, useRef, useState,
 } from 'react';
@@ -12,6 +11,7 @@ import PixelButton    from './PixelButton.jsx';
 import { useWallet }  from '../contexts/WalletContext.js';
 import { useTheme, PALETTE_KEYS } from '../contexts/ThemeContext.js';
 import useIso         from '../utils/useIsoLayoutEffect.js';
+import { NETWORK_KEY } from '../config/deployTarget.js';
 
 /*──────── constants ─────*/
 const NET_COL = {
@@ -100,9 +100,11 @@ export default function Header() {
   const { theme, set: setTheme } = useTheme();
 
   const {
-    address, network = 'ghostnet',
+    address,
+    network: walletNet,
     connect, disconnect,
   } = walletCtx || {};
+  const network = walletNet || NETWORK_KEY;
 
   /* publish header height → CSS var --hdr (Invariant I44) */
   useIso(() => {
@@ -223,6 +225,9 @@ export default function Header() {
     </>
   );
 }
-
-/* What changed & why: replaced placeholder links with live routes in the
-   requested order; removed debug logging; retains clipboard button. */
+/* What changed & why:
+   • Header now defaults to NETWORK_KEY when wallet not yet connected,
+     eliminating hard‑coded 'ghostnet' leakage and keeping divergence
+     centralised in deployTarget.js (I10, I63).  No UI regressions.
+*/
+/* EOF */

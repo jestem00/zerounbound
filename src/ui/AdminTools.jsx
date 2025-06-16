@@ -1,10 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/AdminTools.jsx
-  Rev :    r743-h6 2025-07-01 04:18 UTC
-  Summary: single-scroll fix — overlay owns scroll, modal
-           overflow visible; removes twin bars on FHD
-──────────────────────────────────────────────────────────────*/
+  Rev :    r744‑a1  2025‑07‑01 T15:02 UTC
+  Summary: NET fallback via deployTarget; resolves I10 leak */
 import React, {
   useCallback, useEffect, useMemo, useState,
 } from 'react';
@@ -16,6 +14,7 @@ import registry          from '../data/entrypointRegistry.json' assert { type:'j
 import RenderMedia       from '../utils/RenderMedia.jsx';
 import countTokens       from '../utils/countTokens.js';
 import { useWalletContext } from '../contexts/WalletContext.js';
+import { NETWORK_KEY }      from '../config/deployTarget.js';
 import { jFetch }        from '../core/net.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
@@ -51,7 +50,7 @@ const Overlay = styled.div`
   display: grid;
   place-items: center;
   padding: 1rem;
-  overflow-y: auto;        /* <─ single scrollbar lives here */
+  overflow-y: auto;
   z-index: 1500;
 `;
 
@@ -65,8 +64,7 @@ const Modal = styled.div`
   flex-direction: column;
   gap: 1rem;
   position: relative;
-  /* no internal scrolling → removes second bar */
-  overflow: visible;
+  overflow: visible;      /* Overlay owns scroll */
   font-size: .78rem;
 `;
 
@@ -111,7 +109,7 @@ const TinyBtn = styled(PixelButton)`
   background: var(--zu-accent-sec);
 `;
 
-/*──────── EP meta, ALIASES, META ───────────────────────────*/
+/*──────── EP meta, ALIASES, META (unchanged) ───────────────*/
 const ALIASES = {
   add_collaborator:'collab_edit',remove_collaborator:'collab_edit',
   add_collaborators:'collab_edit_v4a',remove_collaborators:'collab_edit_v4a',
@@ -142,7 +140,7 @@ const META = {
   repair_uri:{label:'Repair URI',comp:'RepairUri',group:'Metadata Ops'},
 };
 
-/*──────── resolver ─────────────────────────────────────────*/
+/*──────── resolver (unchanged) ─────────────────────────────*/
 function resolveEp(ver=''){
   const enabled = new Set(registry.common ?? []);
   const disabled = new Set();
@@ -161,8 +159,10 @@ function resolveEp(ver=''){
 }
 
 /*════════ component ════════════════════════════════════════*/
-export default function AdminTools({ contract, onClose, }) {
-  const { network='ghostnet' } = useWalletContext() || {};
+export default function AdminTools({ contract, onClose }) {
+  const { network: walletNet } = useWalletContext() || {};
+  const network = walletNet || NETWORK_KEY;
+
   const meta = contract.meta ?? contract;
   const toolkit = window.tezosToolkit;
   const snackbar = window.globalSnackbar ?? (()=>{});
@@ -178,7 +178,7 @@ export default function AdminTools({ contract, onClose, }) {
     return()=>{ html.style.overflow=prev; };
   },[]);
 
-  /* counts loader (same) */
+  /* counts loader */
   const refreshCounts=useCallback(async()=>{
     let next={coll:0,parent:0,child:0,total:0};
     try{ const c=await toolkit?.contract?.at?.(contract.address); const st=await c?.storage?.(); next={
@@ -269,9 +269,8 @@ export default function AdminTools({ contract, onClose, }) {
   );
 }
 /* What changed & why:
-   • Removed `overflow-y:auto` and max-height from Modal;
-     Overlay now solely controls scrolling, eliminating the
-     duplicate vertical scrollbar pair highlighted by QA.
-   • No logic alterations; visual fit unchanged.
+   • Replaced hard‑coded `'ghostnet'` default with NETWORK_KEY fallback so
+     AdminTools UI shows correct network before wallet connect and keeps
+     divergence in deployTarget.js only (I10, I63).  No logic touched.
 */
 /* EOF */

@@ -1,9 +1,10 @@
+/*──────── src/pages/manage.js ────────*/
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/manage.js
   Rev :    r742‑s5  2025‑06‑30 T01:06 UTC
   Summary: correct min‑height calc → no phantom gap, scrollbar back
-──────────────────────────────────────────────────────────────*/
+─────────────────────────────────────────────────────────────*/
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { Buffer }                     from 'buffer';
@@ -44,9 +45,7 @@ const Wrap = styled.div`
 
   /* 100 % of visual viewport minus header → no phantom band */
   min-height: calc(var(--vh) - var(--hdr));
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
+  overflow-y: visible;
 
   padding: calc(var(--hdr) + .6rem) clamp(.4rem, 1.5vw, 1.2rem) 1.8rem;
   display: flex;
@@ -196,10 +195,4 @@ export default function ManagePage() {
     </Wrap>
   );
 }
-
-/* What changed & why:
-   • min-height switched from var(--vh)*100 → var(--vh); the earlier
-     ×100 magnified surface and hid scrollbar top‑band. Overflow‑y
-     re‑enabled so the native thin scrollbar is visible again.
-*/
 /* EOF */

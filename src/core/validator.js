@@ -1,9 +1,8 @@
-/*Developed by @jams2blues with love for the Tezos community
+/*Developed by @jams2blues – ZeroContract Studio
   File:    src/core/validator.js
-  Rev :    r676   2025-06-25
-  Summary: Bump metadata OVERHEAD_BYTES to 12 522 B so
-           DeployCollectionForm and op-size checks match
-           real-world forged sizes across protocols. */
+  Rev :    r713   2025-06-26
+  Summary: proto-cap proof → OVERHEAD_BYTES-4
+──────────────────────────────────────────────────────────────*/
 
 const RE_CTRL_C0 = /[\u0000-\u001F\u007F]/;    // C0 + DEL
 const RE_CTRL_C1 = /[\u0080-\u009F]/;          // C1 set (often hidden)

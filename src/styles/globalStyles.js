@@ -1,10 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/styles/globalStyles.js
-  Rev :    r742-r6  2025-06-29 T22:18 UTC
-  Summary: adaptive root font-scale for 1080p ↔ 8 k
-──────────────────────────────────────────────────────────────*/
-
+  Rev :    r742-r7  2025-07-02
+  Summary: lower root scale for saner size */
 import { createGlobalStyle } from 'styled-components';
 import palettes from './palettes.json' assert { type: 'json' };
 
@@ -15,11 +13,11 @@ const v = (k, d) => F?.[`--zu-${k}`] ?? d;
 const GlobalStyles = createGlobalStyle`
   :root{
     --hdr: 112px;
-    --zu-bg:${v('bg',        '#000')};
+    --zu-bg:${v('bg','#000')};
     --zu-bg-alt:${v('bg-alt','#101010')};
-    --zu-fg:${v('fg',        '#eee')};
+    --zu-fg:${v('fg','#eee')};
     --zu-heading:${v('heading','#fff')};
-    --zu-accent:${v('accent', '#2ecc71')};
+    --zu-accent:${v('accent','#2ecc71')};
     --zu-accent-sec:${v('accent-sec','#e74c3c')};
     --zu-btn-fg:${v('btn-fg','#fff')};
   }
@@ -32,27 +30,25 @@ const GlobalStyles = createGlobalStyle`
 
   html,body{ height:100%; }
 
-  /*──────────────── adaptive root scale ────────────────*
-    • 1080 p @150 % ≈ 1620× – starts at 15 px
-    • 4 k @150 %  ⇒ ~ 3840× – climbs toward 22 px
-    • 8 k native  ⇒ hits 24 px hard-cap
-  *──────────────────────────────────────────────────────*/
+  /* tamer root scale */
   html{
-    font-size:clamp(15px, 1.35vw + 0.6vh, 24px);
+    font-size:clamp(14px, 1vw + 0.5vh, 20px);
     max-width:100%;
-    overflow:hidden; /* page itself never scrolls */
+    overflow:hidden;
   }
 
   body{
-    margin:0; max-width:100%;
-    overflow:hidden;                /* all inner scroll locked */
-    background:var(--zu-bg); color:var(--zu-fg);
+    margin:0;
+    max-width:100%;
+    overflow:hidden;
+    background:var(--zu-bg);
+    color:var(--zu-fg);
     font-family:'PixeloidSans', sans-serif;
     padding-bottom:env(safe-area-inset-bottom);
     line-height:1.25;
   }
 
-  /* thin, always-visible scrollbars for inner regions */
+  /* scrollbars unchanged */
   ::-webkit-scrollbar{ width:6px; height:6px; }
   ::-webkit-scrollbar-thumb{
     background:var(--zu-accent-sec);
@@ -67,10 +63,6 @@ const GlobalStyles = createGlobalStyle`
 `;
 
 export default GlobalStyles;
-
 /* What changed & why:
-   • html font-size now scales with 1.35 vw + 0.6 vh (cap 24 px) so UI
-     enlarges on 4 k/8 k while still readable on 1080 p @150 % without
-     overflowing; meets I00 responsive mandate.
-*/
+   • Root clamp lowered → overall UI ~20 % smaller, fits 1080 p. */
 /* EOF */

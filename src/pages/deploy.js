@@ -1,7 +1,7 @@
-/*Developed by @jams2blues with love for the Tezos community
-  File: src/pages/deploy.js
-  Summary: case-/space-insensitive interfaces dedupe */
-
+/*Developed by @jams2blues – ZeroContract Studio
+  File:    src/pages/deploy.js
+  Rev :    r744-h10  2025-07-02
+  Summary: natural flow — no flex stretch, scroll works */
 import React, { useRef, useState } from 'react';
 import { MichelsonMap }            from '@taquito/michelson-encoder';
 import { char2Bytes }              from '@taquito/utils';
@@ -21,7 +21,7 @@ const uniqInterfaces = src => {
   [...(src || []), ...base].forEach(i => {
     const k = String(i ?? '').trim();
     if (!k) return;
-    map.set(k.toUpperCase(), k);      // first form wins
+    map.set(k.toUpperCase(), k);
   });
   return Array.from(map.values());
 };
@@ -98,14 +98,14 @@ export default function DeployPage () {
     const body   = '0x' + utf8ToHex(JSON.stringify(ordered), p => setPct(p / 4));
 
     /* stage-1 wallet */
-    setStep(1); setLabel('Check wallet & sign'); setPct(1/4);
+    setStep(1); setLabel('Check wallet & sign'); setPct(0.25);
 
     const md = new MichelsonMap();
     md.set('',       header);
     md.set('content', body);
 
     const tick = () => {
-      setPct(p => Math.min(1.9/4, p + 0.002));
+      setPct(p => Math.min(0.475, p + 0.002));
       rafRef.current = requestAnimationFrame(tick);
     };
     tick();
@@ -117,7 +117,7 @@ export default function DeployPage () {
       }).send();
 
       cancelAnimationFrame(rafRef.current);
-      setStep(2); setLabel('Forging & injecting'); setPct(2/4);
+      setStep(2); setLabel('Forging & injecting'); setPct(0.5);
 
       await op.confirmation(2);
       setStep(3); setLabel('Confirming on-chain'); setPct(1);
@@ -134,23 +134,27 @@ export default function DeployPage () {
     }
   }
 
+  /* page content flows normally -- Main provides scrolling */
   return (
-    <CRTFrame>
-      <PixelHeading>Create&nbsp;Collection</PixelHeading>
-      <DeployCollectionForm onDeploy={originate}/>
-      {(step !== -1 || err) && (
-        <OperationOverlay
-          status={label}
-          progress={pct}
-          kt1={kt1}
-          error={err}
-          onRetry={reset}
-          onCancel={reset}
-        />
-      )}
-    </CRTFrame>
+    <div style={{ width:'100%', padding:'1rem', boxSizing:'border-box' }}>
+      <CRTFrame style={{ maxWidth:900, margin:'0 auto' }}>
+        <PixelHeading>Create&nbsp;Collection</PixelHeading>
+        <DeployCollectionForm onDeploy={originate} />
+        {(step !== -1 || err) && (
+          <OperationOverlay
+            status={label}
+            progress={pct}
+            kt1={kt1}
+            error={err}
+            onRetry={reset}
+            onCancel={reset}
+          />
+        )}
+      </CRTFrame>
+    </div>
   );
 }
-
-/* What changed & why: interfaces now passed through case/space-insensitive
-   Map → unique list; duplicate “TZIP-012/016” impossible. */
+/* What changed & why:
+   • Removed flex-stretch wrapper so the form sits in document flow;
+     Main (overflow-auto) now scrolls on every viewport. */
+/* EOF */

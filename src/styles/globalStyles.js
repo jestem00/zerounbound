@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/styles/globalStyles.js
-  Rev :    r742-r7  2025-07-02
-  Summary: lower root scale for saner size */
+  Rev :    r742-r8  2025-07-04
+  Summary: enable vertical scroll, lock horiz */
 import { createGlobalStyle } from 'styled-components';
 import palettes from './palettes.json' assert { type: 'json' };
 
@@ -34,13 +34,15 @@ const GlobalStyles = createGlobalStyle`
   html{
     font-size:clamp(14px, 1vw + 0.5vh, 20px);
     max-width:100%;
-    overflow:hidden;
+    overflow-x:hidden;
   }
 
   body{
     margin:0;
     max-width:100%;
-    overflow:hidden;
+    overflow-x:hidden;      /* lock sideways scroll */
+    overflow-y:auto;        /* always allow vertical scrolling */
+    -webkit-overflow-scrolling:touch; /* smooth on iOS */
     background:var(--zu-bg);
     color:var(--zu-fg);
     font-family:'PixeloidSans', sans-serif;
@@ -64,5 +66,8 @@ const GlobalStyles = createGlobalStyle`
 
 export default GlobalStyles;
 /* What changed & why:
-   • Root clamp lowered → overall UI ~20 % smaller, fits 1080 p. */
+   • Replaced `overflow:hidden` with
+     `overflow-x:hidden; overflow-y:auto` on <body> to restore
+     vertical scrolling across all viewport sizes while still
+     preventing horizontal drift. */
 /* EOF */

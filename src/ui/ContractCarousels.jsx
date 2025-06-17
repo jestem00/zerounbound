@@ -1,9 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/ContractCarousels.jsx
-  Rev :    r742-r9  2025-06-29 T23:58 UTC
-  Summary: adaptive card sizing — 18 vh clamp
-           removes 1080 p scroll; no 4 k clipping
+  Rev :    r742-r11  2025-07-04 T03:18 UTC
+  Summary: clearer hints, no card hover/click, hot-hint colour
 ──────────────────────────────────────────────────────────────*/
 
 import React, {
@@ -22,12 +21,12 @@ import PixelHeading          from './PixelHeading.jsx';
 import PixelButton           from './PixelButton.jsx';
 
 /*──────── constants ─────────────────────────────────────────*/
-const CARD_W    = 340;                            /* keeps wider 4 k */
+const CARD_W    = 340;
 const CLAMP_CSS = `clamp(220px, 24vw, ${CARD_W}px)`;
 const MAX_W     = CARD_W * 3 + 64;
 const GUTTER    = 32;
-/* new – img height scales with viewport so whole page fits 720 CSS px */
-const IMG_H     = 'clamp(115px, 18vh, 160px)';    /* 18 vh ≈ 130 px @ 720 */
+/* responsive banner keeps 720 px landscape in-view */
+const IMG_H     = 'clamp(115px, 18vh, 160px)';
 
 const EMBLA_OPTS = { loop: true, dragFree: true, align: 'center' };
 
@@ -217,22 +216,21 @@ const TitleWrap = styled(PixelHeading).attrs({ as:'h3', level:3 })`
 
 const ArrowBtn = styled.button`
   position:absolute;top:50%;transform:translateY(-50%);
-  ${({ $left }) => ($left ? 'left:-12px;' : 'right:-12px;')}
+  ${({ $left }) => ($left ? 'left:4px;' : 'right:4px;')}
   width:34px;height:34px;display:flex;align-items:center;justify-content:center;
   background:var(--zu-accent-sec);color:#fff;border:2px solid var(--zu-accent);
   font:900 .85rem/1 'PixeloidSans',monospace;cursor:pointer;z-index:5;
   &:hover{background:var(--zu-accent);}
 `;
 
-/* card — min-height auto; image height uses clamp */
+/* card — hover/click cues removed → no false affordance */
 const CardBase = styled.div.withConfig({ shouldForwardProp:p=>p!=='$dim' })`
   width:${CLAMP_CSS};
   border:2px solid var(--zu-fg);
   background:var(--zu-bg-alt);color:var(--zu-fg);
   display:flex;flex-direction:column;padding-bottom:.25rem;
-  cursor:pointer;position:relative;
   opacity:${p=>p.$dim?0.45:1};
-  &:hover{box-shadow:0 0 0 3px var(--zu-accent);}
+  cursor:grab;
 `;
 
 const BusyWrap = styled.div`
@@ -257,33 +255,33 @@ const TinyLoad = styled(PixelButton)`
   background:var(--zu-accent-sec);
 `;
 
-/*──────── SlideCard (only changed bits) ─────────────────────*/
+/*──────── SlideCard ───────────────────────────────────────*/
 const SlideCard = React.memo(function SlideCard({
-  contract, index, api, hidden, toggleHidden, load,
+  contract, hidden, toggleHidden, load,
 }) {
   const dim = hidden.has(contract.address);
 
   return (
-    <Slide onClick={() => api?.scrollTo(index)} key={contract.address}>
+    <Slide key={contract.address}>
       <CardBase $dim={dim}>
         <RenderMedia
           uri={contract.imageUri}
           alt={contract.name}
           style={{
             width: '100%',
-            height: IMG_H,                          /* responsive */
+            height: IMG_H,
             objectFit: 'contain',
             borderBottom: '1px solid var(--zu-fg)',
           }}
         />
 
-        <TinyLoad size="xs" title="Load"
+        <TinyLoad size="xs" title="LOAD CONTRACT"
           onClick={(e)=>{e.stopPropagation();load?.(contract);}}>
-          ↻
+          {ICON_LOAD}
         </TinyLoad>
         <TinyHide size="xs" title={dim?'Show':'Hide'}
           onClick={(e)=>{e.stopPropagation();toggleHidden(contract.address);}}>
-          {dim?'👁️':'🚫'}
+          {dim?ICON_EYE:ICON_HIDE}
         </TinyHide>
 
         <div style={{ padding: '.32rem .4rem 0' }}>
@@ -309,7 +307,7 @@ const SlideCard = React.memo(function SlideCard({
   );
 });
 
-/*──────── hold-scroll helper (unchanged) ───────────────────*/
+/*──────── hold-scroll helper – unchanged ──────────────────*/
 const useHold = (api) => {
   const t = useRef(null);
   const start = (dir) => {
@@ -324,7 +322,7 @@ const useHold = (api) => {
   return { start, stop };
 };
 
-/*──────── Rail (unchanged) ─────────────────────────────────*/
+/*──────── Rail (hint & colour tweaked) ─────────────────────*/
 const Rail = React.memo(({
   label, data, emblaRef, api, hidden,
   toggleHidden, load, busy, holdPrev, holdNext,
@@ -333,8 +331,14 @@ const Rail = React.memo(({
     <h4 style={{ margin: '.9rem 0 .2rem', fontFamily: 'PixeloidSans', textAlign: 'center' }}>
       {label}<CountBox>{data.length}</CountBox>
     </h4>
-    <p style={{ margin: '0 0 .45rem', fontSize: '.7rem', textAlign: 'center', opacity: .75 }}>
-      ↔ drag/swipe • hold ◀ ▶ • ↻ load • 🚫/👁 hide
+    <p style={{
+      margin: '0 0 .45rem',
+      fontSize: '.74rem',
+      textAlign: 'center',
+      color: 'var(--zu-accent-sec)',
+      fontWeight: 700,
+    }}>
+      ↔ drag/swipe&nbsp;• hold ◀ ▶&nbsp;• Click&nbsp;↻&nbsp;to&nbsp;LOAD&nbsp;CONTRACT&nbsp;• 🚫/👁️ hide/unhide
     </p>
 
     <div style={{
@@ -355,12 +359,10 @@ const Rail = React.memo(({
       <Viewport ref={emblaRef}>
         <Container>
           {data.length
-            ? data.map((c, i) => (
+            ? data.map((c) => (
                 <SlideCard
                   key={c.address}
                   contract={c}
-                  index={i}
-                  api={api}
                   hidden={hidden}
                   toggleHidden={toggleHidden}
                   load={load}
@@ -528,8 +530,9 @@ export default function ContractCarousels({ onSelect }) {
 }
 
 /* What changed & why:
-   • Image height now `clamp(115px,18vh,160px)` so 1080 p @150 % loses
-     ~25 px per card, removing scrollbars while big monitors keep 160 px.
-   • Container min-height scales with card so invisible top “cut” vanishes.
-   • TitleWrap 2-line clamp retained; addr font stayed tiny.
-*/
+   • Guidance line reworded & coloured var(--zu-accent-sec) for visibility.
+   • CardBase: removed hover glow & pointer cursor, now grab-only drag cue.
+   • Slide click handler removed → no false “click to open” affordance.
+   • TinyLoad button title “LOAD CONTRACT” clarifies purpose.
+   • Version bump r742-r11. */
+/* EOF */

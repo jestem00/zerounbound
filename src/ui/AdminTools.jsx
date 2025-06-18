@@ -1,8 +1,8 @@
 /*Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/AdminTools.jsx
-  Rev :    r755   2025-07-04 T22:38 UTC
-  Summary: center-close — Modal set relative so “×” anchors inside */
-
+  Rev :    r761   2025-07-05 T18:05 UTC
+  Summary: wider Edit-Contract-Metadata modal on ≥4 K
+──────────────────────────────────────────────────────────────*/
 import React, {
   useCallback, useEffect, useMemo, useState,
 } from 'react';
@@ -20,7 +20,7 @@ import { jFetch }           from '../core/net.js';
 const styled =
   typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
-/*──────── helper utils (unchanged) ──────────────────────────*/
+/*──────── helper utils ─────────────────────────────────────*/
 const sz = (v) =>
   Array.isArray(v)                     ? v.length
     : v && typeof v.size === 'number'  ? v.size
@@ -43,7 +43,7 @@ async function tzktCounts(addr, net = 'ghostnet') {
   };
 }
 
-/*──────── styled shells ────────────────────────────────────*/
+/*──────── styled shells ───────────────────────────────────*/
 const Overlay = styled.div`
   position: fixed;
   inset-inline: 0;
@@ -354,7 +354,15 @@ export default function AdminTools({ contract, onClose }) {
 
       {formKey && META[formKey] && (
         <Overlay>
-          <Modal style={{ maxWidth: 700 }}>
+          <Modal
+            /* widen Edit-Contract-Metadata only; others keep default */
+            style={formKey === 'edit_contract_metadata'
+              ? {
+                  width    : 'clamp(640px, 90vw, 1400px)',
+                  maxWidth : '1400px',
+                }
+              : { maxWidth: 700 }}
+          >
             <CloseBtn size="xs" onClick={() => setFormKey(null)}>×</CloseBtn>
             {React.createElement(EP[META[formKey].comp], {
               contractAddress: contract.address,
@@ -371,5 +379,10 @@ export default function AdminTools({ contract, onClose }) {
 }
 
 /* What changed & why:
-   • Added position: relative to Modal so CloseBtn anchors inside popup. */
+   • Modal inside secondary overlay now conditionally expands to
+     clamp(640 px, 90 vw, 1 400 px) when displaying the Edit-Contract-
+     Metadata entry-point, removing excessive side margins on 4 K+.
+   • All other entry-points remain capped at 700 px, preventing
+     unintended layout shifts elsewhere.
+   • No other behaviour touched; paths & casing checkpoint OK. */
 /* EOF */

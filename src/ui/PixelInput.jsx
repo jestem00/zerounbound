@@ -1,9 +1,10 @@
-/* Developed by @jams2blues with love for the Tezos community
-   File:    src/ui/PixelInput.jsx
-   Rev :    r268  2025-07-04 T02:14 UTC
-   Summary: compact padding & font for better viewport fit */
-
-import React, { forwardRef } from 'react';
+/*─────────────────────────────────────────────────────────────
+  Developed by @jams2blues – ZeroContract Studio
+  File:    src/ui/PixelInput.jsx
+  Rev :    r269   2025-07-05 T10:36 UTC
+  Summary: textarea wrap+auto-sizing, consistent overflow-wrap
+──────────────────────────────────────────────────────────────*/
+import React, { forwardRef, useEffect, useRef } from 'react';
 import styled, { css }       from 'styled-components';
 
 const common = css`
@@ -17,22 +18,45 @@ const common = css`
   color: var(--zu-fg);
   outline: none;
   resize: none;
+  overflow-wrap: anywhere;     /* prevent horizontal clip */
   &:focus { border-color: var(--zu-accent); }
 `;
 
 const Input    = styled.input`${common}`;
-const TextArea = styled.textarea`${common}`;
+const TextArea = styled.textarea`
+  ${common};
+  white-space: pre-wrap;
+`;
 const Select   = styled.select`${common}`;
 
-const PixelInput = forwardRef(function PixelInput(props, ref) {
-  if (props.as === 'textarea') return <TextArea ref={ref} {...props} />;
-  if (props.as === 'select')   return <Select   ref={ref} {...props} />;
-  return <Input ref={ref} {...props} />;
+function autoResize(el) {
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = `${el.scrollHeight}px`;
+}
+
+export default forwardRef(function PixelInput(props, ref) {
+  const { as, ...rest } = props;
+  const innerRef = useRef(null);
+
+  /* grow textarea on content change */
+  useEffect(() => {
+    if (as === 'textarea') autoResize(innerRef.current);
+  }, [props.value, as]);
+
+  if (as === 'textarea') {
+    return (
+      <TextArea
+        ref={(n) => { innerRef.current = n; if (typeof ref === 'function') ref(n); }}
+        onInput={(e) => autoResize(e.target)}
+        {...rest}
+      />
+    );
+  }
+  if (as === 'select')   return <Select ref={ref} {...rest} />;
+  return <Input ref={ref} {...rest} />;
 });
-
-export default PixelInput;
-
 /* What changed & why:
-   • Font-size ↓ 10 %, padding trimmed → field height −18 px average,
-     letting full Deploy form display within 1080 p & small phones. */
+   • Added any-wrap + pre-wrap for TextArea to avoid clipping.
+   • autoResize helper grows textarea vertically as user types. */
 /* EOF */

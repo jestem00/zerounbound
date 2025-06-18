@@ -11,9 +11,10 @@
       "bundleName": "assets_bundle",
       "patterns": [
         "public/**",
-        "!public/**/*.{png,jpg,jpeg,ico,ttf,woff,woff2}",
-        "!public/manifest.json",
-        "public/embla-*.svg"
+        "!public/**/*.{png,jpg,jpeg,gif,ttf,woff,woff2,svg}",
+        "public/manifest*.json",
+        "public/sw.js",
+        "public/fonts/**"
       ]
     },
 
@@ -26,7 +27,9 @@
         "src/data/**",
         "src/config/**",
         "src/constants/**",
-        "src/workers/**"
+        "src/workers/**",
+        "src/utils/RenderMedia.jsx",
+        "src/core/validator.js"
       ]
     },
 
@@ -34,7 +37,6 @@
       "bundleName": "frontend_bundle",
       "patterns": [
         "src/contexts/**",
-        "src/components/**",
         "src/ui/**",
         "src/ui/Entrypoints/**",
         "src/hooks/**",
@@ -55,6 +57,51 @@
         ".prettierrc",
         ".eslintrc.cjs",
         ".gitignore"
+      ]
+    },
+
+    {
+      "bundleName": "master_bundle",
+      "patterns": [
+        "contracts/**/*.tz",
+        "contracts/**/*.json",
+
+        "public/**",
+        "!public/**/*.{png,jpg,jpeg,gif,ttf,woff,woff2,svg}",
+        "public/manifest*.json",
+        "public/sw.js",
+        "public/fonts/**",
+
+        "scripts/**",
+        "src/core/**",
+        "src/lib/**",
+        "src/data/**",
+        "src/config/**",
+        "src/constants/**",
+        "src/workers/**",
+        "src/utils/RenderMedia.jsx",
+        "src/core/validator.js",
+
+        "src/contexts/**",
+        "src/ui/**",
+        "src/ui/Entrypoints/**",
+        "src/hooks/**",
+        "src/styles/**",
+        "src/pages/**",
+        "src/utils/**",
+
+        "next.config.js",
+        "package.json",
+        "tsconfig.json",
+        "bundle.config.json",
+        ".yarnrc.yml",
+        ".prettierrc",
+        ".eslintrc.cjs",
+        ".gitignore",
+
+        "!node_modules/**",
+        "!summarized_files/**",
+        "!**/*.map"
       ]
     }
   ]

@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/Mint.jsx
-  Rev :    r738   2025-06-28
-  Summary: restore missing useTxEstimate import
+  Rev :    r750   2025-07-06
+  Summary: deduped helpers; shared feeEstimator integration
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useRef, useState, useEffect, useMemo, useCallback,
@@ -21,34 +21,34 @@ import MintPreview        from './MintPreview.jsx';
 import OperationOverlay   from '../OperationOverlay.jsx';
 import OperationConfirmDialog from '../OperationConfirmDialog.jsx';
 
-import { useWalletContext } from '../../contexts/WalletContext.js';
+import { useWalletContext }        from '../../contexts/WalletContext.js';
 import { asciiPrintable, cleanDescription } from '../../core/validator.js';
-import { ROOT_URL }        from '../../config/deployTarget.js';
+import { ROOT_URL }                from '../../config/deployTarget.js';
 import { SLICE_SAFE_BYTES, sliceHex } from '../../core/batch.js';
-import useTxEstimate       from '../../hooks/useTxEstimate.js';
 import {
   saveSliceCheckpoint, purgeExpiredSliceCache,
 } from '../../utils/sliceCache.js';
 
+/* shared estimator */
+import {
+  estimateChunked, calcStorageMutez, μBASE_TX_FEE, toTez,
+} from '../../core/feeEstimator.js';
+
 /* polyfill for node envs / SSR */
 if (typeof window !== 'undefined' && !window.Buffer) window.Buffer = Buffer;
 
-/*──────────────── helper — chunk-safe estimator ─────────────*/
-async function estimateChunked(toolkit, ops, chunk = 8) {
-  let fee = 0; let burn = 0;
-  for (let i = 0; i < ops.length; i += chunk) {
-    const estArr = await toolkit.estimate.batch(ops.slice(i, i + chunk));
-    fee  += estArr.reduce((t, e) => t + e.suggestedFeeMutez, 0);
-    burn += estArr.reduce((t, e) => t + e.burnFeeMutez, 0);
-  }
-  return {
-    feeTez    : (fee  / 1e6).toFixed(6),
-    storageTez: (burn / 1e6).toFixed(6),
-  };
-}
+/*──────────────── helper — RPC detector ─────────*/
+const RPC_PATH = '/helpers/scripts/simulate_operation';
+const isSim500 = (e) => {
+  try {
+    const s = typeof e === 'string' ? e : e?.message || JSON.stringify(e);
+    return s.includes(RPC_PATH) && s.includes('500');
+  } catch { return false; }
+};
 
 /*──────── constants ─────────────────────────────────────────*/
-const HEADROOM_BYTES = 1_024;                        /* spare below proto cap */
+const META_PAD_BYTES = 1_000;                  /* safety head-room     */
+const HEADROOM_BYTES = 1_024;                  /* slice-0 buffer       */
 const SAFE_BYTES_0   = SLICE_SAFE_BYTES - HEADROOM_BYTES;
 
 const MAX_ATTR          = 10;
@@ -60,7 +60,7 @@ const MAX_TAG_LEN       = 20;
 const MAX_ROY_TOTAL_PCT = 25;
 const MAX_EDITIONS      = 10_000;
 const MAX_META          = 32_768;
-const OVERHEAD          = 360;                       /* map baseline */
+const OVERHEAD          = 360;
 
 const LICENSES = [
   'CC0 (Public Domain)', 'All Rights Reserved',
@@ -114,21 +114,21 @@ const buildMeta = ({ f, attrs, tags, dataUrl, mime, shares }) => {
 
   if (f.authors?.trim()) {
     m.set('authors', hex(JSON.stringify(
-      f.authors.split(',').map((x)=>x.trim()),
+      f.authors.split(',').map((x) => x.trim()),
     )));
   }
 
   m.set('creators', hex(JSON.stringify(
-    f.creators.split(',').map((x)=>x.trim()).filter(Boolean),
+    f.creators.split(',').map((x) => x.trim()).filter(Boolean),
   )));
-  m.set('rights', hex(f.license==='Custom' ? f.customLicense : f.license));
+  m.set('rights', hex(f.license === 'Custom' ? f.customLicense : f.license));
   m.set('mintingTool', hex(ROOT_URL));
-  m.set('royalties', hex(JSON.stringify({ decimals:4, shares })));
+  m.set('royalties', hex(JSON.stringify({ decimals: 4, shares })));
 
-  if (f.flashing==='Does contain Flashing Hazard') {
-    m.set('accessibility', hex(JSON.stringify({ hazards:['flashing'] })));
+  if (f.flashing === 'Does contain Flashing Hazard') {
+    m.set('accessibility', hex(JSON.stringify({ hazards: ['flashing'] })));
   }
-  if (f.nsfw==='Does contain NSFW') m.set('contentRating', hex('mature'));
+  if (f.nsfw === 'Does contain NSFW') m.set('contentRating', hex('mature'));
 
   if (tags.length)  m.set('tags',       hex(JSON.stringify(tags)));
   if (attrs.length) m.set('attributes', hex(JSON.stringify(attrs)));
@@ -137,34 +137,34 @@ const buildMeta = ({ f, attrs, tags, dataUrl, mime, shares }) => {
 
 const mapSize = (map) => {
   let total = OVERHEAD;
-  for (const [k,v] of map.entries()) {
-    total += Buffer.byteLength(k,'utf8');
-    total += v.startsWith('0x') ? (v.length-2)/2 : Buffer.byteLength(v,'utf8');
+  for (const [k, v] of map.entries()) {
+    total += Buffer.byteLength(k, 'utf8');
+    total += v.startsWith('0x') ? (v.length - 2) / 2 : Buffer.byteLength(v, 'utf8');
   }
   return total;
 };
 
 const buildMintCall = (c, ver, amt, map, to) => {
-  const n = parseInt(amt,10)||1;
-  const v = String(ver).replace(/^v/i,'');
-  if (v==='1')  return c.methods.mint(map,to);
-  if (v==='2b') return c.methods.mint(map,to,n);
-  return c.methods.mint(n,map,to);            // v3+
+  const n = parseInt(amt, 10) || 1;
+  const v = String(ver).replace(/^v/i, '');
+  if (v === '1')  return c.methods.mint(map, to);
+  if (v === '2b') return c.methods.mint(map, to, n);
+  return c.methods.mint(n, map, to);            // v3+
 };
 
 /*──────── snackbar helper ──────────────────────────────────*/
 function useSnackbarBridge(cb) {
-  const [local,setLocal] = useState(null);
-  const api = (msg, sev='info') => {
-    cb ? cb({ open:true, message:msg, severity:sev })
-       : setLocal({ open:true, message:msg, severity:sev });
+  const [local, setLocal] = useState(null);
+  const api = (msg, sev = 'info') => {
+    cb ? cb({ open: true, message: msg, severity: sev })
+       : setLocal({ open: true, message: msg, severity: sev });
   };
   const node = local?.open && (
     <div role="alert"
       style={{
-        position:'fixed',bottom:20,left:'50%',transform:'translateX(-50%)',
-        background:'#222',color:'#fff',padding:'6px 12px',borderRadius:4,
-        fontSize:'.8rem',zIndex:2600,cursor:'pointer',
+        position: 'fixed', bottom: 20, left: '50%', transform: 'translateX(-50%)',
+        background: '#222', color: '#fff', padding: '6px 12px', borderRadius: 4,
+        fontSize: '.8rem', zIndex: 2600, cursor: 'pointer',
       }}
       onClick={() => setLocal(null)}
     >{local.message}</div>
@@ -173,13 +173,8 @@ function useSnackbarBridge(cb) {
 }
 
 /*════════ component ═══════════════════════════════════════*/
-export default function Mint({
-  contractAddress,
-  contractVersion = 'v4',
-  setSnackbar,
-  onMutate,
-  $level,
-}) {
+export default function Mint({ contractAddress, contractVersion = 'v4',
+  setSnackbar, onMutate, $level }) {
   /* slice-cache hygiene */
   useEffect(() => { purgeExpiredSliceCache(); }, []);
 
@@ -195,94 +190,125 @@ export default function Mint({
   /* snackbar */
   const [snack, snackNode] = useSnackbarBridge(setSnackbar);
 
-  /*── form state ───────────────────────────────────────*/
+  /*── form & UI state (unchanged) ──────────────────────────*/
   const init = {
-    name:'', description:'', creators:'', authors:'',
-    toAddress:'', license:'All Rights Reserved', customLicense:'',
-    amount:'1', nsfw:'Does not contain NSFW',
-    flashing:'Does not contain Flashing Hazard',
-    agree:false,
+    name: '', description: '', creators: '', authors: '',
+    toAddress: '', license: 'All Rights Reserved', customLicense: '',
+    amount: '1', nsfw: 'Does not contain NSFW',
+    flashing: 'Does not contain Flashing Hazard',
+    agree: false,
   };
   const [f, setF]         = useState(init);
-  const [attrs, setAttrs] = useState([{ name:'', value:'' }]);
+  const [attrs, setAttrs] = useState([{ name: '', value: '' }]);
   const [tags, setTags]   = useState([]);
   const [tagInput, setTagInput] = useState('');
   const [file, setFile]   = useState(null);
   const [url, setUrl]     = useState('');
-  const [roys, setRoys]   = useState([{ address: wallet||'', sharePct: '' }]);
+  const [roys, setRoys]   = useState([{ address: wallet || '', sharePct: '' }]);
 
-  /* batch & loop state */
   const [batches, setBatches]       = useState(null);
   const [stepIdx, setStepIdx]       = useState(0);
   const [confirmCount, setConfirmCount] = useState(0);
-  const [ov, setOv]                = useState({ open:false });
+  const [ov, setOv]                = useState({ open: false });
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const tagRef = useRef(null);
 
-  /*── wallet autofill ─────────────────────────────────*/
+  /* wallet autofill */
   useEffect(() => {
-    setF(p => ({ ...p, creators: wallet||'', toAddress: wallet||'' }));
-    setRoys(p => {
+    setF((p) => ({ ...p, creators: wallet || '', toAddress: wallet || '' }));
+    setRoys((p) => {
       const n = [...p];
-      if (!n.length) return [{ address: wallet||'', sharePct: '' }];
-      n[0] = { ...n[0], address: wallet||'' };
+      if (!n.length) return [{ address: wallet || '', sharePct: '' }];
+      n[0] = { ...n[0], address: wallet || '' };
       return n;
     });
   }, [wallet]);
 
   /* royalties helpers */
-  const setRoy = (i, k, v) => setRoys(p => { const n=[...p]; n[i][k] = v; return n; });
-  const addRoy = () => roys.length < MAX_ROY_ENTRIES && setRoys(p => [ ...p, { address:'', sharePct:'' } ]);
-  const delRoy = (i) => setRoys(p => p.filter((_, idx) => idx !== i));
+  const setRoy = (i, k, v) => setRoys((p) => { const n = [...p]; n[i][k] = v; return n; });
+  const addRoy = () => roys.length < MAX_ROY_ENTRIES && setRoys((p) => [...p, { address: '', sharePct: '' }]);
+  const delRoy = (i) => setRoys((p) => p.filter((_, idx) => idx !== i));
 
-  /* attr & tag helpers */
+  /* attr & tag helpers (unchanged) */
   const setAttr = (i, k, v) => {
-    if ((k==='name' && v.length > MAX_ATTR_N) || (k==='value' && v.length > MAX_ATTR_V)) return;
-    setAttrs(p => { const n=[...p]; n[i][k] = v; return n; });
+    if ((k === 'name' && v.length > MAX_ATTR_N) || (k === 'value' && v.length > MAX_ATTR_V)) return;
+    setAttrs((p) => { const n = [...p]; n[i][k] = v; return n; });
   };
-  const addAttr = () => attrs.length < MAX_ATTR && setAttrs(p => [ ...p, { name:'', value:'' } ]);
-  const delAttr = (i) => setAttrs(p => p.filter((_, idx) => idx !== i));
+  const addAttr = () => attrs.length < MAX_ATTR && setAttrs((p) => [...p, { name: '', value: '' }]);
+  const delAttr = (i) => setAttrs((p) => p.filter((_, idx) => idx !== i));
 
   const pushTag = (raw) => {
     const t = raw.trim().toLowerCase();
     if (!t) return;
-    if (!/^[a-z0-9-_]+$/i.test(t))      return snack('Invalid tag','error');
-    if (t.length > MAX_TAG_LEN)         return snack('Tag too long','error');
+    if (!/^[a-z0-9-_]+$/i.test(t))      return snack('Invalid tag', 'error');
+    if (t.length > MAX_TAG_LEN)         return snack('Tag too long', 'error');
     if (tags.includes(t))               return;
-    if (tags.length >= MAX_TAGS)        return snack('Max 10 tags','error');
-    setTags(p => [ ...p, t ]);
+    if (tags.length >= MAX_TAGS)        return snack('Max 10 tags', 'error');
+    setTags((p) => [...p, t]);
   };
 
- 
-  /*────────────────── estimator state ─────────────────────*/
-  const [isEstim,   setIsEstim]   = useState(false);
-  const [estimate,  setEstimate]  = useState(null);
-   /* oversize slicing */
+  /*────────────────── estimator state ───────────────*/
+  const [isEstim,  setIsEstim]  = useState(false);
+  const [estimate, setEstimate] = useState(null);
+
+  /*──────────────── prepare & estimate ───────────────*/
+  const prepareMint = async () => {
+    if (!toolkit) return snack('Toolkit unavailable', 'error');
+    if (!validate()) return;
+
+    setIsEstim(true);
+    await new Promise(requestAnimationFrame);
+    try {
+      const packs = await buildBatches();
+      setBatches(packs);
+
+      const { fee, burn } = await estimateChunked(toolkit, packs.flat());
+
+      const manualBurn = calcStorageMutez(
+        metaBytes + META_PAD_BYTES,
+        appendSlices,
+        parseInt(f.amount, 10) || 1,
+      );
+      const burnFinal = burn > 0 ? burn : manualBurn;
+
+      setEstimate({ feeTez: toTez(fee), storageTez: toTez(burnFinal) });
+    } catch (e) {
+      snack(isSim500(e) ? 'Node refused simulation – heuristic used' : e.message, 'warning');
+      const feeMutez  = (batches?.length || 1) * μBASE_TX_FEE;
+      const burnMutez = calcStorageMutez(
+        metaBytes + META_PAD_BYTES,
+        appendSlices,
+        parseInt(f.amount, 10) || 1,
+      );
+      setEstimate({ feeTez: toTez(feeMutez), storageTez: toTez(burnMutez) });
+    } finally { setIsEstim(false); }
+  };
+
+  /* oversize slicing logic (unchanged) */
   const artifactHex = useMemo(() => char2Bytes(url), [url]);
   const oversize    = artifactHex.length / 2 > SLICE_SAFE_BYTES;
 
-  const allSlices = useMemo(() => (
-    oversize ? sliceHex(`0x${artifactHex}`, SAFE_BYTES_0) : []
-  ), [oversize, artifactHex]);
+  const allSlices = useMemo(
+    () => (oversize ? sliceHex(`0x${artifactHex}`, SAFE_BYTES_0) : []),
+    [oversize, artifactHex],
+  );
 
-  const slice0DataUri = useMemo(() => (
-    oversize ? Buffer.from(allSlices[0].slice(2), 'hex').toString('utf8') : url
-  ), [oversize, allSlices, url]);
+  const slice0DataUri = useMemo(
+    () => (oversize ? Buffer.from(allSlices[0].slice(2), 'hex').toString('utf8') : url),
+    [oversize, allSlices, url],
+  );
 
   const appendSlices = useMemo(
-    () => oversize ? allSlices.slice(1) : [],
+    () => (oversize ? allSlices.slice(1) : []),
     [oversize, allSlices],
   );
 
-  /* warn on oversize file */
   useEffect(() => {
-    if (oversize) {
-      snack('Large file detected – multiple transactions & higher fees required', 'warning');
-    }
+    if (oversize) snack('Large file detected – multiple transactions & higher fees required', 'warning');
   }, [oversize]);
 
-  /* royalties shares object */
+  /* royalties shares, metadata build, bytes & pct (unchanged) */
   const shares = useMemo(() => {
     const o = {};
     roys.forEach(({ address, sharePct }) => {
@@ -294,46 +320,51 @@ export default function Mint({
     return o;
   }, [roys]);
 
-  /* metadata & size */
-  const metaMap   = useMemo(() => {
-    const clean = attrs.filter(a => a.name && a.value);
-    return buildMeta({ f, attrs: clean, tags, dataUrl: slice0DataUri, mime: file?.type, shares });
+  const metaMap = useMemo(() => {
+    const clean = attrs.filter((a) => a.name && a.value);
+    return buildMeta({
+      f, attrs: clean, tags, dataUrl: slice0DataUri, mime: file?.type, shares,
+    });
   }, [f, attrs, tags, slice0DataUri, file, shares]);
 
   const metaBytes = useMemo(() => mapSize(metaMap), [metaMap]);
 
-  /* royalties % */
-  const totalPct = useMemo(() => Object.values(shares)
-    .reduce((t, n) => t + n, 0) / 100, [shares]);
+  const totalPct = useMemo(
+    () => Object.values(shares).reduce((t, n) => t + n, 0) / 100,
+    [shares],
+  );
 
   /*──────── validation ───────────────────────────────*/
   const validate = () => {
     try {
-      if (!wallet)                  throw new Error('Wallet not connected');
-      if (mismatch)                 throw new Error('Wrong wallet network');
-      if (needsReveal)              throw new Error('Reveal account first');
+      if (!wallet)                                  throw new Error('Wallet not connected');
+      if (mismatch)                                 throw new Error('Wrong wallet network');
+      if (needsReveal)                              throw new Error('Reveal account first');
       asciiPrintable(f.name, 200);
-      if (!f.name.trim())           throw new Error('Name required');
-      if (f.description)            cleanDescription(f.description);
-      if (!file || !url)            throw new Error('Artifact required');
+      if (!f.name.trim())                           throw new Error('Name required');
+      if (f.description)                            cleanDescription(f.description);
+      if (!file || !url)                            throw new Error('Artifact required');
 
       const R = /^(tz1|tz2|tz3|KT1)[1-9A-HJ-NP-Za-km-z]{33}$/;
-      const list = s => s.split(',').map(x => x.trim()).filter(Boolean);
-      if (!R.test(f.toAddress))     throw new Error('Recipient invalid');
-      if (list(f.creators).some(a => !R.test(a))) throw new Error('Creator invalid');
-      if (totalPct === 0)           throw new Error('Royalties 0 %');
-      if (totalPct > MAX_ROY_TOTAL_PCT) throw new Error(`Royalties > ${MAX_ROY_TOTAL_PCT}%`);
+      const list = (s) => s.split(',').map((x) => x.trim()).filter(Boolean);
+      if (!R.test(f.toAddress))                     throw new Error('Recipient invalid');
+      if (list(f.creators).some((a) => !R.test(a))) throw new Error('Creator invalid');
+      if (totalPct === 0)                           throw new Error('Royalties 0 %');
+      if (totalPct > MAX_ROY_TOTAL_PCT)             throw new Error(`Royalties > ${MAX_ROY_TOTAL_PCT}%`);
 
       if (contractVersion !== 'v1') {
         const n = parseInt(f.amount, 10);
-        if (Number.isNaN(n) || n < 1 || n > MAX_EDITIONS) throw new Error(`Editions 1–${MAX_EDITIONS}`);
+        if (Number.isNaN(n) || n < 1 || n > MAX_EDITIONS) {
+          throw new Error(`Editions 1–${MAX_EDITIONS}`);
+        }
       }
 
-      if (!f.license)               throw new Error('License required');
-      if (f.license === 'Custom' && !f.customLicense.trim())
-                                   throw new Error('Custom licence required');
-      if (!f.agree)                 throw new Error('Agree to the terms first');
-      if (!oversize && metaBytes > MAX_META) throw new Error('Metadata > 32 kB');
+      if (!f.license)                               throw new Error('License required');
+      if (f.license === 'Custom' && !f.customLicense.trim()) {
+        throw new Error('Custom licence required');
+      }
+      if (!f.agree)                                 throw new Error('Agree to the terms first');
+      if (!oversize && metaBytes > MAX_META)        throw new Error('Metadata > 32 kB');
       return true;
     } catch (e) { snack(e.message, 'error'); return false; }
   };
@@ -346,7 +377,7 @@ export default function Mint({
     try {
       const st = await c.storage?.();
       baseId = Number(st?.next_token_id || 0);
-    } catch { /* ignore */ }
+    } catch {/* ignore */}
     baseIdRef.current = baseId;
 
     const mintParams = {
@@ -354,25 +385,26 @@ export default function Mint({
       ...(await buildMintCall(c, contractVersion, f.amount, metaMap, f.toAddress).toTransferParams()),
     };
 
-    const out = [[mintParams]];  // batch‑0 mint
+    const out = [[mintParams]];                     /* batch-0 = mint */
 
     const amt = parseInt(f.amount, 10) || 1;
     if (appendSlices.length) {
       for (let i = 0; i < amt; i += 1) {
         const tokenId = baseId + i;
-        appendSlices.forEach(hx => {
+        appendSlices.forEach((hx) => {
           out.push([{
             kind: OpKind.TRANSACTION,
             ...(c.methods.append_artifact_uri(tokenId, hx).toTransferParams()),
           }]);
         });
       }
-      // Save initial checkpoints for resumable upload
+      /* save slice checkpoints for resumable upload */
       try {
         const fullHex = `0x${artifactHex}`;
         const buf = new TextEncoder().encode(fullHex);
         const hashBuffer = await crypto.subtle.digest('SHA-256', buf);
-        const digest = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+        const digest = Array.from(new Uint8Array(hashBuffer))
+          .map((b) => b.toString(16).padStart(2, '0')).join('');
         for (let i = 0; i < amt; i += 1) {
           const tokenId = baseId + i;
           saveSliceCheckpoint(contractAddress, tokenId, 'artifactUri', {
@@ -381,64 +413,30 @@ export default function Mint({
             hash: `sha256:${digest}`,
           });
         }
-      } catch { /* hashing errors ignored */ }
+      } catch {/* hashing errors ignored */}
     }
     return out;
   }, [toolkit, contractAddress, contractVersion, f.amount, metaMap, f.toAddress, appendSlices, artifactHex]);
 
-  /*──────── fee estimate (+ confirm dialog) ──────────*/
-  const flatParams = useMemo(() => batches?.flat() || [], [batches]);
-  const est        = useTxEstimate(toolkit, flatParams);
-
+  /*──────── confirm-dialog gate ──────────────────────*/
   useEffect(() => {
-    if (batches && !est.isLoading && confirmCount === 0) {
-      setConfirmOpen(true);
-    }
-  }, [batches, est.isLoading, confirmCount]);
-
-  /*──────── prepare & CTA click (REWRITTEN) ───────────────*/
-  const prepareMint = async () => {
-    if (!toolkit) return snack('Toolkit unavailable', 'error');
-    if (!validate()) return;
-
-    setIsEstim(true);
-    await new Promise(requestAnimationFrame);        // paint spinner ASAP
-
-    try {
-      const packs = await buildBatches();
-      const flat  = packs.flat();
-      const est   = await estimateChunked(toolkit, flat);
-
-      setBatches(packs);
-      setEstimate(est);
-      setConfirmOpen(true);
-    } catch (e) { snack(e.message, 'error'); }
-    finally   { setIsEstim(false); }
-  };
-
+    if (batches && estimate && confirmCount === 0) setConfirmOpen(true);
+  }, [batches, estimate, confirmCount]);
 
   /*──────── sender loop guarded by confirmCount ──────*/
   const sendBatch = useCallback(async () => {
     if (!batches || !batches.length) return;
-    if (stepIdx >= batches.length) return;
+    if (stepIdx >= batches.length)  return;
+
     const params = batches[stepIdx];
     try {
-      setOv({
-        open:true,status:'Waiting for signature…',
-        step:stepIdx+1,total:batches.length,
-      });
+      setOv({ open: true, status: 'Waiting for signature…', step: stepIdx + 1, total: batches.length });
       const op = await toolkit.wallet.batch(params).send();
-      setOv({
-        open:true,status:'Broadcasting…',
-        step:stepIdx+1,total:batches.length,
-      });
+      setOv({ open: true, status: 'Broadcasting…', step: stepIdx + 1, total: batches.length });
       await op.confirmation();
 
       if (stepIdx + 1 === batches.length) {
-        setOv({
-          open:true,opHash:op.opHash,
-          step:batches.length,total:batches.length,
-        });
+        setOv({ open: true, opHash: op.opHash, step: batches.length, total: batches.length });
         onMutate?.();
         /* reset */
         setBatches(null); setStepIdx(0); setConfirmCount(0);
@@ -446,26 +444,23 @@ export default function Mint({
         setStepIdx((i) => i + 1);
       }
     } catch (e) {
-      setOv({ open:true, error:true, status: e.message || String(e),
-              step: stepIdx+1, total: batches.length });
+      setOv({
+        open: true, error: true, status: e.message || String(e),
+        step: stepIdx + 1, total: batches.length,
+      });
     }
   }, [batches, stepIdx, toolkit, onMutate]);
 
   /* arm loop on confirm */
-  useEffect(() => {
-    if (confirmCount === 1 && batches) sendBatch();
-  }, [confirmCount, batches, sendBatch]);
+  useEffect(() => { if (confirmCount === 1 && batches) sendBatch(); }, [confirmCount, batches, sendBatch]);
 
   /*──────── retry hook ───────────────────────────────*/
   const retry = () => {
-    if (!batches || !batches.length) {
-      snack('Nothing to retry', 'error');
-      return;
-    }
+    if (!batches || !batches.length) return snack('Nothing to retry', 'error');
     sendBatch();
   };
 
-  /*──────── disabled-reason string ────────────────────────*/
+  /*──────── disabled-reason string ───────────────────*/
   const reason = isEstim
     ? 'Estimating…'
     : ov.open && !ov.error && !ov.opHash
@@ -476,7 +471,7 @@ export default function Mint({
           ? 'Royalties exceed limit'
           : !f.agree ? 'Agree to the terms first' : '';
 
-  /*──────── JSX ──────────────────────────────────────*/
+   /*──────────────────────── JSX begins here ─────────────────────*/
   return (
     <Wrap $level={$level}>
       {snackNode}
@@ -726,7 +721,7 @@ export default function Mint({
       </PixelButton>
 
       {/* confirm dialog */}
-      {confirmOpen && (
+       {confirmOpen && (
         <OperationConfirmDialog
           open
           slices={batches?.length || 1}
@@ -736,7 +731,6 @@ export default function Mint({
         />
       )}
 
-      {/* overlay */}
       {ov.open && (
         <OperationOverlay
           mode="mint"
@@ -746,7 +740,7 @@ export default function Mint({
           contractAddr={contractAddress}
           step={ov.step}
           total={ov.total}
-          onRetry={ov.error ? retry : undefined}
+          onRetry={retry}
           onCancel={() => {
             setOv({ open:false });
             setBatches(null); setStepIdx(0); setConfirmCount(0);
@@ -756,4 +750,10 @@ export default function Mint({
     </Wrap>
   );
 }
+/* What changed & why:
+   • Removed duplicated local helpers/constants; now rely on
+     shared `feeEstimator` utilities.
+   • Added `META_PAD_BYTES` so burn calc keeps 1 kB safety head-room.
+   • Overlay always shows **Retry** when handler provided.
+*/
 /* EOF */

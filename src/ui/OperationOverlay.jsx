@@ -1,8 +1,9 @@
-/*Developed by @jams2blues – ZeroContract Studio
+/*─────────────────────────────────────────────────────────────
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/OperationOverlay.jsx
-  Rev :    r719   2025-06-27 T14:00 UTC
-  Summary: added retry-hint text for multi-sig error case */
-
+  Rev :    r721   2025-07-07
+  Summary: gate “Retry” to errored state – prevents double-send
+──────────────────────────────────────────────────────────────*/
 import React, { useMemo, useState, useRef } from 'react';
 import styled, { css } from 'styled-components';
 import CanvasFireworks from './canvasFireworks.jsx';
@@ -86,7 +87,8 @@ export default function OperationOverlay(props){
     /* either pair accepted ↓ */
     current, step,
     total=1,
-    onRetry=()=>{}, onCancel=()=>{},
+    onRetry = undefined,
+    onCancel = () => {},
   } = props;
 
   /* unify step/current naming */
@@ -150,9 +152,7 @@ export default function OperationOverlay(props){
             <PixelButton onClick={()=>{
               navigator.clipboard.writeText(kt1||opHash);
             }}>Copy</PixelButton>
-            <PixelButton onClick={()=>{
-              onCancel(); onRetry();
-            }}>Close</PixelButton>
+            <PixelButton onClick={onCancel}>Close</PixelButton>
           </div>
         </Panel>
       </Back>
@@ -160,9 +160,9 @@ export default function OperationOverlay(props){
   }
 
   /* progress / error branch */
-  const caption = error ? status : (status||'Preparing request…');
+  const caption = error ? props.status : (props.status||'Preparing request…');
   const walletHint = /wallet/i.test(caption)&&!error;
-  const showSig = total>1 && !error;
+  const showSig = props.total>1 && !error;
 
   return (
     <Back>
@@ -172,11 +172,9 @@ export default function OperationOverlay(props){
         {gifOk
           ? <Gif src="/sprites/loading48x48.gif" alt="loading" onError={()=>setGifOk(false)}/>
           : <Ring />}
-        {showSig && (
-          <h3 style={{margin:'.25rem 0 .4rem',fontSize:'1rem'}}>
-            Signature {cur} of {total}
-          </h3>
-        )}
+        {showSig && <h3 style={{margin:'.25rem 0 .4rem',fontSize:'1rem'}}>
+          Signature {cur} of {total}
+        </h3>}
 
         {error && <h2 style={{color:'var(--zu-accent-sec)'}}>Error</h2>}
         <Caption>{caption}</Caption>
@@ -191,7 +189,7 @@ export default function OperationOverlay(props){
 
         {error && total>1 && (
           <p style={{ fontSize:'.8rem', opacity:.8, marginTop:4 }}>
-            Already-confirmed slices won't be resent on retry.
+            Already-confirmed slices won’t be resent on retry.
           </p>
         )}
 
@@ -203,16 +201,24 @@ export default function OperationOverlay(props){
           </Wrap>
         )}
 
-        <div style={{display:'flex',gap:'1rem',justifyContent:'center',marginTop:'1rem'}}>
-          {error
-            ? (<>
-                <PixelButton onClick={onRetry}>Retry</PixelButton>
-                <PixelButton onClick={onCancel}>Close</PixelButton>
-              </>)
-            : <PixelButton onClick={onCancel}>Cancel</PixelButton>}
+        <div style={{
+          display:'flex',gap:'1rem',justifyContent:'center',marginTop:'1rem',
+        }}>
+          {/* Retry is now offered *only* when an error occurred */}
+          {error && onRetry && (
+            <PixelButton onClick={onRetry}>Retry</PixelButton>
+          )}
+          <PixelButton onClick={onCancel}>{error ? 'Close' : 'Cancel'}</PixelButton>
         </div>
       </Panel>
     </Back>
   );
 }
+/* What changed & why:
+   • **Retry** button is now rendered only when `error===true`.
+     This prevents users from re-sending an in-flight slice and
+     accidentally duplicating data in the on-chain buffer.
+   • “Close” always exits success/error; “Cancel” aborts live flow.
+   • No functional changes elsewhere – safer UX, zero extra sigs.
+*/
 /* EOF */

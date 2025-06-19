@@ -1,6 +1,6 @@
 /*Developed by @jams2blues with love for the Tezos community
-  File: .eslintrc.cjs
-  Summary: Lint ruleset enforcing user style prefs + a11y */
+  File:    .eslintrc.cjs
+  Summary: add “no-local-estimator” guard; keep em-dash ban */
 
 module.exports = {
   root: true,
@@ -17,15 +17,28 @@ module.exports = {
     'no-undef': 'error',
     'no-multi-spaces': 'error',
     'no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
-    // custom: ban em-dash unicode char
+
+    /* ban em-dash characters */
     'no-restricted-syntax': [
       'error',
+      /* em-dash guard (I22) */
       {
         selector: "Literal[value=/\\u2014/]",
-        message: 'Use double hyphen instead of em-dash.',
+        message : 'Use double hyphen instead of em-dash.',
+      },
+      /* NEW: forbid raw toolkit.estimate usage – centralise in feeEstimator.js */
+      {
+        selector:
+          "MemberExpression[property.name='estimate']",
+        message :
+          'Use shared feeEstimator.estimateChunked() – local estimators are disallowed.',
       },
     ],
   },
   ignorePatterns: ['summarized_files/**', 'public/**'],
 };
-/* What changed & why: baseline ESLint config ensures repo-wide lint pass */
+/* What changed & why:
+   • Added explicit guard against direct `toolkit.estimate.*`
+     (rule nick-named “no-local-estimator”, I85).
+*/
+/* EOF */

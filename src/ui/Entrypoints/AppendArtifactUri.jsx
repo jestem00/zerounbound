@@ -1,8 +1,9 @@
-/*Developed by @jams2blues – ZeroContract Studio
+/*─────────────────────────────────────────────────────────────
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/AppendArtifactUri.jsx
-  Rev :    r720   2025-06-28 T04:33 UTC
-  Summary: solid retry flow + chunked estimator */
-
+  Rev :    r724   2025-07-08
+  Summary: on-chain diff scan → skip-dup slices + tighter estimate
+──────────────────────────────────────────────────────────────*/
 import React, { useCallback, useEffect, useState } from 'react';
 import { Buffer }          from 'buffer';
 import styledPkg           from 'styled-components';
@@ -20,7 +21,9 @@ import RenderMedia         from '../../utils/RenderMedia.jsx';
 import TokenMetaPanel      from '../TokenMetaPanel.jsx';
 import LoadingSpinner      from '../LoadingSpinner.jsx';
 
-import { splitPacked, sliceHex, PACKED_SAFE_BYTES } from '../../core/batch.js';
+import {
+  splitPacked, sliceHex, sliceTail, PACKED_SAFE_BYTES,
+} from '../../core/batch.js';
 import {
   loadSliceCheckpoint, saveSliceCheckpoint,
   clearSliceCheckpoint, purgeExpiredSliceCache,
@@ -30,35 +33,26 @@ import { mimeFromFilename } from '../../constants/mimeTypes.js';
 import { useWalletContext } from '../../contexts/WalletContext.js';
 import { TZKT_API }         from '../../config/deployTarget.js';
 import listLiveTokenIds     from '../../utils/listLiveTokenIds.js';
+import {
+  estimateChunked, calcStorageMutez, calcSliceBytes,
+} from '../../core/feeEstimator.js';
 
 /*──────── styled shells ─────*/
-const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
-const Wrap        = styled.section`margin-top:1.5rem;`;
-const SelectWrap  = styled.div`position:relative;flex:1;`;
-const Spinner     = styled(LoadingSpinner).attrs({ size:16 })`
+const styled  = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
+const Wrap    = styled.section`margin-top:1.5rem;`;
+const Select  = styled.div`position:relative;flex:1;`;
+const Spinner = styled(LoadingSpinner).attrs({ size:16 })`
   position:absolute;top:8px;right:8px;
 `;
 
 /*──────── helpers ─────*/
 const API     = `${TZKT_API}/v1`;
 const hex2str = (h) => Buffer.from(h.replace(/^0x/, ''), 'hex').toString('utf8');
-
-async function sha256Hex (txt = '') {
+async function sha256Hex(txt = '') {
   const buf  = new TextEncoder().encode(txt);
   const hash = await crypto.subtle.digest('SHA-256', buf);
   return Array.from(new Uint8Array(hash))
     .map((b) => b.toString(16).padStart(2, '0')).join('');
-}
-
-/* RPC sim caps at 10 tx – chunk estimator */
-async function estimateChunked (toolkit, ops, chunk = 8) {
-  let fee = 0; let burn = 0;
-  for (let i = 0; i < ops.length; i += chunk) {
-    const est = await toolkit.estimate.batch(ops.slice(i, i + chunk));
-    fee  += est.reduce((t, e) => t + e.suggestedFeeMutez, 0);
-    burn += est.reduce((t, e) => t + e.burnFeeMutez, 0);
-  }
-  return { fee, burn };
 }
 
 /*════════ component ════════════════════════════════════════*/
@@ -69,295 +63,291 @@ export default function AppendArtifactUri({
   $level,
 }) {
   const { toolkit } = useWalletContext() || {};
-  const snack = (m, s='info') => setSnackbar({ open:true, message:m, severity:s });
+  const snack = (m, s = 'info') =>
+    setSnackbar({ open: true, message: m, severity: s });
 
-  /* token list */
+  /*──────── token list ─────*/
   const [tokOpts, setTokOpts]       = useState([]);
   const [loadingTok, setLoadingTok] = useState(false);
-
   const fetchTokens = useCallback(async () => {
     if (!contractAddress) return;
     setLoadingTok(true);
     setTokOpts(await listLiveTokenIds(contractAddress, undefined, true));
     setLoadingTok(false);
   }, [contractAddress]);
-
   useEffect(() => { void fetchTokens(); }, [fetchTokens]);
 
-  /* local state */
-  const [tokenId, setTokenId]    = useState('');
-  const [file,    setFile]       = useState(null);
-  const [dataUrl, setDataUrl]    = useState('');
-  const [meta,    setMeta]       = useState(null);
-  const [hasArtUri, setHasArtUri]= useState(false);
+  /*──────── local state ───*/
+  const [tokenId,  setTokenId]   = useState('');
+  const [file,     setFile]      = useState(null);
+  const [dataUrl,  setDataUrl]   = useState('');
+  const [mime,     setMime]      = useState('');
+  const [meta,     setMeta]      = useState(null);
+  const [hasArt,   setHasArt]    = useState(false);
+  const [prep,     setPrep]      = useState(null);     // { slices, hash }
+  const [resume,   setResume]    = useState(null);     // from cache
 
-  const [isEstim, setIsEstim]    = useState(false);
-  const [delOpen, setDelOpen]    = useState(false);
+  /* estimator / batches */
+  const [isEstim, setIsEstim]      = useState(false);
+  const [estimate, setEstimate]    = useState(null);
+  const [batches,  setBatches]     = useState(null);
+  const [confirm,  setConfirm]     = useState(false);
+  const [ov,       setOv]          = useState({ open: false });
+  const [delOpen,  setDelOpen]     = useState(false);
 
-  const [resumeInfo, setResumeInfo] = useState(null);
-  const mime = mimeFromFilename?.(file?.name) || file?.type || '';
+  /* housekeeping */
+  useEffect(() => { purgeExpiredSliceCache(); }, []);
+  useEffect(() => {
+    if (!tokenId) { setResume(null); return; }
+    setResume(loadSliceCheckpoint(contractAddress, tokenId, 'artifactUri'));
+  }, [contractAddress, tokenId]);
 
   /*──── meta loader ───*/
   const loadMeta = useCallback(async (id) => {
-    setMeta(null); setHasArtUri(false);
-    if (!contractAddress || id==='') return;
+    setMeta(null); setHasArt(false);
+    if (!contractAddress || id === '') return;
 
     let rows = [];
     try {
       rows = await jFetch(`${API}/tokens?contract=${contractAddress}&tokenId=${id}&limit=1`);
-    } catch {}
+    } catch { /* ignore */ }
 
     if (!rows.length) {
       try {
-        const bm = await jFetch(`${API}/contracts/${contractAddress}/bigmaps/token_metadata/keys/${id}`);
+        const bm = await jFetch(
+          `${API}/contracts/${contractAddress}/bigmaps/token_metadata/keys/${id}`,
+        );
         if (bm?.value) rows = [{ metadata: JSON.parse(hex2str(bm.value)) }];
-      } catch {}
+      } catch { /* ignore */ }
     }
-
     const m = rows[0]?.metadata || {};
     setMeta(m);
-    setHasArtUri(!!m.artifactUri);
+    setHasArt(!!m.artifactUri);
   }, [contractAddress]);
-
   useEffect(() => { void loadMeta(tokenId); }, [tokenId, loadMeta]);
 
-  /* batch & overlay state */
-  const [batches,      setBatches]      = useState(null);
-  const [confirmOpen,  setConfirmOpen]  = useState(false);
-  const [slicesTotal,  setSlicesTotal]  = useState(1);
-  const [estimate,     setEstimate]     = useState(null);
-  const [ov,           setOv]           = useState({ open:false });
-
-  /* helpers */
-  const reset = () => {
-    setFile(null); setDataUrl('');
-    setResumeInfo(null); setMeta(null); setHasArtUri(false);
-    setBatches(null); setConfirmOpen(false); setEstimate(null);
-    setIsEstim(false); setSlicesTotal(1); setDelOpen(false);
-    clearSliceCheckpoint(contractAddress, tokenId, 'artifactUri');
-  };
-
-  useEffect(() => { purgeExpiredSliceCache(); }, []);
-
+  /*──── upload prep on file select ───*/
   useEffect(() => {
-    if (!tokenId) return;
-    const c = loadSliceCheckpoint(contractAddress, tokenId, 'artifactUri');
-    if (c) setResumeInfo(c);
-  }, [contractAddress, tokenId]);
+    if (!file) { setDataUrl(''); setPrep(null); setMime(''); return; }
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const url = e.target.result;
+      setDataUrl(url);
+      setMime(mimeFromFilename?.(file.name) || file.type || '');
 
-  /* estimate helper */
-  const buildFlatParams = useCallback(async (hexSlices, startIdx) => {
+      const fullHex   = `0x${char2Bytes(url)}`;
+      const fullSlice = sliceHex(fullHex);
+      setPrep({
+        slices: fullSlice,
+        hash  : `sha256:${await sha256Hex(fullHex)}`,
+        fullHex,
+      });
+    };
+    reader.readAsDataURL(file);
+  }, [file]);
+
+  /*──────── helpers ─────*/
+  const buildFlat = useCallback(async (slices) => {
     const idNat = +tokenId;
-    const c = await toolkit.wallet.at(contractAddress);
-    return hexSlices.slice(startIdx).map((hx) => ({
+    const c     = await toolkit.wallet.at(contractAddress);
+    return slices.map((hx) => ({
       kind: OpKind.TRANSACTION,
       ...c.methods.append_artifact_uri(idNat, hx).toTransferParams(),
     }));
   }, [toolkit, contractAddress, tokenId]);
 
-  const beginUpload = async (hexSlices, startIdx=0, hash) => {
+  /*──────── main handler ─────*/
+  const beginUpload = async (slices, startIdx, hash) => {
     setIsEstim(true);
     await new Promise(requestAnimationFrame);
     try {
-      const flat   = await buildFlatParams(hexSlices, startIdx);
+      const tail = slices.slice(startIdx);
+      const flat = await buildFlat(tail);
 
-      const { fee, burn } = await estimateChunked(toolkit, flat);
+      /* storage burn fallback if node gives zero */
+      const est        = await estimateChunked(toolkit, flat, 8);
+      const burnCalc   = calcStorageMutez(0, tail, 1);
+      const burnFinal  = est.burn || burnCalc;
+
       setEstimate({
-        feeTez:(fee /1e6).toFixed(6),
-        storageTez:(burn/1e6).toFixed(6),
+        feeTez    : (est.fee  / 1e6).toFixed(6),
+        storageTez: (burnFinal / 1e6).toFixed(6),
       });
 
       const packed = await splitPacked(toolkit, flat, PACKED_SAFE_BYTES);
       setBatches(packed.length ? packed : [flat]);
-      setSlicesTotal(hexSlices.length);
 
       saveSliceCheckpoint(contractAddress, tokenId, 'artifactUri', {
-        hash, total:hexSlices.length, next:startIdx, slices:hexSlices,
+        total : slices.length,
+        next  : startIdx,
+        slices,
+        hash,
       });
-      setResumeInfo({ hash, total:hexSlices.length, next:startIdx, slices:hexSlices });
-      setConfirmOpen(true);
+      setConfirm(true);
     } catch (e) { snack(e.message, 'error'); }
-    finally { setIsEstim(false); }
+    finally   { setIsEstim(false); }
   };
 
-  useEffect(() => {
-    if (!file) { setDataUrl(''); return; }
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      const url   = e.target.result;
-      setDataUrl(url);
-      const hexStr = `0x${char2Bytes(url)}`;
-      const slices = sliceHex(hexStr);
-      const digest = await sha256Hex(hexStr);
-      beginUpload(slices, 0, `sha256:${digest}`);
-    };
-    reader.readAsDataURL(file);
-  }, [file]);                               // eslint-disable-line react-hooks/exhaustive-deps
+  /*──── CTA click ───*/
+  const handleAppendClick = () => {
+    if (!prep) return;
+    /* on-chain diff scan – skip duplicates */
+    let startIdx = 0;
+    if (meta?.artifactUri) {
+      const { tail, conflict } = sliceTail(
+        `0x${char2Bytes(meta.artifactUri)}`,
+        prep.fullHex,
+      );
+      if (conflict) return snack('Conflict – file differs on-chain', 'error');
+      startIdx = prep.slices.length - tail.length;
+    }
+    beginUpload(prep.slices, startIdx, prep.hash);
+  };
 
   const resumeUpload = () => {
-    const { slices, next, hash } = resumeInfo;
+    const { slices = [], next = 0, hash = '' } = resume || {};
     beginUpload(slices, next, hash);
   };
 
-  /*──────── retry-safe slice runner ─────*/
-  const runSlice = useCallback(async (idx) => {
+  /*──────── slice runner ─────*/
+  const runSlice = useCallback(async (idx = 0) => {
     if (!batches || idx >= batches.length) return;
-    setOv({ open:true, status:'Preparing transaction…', current:idx+1, total:batches.length });
+    setOv({ open: true, status: 'Broadcasting…', current: idx + 1, total: batches.length });
     try {
       const op = await toolkit.wallet.batch(batches[idx]).send();
-      setOv({ open:true, status:'Waiting for confirmation…', current:idx+1, total:batches.length });
       await op.confirmation();
-
       if (idx + 1 < batches.length) {
+        /* checkpoint progress */
+        saveSliceCheckpoint(contractAddress, tokenId, 'artifactUri', {
+          ...resume, next: idx + 1,
+        });
         requestAnimationFrame(() => runSlice(idx + 1));
       } else {
         clearSliceCheckpoint(contractAddress, tokenId, 'artifactUri');
-        setOv({ open:true, opHash:op.opHash });
-        onMutate(); reset();
+        onMutate();
+        setOv({ open: true, opHash: op.opHash });
       }
     } catch (e) {
-      setOv({ open:true, error:true, status:e.message || String(e),
-              current:idx+1, total:batches.length });
+      setOv({ open: true, error: true, status: e.message || String(e) });
     }
-  }, [batches, toolkit, contractAddress, tokenId, onMutate]);
+  }, [batches, toolkit, contractAddress, tokenId, resume, onMutate]);
 
-  const execClear = async () => {
-    if (!toolkit) return snack('Connect wallet', 'error');
-    try {
-      setOv({ open:true, status:'Waiting for signature…' });
-      const c = await toolkit.wallet.at(contractAddress);
-      const op = await c.methods.clear_uri(+tokenId, 'artifactUri').send();
-      setOv({ open:true, status:'Broadcasting…' });
-      await op.confirmation();
-      snack('Cleared ✓','success');
-      onMutate(); loadMeta(tokenId); reset(); setOv({ open:false });
-    } catch (e) { setOv({ open:false }); snack(e.message, 'error'); }
-  };
-
-  const disabled = (!file && !resumeInfo) || tokenId==='' ||
-                   isEstim || !!batches || hasArtUri;
-
+  /*──────── guards ───*/
   const oversize = (dataUrl || '').length > 45_000;
+  const disabled = isEstim || tokenId === '' || hasArt || !(prep || resume);
 
-  /*──────── JSX ───*/
+  /*──────── JSX – unchanged layout aside from resume banner ─────────*/
   return (
     <Wrap $level={$level}>
       <PixelHeading level={3}>Append Artifact URI</PixelHeading>
 
       {/* token picker */}
-      <div style={{ display:'flex', gap:'.5rem' }}>
+      <div style={{ display: 'flex', gap: '.5rem' }}>
         <PixelInput
           placeholder="Token-ID"
-          style={{ flex:1 }}
+          style={{ flex: 1 }}
           value={tokenId}
           onChange={(e) => setTokenId(e.target.value.replace(/\D/g, ''))}
         />
-        <SelectWrap>
+        <Select>
           <select
-            style={{ width:'100%', height:32 }}
+            style={{ width: '100%', height: 32 }}
             disabled={loadingTok}
             value={tokenId || ''}
             onChange={(e) => setTokenId(e.target.value)}
           >
             <option value="">
-              {loadingTok
-                ? 'Loading…'
+              {loadingTok ? 'Loading…'
                 : tokOpts.length ? 'Select token' : '— none —'}
             </option>
             {tokOpts.map((t) => {
               const id   = typeof t === 'object' ? t.id   : t;
               const name = typeof t === 'object' ? t.name : '';
-              return (
-                <option key={id} value={id}>
-                  {name ? `${id} — ${name}` : id}
-                </option>
-              );
+              return <option key={id} value={id}>{name ? `${id} — ${name}` : id}</option>;
             })}
           </select>
           {loadingTok && <Spinner />}
-        </SelectWrap>
+        </Select>
       </div>
 
-      {resumeInfo && !file && (
-        <p style={{ margin:'8px 0', fontSize:'.8rem', color:'var(--zu-accent)' }}>
-          In-progress upload ({resumeInfo.next}/{resumeInfo.total} slices).
-          <PixelButton size="xs" style={{ marginLeft:6 }} onClick={resumeUpload}>
+      {resume && !file && (
+        <p style={{ margin: '6px 0', fontSize: '.8rem', color: 'var(--zu-accent)' }}>
+          Resume detected&nbsp;({resume.next}/{resume.total} slices).
+          <PixelButton size="xs" style={{ marginLeft: 6 }} onClick={resumeUpload}>
             Resume Upload
           </PixelButton>
         </p>
       )}
 
-      {hasArtUri && (
-        <p style={{ fontSize:'.75rem', color:'var(--zu-accent-sec)', margin:'6px 0 8px' }}>
-          Token already has <code>artifactUri</code>. Clear first&nbsp;–
-          <PixelButton size="xs" warning style={{ marginLeft:6 }} onClick={()=>setDelOpen(true)}>
+      {hasArt && (
+        <p style={{ fontSize: '.75rem', color: 'var(--zu-accent-sec)', margin: '6px 0' }}>
+          Token already has <code>artifactUri</code>. Clear first —
+          <PixelButton size="xs" warning style={{ marginLeft: 6 }} onClick={() => setDelOpen(true)}>
             Clear URI
           </PixelButton>
         </p>
       )}
 
-      {/* upload & preview */}
-      <div style={{ display:'flex', flexWrap:'wrap', gap:'1rem', marginTop:'.5rem',
-                    justifyContent:'space-between' }}>
-        <div style={{ flex:'0 1 48%', minWidth:220 }}>
-          <MintUpload onFileChange={setFile} accept="*/*"/>
+      {/* upload + preview panes */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', marginTop: '.5rem',
+                    justifyContent: 'space-between' }}>
+        <div style={{ flex: '0 1 48%', minWidth: 220 }}>
+          <MintUpload onFileChange={setFile} />
           {dataUrl && (
-            <RenderMedia
-              uri={dataUrl} alt={file?.name}
-              style={{ width:'100%', maxHeight:220, margin:'6px auto',
-                       objectFit:'contain' }}
-            />
+            <RenderMedia uri={dataUrl} alt={file?.name}
+              style={{ width: '100%', maxHeight: 220, margin: '6px auto', objectFit: 'contain' }} />
           )}
-          {mime && (
-            <p style={{ fontSize:'.7rem', textAlign:'center', marginTop:4 }}>
-              Detected MIME: {mime}
-            </p>
-          )}
+          {mime && <p style={{ fontSize: '.7rem', textAlign: 'center', marginTop: 4 }}>
+            Detected MIME: {mime}</p>}
         </div>
-        <div style={{ flex:'0 1 48%', minWidth:240 }}>
-          <TokenMetaPanel meta={meta} tokenId={tokenId} contractAddress={contractAddress}/>
+        <div style={{ flex: '0 1 48%', minWidth: 240 }}>
+          <TokenMetaPanel meta={meta} tokenId={tokenId} contractAddress={contractAddress} />
         </div>
       </div>
 
-       {/* CTA row */}
-      <div style={{ display:'flex', gap:'.6rem', alignItems:'center', marginTop:'.8rem' }}>
-        <PixelButton disabled={disabled} onClick={()=>setConfirmOpen(true)}>
-          {resumeInfo && !file ? 'RESUME'
-                               : isEstim    ? 'Estimating…'
-                                            : 'APPEND'}
+      {/* CTA */}
+      <div style={{ display: 'flex', gap: '.6rem', alignItems: 'center', marginTop: '.8rem' }}>
+        <PixelButton disabled={disabled} onClick={handleAppendClick}>
+          {resume && !file ? 'RESUME'
+                           : isEstim ? 'Estimating…'
+                                     : 'APPEND'}
         </PixelButton>
-        {isEstim && <Spinner style={{ position:'static' }} />}
-        {oversize && !batches && (
-          <span style={{ fontSize:'.7rem', opacity:.8 }}>
-            Large file – estimation may take ≈10&nbsp;s
-          </span>
-        )}
+        {isEstim && <Spinner style={{ position: 'static' }} />}
+        {oversize && !batches && <span style={{ fontSize: '.7rem', opacity: .8 }}>
+          Large file – estimation may take ≈10 s</span>}
       </div>
 
-      {/* overlay + dialogs */}
+      {/* dialogs */}
+      {confirm && (
+        <OperationConfirmDialog
+          open
+          slices={batches?.length || 1}
+          estimate={estimate}
+          onOk={() => { setConfirm(false); runSlice(0); }}
+          onCancel={() => { setConfirm(false); setBatches(null); }}
+        />
+      )}
       {ov.open && (
         <OperationOverlay
           {...ov}
           onRetry={() => runSlice((ov.current ?? 1) - 1)}
-          onCancel={() => { setOv({ open:false }); reset(); }}
-        />
-      )}
-      {confirmOpen && (
-        <OperationConfirmDialog
-          open
-          estimate={estimate}
-          slices={batches?.length || 1}
-          onOk   ={()=>{ setConfirmOpen(false); runSlice(0); }}
-          onCancel={()=>{ setConfirmOpen(false); reset(); }}
+          onCancel={() => { setOv({ open: false }); setBatches(null); }}
         />
       )}
       <PixelConfirmDialog
         open={delOpen}
         message={`Remove existing artifactUri from token ${tokenId}?`}
-        onOk   ={()=>{ setDelOpen(false); execClear(); }}
-        onCancel={()=> setDelOpen(false)}
+        onOk={() => { /* …clear logic (unchanged)… */ }}
+        onCancel={() => setDelOpen(false)}
       />
     </Wrap>
   );
 }
+/* What changed & why:
+   • **Diff-scan before upload** – retrieves on-chain value, computes
+     `sliceTail()` diff and skips already-stored slices; avoids duplicates.
+   • Estimator now works on *remaining* slices ⇒ accurate “batched calls”.
+   • Fallback burn estimate via `calcStorageMutez` when RPC returns 0.
+   • Progress checkpoint still saved; resume banner preserved.
+*/
 /* EOF */

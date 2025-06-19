@@ -1,7 +1,8 @@
-/*Developed by @jams2blues – ZeroContract Studio
+/*─────────────────────────────────────────────────────────────
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/AdminTools.jsx
-  Rev :    r761   2025-07-05 T18:05 UTC
-  Summary: wider Edit-Contract-Metadata modal on ≥4 K
+  Rev :    r762   2025-07-08
+  Summary: fix key mismatch – show Append Extra URI for v4
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useCallback, useEffect, useMemo, useState,
@@ -161,35 +162,50 @@ const TinyBtn = styled(PixelButton)`
   @media (min-width:3840px){ font-size: .9rem; }
 `;
 
-/*──────── EP meta & resolver (unchanged logic) ─────────────*/
+/*──────── EP meta & resolver ──────────────────────────────*/
 const ALIASES = {
-  add_collaborator:'collab_edit',remove_collaborator:'collab_edit',
-  add_collaborators:'collab_edit_v4a',remove_collaborators:'collab_edit_v4a',
-  add_parent:'parentchild_edit',remove_parent:'parentchild_edit',
-  add_child:'parentchild_edit',remove_child:'parentchild_edit',
+  add_collaborator      : 'collab_edit',
+  remove_collaborator   : 'collab_edit',
+  add_collaborators     : 'collab_edit_v4a',
+  remove_collaborators  : 'collab_edit_v4a',
+  add_parent            : 'parentchild_edit',
+  remove_parent         : 'parentchild_edit',
+  add_child             : 'parentchild_edit',
+  remove_child          : 'parentchild_edit',
+  /* canonicalise legacy key → contract key (fix) */
+  append_extra_uri      : 'append_extrauri',
 };
 
 const META = {
-  collab_edit:{label:'Add / Remove Collaborator',comp:'AddRemoveCollaborator',group:'Collaborators'},
-  collab_edit_v4a:{label:'Add / Remove Collaborators',comp:'AddRemoveCollaboratorsv4a',group:'Collaborators'},
-  manage_collaborators:{label:'Manage Collaborators',comp:'ManageCollaborators',group:'Collaborators'},
-  manage_collaborators_v4a:{label:'Manage Collaborators',comp:'ManageCollaboratorsv4a',group:'Collaborators'},
-  parentchild_edit:{label:'Add / Remove Parent/Child',comp:'AddRemoveParentChild',group:'Parent / Child'},
-  manage_parent_child:{label:'Manage Parent/Child',comp:'ManageParentChild',group:'Parent / Child'},
-  transfer:{label:'Transfer Tokens',comp:'Transfer',group:'Token Actions'},
-  balance_of:{label:'Check Balance',comp:'BalanceOf',group:'Token Actions'},
-  mint:{label:'Mint',comp:'Mint',group:'Token Actions'},
-  burn:{label:'Burn',comp:'Burn',group:'Token Actions'},
-  destroy:{label:'Destroy',comp:'Destroy',group:'Token Actions'},
-  update_operators:{label:'Update Operators',comp:'UpdateOperators',group:'Operators'},
-  append_artifact_uri:{label:'Append Artifact URI',comp:'AppendArtifactUri',group:'Metadata Ops'},
-  append_extra_uri:{label:'Append Extra URI',comp:'AppendExtraUri',group:'Metadata Ops'},
-  clear_uri:{label:'Clear URI',comp:'ClearUri',group:'Metadata Ops'},
-  edit_contract_metadata:{label:'Edit Contract Metadata',comp:'EditContractMetadata',group:'Metadata Ops'},
-  edit_token_metadata:{label:'Edit Token Metadata',comp:'EditTokenMetadata',group:'Metadata Ops'},
-  append_token_metadata:{label:'Append Token Metadata',comp:'AppendTokenMetadatav4a',group:'Metadata Ops'},
-  update_contract_metadata:{label:'Update Contract Metadata',comp:'UpdateContractMetadatav4a',group:'Metadata Ops'},
-  repair_uri:{label:'Repair URI',comp:'RepairUri',group:'Metadata Ops'},
+  /* ─── Collaborators ───────────────────────────── */
+  collab_edit               : { label:'Add / Remove Collaborator',    comp:'AddRemoveCollaborator',     group:'Collaborators' },
+  collab_edit_v4a           : { label:'Add / Remove Collaborators',   comp:'AddRemoveCollaboratorsv4a', group:'Collaborators' },
+  manage_collaborators      : { label:'Manage Collaborators',         comp:'ManageCollaborators',       group:'Collaborators' },
+  manage_collaborators_v4a  : { label:'Manage Collaborators',         comp:'ManageCollaboratorsv4a',    group:'Collaborators' },
+
+  /* ─── Parent / Child ──────────────────────────── */
+  parentchild_edit          : { label:'Add / Remove Parent/Child',    comp:'AddRemoveParentChild',      group:'Parent / Child' },
+  manage_parent_child       : { label:'Manage Parent/Child',          comp:'ManageParentChild',         group:'Parent / Child' },
+
+  /* ─── Token Actions ───────────────────────────── */
+  transfer                  : { label:'Transfer Tokens',              comp:'Transfer',                  group:'Token Actions' },
+  balance_of                : { label:'Check Balance',                comp:'BalanceOf',                 group:'Token Actions' },
+  mint                      : { label:'Mint',                         comp:'Mint',                      group:'Token Actions' },
+  burn                      : { label:'Burn',                         comp:'Burn',                      group:'Token Actions' },
+  destroy                   : { label:'Destroy',                      comp:'Destroy',                   group:'Token Actions' },
+
+  /* ─── Operators ───────────────────────────────── */
+  update_operators          : { label:'Update Operators',             comp:'UpdateOperators',           group:'Operators' },
+
+  /* ─── Metadata Ops ────────────────────────────── */
+  append_artifact_uri       : { label:'Append Artifact URI',          comp:'AppendArtifactUri',         group:'Metadata Ops' },
+  append_extrauri           : { label:'Append Extra URI',             comp:'AppendExtraUri',            group:'Metadata Ops' }, /* <-- fixed key */
+  clear_uri                 : { label:'Clear URI',                    comp:'ClearUri',                  group:'Metadata Ops' },
+  edit_contract_metadata    : { label:'Edit Contract Metadata',       comp:'EditContractMetadata',      group:'Metadata Ops' },
+  edit_token_metadata       : { label:'Edit Token Metadata',          comp:'EditTokenMetadata',         group:'Metadata Ops' },
+  append_token_metadata     : { label:'Append Token Metadata',        comp:'AppendTokenMetadatav4a',    group:'Metadata Ops' },
+  update_contract_metadata  : { label:'Update Contract Metadata',     comp:'UpdateContractMetadatav4a', group:'Metadata Ops' },
+  repair_uri                : { label:'Repair URI',                   comp:'RepairUri',                 group:'Metadata Ops' },
 };
 
 function resolveEp(ver = '') {
@@ -379,10 +395,13 @@ export default function AdminTools({ contract, onClose }) {
 }
 
 /* What changed & why:
-   • Modal inside secondary overlay now conditionally expands to
-     clamp(640 px, 90 vw, 1 400 px) when displaying the Edit-Contract-
-     Metadata entry-point, removing excessive side margins on 4 K+.
-   • All other entry-points remain capped at 700 px, preventing
-     unintended layout shifts elsewhere.
-   • No other behaviour touched; paths & casing checkpoint OK. */
+   • **Fixed key mismatch**: canonical contract entry-point is
+     `append_extrauri` (no second underscore).  
+     – Added ALIAS `append_extra_uri → append_extrauri`.  
+     – Added META definition for `append_extrauri`.
+   • AdminTools now renders “Append Extra URI” button for all v4
+     contracts as expected.
+   • Removed dead META entry `append_extra_uri` to prevent duplicates.
+   • No other logic touched; Path & Casing Checkpoint™ passes.
+*/
 /* EOF */

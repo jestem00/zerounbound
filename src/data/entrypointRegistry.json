@@ -1,14 +1,10 @@
 {
-  "common": [
-    "transfer",
-    "balance_of",
-    "update_operators"
-  ],
+  "common": ["transfer","balance_of","update_operators"],
 
   "v1": {
     "$extends": "common",
-    "mint": ["nat", "map(string,bytes)", "address"],
-    "burn": ["nat", "nat"]
+    "mint": ["nat","map(string,bytes)","address"],
+    "burn": ["nat","nat"]
   },
 
   "v2a": {
@@ -35,23 +31,31 @@
     "$extends": "v3",
     "destroy": ["nat"],
     "burn": false,
-    "append_artifact_uri": ["nat", "bytes"],
-    "append_extrauri": ["string", "string", "string", "nat", "bytes"],
-    "clear_uri": ["nat", "string"],
+    "append_artifact_uri": ["nat","bytes"],
+    "append_extrauri": ["string","string","string","nat","bytes"],
+    "clear_uri": ["nat","string"],
     "edit_contract_metadata": ["bytes"],
-    "edit_token_metadata": ["map(string,bytes)", "nat"],
+    "edit_token_metadata": ["map(string,bytes)","nat"],
     "lock_metadata": false,
     "repair_uri": false
   },
 
   "v4a": {
     "$extends": "v3",
-    "burn": ["nat", "nat"],
-    "append_token_metadata": ["string", "nat", "bytes"],
+    "burn": ["nat","nat"],
+    "append_token_metadata": ["string","nat","bytes"],
     "update_contract_metadata": ["bytes"],
     "add_collaborators": ["set<address>"],
     "remove_collaborators": ["set<address>"],
     "lock_metadata": false,
     "repair_uri": false
+  },
+
+  "v4b": {
+    "$extends": "v4",
+    "add_collaborator": false,
+    "remove_collaborator": false,
+    "add_collaborators": false,
+    "remove_collaborators": false
   }
 }

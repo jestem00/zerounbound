@@ -16,7 +16,9 @@ const Wrap   = styled('section').withConfig({ shouldForwardProp: (p) => p !== '$
   margin-top:1.5rem;position:relative;z-index:${(p) => p.$level ?? 'auto'};
 `;
 const Result = styled('p')`font-size:.8rem;margin-top:.75rem;word-break:break-all;`;
-
+const HelpBox = styled.p`
+  font-size:.75rem;line-height:1.25;margin:.5rem 0 .9rem;
+`;
 export default function BalanceOf({
   contractAddress,
   tezos,
@@ -50,6 +52,9 @@ export default function BalanceOf({
   return (
     <Wrap $level={$level}>
       <PixelHeading level={3}>Check Balance</PixelHeading>
+      <HelpBox>
+        Read-only utility: returns FA2 balance for a given tz/KT at selected token-id (supply--1 for NFTs). Great for quick owner checks—no wallet required.
+      </HelpBox>
       <PixelInput
         value={addr}
         placeholder="tz… / KT1…"

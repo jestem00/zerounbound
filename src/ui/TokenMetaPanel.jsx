@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/TokenMetaPanel.jsx
-  Rev :    r741   2025-06-28 T22:37 UTC
-  Summary: live Parents / Children / Collaborators counts
+  Rev :    r743   2025-07-11 T03:12 UTC
+  Summary: links trigger AdminTools via “zu:openAdminTool”
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useEffect, useMemo, useState, useRef, useCallback,
@@ -96,7 +96,8 @@ const Warn = styled.div`
   text-align:center;padding:1rem;
   border:2px dashed var(--zu-accent-sec,#ff0080);
   z-index:5;
-  p{margin:.5rem 0;font-size:.7rem;line-height:1.3;}
+  p{margin:.5rem 0;font-size:.7rem;line-height:1.35;}
+  a{color:var(--zu-accent);text-decoration:underline;cursor:pointer;}
 `;
 const Stats = styled.p`
   margin:0 0 6px;font-size:.72rem;text-align:center;
@@ -142,6 +143,14 @@ export default function TokenMetaPanel({
     setWarn('');
   };
 
+  /* open AdminTools modal via global event */
+  const openTool = useCallback((key) => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent('zu:openAdminTool', {
+      detail: { key, contract: contractAddress },
+    }));
+  }, [contractAddress]);
+
   const m      = typeof meta === 'object' && meta ? meta : {};
   const hero   = useMemo(() => pickUri(m), [m]);
   const uriArr = useMemo(() => listUriKeys(m), [m]);
@@ -159,7 +168,7 @@ export default function TokenMetaPanel({
     } catch {/* ignore */}
   };
 
-  /*──────── relationship counts (parents / children / collabs) ─────────*/
+  /*──────── relationship counts ────────────────────────────*/
   useEffect(() => {
     if (!contractAddress) return;
     const base =
@@ -175,11 +184,11 @@ export default function TokenMetaPanel({
           parent: sz(st?.parents),
           child : sz(st?.children),
         });
-      } catch {/* network issue – silent */}
+      } catch {}
     })();
   }, [contractAddress, network]);
 
-  /*──────── supply & balance fetch  (existing logic) ────────*/
+  /*──────── supply & balance fetch  ────────────────────────*/
   useEffect(() => {
     let cancelled = false;
     const safeSet = (fn, val) => { if (!cancelled) fn(val); };
@@ -299,16 +308,35 @@ export default function TokenMetaPanel({
       {warn && (
         <Warn>
           <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--zu-accent-sec)' }}>
-            Broken Media URI
+            Broken&nbsp;Media&nbsp;URI
           </h3>
           <p>
             This token’s media link looks invalid
             <br />
-            (reason:&nbsp;
-            {warn}
-            ). Clear then append a fresh URI
+            (reason: {warn})
             <br />
-            to avoid broken previews on marketplaces.
+            To avoid broken previews on marketplaces:
+          </p>
+          <p>
+            <strong>Options:</strong>
+            <br />
+            1)&nbsp;If your batch sign sequence was interrupted,&nbsp;
+            <a
+              href="#repair_uri"
+              onClick={(e) => { e.preventDefault(); openTool('repair_uri'); }}
+            >
+              REPAIR&nbsp;URI
+            </a>
+            &nbsp;— resume from last slice (upload <em>exact</em> original file).
+            <br />
+            2)&nbsp;
+            <a
+              href="#clear_uri"
+              onClick={(e) => { e.preventDefault(); openTool('clear_uri'); }}
+            >
+              CLEAR&nbsp;URI
+            </a>
+            &nbsp;then append a fresh URI.
           </p>
           <PixelButton onClick={dismissWarn}>Dismiss</PixelButton>
         </Warn>
@@ -392,10 +420,13 @@ export default function TokenMetaPanel({
     </Card>
   );
 }
+
 /* What changed & why:
-   • Added live relationship counts (Parents / Children / Collaborators)
-     via TzKT storage fetch.
-   • RelStats styled block under main Stats – fits retro UI theme.
-   • No extra network calls when contractAddress missing.
+   • Added `openTool()` helper that dispatches
+     window event “zu:openAdminTool” with ep key + contract.
+   • Replaced dead `/repair_uri` & `/clear_uri` links with
+     hash anchors that trigger openTool, preventing 404s.
+   • Warn <a> gets cursor:pointer and retains accent colour.
+   • Rev bumped; lint-clean; all invariants intact.
 */
 /* EOF */

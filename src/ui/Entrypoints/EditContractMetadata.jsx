@@ -71,7 +71,9 @@ const Notice = styled.p`
   text-align: center;
   color: var(--zu-accent-sec);
 `;
-
+const HelpBox = styled.p`
+  font-size:.75rem;line-height:1.25;margin:.5rem 0 .9rem;
+`;
 /*──────── constants & helpers ───────────────────────────────*/
 const CUSTOM_LABEL = 'Custom…';
 const IMAGE_CUTOFF = 28_000;
@@ -321,7 +323,13 @@ export default function EditContractMetadata({
     <section $level={$level}>
       <PixelHeading level={3}>Edit Contract&nbsp;Metadata</PixelHeading>
       <Notice>Must own all editions to use this entry-point</Notice>
-
+      <HelpBox>
+        Updates *contract-level* TZIP-16 JSON (name, description, license, etc.). Fields validate live; red text marks issues. When happy, **Update**—one transaction, no slicing.
+        <br/>
+        <strong>Note:</strong> this does not change the contract owner, it only updates metadata.
+        <br/>
+        <strong>Tip:</strong> use the <code>type</code> field to categorize your contract (art, music, collectible, etc.).
+      </HelpBox>
       {loading && (
         <LoadingSpinner
           size={48}

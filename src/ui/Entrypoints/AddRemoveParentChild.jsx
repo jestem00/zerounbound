@@ -18,7 +18,9 @@ const Wrap = styled('section').withConfig({ shouldForwardProp: (p) => p !== '$le
   margin-top:1.5rem;position:relative;z-index:${(p) => p.$level ?? 'auto'};
 `;
 const Bar  = styled('div')`display:flex;flex-wrap:wrap;gap:.75rem;margin-top:1rem;`;
-
+const HelpBox = styled.p`
+  font-size:.75rem;line-height:1.25;margin:.5rem 0 .9rem;
+`;
 export default function AddRemoveParentChild({
   contractAddress,
   tezos,
@@ -80,7 +82,11 @@ export default function AddRemoveParentChild({
   return (
     <Wrap $level={$level}>
       <PixelHeading level={3}>Parent / Child Links</PixelHeading>
-
+      <HelpBox>
+        Links other contracts or tokens as *parents* or *children* for composability. Enter address list, then choose Add/Remove Parent or Child. Each address becomes a set-element on-chain.
+        <br />
+        <strong>Note:</strong> this does not change the contract owner, it only allows the specified addresses to call certain entrypoints (e.g. <code>Mint</code>).
+      </HelpBox>
       <PixelInput
         as="textarea"
         rows={3}

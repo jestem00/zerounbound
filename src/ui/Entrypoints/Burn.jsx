@@ -35,7 +35,9 @@ const Box    = styled.div`position:relative;flex:1;`;
 const Spin   = styled(LoadingSpinner).attrs({ size:16 })`
   position:absolute;top:8px;right:8px;
 `;
-
+const HelpBox = styled.p`
+  font-size:.75rem;line-height:1.25;margin:.5rem 0 .9rem;
+`;
 /*──────── helpers ────────*/
 const API     = `${TZKT_API}/v1`;
 const hex2str = (h) => Buffer.from(h.replace(/^0x/, ''), 'hex').toString('utf8');
@@ -223,6 +225,9 @@ export default function Burn({
   return (
     <Wrap $level={$level}>
       <PixelHeading level={3}>Burn&nbsp;Tokens</PixelHeading>
+      <HelpBox>
+        Remove tokens from circulation. Enter token-ID, quantity, then click <strong>Burn</strong>. You can burn multiple editions at once, but not more than you own. This does not change the contract owner, it only removes tokens from your balance.
+      </HelpBox>
 
       <Picker>
         <PixelInput

@@ -32,7 +32,9 @@ const Row = styled('div')`
 const Del = styled(PixelButton)`
   font-size:.6rem;padding:0 .4rem;background:var(--zu-accent-sec);
 `;
-
+const HelpBox = styled.p`
+  font-size:.75rem;line-height:1.25;margin:.5rem 0 .9rem;
+`;
 export default function ManageCollaborators({
   contractAddress,
   tezos,
@@ -100,6 +102,11 @@ export default function ManageCollaborators({
     <Wrap $level={$level}>
       <Box>
         <PixelHeading level={4}>Manage Collaborators</PixelHeading>
+        <HelpBox>
+          Lists current collaborators and lets you remove any with one click. Reloads automatically after confirmation. Use **Add/Remove Collaborator** entrypoint to add new ones.
+          <br/>
+          <strong>Note:</strong> this does not change the contract owner, it only updates the list of addresses that can call certain entrypoints (e.g. <code>Mint</code>).
+        </HelpBox>
         {busy && <p style={{ fontSize:'.7rem' }}>⏳ Loading…</p>}
         {!busy && (
           list.length === 0

@@ -15,6 +15,9 @@ const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 const Box = styled('section').withConfig({ shouldForwardProp: (p) => p !== '$level' })`
   margin-top:1.5rem;position:relative;z-index:${(p) => p.$level ?? 'auto'};
 `;
+const HelpBox = styled.p`
+  font-size:.75rem;line-height:1.25;margin:.5rem 0 .9rem;
+`;
 const isTz = (a) => /^(tz1|tz2|tz3|KT1)[1-9A-HJ-NP-Za-km-z]{33}$/.test(a);
 
 export default function UpdateOperators({
@@ -55,7 +58,11 @@ export default function UpdateOperators({
   return (
     <Box $level={$level}>
       <PixelHeading level={3}>Update Operators</PixelHeading>
-
+      <HelpBox>
+        Grant or revoke operator rights. Add operator rows (+), set owner / operator / token-ID, choose ADD or REMOVE. Wallet packs rows into a single update_operators call.
+        <br/>
+        <strong>Note:</strong> this does not change the contract owner, it only updates the list of addresses that can manage tokens on your behalf.
+      </HelpBox>
       <PixelInput
         value={addr}
         placeholder="Operator address"

@@ -32,7 +32,9 @@ const Row  = styled('div')`
   &:last-child{border-bottom:none;}
 `;
 const Del  = styled(PixelButton)`font-size:.6rem;padding:0 .4rem;background:var(--zu-accent-sec);`;
-
+const HelpBox = styled.p`
+  font-size:.75rem;line-height:1.25;margin:.5rem 0 .9rem;
+`;
 export default function ManageParentChild({
   contractAddress,
   tezos,
@@ -107,7 +109,11 @@ export default function ManageParentChild({
   return (
     <Wrap $level={$level}>
       <PixelHeading level={4}>Manage {tab === 'parent' ? 'Parents' : 'Children'}</PixelHeading>
-
+      <HelpBox>
+        Shows current *parents* or *children* sets. Switch tab, click ✖ to unlink. Use **Add/Remove Parent Child** entrypoint to add links.
+        <br/>
+        <strong>Note:</strong> this does not change the contract owner, it only updates the token's hierarchial ordering and connectome.
+      </HelpBox>
       <Tabs>
         <Tab $sel={tab === 'parent'} size="xs" onClick={() => setTab('parent')}>
           Parents ({parents.length})

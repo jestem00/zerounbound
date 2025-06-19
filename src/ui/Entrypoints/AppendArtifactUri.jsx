@@ -44,7 +44,9 @@ const Select  = styled.div`position:relative;flex:1;`;
 const Spinner = styled(LoadingSpinner).attrs({ size:16 })`
   position:absolute;top:8px;right:8px;
 `;
-
+const HelpBox = styled.p`
+  font-size:.75rem;line-height:1.25;margin:.5rem 0 .9rem;
+`;
 /*──────── helpers ─────*/
 const API     = `${TZKT_API}/v1`;
 const hex2str = (h) => Buffer.from(h.replace(/^0x/, ''), 'hex').toString('utf8');
@@ -269,7 +271,9 @@ export default function AppendArtifactUri({
           {loadingTok && <Spinner />}
         </Select>
       </div>
-
+      <HelpBox>
+        Adds the *main* media (artifactUri) to a minted token that is still blank. Pick token → upload asset → APPEND. UI runs an on-chain diff so duplicates are skipped and fees stay low. If the upload breaks you’ll see a RESUME banner – no data is ever lost.
+      </HelpBox>
       {resume && !file && (
         <p style={{ margin: '6px 0', fontSize: '.8rem', color: 'var(--zu-accent)' }}>
           Resume detected&nbsp;({resume.next}/{resume.total} slices).

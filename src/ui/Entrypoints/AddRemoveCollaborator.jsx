@@ -17,7 +17,9 @@ const Wrap   = styled('section').withConfig({ shouldForwardProp: (p) => p !== '$
   margin-top:1.5rem;position:relative;
   z-index:${(p) => p.$level ?? 'auto'};
 `;
-
+const HelpBox = styled.p`
+  font-size:.75rem;line-height:1.25;margin:.5rem 0 .9rem;
+`;
 export default function AddRemoveCollaborator({
   contractAddress,
   tezos,
@@ -79,6 +81,13 @@ export default function AddRemoveCollaborator({
   return (
     <Wrap $level={$level}>
       <PixelHeading level={3}>Collaborators</PixelHeading>
+      <HelpBox>
+        For V3-V4 contracts using single-entry add/remove calls. Paste one or many tz/KT addresses *comma, space or newline* and click **Add** or **Remove**. Wallet batches the calls; duplicates are ignored.
+        <br />
+        <strong>Note:</strong> this does not change the contract owner, it only
+        allows the specified addresses to call certain entrypoints (e.g.
+        <code>Mint</code>).
+      </HelpBox>
 
       <PixelInput
         as="textarea"

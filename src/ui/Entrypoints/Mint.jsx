@@ -100,7 +100,9 @@ const Select    = styled.select`
   width:100%;background:var(--zu-bg);color:var(--zu-fg);
   border:1px solid var(--zu-fg);padding:.25rem .4rem;font-family:inherit;
 `;
-
+const HelpBox = styled.p`
+  font-size:.75rem;line-height:1.25;margin:.5rem 0 .9rem;
+`;
 /*──────── helper fns ───────────────────────────────────────*/
 const hex = (s = '') => `0x${Buffer.from(s, 'utf8').toString('hex')}`;
 
@@ -476,7 +478,9 @@ export default function Mint({ contractAddress, contractVersion = 'v4',
     <Wrap $level={$level}>
       {snackNode}
       <PixelHeading level={3}>Mint NFT</PixelHeading>
-
+      <HelpBox>
+        Creates new NFT(s). Fill title, upload media, royalties ≤ 25 %, agree to terms, then **Mint NFT**. Large files are chunked automatically; if a slice fails you can resume from the banner. Estimated fees appear before signing.
+      </HelpBox>
       {/* Core fields */}
       <Grid>
         <div>

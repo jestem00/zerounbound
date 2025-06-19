@@ -33,7 +33,9 @@ const Box = styled.div`position:relative;flex:1;`;
 const Spin = styled(LoadingSpinner).attrs({ size:16 })`
   position:absolute;top:8px;right:8px;
 `;
-
+const HelpBox = styled.p`
+  font-size:.75rem;line-height:1.25;margin:.5rem 0 .9rem;
+`;
 const API = `${TZKT_API}/v1`;
 const hex2str = (h) => Buffer.from(h.replace(/^0x/, ''), 'hex').toString('utf8');
 
@@ -126,7 +128,12 @@ export default function Destroy({
   return (
     <Wrap $level={$level}>
       <PixelHeading level={3}>Destroy&nbsp;Token</PixelHeading>
-
+      <HelpBox>
+        V4 contracts don't have a burn entrypoint, instead they have an Admin-only “hard” burn: 
+        sets **total_supply = 0** and marks token as destroyed. Metadata remains for provenance. 
+        Pick token → Destroy → confirm. Irreversible and heavier fee than Burn. ❗MUST OWN ALL EDITIONS TO Destroy❗
+        <br/>   
+        </HelpBox>
       <div style={{ display:'flex', gap:'.5rem' }}>
         <PixelInput
           placeholder="Token-ID"

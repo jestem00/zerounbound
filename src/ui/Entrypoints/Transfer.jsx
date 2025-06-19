@@ -20,7 +20,9 @@ const split = (r) => r.split(/[\s,]+/).map((t) => t.trim()).filter(Boolean);
 const Wrap = styled('section').withConfig({ shouldForwardProp: (p) => p !== '$level' })`
   margin-top:1.5rem;position:relative;z-index:${(p) => p.$level ?? 'auto'};
 `;
-
+const HelpBox = styled.p`
+  font-size:.75rem;line-height:1.25;margin:.5rem 0 .9rem;
+`;
 export default function Transfer({
   contractAddress,
   tezos,
@@ -66,7 +68,11 @@ export default function Transfer({
   return (
     <Wrap $level={$level}>
       <PixelHeading level={3}>Batch Transfer</PixelHeading>
-
+      <HelpBox>
+        Simple FA2 transfer helper. Enter *from* (defaults to your wallet), one or more *to* addresses, token-ID, amount, then **Send**. Batches multiple recipients into one op.
+        <br/>
+        <strong>Note:</strong> this does not change the contract owner, it only transfers tokens.
+      </HelpBox>
       <PixelInput
         placeholder="Sender tz1…"
         value={from}

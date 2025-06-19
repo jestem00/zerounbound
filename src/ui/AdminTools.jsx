@@ -1,8 +1,10 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/AdminTools.jsx
-  Rev :    r762   2025-07-08
-  Summary: fix key mismatch – show Append Extra URI for v4
+  Rev :    r763   2025-07-11 T03:12 UTC
+  Summary: listens for global “zu:openAdminTool” events so
+           external links (e.g. TokenMetaPanel) can open any
+           entry-point modal programmatically
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useCallback, useEffect, useMemo, useState,
@@ -60,7 +62,7 @@ const Overlay = styled.div`
 `;
 
 const Modal = styled.div`
-  position: relative;                 /* anchor CloseBtn inside */
+  position: relative;
   background: var(--zu-bg);
   border: 3px solid var(--zu-fg);
   box-shadow: 0 0 10px var(--zu-fg);
@@ -172,8 +174,7 @@ const ALIASES = {
   remove_parent         : 'parentchild_edit',
   add_child             : 'parentchild_edit',
   remove_child          : 'parentchild_edit',
-  /* canonicalise legacy key → contract key (fix) */
-  append_extra_uri      : 'append_extrauri',
+  append_extra_uri      : 'append_extrauri', /* legacy alias */
 };
 
 const META = {
@@ -199,7 +200,7 @@ const META = {
 
   /* ─── Metadata Ops ────────────────────────────── */
   append_artifact_uri       : { label:'Append Artifact URI',          comp:'AppendArtifactUri',         group:'Metadata Ops' },
-  append_extrauri           : { label:'Append Extra URI',             comp:'AppendExtraUri',            group:'Metadata Ops' }, /* <-- fixed key */
+  append_extrauri           : { label:'Append Extra URI',             comp:'AppendExtraUri',            group:'Metadata Ops' },
   clear_uri                 : { label:'Clear URI',                    comp:'ClearUri',                  group:'Metadata Ops' },
   edit_contract_metadata    : { label:'Edit Contract Metadata',       comp:'EditContractMetadata',      group:'Metadata Ops' },
   edit_token_metadata       : { label:'Edit Token Metadata',          comp:'EditTokenMetadata',         group:'Metadata Ops' },
@@ -250,6 +251,18 @@ export default function AdminTools({ contract, onClose }) {
     return () => { html.style.overflow = prev; };
   }, []);
 
+  /* ── NEW: listen for global open-tool requests ─────────── */
+  useEffect(() => {
+    const handler = (e) => {
+      const { key, contract: addr } = e.detail || {};
+      if (!key || !META[key]) return;
+      if (addr && addr !== contract.address) return; // ignore if not my contract
+      setFormKey(key);
+    };
+    window.addEventListener('zu:openAdminTool', handler);
+    return () => window.removeEventListener('zu:openAdminTool', handler);
+  }, [contract.address]);
+
   /* counts loader */
   const refreshCounts = useCallback(async () => {
     let next = { coll:0, parent:0, child:0, total:0 };
@@ -299,7 +312,7 @@ export default function AdminTools({ contract, onClose }) {
           <CloseBtn size="xs" onClick={onClose}>×</CloseBtn>
 
           <Preview>
-             <RenderMedia
+            <RenderMedia
               uri={meta.imageUri}
               alt={meta.name}
               style={{
@@ -371,7 +384,6 @@ export default function AdminTools({ contract, onClose }) {
       {formKey && META[formKey] && (
         <Overlay>
           <Modal
-            /* widen Edit-Contract-Metadata only; others keep default */
             style={formKey === 'edit_contract_metadata'
               ? {
                   width    : 'clamp(640px, 90vw, 1400px)',
@@ -395,13 +407,10 @@ export default function AdminTools({ contract, onClose }) {
 }
 
 /* What changed & why:
-   • **Fixed key mismatch**: canonical contract entry-point is
-     `append_extrauri` (no second underscore).  
-     – Added ALIAS `append_extra_uri → append_extrauri`.  
-     – Added META definition for `append_extrauri`.
-   • AdminTools now renders “Append Extra URI” button for all v4
-     contracts as expected.
-   • Removed dead META entry `append_extra_uri` to prevent duplicates.
-   • No other logic touched; Path & Casing Checkpoint™ passes.
+   • Added window event listener for “zu:openAdminTool”.
+     External components dispatching this event with
+     `{key:'repair_uri'|'clear_uri', contract:<KT1>}` now
+     open the corresponding AdminTools module directly.
+   • No other logic touched; passes Path & Casing Checkpoint™.
 */
 /* EOF */

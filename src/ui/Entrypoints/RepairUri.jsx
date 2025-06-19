@@ -1,13 +1,12 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/RepairUri.jsx
-  Rev :    r811   2025‑07‑11 T02:05 UTC
-  Summary: recognise on‑chain “0x…” values → no false conflict;
-           CTA enabled for unfinished extra URI slices
+  Rev :    r812   2025-07-11 T04:18 UTC
+  Summary: resumable uploads + stronger fault-tolerance,
+           faster resume banner, per-slice checkpoints
 ──────────────────────────────────────────────────────────────*/
-
 import React, {
-  useCallback, useEffect, useState,
+  useCallback, useEffect, useState, useMemo,
 } from 'react';
 import styledPkg           from 'styled-components';
 import { OpKind }          from '@taquito/taquito';
@@ -29,9 +28,12 @@ import { jFetch }          from '../../core/net.js';
 import { useWalletContext } from '../../contexts/WalletContext.js';
 import { TZKT_API }         from '../../config/deployTarget.js';
 import { listUriKeys }      from '../../utils/uriHelpers.js';
-import { sliceTail, PACKED_SAFE_BYTES, splitPacked } from '../../core/batch.js';
 import {
-  clearSliceCheckpoint, purgeExpiredSliceCache,
+  sliceTail, PACKED_SAFE_BYTES, splitPacked,
+} from '../../core/batch.js';
+import {
+  loadSliceCheckpoint, saveSliceCheckpoint, clearSliceCheckpoint,
+  purgeExpiredSliceCache,
 } from '../../utils/sliceCache.js';
 import listLiveTokenIds    from '../../utils/listLiveTokenIds.js';
 import { estimateChunked } from '../../core/feeEstimator.js';
@@ -73,30 +75,37 @@ export default function RepairUri({
   useEffect(() => { void fetchTokens(); }, [fetchTokens]);
 
   /* local state */
-  const [tokenId, setTokenId] = useState('');
-  const [uriKey,  setUriKey]  = useState('');
-  const [uriKeys, setUriKeys] = useState([]);
+  const [tokenId,     setTokenId]     = useState('');
+  const [uriKey,      setUriKey]      = useState('');
+  const [uriKeys,     setUriKeys]     = useState([]);
+  const [file,        setFile]        = useState(null);
+  const [dataUrl,     setDataUrl]     = useState('');
+  const [meta,        setMeta]        = useState(null);
+  const [origHex,     setOrigHex]     = useState('');
+  const [diff,        setDiff]        = useState([]);
 
-  const [file,    setFile]    = useState(null);
-  const [dataUrl, setDataUrl] = useState('');
-  const [meta,    setMeta]    = useState(null);
-  const [origHex, setOrigHex] = useState('');
-  const [diff,    setDiff]    = useState([]);
+  /* resumable upload checkpoint */
+  const [resumeInfo,  setResumeInfo]  = useState(null);
 
-  const [preparing, setPreparing] = useState(false);
-  const [batches,   setBatches]   = useState(null);
-  const [estimate,  setEstimate]  = useState(null);
+  /* tx prep & overlay */
+  const [preparing,   setPreparing]   = useState(false);
+  const [batches,     setBatches]     = useState(null);
+  const [estimate,    setEstimate]    = useState(null);
+  const [overlay,     setOverlay]     = useState({ open:false });
+  const [confirmOpen, setConfirm]     = useState(false);
+  const [conflictOpen,setConflict]    = useState(false);
 
-  const [overlay,    setOverlay]    = useState({ open:false });
-  const [conflictOpen, setConflict] = useState(false);
-  const [confirmOpen,  setConfirm]  = useState(false);
+  /* housekeeping */
+  useEffect(() => { purgeExpiredSliceCache(); }, []);
 
-  const reset = () => {
-    setFile(null); setDataUrl(''); setDiff([]);
-    setBatches(null); setEstimate(null);
-    clearSliceCheckpoint(contractAddress, tokenId,
-      uriKey || 'artifactUri', network);
-  };
+  /*─ helpers ─*/
+  const storageLabel = useMemo(() => (
+    uriKey || 'artifactUri'
+  ), [uriKey]);
+
+  const checkpointKeyArgs = useMemo(() => (
+    [contractAddress, tokenId, storageLabel, network]
+  ), [contractAddress, tokenId, storageLabel, network]);
 
   /*──── meta fetch ──────────────────────────────────────────*/
   const loadMeta = useCallback(async (id) => {
@@ -107,7 +116,7 @@ export default function RepairUri({
       rows = await jFetch(
         `${TZKT_API}/v1/tokens?contract=${contractAddress}&tokenId=${id}&limit=1`,
       );
-    } catch {}
+    } catch {/* ignore */}
     if (!rows.length) {
       try {
         const one = await jFetch(
@@ -117,7 +126,7 @@ export default function RepairUri({
           rows = [{ metadata: JSON.parse(
             Buffer.from(one.value.replace(/^0x/, ''), 'hex').toString('utf8'),
           ) }];
-      } catch {}
+      } catch {/* ignore */}
     }
     const m = rows[0]?.metadata || {};
     setMeta(m);
@@ -128,28 +137,33 @@ export default function RepairUri({
   }, [contractAddress]);
   useEffect(() => { loadMeta(tokenId); }, [tokenId, loadMeta]);
 
+  /*──── resume checkpoint fetch ─────────────────────────────*/
+  useEffect(() => {
+    if (!contractAddress || tokenId === '') { setResumeInfo(null); return; }
+    const info = loadSliceCheckpoint(...checkpointKeyArgs);
+    setResumeInfo(info);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contractAddress, tokenId, storageLabel]);
+
   /* load original hex when uriKey changes */
   useEffect(() => {
     if (!uriKey || !meta) return;
     const val = meta[uriKey];
-    /* value may already be on‑chain hex (“0x…”) OR plain string */
     const hx  = typeof val === 'string' && val.startsWith('0x')
       ? val.trim()
       : `0x${char2Bytes(val || '')}`;
     setOrigHex(hx);
   }, [uriKey, meta]);
 
-  useEffect(() => { purgeExpiredSliceCache(); }, []);
-
   /*──── upload handler + preview ────────────────────────────*/
   const onUpload = useCallback((v) => {
-    if (!v) { reset(); return; }
+    if (!v) { setFile(null); setDataUrl(''); setDiff([]); return; }
 
-    const f  = v instanceof File              ? v
-             : v && v.file instanceof File    ? v.file
+    const f  = v instanceof File           ? v
+             : v?.file instanceof File      ? v.file
              : null;
-    const du = typeof v === 'string'          ? v
-             : v && typeof v.dataUrl === 'string' ? v.dataUrl
+    const du = typeof v === 'string'        ? v
+             : typeof v?.dataUrl === 'string' ? v.dataUrl
              : '';
 
     if (f)  setFile(f);
@@ -160,7 +174,6 @@ export default function RepairUri({
       r.onload = (e) => setDataUrl(e.target.result);
       r.readAsDataURL(f);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /* keep diff live when either source changes */
@@ -168,41 +181,21 @@ export default function RepairUri({
     if (!dataUrl || !origHex) return;
     const { tail, conflict } = sliceTail(origHex, `0x${char2Bytes(dataUrl)}`);
     if (conflict) { setConflict(true); setDiff([]); return; }
-    setDiff(tail);
+    setConflict(false); setDiff(tail);
   }, [dataUrl, origHex]);
 
-  /* helper – build diff ad‑hoc */
-  const buildDiff = useCallback(async () => {
-    if ((!file && !dataUrl) || !origHex) return [];
-    let fullData = dataUrl;
-    if (!fullData && file) {
-      fullData = await new Promise((res) => {
-        const r = new FileReader(); r.onload = (e) => res(e.target.result);
-        r.readAsDataURL(file);
-      });
-      setDataUrl(fullData);
-    }
-    const { tail, conflict } = sliceTail(origHex, `0x${char2Bytes(fullData)}`);
-    if (conflict) { setConflict(true); return []; }
-    if (!tail.length) snack('File matches on‑chain', 'success');
-    setDiff(tail);
-    return tail;
-  }, [file, dataUrl, origHex, snack]);
-
-  /*──── builder & estimator ─────────────────────────────────*/
-  const buildAndEstimate = async () => {
+  /*──── estimator & batch-builder ───────────────────────────*/
+  const buildAndEstimate = async (slices) => {
     if (!toolkit) return snack('Connect wallet', 'error');
     if (!origHex)  return snack('Metadata still loading — try again', 'warning');
-
-    const tail = diff.length ? diff : await buildDiff();
-    if (!tail.length) return;
+    if (!slices.length) return;
 
     setPreparing(true);
     try {
       const c     = await toolkit.wallet.at(contractAddress);
       const idNat = +tokenId;
       const label = uriKey.replace(/^extrauri_/i, '');
-      const ops   = tail.map((hx) => (
+      const ops   = slices.map((hx) => (
         uriKey.toLowerCase().startsWith('extrauri_')
           ? { kind: OpKind.TRANSACTION,
               ...c.methods.append_extrauri('', label, '', idNat, hx).toTransferParams() }
@@ -210,40 +203,68 @@ export default function RepairUri({
               ...c.methods.append_artifact_uri(idNat, hx).toTransferParams() }
       ));
 
-      const { fee, burn } = await estimateChunked(toolkit, ops, 8);
-      setEstimate({
-        feeTez:     (fee   / 1e6).toFixed(6),
-        storageTez: (burn  / 1e6).toFixed(6),
+      const est         = await estimateChunked(toolkit, ops, 8);
+      const feeTez      = (est.fee   / 1e6).toFixed(6);
+      const storageTez  = (est.burn  / 1e6).toFixed(6);
+      setEstimate({ feeTez, storageTez });
+
+      const packs = await splitPacked(toolkit, ops, PACKED_SAFE_BYTES);
+      setBatches(packs.length ? packs : [ops]);
+
+      /* save checkpoint before any signing – allows immediate resume */
+      saveSliceCheckpoint(...checkpointKeyArgs, {
+        total : packs.length,
+        next  : resumeInfo?.next ?? 0,
+        slices,
       });
-      setBatches(await splitPacked(toolkit, ops, PACKED_SAFE_BYTES));
       setConfirm(true);
     } catch (e) { snack(e.message, 'error'); }
     finally      { setPreparing(false); }
+  };
+
+  /*──── CTA handlers ───────────────────────────────────────*/
+  const handleCompareRepair = () => buildAndEstimate(diff);
+  const resumeUpload        = () => {
+    if (!resumeInfo?.slices?.length) return snack('No checkpoint', 'info');
+    const remaining = resumeInfo.slices.slice(resumeInfo.next ?? 0);
+    if (!remaining.length) return snack('Checkpoint already complete', 'success');
+    buildAndEstimate(remaining);
   };
 
   /*──── slice executor ──────────────────────────────────────*/
   const runSlice = useCallback(async (idx) => {
     if (!batches || idx >= batches.length) return;
     try {
-      setOverlay({ open:true, status:'Preparing transaction…', current:idx+1, total:batches.length });
+      setOverlay({ open:true, status:'Waiting for signature…',
+                   current:idx+1, total:batches.length });
       const op = await toolkit.wallet.batch(batches[idx]).send();
-      setOverlay({ open:true, status:'Waiting for confirmation…', current:idx+1, total:batches.length });
+      setOverlay({ open:true, status:'Broadcasting…',
+                   current:idx+1, total:batches.length });
       await op.confirmation();
+
+      /* update checkpoint */
+      saveSliceCheckpoint(...checkpointKeyArgs, {
+        ...resumeInfo, next: (idx + 1),
+      });
+
       if (idx + 1 < batches.length) {
         requestAnimationFrame(() => runSlice(idx + 1));
       } else {
         snack('Repair complete', 'success');
         setOverlay({ open:false });
-        reset(); onMutate();
+        clearSliceCheckpoint(...checkpointKeyArgs);
+        onMutate(); setBatches(null); setResumeInfo(null);
       }
     } catch (e) {
-      setOverlay({ open:true, error:true, status:e.message || String(e), current:idx+1, total:batches.length });
+      setOverlay({ open:true, error:true, status:e.message || String(e),
+                   current:idx+1, total:batches.length });
     }
-  }, [batches, toolkit, onMutate, snack]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [batches, toolkit, resumeInfo]);
 
-  /* enable‑guard */
+  /*──────── guards ─────*/
   const disabled = preparing
-    || !file && !dataUrl
+    || (!file && !dataUrl && !resumeInfo)
     || !tokenId
     || !origHex
     || conflictOpen;
@@ -299,9 +320,22 @@ export default function RepairUri({
       </div>
 
       <HelpBox>
-        ① Pick token → ② choose URI key → ③ upload original file.
-        Any order works; only missing tail bytes are appended.
+        ① Pick token → ② choose URI key → ③ upload same original file.
+        The missing tail bytes will be appended exactly where the last slice stopped.❗after repair it takes 10-30 seconds on average for the chain to update, refresh
+        the page a few times every 10 seconds or so to see the changes.
       </HelpBox>
+
+      {/* resume banner */}
+      {resumeInfo && !file && (
+        <p style={{ fontSize:'.8rem', color:'var(--zu-accent)',
+                   margin:'4px 0' }}>
+          Resume detected&nbsp;
+          ({resumeInfo.next}/{resumeInfo.total} batches pending).
+          <PixelButton size="xs" style={{ marginLeft:6 }} onClick={resumeUpload}>
+            RESUME
+          </PixelButton>
+        </p>
+      )}
 
       {/* preview panes */}
       <div style={{
@@ -319,7 +353,8 @@ export default function RepairUri({
               uri={dataUrl}
               alt={file?.name}
               style={{
-                width:'100%', maxHeight:200, margin:'6px auto', objectFit:'contain',
+                width:'100%', maxHeight:200,
+                margin:'6px auto', objectFit:'contain',
               }}
             />
           )}
@@ -334,9 +369,14 @@ export default function RepairUri({
       </div>
 
       {/* CTA */}
-      <div style={{ display:'flex', gap:'.6rem', alignItems:'center', marginTop:'.9rem' }}>
-        <PixelButton disabled={disabled} onClick={buildAndEstimate}>
-          {preparing ? 'Calculating…' : 'Compare & Repair'}
+      <div style={{ display:'flex', gap:'.6rem', alignItems:'center',
+                    marginTop:'.9rem' }}>
+        <PixelButton disabled={disabled} onClick={
+          resumeInfo && !file ? resumeUpload : handleCompareRepair
+        }>
+          {preparing ? 'Calculating…'
+            : resumeInfo && !file ? 'RESUME'
+            : 'Compare & Repair'}
         </PixelButton>
         {preparing && (
           <>
@@ -352,7 +392,7 @@ export default function RepairUri({
           title="Conflict detected"
           message="Uploaded file differs before missing tail. Pick the exact original file."
           confirmLabel="OK"
-          onConfirm={() => { setConflict(false); reset(); }}
+          onConfirm={() => { setConflict(false); setFile(null); setDataUrl(''); }}
         />
       )}
 
@@ -361,7 +401,7 @@ export default function RepairUri({
         <OperationOverlay
           {...overlay}
           onRetry={() => runSlice((overlay.current ?? 1) - 1)}
-          onCancel={() => { setOverlay({ open:false }); reset(); }}
+          onCancel={() => { setOverlay({ open:false }); setBatches(null); }}
         />
       )}
 
@@ -372,19 +412,22 @@ export default function RepairUri({
           estimate={estimate}
           slices={batches?.length || 1}
           onOk={() => { setConfirm(false); runSlice(0); }}
-          onCancel={() => { setConfirm(false); reset(); }}
+          onCancel={() => { setConfirm(false); setBatches(null); }}
         />
       )}
     </Wrap>
   );
 }
 /* What changed & why:
-   • Correctly recognises on‑chain values already prefixed
-     with “0x”: avoids double‑encoding bug that caused
-     `sliceTail` to mark every extra URI as conflict ⇒ CTA
-     permanently disabled.  
-   • enable‑guard simplified; now hinges on presence of
-     upload + origHex (meta fetched) + no conflict.  
-   • All other logic unchanged. Lint‑clean, invariants intact.
+   • **Resumable checkpoints** — RepairUri now reads / writes slice
+     progress via `sliceCache.js`; failed or interrupted sessions
+     resume instantly, fixing blank-screen & re-upload pain-points.
+   • **Resume banner** with one-click RESUME when a checkpoint exists.
+   • Checkpoint saved before first signature *and* after every batch,
+     so tab-switches or wallet stalls can’t lose state.
+   • Overlay messaging tweaked; conflict flag reset on new upload.
+   • No change to `batch.js` constants or helpers — full
+     back-compat with Mint / Append flows maintained.
+   • Lint-clean, invariants I55-I61 intact.
 */
 /* EOF */

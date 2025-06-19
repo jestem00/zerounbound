@@ -30,7 +30,9 @@ const SelectWrap = styled.div`position:relative;flex:1;`;
 const Spinner = styled(LoadingSpinner).attrs({ size:16 })`
   position:absolute;top:8px;right:8px;
 `;
-
+const HelpBox = styled.p`
+  font-size:.75rem;line-height:1.25;margin:.5rem 0 .9rem;
+`;
 /*──────── helpers ─────*/
 if (typeof window !== 'undefined' && !window.Buffer) window.Buffer = Buffer;
 const API     = `${TZKT_API}/v1`;
@@ -107,7 +109,9 @@ export default function ClearUri({
   return (
     <Wrap $level={$level}>
       <PixelHeading level={3}>Clear&nbsp;URI</PixelHeading>
-
+      <HelpBox>
+        Removes any metadata URI key from a token using the v4 zerocontract (artifactUri, thumbnailUri, extrauri_* …). Pick token → click trash icon on the key → confirm. Handy before re-uploading or fixing typos.
+      </HelpBox>  
       <div style={{ display:'flex', gap:'.5rem' }}>
         <PixelInput
           placeholder="Token-ID"

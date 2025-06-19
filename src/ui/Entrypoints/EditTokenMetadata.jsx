@@ -42,7 +42,9 @@ const Grid   = styled.div`display:grid;grid-template-columns:repeat(auto-fit,min
 const FieldW = styled.div`display:flex;flex-direction:column;gap:.4rem;textarea{min-height:5rem;}`;
 const Err    = styled.span`font-size:.8rem;color:var(--zu-accent-sec);`;
 const Notice = styled.p`font-size:.8rem;margin:.25rem 0 1rem;text-align:center;color:var(--zu-accent-sec);`;
-
+const HelpBox = styled.p`
+  font-size:.75rem;line-height:1.25;margin:.5rem 0 .9rem;
+`;
 /*──────── constants ─────*/
 const CUSTOM_LABEL = 'Custom…';
 const LICENSES = [
@@ -196,7 +198,12 @@ export default function EditTokenMetadata({
     <Wrap $level={$level}>
       <PixelHeading level={3}>Edit Token Metadata</PixelHeading>
       <Notice>Select a token then edit any fields below</Notice>
-
+      <HelpBox>
+        Patches selected token’s JSON without touching unaffected keys. Choose token, edit fields, then **Update**. Diff engine only sends changed bytes → lower fees. Custom license? Pick “Custom…” then fill the box.
+        <br/>
+        <strong>Note:</strong> this does not change the contract owner, it only updates metadata.
+        <br/>
+      </HelpBox>
       {/* token picker */}
       <Picker>
         <PixelInput

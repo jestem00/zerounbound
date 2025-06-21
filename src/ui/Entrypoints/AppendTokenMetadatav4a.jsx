@@ -21,11 +21,11 @@ import { useWalletContext } from '../../contexts/WalletContext.js';
 import listLiveTokenIds     from '../../utils/listLiveTokenIds.js';
 import {
   sliceHex, splitPacked, PACKED_SAFE_BYTES,
-} from '../../core/batch.js';
+} from '../../core/batchV4a.js';
 import {
   loadSliceCheckpoint, saveSliceCheckpoint,
   clearSliceCheckpoint, purgeExpiredSliceCache,
-} from '../../utils/sliceCache.js';
+} from '../../utils/sliceCacheV4a.js';
 import { estimateChunked }  from '../../core/feeEstimator.js';
 import { jFetch }           from '../../core/net.js';
 import { TZKT_API }         from '../../config/deployTarget.js';

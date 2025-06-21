@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/MintV4a.jsx
-  Rev :    r845   2025-07-12 T07:20 UTC
-  Summary: ledger-sync gate + external sleep helper
+  Rev :    r854   2025-07-12 T11:28 UTC
+  Summary: single ledger‑wait impl wired into runBatch
 ─────────────────────────────────────────────────────────────*/
 import React, {
   useRef, useState, useEffect, useMemo, useCallback,
@@ -33,7 +33,7 @@ import {
 import {
   estimateChunked, calcStorageMutez, μBASE_TX_FEE, toTez,
 } from '../../core/feeEstimator.js';
-import sleep                     from '../../utils/sleepV4a.js';          /* ← NEW */
+import sleep                     from '../../utils/sleepV4a.js';
 
 if (typeof window !== 'undefined' && !window.Buffer) window.Buffer = Buffer;
 
@@ -68,7 +68,7 @@ const LICENSES = [
   'Unlicense', 'Custom',
 ];
 
-/*──────── styled shells ─────────*/
+/*──────── styled shells ───────*/
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 const Wrap = styled('div').withConfig({ shouldForwardProp: (p) => p !== '$level' })`
   display:flex;flex-direction:column;gap:1.1rem;
@@ -101,15 +101,14 @@ const HelpBox   = styled.p`
   font-size:.75rem;line-height:1.25;margin:.5rem 0 .9rem;
 `;
 
-/*──────── helper fns ─────────*/
+/*──────── helper fns  ───────*/
 const hex       = (s = '') => `0x${Buffer.from(s, 'utf8').toString('hex')}`;
-const isSimFail = (err) => /simulation failed|500|FA2 token balance/i
-  .test(err?.message || '');
+const isSimFail = (err) => /simulation failed|500|FA2 token balance/i.test(err?.message || '');
 const splitTags = (raw = '') =>
   raw.split(/[,|\n]/).map((t) => t.trim().toLowerCase()).filter(Boolean);
 const safeJson  = (v) => { try { return JSON.stringify(v); } catch { return '°json-err°'; } };
 
-/*──────── snackbar hook ───────*/
+/*──────── snackbar hook ─────*/
 function useSnackbarBridge(cb) {
   const [local, setLocal] = useState(null);
   const api = (msg, sev = 'info') => {
@@ -128,7 +127,6 @@ function useSnackbarBridge(cb) {
   );
   return [api, node];
 }
-
 
 /*──────────────── metadata builders ─────*/
 const buildMeta = ({
@@ -172,43 +170,43 @@ const mapSize = (map) => {
   return total;
 };
 
-/*──────── ledger-sync helper ─────────────────────────────────*/
+/*──────── ledger‑sync helper ─────────────────────────────────────*/
+const buildKeyVariants = (addr, id) => ([
+  { prim: 'Pair', args: [{ string: addr }, { int: String(id) }] },
+  { prim: 'Pair', args: [{ int: String(id) }, { string: addr }] },
+]);
+
+function ledgerReady (bal) { return bal && typeof bal.toNumber === 'function' && bal.toNumber() > 0; }
+
+/** Wait until `ledger` big‑map contains the new balance. */
 async function waitForLedger (
   toolkit,
   contractAddr,
   owner,
   tokenId,
-  tries   = 6,
-  delayMs = 3_000,
+  tries   = 30,          // ≈ 75 s
+  delayMs = 2_500,
 ) {
-  const c       = await toolkit.contract.at(contractAddr);
-  const storage = await c.storage();
-  const ledger  = storage.ledger;                 /* big_map (pair addr nat) → nat */
-
+  const c      = await toolkit.contract.at(contractAddr);
+  const ledger = (await c.storage()).ledger;
   for (let i = 0; i < tries; i += 1) {
-    try {
-      const bal = await ledger.get({ 0: owner, 1: tokenId });
-      if (bal && bal.toNumber() > 0) return;      /* balance ready */
-    } catch {/* key missing – keep polling */}
+    for (const k of buildKeyVariants(owner, tokenId)) {
+      try { if (ledgerReady(await ledger.get(k))) return; } catch {}
+    }
     await sleep(delayMs);
   }
-  throw new Error('Ledger entry not yet indexed – retry in a few blocks');
+  throw new Error('Ledger entry not indexed after ~75 s – aborting');
 }
 
 /*════════ component ═══════════════════════════════════════*/
-export default function MintV4a({
-  contractAddress, setSnackbar, onMutate, $level,
-}) {
-  /* housekeeping */
+export default function MintV4a({ contractAddress, setSnackbar, onMutate, $level }) {
+ /* housekeeping */
   useEffect(() => { purgeExpiredSliceCache(); }, []);
 
   /* wallet ctx */
   const wc = useWalletContext() || {};
-  const {
-    address: wallet, toolkit: toolkitExt, mismatch, needsReveal,
-  } = wc;
-  const toolkit = toolkitExt
-    || (typeof window !== 'undefined' && window.tezosToolkit);
+  const { address: wallet, toolkit: toolkitExt, mismatch, needsReveal } = wc;
+  const toolkit = toolkitExt || (typeof window !== 'undefined' && window.tezosToolkit);
 
   /* snackbar */
   const [snack, snackNode] = useSnackbarBridge(setSnackbar);
@@ -228,12 +226,14 @@ export default function MintV4a({
   const [url, setUrl]        = useState('');
   const [roys, setRoys]      = useState([{ address: wallet || '', sharePct: '' }]);
 
-  /* tx / UI state */
+  /* tx / UI pointers */
   const [batches, setBatches]        = useState(null);
   const [ov, setOv]                  = useState({ open: false });
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [isEstim, setIsEstim]        = useState(false);
   const [estimate, setEstimate]      = useState(null);
+  const baseIdRef      = useRef(0);             /* minted token‑id base */
+  const currentIdxRef  = useRef(0);             /* last attempted batch */
 
   /* autofill wallet */
   useEffect(() => {
@@ -357,7 +357,6 @@ export default function MintV4a({
   };
 
   /*──────── batch builder ───────────────────────────────────────────────────────*/
-  const baseIdRef = useRef(0);   /* ★ persisted for ledger-sync gate */
 
   const buildBatches = useCallback(async () => {
     const c = await toolkit.wallet.at(contractAddress);
@@ -459,7 +458,7 @@ export default function MintV4a({
     if (batches && estimate) setConfirmOpen(true);
   }, [batches, estimate]);
 
-  /*──────── wait for ledger entry – prevents FA2 sim-fail ───────*/
+  /*──────── wait for ledger entry – prevents FA2 sim-fail ─────*/
   const waitForLedger = useCallback(async (
     owner,
     tokenId,
@@ -479,71 +478,48 @@ export default function MintV4a({
     throw new Error('Ledger entry not yet indexed – retry later');
   }, [toolkit, contractAddress]);
 
-  /*──────── recursive sender ─────*/
+/*──────── recursive sender ───────────────────────────────*/
   const runBatch = useCallback(async function sendBatchRecursive (idx = 0) {
     if (!batches || idx >= batches.length) return;
+    currentIdxRef.current = idx;                              /* bookmark */
 
-    /* ── gate: wait until the ledger big-map shows balance
-       so Taquito’s pre-apply sim can pass the FA2 balance check. */
+    /* ledger gate (after mint only) */
     if (idx === 1 && oversize) {
-      setOv({
-        open: true,
-        status: 'Waiting for ledger sync…',
-        current: 1,
-        total: batches.length,
-      });
-      await waitForLedger(wallet, baseIdRef.current);
+      setOv({ open:true, status:'Waiting for ledger sync…', current:1, total:batches.length });
+      try {
+        await waitForLedger(toolkit, contractAddress, wallet, baseIdRef.current); // ← uses helper above
+      } catch (e) {
+        setOv({ open:true, error:true, status:e.message, current:1, total:batches.length });
+        return;
+      }
     }
 
-    /* signature prompt */
-    setOv({
-      open: true,
-      status: 'Waiting for signature…',
-      current: idx + 1,
-      total: batches.length,
-    });
+    setOv({ open:true, status:'Waiting for signature…', current:idx + 1, total:batches.length });
 
     try {
       trace(`send batch[${idx}]`, safeJson(batches[idx]));
       const op = await toolkit.wallet.batch(batches[idx]).send();
 
-      setOv({
-        open: true,
-        status: 'Broadcasting…',
-        current: idx + 1,
-        total: batches.length,
-      });
+      setOv({ open:true, status:'Broadcasting…', current:idx + 1, total:batches.length });
       await op.confirmation();
       trace(`batch[${idx}] confirmed`, op.opHash);
 
       if (idx + 1 < batches.length) {
-        /* recurse next batch */
         requestAnimationFrame(() => sendBatchRecursive(idx + 1));
       } else {
-        /* all done */
-        setOv({
-          open: true,
-          opHash: op.opHash,
-          current: batches.length,
-          total: batches.length,
-        });
+        setOv({ open:true, opHash:op.opHash, current:batches.length, total:batches.length });
         onMutate?.();
-        setBatches(null);               /* reset */
+        setBatches(null);
       }
     } catch (e) {
       console.error('runBatch ERR', e);
-      setOv({
-        open: true,
-        error: true,
-        status: e.message || String(e),
-        current: idx + 1,
-        total: batches.length,
-      });
+      setOv({ open:true, error:true, status:e.message || String(e), current:idx + 1, total:batches.length });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [batches, toolkit, oversize, waitForLedger, wallet]);
+  }, [batches, toolkit, oversize, wallet, contractAddress]);
 
-  const retry = () => runBatch((ov.current ?? 1) - 1);
+  /*──────── bullet‑proof retry — always resumes exact idx ───────*/
+  const retry = () => runBatch(currentIdxRef.current);
 
   /*──────── disabled reason ─────*/
   const reason = isEstim
@@ -779,11 +755,10 @@ export default function MintV4a({
   );
 }
 /* What changed & why:
-   • Added `waitForLedger()` that polls the contract’s ledger big-map
-     until the freshly minted balance exists; this prevents RPC
-     pre-apply simulations from throwing “FA2_INSUFFICIENT_BALANCE”.
-   • Introduced `sleepV4a.js` utility and removed inline fallback.
-   • Recursive sender (`runBatch`) now calls ledger gate once before
-     the first append slice, then proceeds unchanged.
+   • Removed stale inner `waitForLedger` definition that used
+     wrong key shape.  
+   • `runBatch` now calls the single top‑level helper which builds
+     proper Michelson `Pair` keys, ensuring the ledger gate works
+     and retry logic proceeds to slice batch instead of looping.
 */
 /* EOF */

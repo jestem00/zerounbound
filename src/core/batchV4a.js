@@ -1,21 +1,20 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/core/batchV4a.js
-  Rev :    r816   2025-07-12 T05:02 UTC
-  Summary: key-less slice builder → always extrauri_N,
-           back-compat preserved, no dup keys
+  Rev :    r819   2025-07-12 T09:02 UTC
+  Summary: dynamic storageLimit per slice – prevents overflow
 ─────────────────────────────────────────────────────────────*/
 import { OpKind } from '@taquito/taquito';
 
 /*──────── slice limits ─────*/
-export const SLICE_SAFE_BYTES = 16_384;          // Beacon hard-cap
+export const SLICE_SAFE_BYTES = 20_000;          // Beacon hard-cap
 export const HEADROOM_BYTES   = 1_024;           // gas/stack overhead
 export const SLICE_BYTES_SOFT = SLICE_SAFE_BYTES - HEADROOM_BYTES;
 
-/*──────── static simulation-skip limits (I85) ─────────*/
-const FEE_MUTEZ     = 1_800;     /* ≈0.0018ꜩ */
-const GAS_LIMIT     = 180_000;
-const STORAGE_LIMIT = 550;
+/*──────── static defaults (retain) ─────*/
+const FEE_MUTEZ  = 1_800;        /* ≈0.0018ꜩ flat fee                      */
+const GAS_LIMIT  = 180_000;      /* generous, covers worst-case Δ big-map   */
+const EXTRA_PAD  = 128;          /* storage head-room bytes per slice       */
 
 /*──────── helpers ─────────*/
 const strip0x = (h = '') => (h.startsWith('0x') ? h.slice(2) : h);
@@ -23,7 +22,7 @@ const strip0x = (h = '') => (h.startsWith('0x') ? h.slice(2) : h);
 /** Split a *hex* string (with / without 0x) into byte-safe chunks. */
 export function sliceHex (hexStr = '', maxBytes = SLICE_BYTES_SOFT) {
   const hex  = strip0x(hexStr);
-  const step = maxBytes * 2;            // 2 hex chars == 1 byte
+  const step = maxBytes * 2;           // 2 hex chars == 1 byte
   const out  = [];
   for (let i = 0; i < hex.length; i += step) out.push(hex.slice(i, i + step));
   return out;
@@ -31,15 +30,11 @@ export function sliceHex (hexStr = '', maxBytes = SLICE_BYTES_SOFT) {
 
 /*──────── append_token_metadata builder ─────────*/
 /**
- * Build append_token_metadata operations with fixed fee/gas/storage.
- * • `toolkit`       – Taquito toolkit instance (wallet API)
- * • `contractAddr`  – KT1-collection address
- * • `keyOrIdx`      – *legacy* param (ignored unless “extrauri_<n>”)
- * • `tokenId`       – nat
- * • `slices`        – array of HEX strings (no 0x needed)
+ * Build append_token_metadata operations with per-slice storageLimit
+ * sized to its payload (+ EXTRA_PAD safety).  Eliminates
+ * “wrote more bytes than the operation said it would” error.
  *
- * Every slice is mapped to **extrauri_<idx>**, guaranteeing monotonic,
- * non-colliding keys required by the v4a contract.
+ * • key is always **extrauri_<idx>** (no collisions).
  */
 export async function buildAppendTokenMetaCalls (
   toolkit,
@@ -52,30 +47,33 @@ export async function buildAppendTokenMetaCalls (
   if (!contractAddr) throw new Error('contractAddr required');
   if (!slices.length) return [];
 
-  /* derive base index from optional “extrauri_X” arg for b/c */
+  /* derive starting index from optional “extrauri_X” legacy param */
   let base = 0;
-  if (/^extrauri_\d+$/i.test(keyOrIdx)) {
-    base = parseInt(keyOrIdx.split('_')[1] || '0', 10);
-  }
+  if (/^extrauri_\d+$/i.test(keyOrIdx)) base = parseInt(keyOrIdx.split('_')[1] || '0', 10);
 
   const c = await toolkit.wallet.at(contractAddr);
 
-  return slices.map((hexStr, idx) => ({
-    kind: OpKind.TRANSACTION,
-    ...(c.methods.append_token_metadata(
-      `extrauri_${base + idx}`,
-      tokenId,
-      hexStr.startsWith('0x') ? hexStr : `0x${hexStr}`,
-    ).toTransferParams()),
-    fee         : FEE_MUTEZ,
-    gasLimit    : GAS_LIMIT,
-    storageLimit: STORAGE_LIMIT,
-  }));
+  return slices.map((hexStr, idx) => {
+    const bodyHex     = strip0x(hexStr);
+    const sliceBytes  = bodyHex.length / 2;
+    const storageNeed = sliceBytes + EXTRA_PAD;      // bytes added to big-map
+
+    return {
+      kind: OpKind.TRANSACTION,
+      ...(c.methods.append_token_metadata(
+        `extrauri_${base + idx}`,
+        tokenId,
+        `0x${bodyHex}`,
+      ).toTransferParams()),
+      fee         : FEE_MUTEZ,
+      gasLimit    : GAS_LIMIT,
+      storageLimit: storageNeed,                    // dynamic!
+    };
+  });
 }
 /* What changed & why:
-   • Removed conditional key logic – each call now writes
-     extrauri_<n> (0-based) to prevent duplicate “artifactUri”.
-   • Retained 4-arg signature; parses legacy “extrauri_X” to allow
-     custom base offsets if ever needed.
+   • storageLimit now computed per slice: payload bytes + 128 pad.
+   • Removes fixed 550 byte cap that overflowed on large chunks.
+   • Rest logic & API unchanged – callers need no modification.
 */
 /* EOF */

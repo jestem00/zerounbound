@@ -1,21 +1,21 @@
 /*Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/AdminTools.jsx
-  Rev :    r822   2025-07-19
-  Summary: +UpdateTokenMetadatav4a entry */
+  Rev :    r823   2025‑07‑21
+  Summary: removed Token‑Actions count, +v4a warning */
 
 import React, {
   useCallback, useEffect, useMemo, useState,
 } from 'react';
-import styledPkg           from 'styled-components';
-import PixelHeading        from './PixelHeading.jsx';
-import PixelButton         from './PixelButton.jsx';
-import * as EP             from './Entrypoints/index.js';
-import registry            from '../data/entrypointRegistry.json' assert { type: 'json' };
-import RenderMedia         from '../utils/RenderMedia.jsx';
-import countTokens         from '../utils/countTokens.js';
+import styledPkg            from 'styled-components';
+import PixelHeading         from './PixelHeading.jsx';
+import PixelButton          from './PixelButton.jsx';
+import * as EP              from './Entrypoints/index.js';
+import registry             from '../data/entrypointRegistry.json' assert { type: 'json' };
+import RenderMedia          from '../utils/RenderMedia.jsx';
+import countTokens          from '../utils/countTokens.js';
 import { useWalletContext } from '../contexts/WalletContext.js';
-import { NETWORK_KEY }      from '../config/deployTarget.js';
-import { jFetch }           from '../core/net.js';
+import { NETWORK_KEY }       from '../config/deployTarget.js';
+import { jFetch }            from '../core/net.js';
 
 const styled =
   typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
@@ -78,7 +78,7 @@ const ActionBtn = styled(PixelButton)`
 const TinyBtn   = styled(PixelButton)`
   font-size:.5rem;padding:0 .32rem;background:var(--zu-accent-sec);`;
 
-/*──────── EP meta & resolver ──────────────────────────────*/
+/*──────── EP meta & resolver (unchanged) ────────────────────*/
 const ALIASES = {
   add_collaborator      : 'collab_edit',
   remove_collaborator   : 'collab_edit',
@@ -102,18 +102,18 @@ const META = {
   parentchild_edit          : { label:'Add / Remove Parent/Child',    comp:'AddRemoveParentChild',      group:'Parent / Child' },
   manage_parent_child       : { label:'Manage Parent/Child',          comp:'ManageParentChild',         group:'Parent / Child' },
 
-/* ─── Token Actions ─────────────────────── */
+  /* ─── Token Actions ───────────────────────────── */
   transfer     : { label:'Transfer Tokens', comp:'Transfer',   group:'Token Actions' },
   balance_of   : { label:'Check Balance',   comp:'BalanceOf',  group:'Token Actions' },
   mint         : { label:'Mint',            comp:'Mint',       group:'Token Actions' },
   mint_v4a     : { label:'Mint',            comp:'MintV4a',    group:'Token Actions' },
   burn         : { label:'Burn',            comp:'Burn',       group:'Token Actions' },
   destroy      : { label:'Destroy',         comp:'Destroy',    group:'Token Actions' },
-  
+
   /* ─── Operators ───────────────────────────────── */
   update_operators          : { label:'Update Operators',             comp:'UpdateOperators',           group:'Operators' },
 
-   /* ─── Metadata Ops ────────────────────────────── */
+  /* ─── Metadata Ops ────────────────────────────── */
   append_artifact_uri       : { label:'Append Artifact URI',          comp:'AppendArtifactUri',         group:'Metadata Ops' },
   append_extrauri           : { label:'Append Extra URI',             comp:'AppendExtraUri',            group:'Metadata Ops' },
   clear_uri                 : { label:'Clear URI',                    comp:'ClearUri',                  group:'Metadata Ops' },
@@ -147,11 +147,10 @@ function resolveEp(ver = '') {
   if (vLow.startsWith('v4a'))    enabled.add('manage_collaborators_v4a');
   else                            enabled.add('manage_collaborators');
   if (enabled.has('parentchild_edit')) enabled.add('manage_parent_child');
-  /* ensure dup‑safe set */
   return uniq([...enabled]);
 }
 
-/*════════ component – exported unchanged public API ═════════*/
+/*════════ component ═══════════════════════════════════════*/
 export default function AdminTools({ contract, onClose }) {
   const { network: walletNet } = useWalletContext() || {};
   const network = walletNet || NETWORK_KEY;
@@ -171,7 +170,7 @@ export default function AdminTools({ contract, onClose }) {
     return () => { html.style.overflow = prev; };
   }, []);
 
-  /* global open‑tool events (unchanged) */
+  /* global open‑tool events */
   useEffect(() => {
     const handler = (e) => {
       const { key, contract: addr } = e.detail || {};
@@ -183,7 +182,7 @@ export default function AdminTools({ contract, onClose }) {
     return () => window.removeEventListener('zu:openAdminTool', handler);
   }, [contract.address]);
 
-  /* counts loader (unchanged logic) */
+  /* counts loader */
   const refreshCounts = useCallback(async () => {
     let next = { coll:0, parent:0, child:0, total:0 };
     try {
@@ -223,17 +222,16 @@ export default function AdminTools({ contract, onClose }) {
     }
 
     const raw = uniq(rawSet)
-      .filter((k) => META[k] && EP[META[k].comp]);          /* safety */
+      .filter((k) => META[k] && EP[META[k].comp]);
     return raw.reduce((o, k) => { (o[META[k].group] ??= []).push(k); return o; }, {});
   }, [contract.version]);
 
-  /* order helpers unchanged … */
   const ORDER = ['mint','transfer','balance_of','destroy','burn'];
   const sortTokens = (arr) => arr.slice().sort(
     (a, b) => ORDER.indexOf(a) - ORDER.indexOf(b),
   );
 
-  /*──────── render – unchanged layout aside from new repair key ───*/
+  /*──────── render ───────────────────────────────────────────*/
   return (
     <>
       <Overlay>
@@ -259,6 +257,22 @@ export default function AdminTools({ contract, onClose }) {
             </div>
           </Preview>
 
+          {/* v4a warning banner */}
+          {contract.version?.toLowerCase().startsWith('v4a') && (
+            <p style={{
+              margin:'.15rem auto 0',
+              maxWidth:'600px',
+              fontSize:'.72rem',
+              textAlign:'center',
+              fontWeight:700,
+              color:'var(--zu-accent-sec)',
+            }}>
+              ⚠️ Warning: ZeroTerminal Progressive (v4a) contracts are still under
+              construction and may not behave as expected. Always test on&nbsp;
+              ghostnet first or contact&nbsp;@jams2blues for assistance.
+            </p>
+          )}
+
           <Body>
             {Object.entries(grouped).map(([title, keys]) => {
               const manageKey = title === 'Collaborators'
@@ -276,7 +290,7 @@ export default function AdminTools({ contract, onClose }) {
                       {title === 'Collaborators' && ` (${counts.coll})`}
                       {title.startsWith('Parent') &&
                          ` (P:${counts.parent} • C:${counts.child})`}
-                      {title === 'Token Actions' && ` (${counts.total})`}
+                      {/* Token Actions count intentionally removed */}
                     </PixelHeading>
                   </TitleRow>
 
@@ -323,4 +337,6 @@ export default function AdminTools({ contract, onClose }) {
     </>
   );
 }
-/* What changed & why: added META.update_token_metadata → UpdateTokenMetadatav4a component */
+/* What changed & why: removed confusing Token‑Actions count,
+   added temporary v4a warning banner. */
+/* EOF */

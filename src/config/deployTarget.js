@@ -21,7 +21,7 @@ const nets = {
     description:  'Test your fully-on-chain art collection risk-free on Ghostnet.',
     /* URLs */
     siteUrl:      'https://ghostnet.zerounbound.art',
-    ogImage:      'https://ghostnet.zerounbound.art/sprites/gostnet_Banner.png',
+    ogImage:      'https://ghostnet.zerounbound.art/sprites/gostnetBanner.png',
     startUrl:     '/?source=pwa-ghostnet',
     rpc: [   
       'https://ghostnet.tezos.ecadinfra.com',  // ECAD Infra (May-2025 domain)

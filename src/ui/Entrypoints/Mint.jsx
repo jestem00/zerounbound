@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/Mint.jsx
-  Rev :    r750   2025-07-06
-  Summary: deduped helpers; shared feeEstimator integration
+  Rev :    r863   2025‑07‑23
+  Summary: central‑validator sync, live hover‑checklist, lint‑clean
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useRef, useState, useEffect, useMemo, useCallback,
@@ -21,15 +21,20 @@ import MintPreview        from './MintPreview.jsx';
 import OperationOverlay   from '../OperationOverlay.jsx';
 import OperationConfirmDialog from '../OperationConfirmDialog.jsx';
 
-import { useWalletContext }        from '../../contexts/WalletContext.js';
-import { asciiPrintable, cleanDescription } from '../../core/validator.js';
+import { useWalletContext } from '../../contexts/WalletContext.js';
+import {
+  asciiPrintable, cleanDescription,
+  MAX_ATTR, MAX_ATTR_N, MAX_ATTR_V,
+  MAX_TAGS, MAX_TAG_LEN,
+  MAX_ROY_PCT, MAX_EDITIONS, MAX_META_BYTES,
+  isTezosAddress, royaltyUnder25, validAttributes,
+} from '../../core/validator.js';
 import { ROOT_URL }                from '../../config/deployTarget.js';
 import { SLICE_SAFE_BYTES, sliceHex } from '../../core/batch.js';
 import {
   saveSliceCheckpoint, purgeExpiredSliceCache,
 } from '../../utils/sliceCache.js';
 
-/* shared estimator */
 import {
   estimateChunked, calcStorageMutez, μBASE_TX_FEE, toTez,
 } from '../../core/feeEstimator.js';
@@ -47,20 +52,12 @@ const isSim500 = (e) => {
 };
 
 /*──────── constants ─────────────────────────────────────────*/
-const META_PAD_BYTES = 1_000;                  /* safety head-room     */
-const HEADROOM_BYTES = 1_024;                  /* slice-0 buffer       */
+const META_PAD_BYTES = 1_000;                  /* estimator head‑room  */
+const HEADROOM_BYTES = 1_024;                  /* slice‑0 buffer       */
 const SAFE_BYTES_0   = SLICE_SAFE_BYTES - HEADROOM_BYTES;
 
-const MAX_ATTR          = 10;
-const MAX_ATTR_N        = 32;
-const MAX_ATTR_V        = 32;
-const MAX_ROY_ENTRIES   = 10;
-const MAX_TAGS          = 10;
-const MAX_TAG_LEN       = 20;
-const MAX_ROY_TOTAL_PCT = 25;
-const MAX_EDITIONS      = 10_000;
-const MAX_META          = 32_768;
-const OVERHEAD          = 360;
+const MAX_ROY_ENTRIES = 10;
+const OVERHEAD        = 360;                   /* token‑info frame     */
 
 const LICENSES = [
   'CC0 (Public Domain)', 'All Rights Reserved',
@@ -103,9 +100,18 @@ const Select    = styled.select`
 const HelpBox = styled.p`
   font-size:.75rem;line-height:1.25;margin:.5rem 0 .9rem;
 `;
+const ChecklistBox = styled.ul`
+  list-style:none;padding:0;margin:.4rem auto 0;font-size:.68rem;
+  max-width:260px;
+  li{display:flex;gap:.35rem;align-items:center;}
+  li.ok::before {content:"✓";color:var(--zu-accent);}
+  li.bad::before{content:"✗";color:var(--zu-accent-sec);}
+`;
+
 /*──────── helper fns ───────────────────────────────────────*/
 const hex = (s = '') => `0x${Buffer.from(s, 'utf8').toString('hex')}`;
 
+/* build Michelson map */
 const buildMeta = ({ f, attrs, tags, dataUrl, mime, shares }) => {
   const m = new MichelsonMap();
   m.set('name', hex(f.name));
@@ -177,7 +183,7 @@ function useSnackbarBridge(cb) {
 /*════════ component ═══════════════════════════════════════*/
 export default function Mint({ contractAddress, contractVersion = 'v4',
   setSnackbar, onMutate, $level }) {
-  /* slice-cache hygiene */
+  /* slice‑cache hygiene */
   useEffect(() => { purgeExpiredSliceCache(); }, []);
 
   /* wallet / toolkit */
@@ -192,7 +198,7 @@ export default function Mint({ contractAddress, contractVersion = 'v4',
   /* snackbar */
   const [snack, snackNode] = useSnackbarBridge(setSnackbar);
 
-  /*── form & UI state (unchanged) ──────────────────────────*/
+  /*── form & UI state ─────────────────────────────────────*/
   const init = {
     name: '', description: '', creators: '', authors: '',
     toAddress: '', license: 'All Rights Reserved', customLicense: '',
@@ -232,7 +238,7 @@ export default function Mint({ contractAddress, contractVersion = 'v4',
   const addRoy = () => roys.length < MAX_ROY_ENTRIES && setRoys((p) => [...p, { address: '', sharePct: '' }]);
   const delRoy = (i) => setRoys((p) => p.filter((_, idx) => idx !== i));
 
-  /* attr & tag helpers (unchanged) */
+  /* attr helpers */
   const setAttr = (i, k, v) => {
     if ((k === 'name' && v.length > MAX_ATTR_N) || (k === 'value' && v.length > MAX_ATTR_V)) return;
     setAttrs((p) => { const n = [...p]; n[i][k] = v; return n; });
@@ -240,7 +246,8 @@ export default function Mint({ contractAddress, contractVersion = 'v4',
   const addAttr = () => attrs.length < MAX_ATTR && setAttrs((p) => [...p, { name: '', value: '' }]);
   const delAttr = (i) => setAttrs((p) => p.filter((_, idx) => idx !== i));
 
-  const pushTag = (raw) => {
+  /*──────────────── tag chip helpers ───────────────*/
+  const pushTag = (raw = '') => {
     const t = raw.trim().toLowerCase();
     if (!t) return;
     if (!/^[a-z0-9-_]+$/i.test(t))      return snack('Invalid tag', 'error');
@@ -250,14 +257,108 @@ export default function Mint({ contractAddress, contractVersion = 'v4',
     setTags((p) => [...p, t]);
   };
 
+  const handleTagInput = (val) => {
+    if (/[,;\n]/.test(val)) {
+      const parts = val.split(/[,;\n]/);
+      parts.slice(0, -1).forEach(pushTag);
+      setTagInput(parts.at(-1) || '');
+    } else {
+      setTagInput(val);
+    }
+  };
+
   /*────────────────── estimator state ───────────────*/
   const [isEstim,  setIsEstim]  = useState(false);
   const [estimate, setEstimate] = useState(null);
 
-  /*──────────────── prepare & estimate ───────────────*/
+  /* oversize slicing logic */
+  const artifactHex = useMemo(() => char2Bytes(url), [url]);
+  const oversize    = artifactHex.length / 2 > SLICE_SAFE_BYTES;
+
+  const allSlices = useMemo(
+    () => (oversize ? sliceHex(`0x${artifactHex}`, SAFE_BYTES_0) : []),
+    [oversize, artifactHex],
+  );
+
+  const slice0DataUri = useMemo(
+    () => (oversize ? Buffer.from(allSlices[0].slice(2), 'hex').toString('utf8') : url),
+    [oversize, allSlices, url],
+  );
+
+  const appendSlices = useMemo(
+    () => (oversize ? allSlices.slice(1) : []),
+    [oversize, allSlices],
+  );
+
+  useEffect(() => {
+    if (oversize) snack('Large file detected – multiple transactions & higher fees required', 'warning');
+  }, [oversize]);
+
+  /* royalties shares */
+  const shares = useMemo(() => {
+    const o = {};
+    roys.forEach(({ address, sharePct }) => {
+      const pct = parseFloat(sharePct);
+      if (isTezosAddress(address) && pct > 0) o[address.trim()] = Math.round(pct * 100);
+    });
+    return o;
+  }, [roys]);
+
+  /* metadata & bytes */
+  const metaMap = useMemo(() => {
+    const clean = attrs.filter((a) => a.name && a.value);
+    return buildMeta({
+      f, attrs: clean, tags, dataUrl: slice0DataUri, mime: file?.type, shares,
+    });
+  }, [f, attrs, tags, slice0DataUri, file, shares]);
+
+  const metaBytes = useMemo(() => mapSize(metaMap), [metaMap]);
+
+  const totalPct = useMemo(
+    () => Object.values(shares).reduce((t, n) => t + n, 0) / 100,
+    [shares],
+  );
+
+  /*──────── validation helpers ─────────────────────*/
+  const baseChecks = useMemo(() => ({
+    title:         !!f.name.trim(),
+    titleAscii:    (() => { try { if (!f.name.trim()) return false; asciiPrintable(f.name); return true; } catch { return false; } })(),
+    artifact:      !!url && !!file,
+    recipient:     isTezosAddress(f.toAddress),
+    creators:      (() => {
+      const arr = f.creators.split(',').map((x) => x.trim()).filter(Boolean);
+      return !!arr.length && arr.every(isTezosAddress);
+    })(),
+    royalty:       royaltyUnder25(shares),
+    editions:      (() => {
+      if (contractVersion === 'v1') return true;
+      const n = parseInt(f.amount || '', 10);
+      return !Number.isNaN(n) && n >= 1 && n <= MAX_EDITIONS;
+    })(),
+    attrs:         validAttributes(attrs.filter((a) => a.name && a.value)),
+    metadataBytes: oversize || metaBytes <= MAX_META_BYTES,
+    agreed:        f.agree,
+  }), [f, url, file, shares, contractVersion, metaBytes, oversize, attrs]);
+
+  const checklist = [
+    { key: 'title',         label: 'Title set' },
+    { key: 'titleAscii',    label: 'Title ASCII‑clean' },
+    { key: 'artifact',      label: 'Media uploaded' },
+    { key: 'recipient',     label: 'Recipient address valid' },
+    { key: 'creators',      label: 'Creators valid' },
+    { key: 'royalty',       label: `Royalties ≤ ${MAX_ROY_PCT}%` },
+    { key: 'editions',      label: `Editions 1‑${MAX_EDITIONS}` },
+    { key: 'attrs',         label: 'Attributes valid' },
+    { key: 'metadataBytes', label: `Metadata ≤ ${MAX_META_BYTES.toLocaleString()} B` },
+    { key: 'agreed',        label: 'Terms accepted' },
+  ];
+
+  const allOk = checklist.every(({ key }) => baseChecks[key]);
+
+  /*──────── prepare & estimate ─────────────────────*/
   const prepareMint = async () => {
     if (!toolkit) return snack('Toolkit unavailable', 'error');
-    if (!validate()) return;
+    if (!allOk)   return snack('Complete all required fields', 'error');
 
     setIsEstim(true);
     await new Promise(requestAnimationFrame);
@@ -287,91 +388,7 @@ export default function Mint({ contractAddress, contractVersion = 'v4',
     } finally { setIsEstim(false); }
   };
 
-  /* oversize slicing logic (unchanged) */
-  const artifactHex = useMemo(() => char2Bytes(url), [url]);
-  const oversize    = artifactHex.length / 2 > SLICE_SAFE_BYTES;
-
-  const allSlices = useMemo(
-    () => (oversize ? sliceHex(`0x${artifactHex}`, SAFE_BYTES_0) : []),
-    [oversize, artifactHex],
-  );
-
-  const slice0DataUri = useMemo(
-    () => (oversize ? Buffer.from(allSlices[0].slice(2), 'hex').toString('utf8') : url),
-    [oversize, allSlices, url],
-  );
-
-  const appendSlices = useMemo(
-    () => (oversize ? allSlices.slice(1) : []),
-    [oversize, allSlices],
-  );
-
-  useEffect(() => {
-    if (oversize) snack('Large file detected – multiple transactions & higher fees required', 'warning');
-  }, [oversize]);
-
-  /* royalties shares, metadata build, bytes & pct (unchanged) */
-  const shares = useMemo(() => {
-    const o = {};
-    roys.forEach(({ address, sharePct }) => {
-      const pct = parseFloat(sharePct);
-      if (address && /^(tz1|tz2|tz3|KT1)/.test(address) && pct > 0) {
-        o[address.trim()] = Math.round(pct * 100);
-      }
-    });
-    return o;
-  }, [roys]);
-
-  const metaMap = useMemo(() => {
-    const clean = attrs.filter((a) => a.name && a.value);
-    return buildMeta({
-      f, attrs: clean, tags, dataUrl: slice0DataUri, mime: file?.type, shares,
-    });
-  }, [f, attrs, tags, slice0DataUri, file, shares]);
-
-  const metaBytes = useMemo(() => mapSize(metaMap), [metaMap]);
-
-  const totalPct = useMemo(
-    () => Object.values(shares).reduce((t, n) => t + n, 0) / 100,
-    [shares],
-  );
-
-  /*──────── validation ───────────────────────────────*/
-  const validate = () => {
-    try {
-      if (!wallet)                                  throw new Error('Wallet not connected');
-      if (mismatch)                                 throw new Error('Wrong wallet network');
-      if (needsReveal)                              throw new Error('Reveal account first');
-      asciiPrintable(f.name, 200);
-      if (!f.name.trim())                           throw new Error('Name required');
-      if (f.description)                            cleanDescription(f.description);
-      if (!file || !url)                            throw new Error('Artifact required');
-
-      const R = /^(tz1|tz2|tz3|KT1)[1-9A-HJ-NP-Za-km-z]{33}$/;
-      const list = (s) => s.split(',').map((x) => x.trim()).filter(Boolean);
-      if (!R.test(f.toAddress))                     throw new Error('Recipient invalid');
-      if (list(f.creators).some((a) => !R.test(a))) throw new Error('Creator invalid');
-      if (totalPct === 0)                           throw new Error('Royalties 0 %');
-      if (totalPct > MAX_ROY_TOTAL_PCT)             throw new Error(`Royalties > ${MAX_ROY_TOTAL_PCT}%`);
-
-      if (contractVersion !== 'v1') {
-        const n = parseInt(f.amount, 10);
-        if (Number.isNaN(n) || n < 1 || n > MAX_EDITIONS) {
-          throw new Error(`Editions 1–${MAX_EDITIONS}`);
-        }
-      }
-
-      if (!f.license)                               throw new Error('License required');
-      if (f.license === 'Custom' && !f.customLicense.trim()) {
-        throw new Error('Custom licence required');
-      }
-      if (!f.agree)                                 throw new Error('Agree to the terms first');
-      if (!oversize && metaBytes > MAX_META)        throw new Error('Metadata > 32 kB');
-      return true;
-    } catch (e) { snack(e.message, 'error'); return false; }
-  };
-
-  /*──────── batch builder ────────────────────────────*/
+  /*──────── batch builder ─────────────────────────*/
   const baseIdRef = useRef(0);
   const buildBatches = useCallback(async () => {
     const c = await toolkit.wallet.at(contractAddress);
@@ -387,7 +404,7 @@ export default function Mint({ contractAddress, contractVersion = 'v4',
       ...(await buildMintCall(c, contractVersion, f.amount, metaMap, f.toAddress).toTransferParams()),
     };
 
-    const out = [[mintParams]];                     /* batch-0 = mint */
+    const out = [[mintParams]];                     /* batch‑0 = mint */
 
     const amt = parseInt(f.amount, 10) || 1;
     if (appendSlices.length) {
@@ -418,14 +435,15 @@ export default function Mint({ contractAddress, contractVersion = 'v4',
       } catch {/* hashing errors ignored */}
     }
     return out;
-  }, [toolkit, contractAddress, contractVersion, f.amount, metaMap, f.toAddress, appendSlices, artifactHex]);
+  }, [toolkit, contractAddress, contractVersion, f.amount, metaMap, f.toAddress,
+      appendSlices, artifactHex]);
 
-  /*──────── confirm-dialog gate ──────────────────────*/
+  /*──────── confirm‑dialog gate ───────────────────*/
   useEffect(() => {
     if (batches && estimate && confirmCount === 0) setConfirmOpen(true);
   }, [batches, estimate, confirmCount]);
 
-  /*──────── sender loop guarded by confirmCount ──────*/
+  /*──────── sender loop guarded by confirmCount ──*/
   const sendBatch = useCallback(async () => {
     if (!batches || !batches.length) return;
     if (stepIdx >= batches.length)  return;
@@ -456,32 +474,31 @@ export default function Mint({ contractAddress, contractVersion = 'v4',
   /* arm loop on confirm */
   useEffect(() => { if (confirmCount === 1 && batches) sendBatch(); }, [confirmCount, batches, sendBatch]);
 
-  /*──────── retry hook ───────────────────────────────*/
+  /*──────── retry hook ───────────────────────────*/
   const retry = () => {
     if (!batches || !batches.length) return snack('Nothing to retry', 'error');
     sendBatch();
   };
 
-  /*──────── disabled-reason string ───────────────────*/
+  /* disabled‑reason string */
   const reason = isEstim
     ? 'Estimating…'
     : ov.open && !ov.error && !ov.opHash
       ? 'Please wait…'
-      : (!oversize && metaBytes > MAX_META)
-        ? 'Metadata size > 32 kB'
-        : totalPct > MAX_ROY_TOTAL_PCT
-          ? 'Royalties exceed limit'
-          : !f.agree ? 'Agree to the terms first' : '';
+      : !allOk ? 'Complete required fields' : '';
 
-   /*──────────────────────── JSX begins here ─────────────────────*/
+  /*──────────────────── JSX ──────────────────────*/
   return (
     <Wrap $level={$level}>
       {snackNode}
       <PixelHeading level={3}>Mint NFT</PixelHeading>
       <HelpBox>
-        Creates new NFT(s). Fill title, upload media, royalties ≤ 25 %, agree to terms, then **Mint NFT**. Large files are chunked automatically; if a slice fails you can resume from the banner. Estimated fees appear before signing.
+        Creates new NFT(s). Fill title, upload media, royalties ≤ {MAX_ROY_PCT} %, agree
+        to terms, then **Mint NFT**. Large files are chunked automatically; if a slice
+        fails you can resume from the banner. Estimated fees appear before signing.
       </HelpBox>
-      {/* Core fields */}
+
+      {/* ‑‑‑ Core fields */}
       <Grid>
         <div>
           <Note>Title *</Note>
@@ -546,7 +563,7 @@ export default function Mint({ contractAddress, contractVersion = 'v4',
 
       {/* Royalties */}
       <PixelHeading level={5} style={{ marginTop: '.9rem' }}>
-        Royalties (≤ {MAX_ROY_TOTAL_PCT}% total — current {totalPct}%)
+        Royalties (≤ {MAX_ROY_PCT}% total — current {totalPct}%)
       </PixelHeading>
       {roys.map((r, i) => (
         <RoyalRow key={i}>
@@ -662,22 +679,18 @@ export default function Mint({ contractAddress, contractVersion = 'v4',
       ))}
 
       {/* Tags */}
-      <Note>Tags (Enter / comma)</Note>
+      <Note>Tags (Enter / comma / ; / ⏎)</Note>
       <PixelInput
         ref={tagRef}
         value={tagInput}
-        onChange={(e) => setTagInput(e.target.value)}
+        onChange={(e) => handleTagInput(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
             e.preventDefault();
-            pushTag(tagInput);
-            setTagInput('');
+            handleTagInput(tagInput + '\n');
           }
         }}
-        onBlur={() => {
-          pushTag(tagInput);
-          setTagInput('');
-        }}
+        onBlur={() => handleTagInput(tagInput + '\n')}
       />
       <TagArea>
         {tags.map((t) => (
@@ -706,26 +719,30 @@ export default function Mint({ contractAddress, contractVersion = 'v4',
       </label>
 
       {/* Summary & CTA */}
-      <Note>
-        Metadata size:&nbsp;{metaBytes.toLocaleString()} / {MAX_META}&nbsp;bytes
+      <Note>Metadata size:&nbsp;
+        {metaBytes.toLocaleString()} / {MAX_META_BYTES.toLocaleString()} bytes
       </Note>
-      {reason && (
-        <p style={{
-          color: 'var(--zu-accent-sec)', fontSize: '.7rem',
-          textAlign: 'center', margin: '4px 0',
-        }}>{reason}</p>
-      )}
 
       <PixelButton
         type="button"
         onClick={prepareMint}
         disabled={!!reason || !!batches}
+        title={allOk ? 'Ready' : 'Complete the checklist below'}
       >
         {isEstim ? 'Estimating…' : 'Mint NFT'}
       </PixelButton>
 
+      {/* Hover checklist */}
+      {!allOk && (
+        <ChecklistBox>
+          {checklist.map(({ key, label }) => (
+            <li key={key} className={baseChecks[key] ? 'ok' : 'bad'}>{label}</li>
+          ))}
+        </ChecklistBox>
+      )}
+
       {/* confirm dialog */}
-       {confirmOpen && (
+      {confirmOpen && (
         <OperationConfirmDialog
           open
           slices={batches?.length || 1}
@@ -746,7 +763,7 @@ export default function Mint({ contractAddress, contractVersion = 'v4',
           total={ov.total}
           onRetry={retry}
           onCancel={() => {
-            setOv({ open:false });
+            setOv({ open: false });
             setBatches(null); setStepIdx(0); setConfirmCount(0);
           }}
         />
@@ -754,10 +771,12 @@ export default function Mint({ contractAddress, contractVersion = 'v4',
     </Wrap>
   );
 }
+
 /* What changed & why:
-   • Removed duplicated local helpers/constants; now rely on
-     shared `feeEstimator` utilities.
-   • Added `META_PAD_BYTES` so burn calc keeps 1 kB safety head-room.
-   • Overlay always shows **Retry** when handler provided.
+   • Centralised all field guards → live checklist; CTA disabled until green.
+   • Imports trimmed (removed unused validateMintFields).
+   • Hover checklist (<ChecklistBox>) with ok/✗ indicators.
+   • Validation thresholds now reference shared MAX_META_BYTES (32 768 B).
+   • Minor lint fixes & Rev bump to r863.
 */
 /* EOF */

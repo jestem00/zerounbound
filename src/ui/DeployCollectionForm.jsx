@@ -1,27 +1,28 @@
-/* Developed by @jams2blues with love for the Tezos community
-   File:    src/ui/DeployCollectionForm.jsx
-   Rev :    r678
-   Summary: tighter gaps, responsive label-grid */
-
+/*─────────────────────────────────────────────────────────────
+  Developed by @jams2blues – ZeroContract Studio
+  File:    src/ui/DeployCollectionForm.jsx
+  Rev :    r679   2025‑07‑23
+  Summary: unified central validation + live checklist
+──────────────────────────────────────────────────────────────*/
 import React, { useEffect, useMemo, useState } from 'react';
 import styledPkg from 'styled-components';
 import { char2Bytes } from '@taquito/utils';
 import viewsJson from '../../contracts/metadata/views/Zero_Contract_v4_views.json';
 
-import FileUploadPixel from './FileUploadPixel.jsx';
-import PixelInput      from './PixelInput.jsx';
-import PixelButton     from './PixelButton.jsx';
-import { useWallet }   from '../contexts/WalletContext.js';
+import FileUploadPixel   from './FileUploadPixel.jsx';
+import PixelInput        from './PixelInput.jsx';
+import PixelButton       from './PixelButton.jsx';
+import PixelHeading      from './PixelHeading.jsx';
+import { useWallet }     from '../contexts/WalletContext.js';
 
 import {
-  asciiPrintable, asciiPrintableLn,
-  clean, cleanDescription, listOfTezAddresses,
-  OVERHEAD_BYTES, MAX_META_BYTES,
+  OVERHEAD_BYTES, MAX_META_BYTES, MAX_THUMB_BYTES,
+  calcRawBytesFromB64, validateDeployFields,
 } from '../core/validator.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
-/* denser vertical rhythm & mobile-aware clamp */
+/*──────── styles ───────────────────────────────────────────*/
 const Form   = styled.form`
   display: grid;
   gap: clamp(.6rem, 1.5vh, .9rem);
@@ -30,8 +31,20 @@ const Form   = styled.form`
 `;
 const Pair   = styled.div`display: grid; gap: .25rem;`;
 const Hint   = styled.span`font-size: .75rem; opacity: .75;`;
-const Err    = styled.span`font-size: .8rem; color: var(--zu-accent-sec);`;
 const Cnt    = styled.span`font-size: .7rem; justify-self: end; opacity: .75;`;
+const ChecklistBox = styled.ul`
+  list-style:none;padding:0;margin:.35rem 0 0;font-size:.68rem;
+  li { display:flex;gap:.3rem;align-items:center; }
+  li.ok::before  { content:"✓";color:var(--zu-accent); }
+  li.bad::before { content:"✗";color:var(--zu-accent-sec); }
+`;
+
+/*──────── field caps (visual hints only) ───────────────────*/
+const LEN = {
+  name: 50, symbol: 5, description: 600,
+  authors: 50, addr: 200, creators: 200, license: 120,
+  homepage: 160,
+};
 
 const LICENSES = [
   'No License, All Rights Reserved',
@@ -40,82 +53,40 @@ const LICENSES = [
   'Creative Commons — CC0 1.0',
   'MIT', 'GPL-3.0', 'CAL-1.0', 'Custom…',
 ];
-const LEN = {
-  name: 50, symbol: 5, description: 600,
-  authors: 50, addr: 200, creators: 200, license: 120,
-  homepage: 160,
-};
 
-/*───────────────────────────────────────────────────────────────
-  Thumbnail limit
-  ── Protocol cap 32 768 B minus current OVERHEAD_BYTES leaves the
-     payload budget for the metadata JSON body.
-  ── The thumbnail is embedded as base-64, which expands by 4⁄3.
-  ── Max raw bytes = floor((MAX_META_BYTES − OVERHEAD_BYTES) × ¾). */
-const MAX_THUMB_BYTES = Math.floor((MAX_META_BYTES - OVERHEAD_BYTES) * 3 / 4);
-const MAX_THUMB_KB    = (MAX_THUMB_BYTES / 1024).toFixed(1);
-
+/*════════════════ component ════════════════════════════════*/
 export default function DeployCollectionForm({ onDeploy }) {
   const { address, wallet } = useWallet();
 
   const [data, setData] = useState({
-    name:'', symbol:'', description:'',
+    name:'', symbol:'', description:'', homepage:'',
     authors:'', authorAddresses:'', creators:'',
-    homepage:'', type:'art', license:LICENSES[0], customLicense:'',
+    type:'art', license:LICENSES[0], customLicense:'',
     imageUri:'', agree:false,
   });
-  const [err, setErr] = useState({});
 
   const setField = e => {
     const { name, value, type, checked } = e.target;
     let val = type==='checkbox' ? checked : value;
     if (name==='symbol') val = val.toUpperCase();
     setData(p => ({ ...p, [name]: val }));
-    setErr(p => ({ ...p, [name]: validate(name, val) }));
   };
 
-  const urlOkay = v => /^(https?:\/\/|ipfs:\/\/|ipns:\/\/|ar:\/\/)[\w./#?=-]+$/i.test(v.trim());
-
-  const validate = (k, v) => {
-    switch (k) {
-      case 'homepage':
-        return !v ? '' : !urlOkay(v) ? 'Must be valid URL' : v.length>LEN.homepage?`≤${LEN.homepage}`:'';
-      case 'name':
-        return !v ? 'Required' : !asciiPrintable(v) ? 'ASCII only' : v.length>LEN.name?`≤${LEN.name}`:'';
-      case 'symbol':
-        return !v ? 'Required' : !/^[A-Z0-9]{3,5}$/.test(v)?'3-5 A-Z 0-9':'';
-      case 'description':
-        return !v ? 'Required' : !asciiPrintableLn(v)?'Illegal chars':v.length>LEN.description?`≤${LEN.description}`:'';
-      case 'authors':
-        return !v ? 'Required' : !asciiPrintable(v)?'ASCII only':v.length>LEN.authors?`≤${LEN.authors}`:'';
-      case 'authorAddresses':
-        return !v ? 'Required' : !listOfTezAddresses(v)?'Comma-sep tz':v.length>LEN.addr?`≤${LEN.addr}`:'';
-      case 'creators':
-        return !v ? 'Required' : !listOfTezAddresses(v)?'Comma-sep tz':v.length>LEN.creators?`≤${LEN.creators}`:'';
-      case 'customLicense':
-        if (data.license!=='Custom…') return '';
-        return !v?'Required':!asciiPrintable(v)?'ASCII only':v.length>LEN.license?`≤${LEN.license}`:'';
-      case 'agree':
-        return v?'':'Must accept terms';
-      default:
-        return '';
-    }
-  };
-
+  /* autofill from wallet */
   useEffect(() => {
     if (!address) return;
     setData(p => ({
       ...p,
-      authorAddresses: p.authorAddresses||address,
-      creators:        p.creators||address,
+      authorAddresses: p.authorAddresses || address,
+      creators:        p.creators        || address,
     }));
   }, [address]);
 
-  /*──────── metadata builders ───────*/
+  /*──────── metadata builders ───────────────────────────────*/
   const meta = useMemo(() => ({
-    name:        clean(data.name, LEN.name),
-    symbol:      clean(data.symbol, LEN.symbol),
-    description: cleanDescription(data.description, LEN.description),
+    name:        data.name.trim(),
+    symbol:      data.symbol.trim(),
+    description: data.description.trim(),
     license:     data.license==='Custom…' ? data.customLicense.trim() : data.license,
     authors:     data.authors.split(',').map(s=>s.trim()),
     authoraddress:data.authorAddresses.split(',').map(s=>s.trim()),
@@ -132,30 +103,31 @@ export default function DeployCollectionForm({ onDeploy }) {
     views:   viewsJson.views,
   }), [meta]);
 
-  const bytes = useMemo(() => {
-    const bodyHex   = char2Bytes(JSON.stringify(ordered));
-    return bodyHex.length / 2 + OVERHEAD_BYTES;
-  }, [ordered]);
+  /* size calculations */
+  const metaBodyBytes = useMemo(() => char2Bytes(JSON.stringify(ordered)).length / 2, [ordered]);
+  const thumbnailBytes = useMemo(() => {
+    const b64 = data.imageUri.split(',')[1] || '';
+    return calcRawBytesFromB64(b64);
+  }, [data.imageUri]);
 
-  const tooBig  = bytes > MAX_META_BYTES;
-  const walletOK= Boolean(address && wallet);
-  const valid   = walletOK && !tooBig && Object.values(err).every(e=>!e)
-                  && data.agree && data.imageUri;
+  /*──────── central validation ──────────────────────────────*/
+  const { errors, checklist } = validateDeployFields({
+    data, walletOK: Boolean(address && wallet),
+    thumbBytes: thumbnailBytes,
+    metaBodyBytes,
+  });
 
   const handleSubmit = e => {
     e.preventDefault();
-    const finalErr = {};
-    Object.keys(data).forEach(k => {
-      const m = validate(k, data[k]);
-      if (m) finalErr[k] = m;
-    });
-    setErr(finalErr);
-    if (Object.keys(finalErr).length) return;
+    if (errors.length) return;
     onDeploy(meta);
   };
 
+  /*──────── render ─────────────────────────────────────────*/
   return (
     <Form onSubmit={handleSubmit}>
+      <PixelHeading level={3}>Deploy ZeroContract v4 Collection</PixelHeading>
+
       {/* name */}
       <Pair>
         <label>Name*</label>
@@ -167,12 +139,11 @@ export default function DeployCollectionForm({ onDeploy }) {
           onChange={setField}
         />
         <Cnt>{data.name.length}/{LEN.name}</Cnt>
-        {err.name && <Err>{err.name}</Err>}
       </Pair>
 
       {/* symbol */}
       <Pair>
-        <label>Symbol* <Hint>(3-5 chars)</Hint></label>
+        <label>Symbol* <Hint>(3‑5 chars)</Hint></label>
         <PixelInput
           name="symbol"
           maxLength={LEN.symbol}
@@ -181,7 +152,6 @@ export default function DeployCollectionForm({ onDeploy }) {
           onChange={setField}
         />
         <Cnt>{data.symbol.length}/{LEN.symbol}</Cnt>
-        {err.symbol && <Err>{err.symbol}</Err>}
       </Pair>
 
       {/* description */}
@@ -197,7 +167,6 @@ export default function DeployCollectionForm({ onDeploy }) {
           onChange={setField}
         />
         <Cnt>{data.description.length}/{LEN.description}</Cnt>
-        {err.description && <Err>{err.description}</Err>}
       </Pair>
 
       {/* homepage */}
@@ -211,12 +180,11 @@ export default function DeployCollectionForm({ onDeploy }) {
           onChange={setField}
         />
         <Cnt>{data.homepage.length}/{LEN.homepage}</Cnt>
-        {err.homepage && <Err>{err.homepage}</Err>}
       </Pair>
 
       {/* authors */}
       <Pair>
-        <label>Author(s)* <Hint>(comma-sep)</Hint></label>
+        <label>Author(s)* <Hint>(comma‑sep)</Hint></label>
         <PixelInput
           name="authors"
           maxLength={LEN.authors}
@@ -225,7 +193,6 @@ export default function DeployCollectionForm({ onDeploy }) {
           onChange={setField}
         />
         <Cnt>{data.authors.length}/{LEN.authors}</Cnt>
-        {err.authors && <Err>{err.authors}</Err>}
       </Pair>
 
       {/* author addresses */}
@@ -238,7 +205,6 @@ export default function DeployCollectionForm({ onDeploy }) {
           value={data.authorAddresses}
           onChange={setField}
         />
-        {err.authorAddresses && <Err>{err.authorAddresses}</Err>}
       </Pair>
 
       {/* creators */}
@@ -251,7 +217,6 @@ export default function DeployCollectionForm({ onDeploy }) {
           value={data.creators}
           onChange={setField}
         />
-        {err.creators && <Err>{err.creators}</Err>}
       </Pair>
 
       {/* license */}
@@ -265,20 +230,19 @@ export default function DeployCollectionForm({ onDeploy }) {
         >
           {LICENSES.map(l => <option key={l} value={l}>{l}</option>)}
         </PixelInput>
-        {data.license === 'Custom…' && (
-          <>
-            <PixelInput
-              name="customLicense"
-              maxLength={LEN.license}
-              placeholder="Enter custom license"
-              value={data.customLicense}
-              onChange={setField}
-            />
-            <Cnt>{data.customLicense.length}/{LEN.license}</Cnt>
-            {err.customLicense && <Err>{err.customLicense}</Err>}
-          </>
-        )}
       </Pair>
+      {data.license === 'Custom…' && (
+        <Pair>
+          <PixelInput
+            name="customLicense"
+            maxLength={LEN.license}
+            placeholder="Enter custom license"
+            value={data.customLicense}
+            onChange={setField}
+          />
+          <Cnt>{data.customLicense.length}/{LEN.license}</Cnt>
+        </Pair>
+      )}
 
       {/* type */}
       <Pair>
@@ -306,8 +270,7 @@ export default function DeployCollectionForm({ onDeploy }) {
           onSelect={uri => setData(p => ({ ...p, imageUri: uri }))}
           maxFileSize={MAX_THUMB_BYTES}
         />
-        <Hint>Max thumbnail: {MAX_THUMB_KB} KB</Hint>
-        {!data.imageUri && <Err>Required</Err>}
+        <Hint>Max thumbnail: {(MAX_THUMB_BYTES/1024).toFixed(1)} KB</Hint>
       </Pair>
 
       {/* terms */}
@@ -319,22 +282,26 @@ export default function DeployCollectionForm({ onDeploy }) {
             checked={data.agree}
             onChange={setField}
           />
-          Accept <a href="/terms" target="_blank" rel="noopener noreferrer">
-            terms
-          </a>
+          Accept&nbsp;
+          <a href="/terms" target="_blank" rel="noopener noreferrer">terms</a>
         </label>
-        {err.agree && <Err>{err.agree}</Err>}
       </Pair>
 
-      {/* metadata size */}
+      {/* metadata size + checklist */}
       <Pair>
-        <Cnt style={tooBig ? { color:'var(--zu-accent-sec)' } : undefined}>
-          Metadata {bytes.toLocaleString()} / {MAX_META_BYTES} bytes
+        <Cnt style={metaBodyBytes + OVERHEAD_BYTES > MAX_META_BYTES
+          ? { color:'var(--zu-accent-sec)' } : undefined}>
+          Meta&nbsp;{(metaBodyBytes+OVERHEAD_BYTES).toLocaleString()} / {MAX_META_BYTES} B
         </Cnt>
-        {tooBig && <Err>Exceeds {MAX_META_BYTES.toLocaleString()} bytes</Err>}
       </Pair>
 
-      <PixelButton type="submit" disabled={!valid}>
+      <ChecklistBox>
+        {checklist.map((c, i) => (
+          <li key={i} className={c.ok ? 'ok' : 'bad'}>{c.msg}</li>
+        ))}
+      </ChecklistBox>
+
+      <PixelButton type="submit" disabled={errors.length}>
         {wallet ? 'Deploy' : 'Connect wallet'}
       </PixelButton>
     </Form>
@@ -342,6 +309,8 @@ export default function DeployCollectionForm({ onDeploy }) {
 }
 
 /* What changed & why:
-   • Vertical gap now clamp(.6-.9 rem) → 15-25 % tighter, fits 1080 p.
-   • No logic altered — safe across all consumers. */
+   • Re‑wired validation to central validator.validateDeployFields().
+   • Added live checklist identical to Mint UX.
+   • Thumbnail size + meta size calculated against shared caps.
+   • Rev bumped, inline field‑by‑field errors removed (now checklist). */
 /* EOF */

@@ -6,6 +6,7 @@
 import React from 'react';
 import PixelButton from '../ui/PixelButton.jsx';
 import CRTFrame    from '../ui/CRTFrame.jsx';
+import { SITE_LOGO } from '../config/deployTarget.js'
 
 export default function Home() {
   return (
@@ -29,7 +30,7 @@ export default function Home() {
       >
         {/* logo */}
         <img
-          src="/sprites/logo.svg"
+          src={SITE_LOGO}
           alt="Zero Unbound — ZeroContract Studio"
           style={{
             display: 'block',

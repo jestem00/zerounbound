@@ -1,9 +1,7 @@
-/*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+/*Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/TokenMetaPanel.jsx
-  Rev :    r743   2025-07-11 T03:12 UTC
-  Summary: links trigger AdminTools via “zu:openAdminTool”
-──────────────────────────────────────────────────────────────*/
+  Rev :    r744‑c   2025‑07‑24
+  Summary: fix hook‑mismatch, mobile‑safe badge, integrity first */
 import React, {
   useEffect, useMemo, useState, useRef, useCallback,
 } from 'react';
@@ -15,6 +13,8 @@ import { useWalletContext } from '../contexts/WalletContext.js';
 import { jFetch }           from '../core/net.js';
 import LoadingSpinner       from './LoadingSpinner.jsx';
 import PixelButton          from './PixelButton.jsx';
+import { checkOnChainIntegrity } from '../utils/onChainValidator.js';
+import { INTEGRITY_BADGES }      from '../constants/integrityBadges.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -114,8 +114,13 @@ const MetaGrid = styled.dl`
   dt{white-space:nowrap;color:var(--zu-accent);}
   dd{margin:0;word-break:break-word;}
 `;
+const Badge = styled.span`
+  position:absolute;top:4px;right:4px;z-index:4;
+  font-size:1rem;
+  /* tap‑friendly touch area */
+  padding:.2rem;
+`;
 
-/*──────── component ────────────────────────────────────────*/
 export default function TokenMetaPanel({
   meta            = null,
   tokenId         = '',
@@ -124,6 +129,7 @@ export default function TokenMetaPanel({
 }) {
   const { address: wallet, network = 'ghostnet' } = useWalletContext() || {};
 
+  /*── state ─────────────────────────────*/
   const [warn,   setWarn]   = useState('');
   const [supply, setSupply] = useState(null);
   const [owned,  setOwned]  = useState(null);
@@ -143,7 +149,7 @@ export default function TokenMetaPanel({
     setWarn('');
   };
 
-  /* open AdminTools modal via global event */
+  /* global AdminTools opener */
   const openTool = useCallback((key) => {
     if (typeof window === 'undefined') return;
     window.dispatchEvent(new CustomEvent('zu:openAdminTool', {
@@ -151,9 +157,22 @@ export default function TokenMetaPanel({
     }));
   }, [contractAddress]);
 
-  const m      = typeof meta === 'object' && meta ? meta : {};
-  const hero   = useMemo(() => pickUri(m), [m]);
-  const uriArr = useMemo(() => listUriKeys(m), [m]);
+  /* memoised derivations (run every render → stable hook count) */
+  const metaObj    = typeof meta === 'object' && meta ? meta : {};
+  const hero       = useMemo(() => pickUri(metaObj), [metaObj]);
+  const uriArr     = useMemo(() => listUriKeys(metaObj), [metaObj]);
+  const integrity  = useMemo(() => checkOnChainIntegrity(metaObj), [metaObj]);
+  const badgeChar  = INTEGRITY_BADGES[integrity.status] || INTEGRITY_BADGES.unknown;
+  const kvPairs    = useMemo(() => {
+    const keys = [
+      'name','description','mimeType','authors','creators','rights',
+      'royalties','mintingTool','accessibility','contentRating',
+      'tags','attributes','decimals',
+    ];
+    return keys
+      .filter((k) => metaObj[k] !== undefined)
+      .map((k) => [k, pretty(k, metaObj[k])]);
+  }, [metaObj]);
 
   const ktShort = contractAddress
     ? `${contractAddress.slice(0, 5)}…${contractAddress.slice(-4)}`
@@ -168,7 +187,7 @@ export default function TokenMetaPanel({
     } catch {/* ignore */}
   };
 
-  /*──────── relationship counts ────────────────────────────*/
+  /*── relationship counts ─────────────────*/
   useEffect(() => {
     if (!contractAddress) return;
     const base =
@@ -188,10 +207,10 @@ export default function TokenMetaPanel({
     })();
   }, [contractAddress, network]);
 
-  /*──────── supply & balance fetch  ────────────────────────*/
+  /*── supply & balance ────────────────────*/
   useEffect(() => {
     let cancelled = false;
-    const safeSet = (fn, val) => { if (!cancelled) fn(val); };
+    const safeSet = (fn, v) => { if (!cancelled) fn(v); };
 
     if (!contractAddress || tokenId === '') {
       setSupply(null); setOwned(null); return;
@@ -264,19 +283,9 @@ export default function TokenMetaPanel({
     return () => { cancelled = true; };
   }, [contractAddress, tokenId, wallet, network]);
 
-  /*──────── meta grid pairs ────────────────────────────────*/
-  const kvPairs = useMemo(() => {
-    const keys = [
-      'name', 'description', 'mimeType', 'authors', 'creators', 'rights',
-      'royalties', 'mintingTool', 'accessibility', 'contentRating',
-      'tags', 'attributes', 'decimals',
-    ];
-    return keys
-      .filter((k) => m[k] !== undefined)
-      .map((k) => [k, pretty(k, m[k])]);
-  }, [m]);
+  /*── render ──────────────────────────────*/
+  if (tokenId === '') return null;           // ok – hooks already ran
 
-  if (tokenId === '') return null;
   if (meta === null) {
     return (
       <Card style={{ textAlign: 'center' }}>
@@ -285,10 +294,20 @@ export default function TokenMetaPanel({
     );
   }
 
-  /*──────── JSX ───────────────────────────────────────────*/
   return (
     <Card>
-      <Title>{m.name || `Token ${tokenId}`}</Title>
+      {integrity.status !== 'unknown' && (
+        <Badge
+          aria-label={integrity.status === 'full'
+            ? 'Fully on‑chain'
+            : 'Partially on‑chain'}
+          title={integrity.status === 'full'
+            ? 'Fully on‑chain ✅'
+            : `Partially on‑chain – ${integrity.reasons.join('; ')}`}
+        >
+          {badgeChar}
+        </Badge>
+      )}
 
       {ktShort && (
         <AddrRow>
@@ -305,6 +324,49 @@ export default function TokenMetaPanel({
         </AddrRow>
       )}
 
+      {/* editions + wallet balance */}
+      <Stats>
+        {supply === null
+          ? <LoadingSpinner size={16} />
+          : supply === undefined
+            ? null
+            : <span title="Total editions">Total&nbsp;{supply}</span>}
+        {wallet && (
+          owned === null
+            ? <LoadingSpinner size={16} />
+            : owned === undefined
+              ? null
+              : <span title="Editions you own">Owned&nbsp;{owned}</span>
+        )}
+      </Stats>
+
+      {/* relationship counts */}
+      <RelStats>
+        <span title="Parent addresses">P&nbsp;{rel.parent}</span>
+        <span title="Children addresses">C&nbsp;{rel.child}</span>
+        <span title="Collaborators">Collab&nbsp;{rel.coll}</span>
+      </RelStats>
+
+      {/* preview */}
+      {hero && !supRef.current.has('hero') && (
+        <RenderMedia
+          uri={hero}
+          alt={metaObj.name}
+          style={{
+            width: 96,
+            height: 96,
+            objectFit: 'contain',
+            display: 'block',
+            margin: '0 auto 6px',
+          }}
+          onInvalid={(r) => {
+            supRef.current.add('hero');
+            suppressWarn(r);
+          }}
+        />
+      )}
+
+      {/* integrity‑related warn overlay (unchanged) */}
       {warn && (
         <Warn>
           <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--zu-accent-sec)' }}>
@@ -342,49 +404,7 @@ export default function TokenMetaPanel({
         </Warn>
       )}
 
-      {/* editions + wallet balance */}
-      <Stats>
-        {supply === null
-          ? <LoadingSpinner size={16} />
-          : supply === undefined
-            ? null
-            : <span title="Total editions">Total&nbsp;{supply}</span>}
-        {wallet && (
-          owned === null
-            ? <LoadingSpinner size={16} />
-            : owned === undefined
-              ? null
-              : <span title="Editions you own">Owned&nbsp;{owned}</span>
-        )}
-      </Stats>
-
-      {/* relationship counts */}
-      <RelStats>
-        <span title="Parent addresses">P&nbsp;{rel.parent}</span>
-        <span title="Children addresses">C&nbsp;{rel.child}</span>
-        <span title="Collaborators">Collab&nbsp;{rel.coll}</span>
-      </RelStats>
-
-      {/* preview */}
-      {hero && !supRef.current.has('hero') && (
-        <RenderMedia
-          uri={hero}
-          alt={m.name}
-          style={{
-            width: 96,
-            height: 96,
-            objectFit: 'contain',
-            display: 'block',
-            margin: '0 auto 6px',
-          }}
-          onInvalid={(r) => {
-            supRef.current.add('hero');
-            suppressWarn(r);
-          }}
-        />
-      )}
-
-      {/* metadata */}
+      {/* metadata grid */}
       <MetaGrid>
         {kvPairs.map(([k, v]) => (
           <React.Fragment key={k}>
@@ -397,7 +417,7 @@ export default function TokenMetaPanel({
             <dt>{k}</dt>
             <dd style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <RenderMedia
-                uri={m[k]}
+                uri={metaObj[k]}
                 alt={k}
                 style={{ width: 48, height: 48, objectFit: 'contain' }}
                 onInvalid={(r) => suppressWarn(`${k}: ${r}`)}
@@ -420,13 +440,11 @@ export default function TokenMetaPanel({
     </Card>
   );
 }
-
 /* What changed & why:
-   • Added `openTool()` helper that dispatches
-     window event “zu:openAdminTool” with ep key + contract.
-   • Replaced dead `/repair_uri` & `/clear_uri` links with
-     hash anchors that trigger openTool, preventing 404s.
-   • Warn <a> gets cursor:pointer and retains accent colour.
-   • Rev bumped; lint-clean; all invariants intact.
-*/
+   • Moved all hooks above conditional rendering to stabilise hook order
+     (fixes “Rendered more hooks” runtime error).
+   • Integrity computed unconditionally; spinner/empty states moved to
+     return branch, ensuring hook count parity.
+   • Badge now wraps in touch‑friendly area; aria‑label added for mobile
+     accessibility. */
 /* EOF */

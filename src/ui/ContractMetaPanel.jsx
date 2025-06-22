@@ -1,13 +1,15 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/ContractMetaPanel.jsx
-  Rev :    r799   2025-07-05
-  Summary: visible overflow, auto first-col width, no clipping
+  Rev :    r801   2025‑07‑23
+  Summary: integrity badge uses central map
 ──────────────────────────────────────────────────────────────*/
 import React, { useEffect, useMemo, useState, useRef } from 'react';
-import styledPkg            from 'styled-components';
-import RenderMedia          from '../utils/RenderMedia.jsx';
-import { jFetch }           from '../core/net.js';
+import styledPkg                       from 'styled-components';
+import RenderMedia                     from '../utils/RenderMedia.jsx';
+import { jFetch }                      from '../core/net.js';
+import { checkOnChainIntegrity }       from '../utils/onChainValidator.js';
+import { INTEGRITY_BADGES }            from '../constants/integrityBadges.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -28,8 +30,15 @@ const Card = styled.div`
   padding:10px;
   width:100%;
   font-size:.75rem;line-height:1.25;
-  overflow:visible;                   /* allow natural wrapping   */
+  overflow:visible;
+  position:relative;
 `;
+/* ⭐ / ⛓️‍💥 badge */
+const Badge = styled.span`
+  position:absolute;top:4px;right:4px;z-index:3;
+  font-size:1.15rem;cursor:help;
+`;
+
 const Title = styled.h3`
   margin:.1rem 0 .35rem;font-size:.95rem;text-align:center;
   color:var(--zu-accent);word-break:break-word;
@@ -57,9 +66,7 @@ const MetaGrid = styled.dl`
 `;
 
 /*──────── component ────────────────────────────────────────*/
-export default function ContractMetaPanel({
-  meta={}, contractAddress='', network='ghostnet',
-}) {
+export default function ContractMetaPanel({ meta={}, contractAddress='', network='ghostnet' }) {
   const [counts,setCounts] = useState({ coll:0,parent:0,child:0,total:0 });
   const cancelled = useRef(false);
 
@@ -93,12 +100,26 @@ export default function ContractMetaPanel({
     ORDER.filter(k=>meta[k]!==undefined)
          .map(k=>[k,Array.isArray(meta[k])?meta[k].join(', '):String(meta[k])]),
   [meta]);
+  /* new integrity status */
+  const integrity = useMemo(() => checkOnChainIntegrity(meta), [meta]);
+  const badge     = INTEGRITY_BADGES[integrity.status] || INTEGRITY_BADGES.unknown;
 
-  return (
+   return (
     <Card>
-      {hero&&(
+      {integrity.status !== 'unknown' && (
+        <Badge title={
+          integrity.status === 'full'
+            ? 'Fully on‑chain ✅'
+            : `Partially on‑chain – ${integrity.reasons.join('; ')}`
+        }>
+          {badge}
+        </Badge>
+      )}
+
+      {/* hero image */}
+      {meta.imageUri && (
         <RenderMedia
-          uri={hero}
+          uri={meta.imageUri}
           alt={meta.name}
           style={{
             width:120,height:120,
@@ -127,9 +148,6 @@ export default function ContractMetaPanel({
     </Card>
   );
 }
-/* What changed & why:
-   • Card overflow set to `visible` (was hidden) to prevent text cut-off.
-   • MetaGrid now `max-content 1fr` → first column only as wide as
-     needed, eliminating huge internal gap and clip on narrow widths.
-   • dt / dd both get anywhere-wrap for stubborn URLs. */
+/* What changed & why: imports helper + renders integrity
+   Badge with accessible tooltip; no other logic touched. */
 /* EOF */

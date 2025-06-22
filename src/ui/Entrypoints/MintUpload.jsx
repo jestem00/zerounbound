@@ -1,16 +1,16 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/MintUpload.jsx
-  Rev :    r699   2025-06-25
-  Summary: snackbar fallback, accept whitelist join safeguard,
-           clearer helper naming, ESLint clean
+  Rev :    r700   2025‑07‑23
+  Summary: artefact validator + confirm dialogue
 ──────────────────────────────────────────────────────────────*/
-import React, { useRef, useState } from 'react';
-import styledPkg                   from 'styled-components';
-import PixelButton                 from '../PixelButton.jsx';
+import React, { useRef, useState, useCallback } from 'react';
+import styledPkg            from 'styled-components';
+import PixelButton          from '../PixelButton.jsx';
 import { MIME_TYPES as WHITELIST } from '../../constants/mimeTypes.js';
+import PixelConfirmDialog   from '../PixelConfirmDialog.jsx';
+import { checkOnChainIntegrity } from '../../utils/onChainValidator.js';
 
-/*──────── styled shells ─────────────────────────*/
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
 const Hidden = styled.input`
@@ -21,8 +21,8 @@ const FileName = styled.p`
 `;
 
 /*──────── helpers ───────────────────────────────*/
-const EXT_OK  = ['.glb', '.gltf', '.html'];
-const ACCEPT  = [...WHITELIST, ...EXT_OK].join(',');
+const EXT_OK = ['.glb','.gltf','.html'];
+const ACCEPT = [...WHITELIST, ...EXT_OK].join(',');
 
 /** rough byte estimate from a data URI */
 const byteSizeOfDataUri = (uri = '') => {
@@ -40,42 +40,49 @@ function alertSnack(msg, sev = 'info') {
 
 /*──────── component ────────────────────────────*/
 export default function MintUpload({ onFileChange, onFileDataUrlChange }) {
-  const inpRef           = useRef(null);
-  const [fileName, setFileName] = useState('');
-  const [busy,     setBusy]     = useState(false);
+  const inpRef  = useRef(null);
+  const [busy, setBusy]     = useState(false);
+  const [fileName,setFileName] = useState('');
+  const [dialog,setDialog]  = useState({ open:false,msg:'',todo:null });
 
   const triggerPick = () => inpRef.current?.click();
+
+  const validateArtifact = useCallback((dataUri) => {
+    try {
+      const [, b64=''] = dataUri.split(',');
+      const raw = atob(b64);
+      const res = checkOnChainIntegrity({ artifactUri:dataUri, body:raw });
+      return res.status === 'partial' ? res.reasons.join('; ') : '';
+    } catch { return ''; }
+  }, []);
 
   const handlePick = (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
-
-    const mimeOk = WHITELIST.includes(f.type)
-                || EXT_OK.some((x) => f.name.toLowerCase().endsWith(x));
-
-    if (!mimeOk) {
-      alertSnack('Unsupported file type', 'error');
-      e.target.value = '';
-      return;
-    }
+    const ok = WHITELIST.includes(f.type)
+            || EXT_OK.some(x => f.name.toLowerCase().endsWith(x));
+    if (!ok) { setDialog({ open:true,msg:'Unsupported file type',todo:null }); return; }
 
     setBusy(true);
     const reader = new FileReader();
     reader.onload = () => {
       const uri = reader.result;
-      setFileName(f.name);
-      setBusy(false);
-
-      onFileChange?.(f);
-      onFileDataUrlChange?.(uri);
-
-      if (byteSizeOfDataUri(uri) > 20 * 1024) {
-        alertSnack('Encoded size > 20 KB; some wallets may truncate', 'warning');
+      const warn = validateArtifact(uri);
+      const complete = () => {
+        setFileName(f.name);
+        onFileChange?.(f);
+        onFileDataUrlChange?.(uri);
+        setBusy(false);
+      };
+      if (warn) {
+        setDialog({ open:true,msg:`Potential off‑chain refs detected: ${warn}`,todo:complete });
+      } else {
+        complete();
       }
     };
     reader.onerror = () => {
-      alertSnack('Read error – please try again', 'error');
       setBusy(false);
+      setDialog({ open:true,msg:'Read error – retry?',todo:null });
     };
     reader.readAsDataURL(f);
   };
@@ -92,6 +99,12 @@ export default function MintUpload({ onFileChange, onFileDataUrlChange }) {
         {busy ? 'Uploading…' : 'Upload Artifact *'}
       </PixelButton>
       {fileName && <FileName>Selected: {fileName}</FileName>}
+      <PixelConfirmDialog
+        open={dialog.open}
+        message={dialog.msg}
+        onOk={() => { dialog.todo?.(); setDialog({ open:false,msg:'',todo:null }); }}
+        onCancel={() => setDialog({ open:false,msg:'',todo:null })}
+      />
     </div>
   );
 }

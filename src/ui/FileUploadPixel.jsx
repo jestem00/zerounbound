@@ -1,18 +1,18 @@
-/*Developed by @jams2blues with love for the Tezos community
-  File: src/ui/FileUploadPixel.jsx
-  Rev:   r534
-  Summary: Replace browser alerts with themed overlay warnings per invariant I00 */
-
-import React, {
-  useCallback, useEffect, useRef, useState,
-} from 'react';
-import styledPkg from 'styled-components';
-import PixelButton from './PixelButton.jsx';
-import RenderMedia from '../utils/RenderMedia.jsx';
-import PixelConfirmDialog from './PixelConfirmDialog.jsx';
+/*─────────────────────────────────────────────────────────────
+  Developed by @jams2blues – ZeroContract Studio
+  File:    src/ui/FileUploadPixel.jsx
+  Rev :    r535   2025‑07‑23
+  Summary: on‑chain artefact validator + confirm dialogue
+──────────────────────────────────────────────────────────────*/
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import styledPkg            from 'styled-components';
+import PixelButton          from './PixelButton.jsx';
+import RenderMedia          from '../utils/RenderMedia.jsx';
+import PixelConfirmDialog   from './PixelConfirmDialog.jsx';
 import {
   MIME_TYPES, isMimeWhitelisted, mimeFromFilename,
 } from '../constants/mimeTypes.js';
+import { checkOnChainIntegrity } from '../utils/onChainValidator.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 const ACCEPT = MIME_TYPES.join(',');
@@ -61,35 +61,53 @@ const ReplaceBtn = styled(PixelButton)`
 `;
 const ICON_RE = '↻';
 
-export default function FileUploadPixel({
-  value = '',
-  onSelect = () => {},
-  maxFileSize,
-}) {
-  const inpRef   = useRef(null);
-  const [drag, setDrag]       = useState(false);
-  const [errorMsg, setErrorMsg] = useState('');
+export default function FileUploadPixel({ value='', onSelect=()=>{}, maxFileSize }) {
+  const inpRef = useRef(null);
+  const [drag, setDrag]     = useState(false);
+  const [dialog, setDialog] = useState({ open:false, msg:'', next: null });
 
   const pick = useCallback(() => inpRef.current?.click(), []);
+
+  /* validate inlined content heuristically (SVG / HTML etc.) */
+  const validateArtifact = useCallback((dataUri) => {
+    try {
+      const [, b64 = ''] = dataUri.split(',');
+      const raw = atob(b64);
+      const meta = { artifactUri: dataUri, body: raw };   // fake meta for scan
+      const res  = checkOnChainIntegrity(meta);
+      if (res.status === 'partial') {
+        return res.reasons.join('; ');
+      }
+    } catch { /* ignore */ }
+    return '';
+  }, []);
 
   const handleFiles = useCallback((files) => {
     const f = files?.[0];
     if (!f) return;
     if (maxFileSize && f.size > maxFileSize) {
-      const receivedKB = (f.size / 1024).toFixed(1);
-      const limitKB    = (maxFileSize / 1024).toFixed(1);
-      setErrorMsg(`File too large: ${receivedKB} KB (max ${limitKB} KB)`);
+      const limit = (maxFileSize/1024).toFixed(1);
+      setDialog({ open:true, msg:`File > ${limit} KB`, next:null });
       return;
     }
     const mime = f.type || mimeFromFilename(f.name);
     if (!isMimeWhitelisted(mime)) {
-      setErrorMsg('Unsupported file type.');
+      setDialog({ open:true, msg:'Unsupported file type', next:null });
       return;
     }
     const r = new FileReader();
-    r.onload = (e) => e.target?.result && onSelect(e.target.result);
+    r.onload = (e) => {
+      const uri = e.target?.result;
+      const warn = validateArtifact(uri);
+      if (warn) {
+        /* soft‑block – need user confirm */
+        setDialog({ open:true, msg:`Potential off‑chain refs detected: ${warn}`, next: () => onSelect(uri) });
+      } else {
+        onSelect(uri);
+      }
+    };
     r.readAsDataURL(f);
-  }, [onSelect, maxFileSize]);
+  }, [maxFileSize, onSelect, validateArtifact]);
 
   const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
   const drop = (e) => { stop(e); setDrag(false); handleFiles(e.dataTransfer.files); };
@@ -137,10 +155,10 @@ export default function FileUploadPixel({
 
       {/* Themed overlay warning replacing alert() */}
       <PixelConfirmDialog
-        open={!!errorMsg}
-        message={errorMsg}
-        onOk={() => setErrorMsg('')}
-        onCancel={() => setErrorMsg('')}
+        open={dialog.open}
+        message={dialog.msg}
+        onOk={() => { dialog.next?.(); setDialog({ open:false,msg:'',next:null }); }}
+        onCancel={() => setDialog({ open:false,msg:'',next:null })}
       />
     </>
   );

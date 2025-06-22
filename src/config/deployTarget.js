@@ -15,12 +15,13 @@ const nets = {
     themeColor:   '#6f79ff',
     borderVar:    '--zu-ghostnet',
     manifestName: 'ZeroUnbound.art • Ghostnet',
+    siteLogo:     '/sprites/ghostnet_logo.svg',
     /* UX */
     ctaFirst:     '/deploy',
     description:  'Test your fully-on-chain art collection risk-free on Ghostnet.',
     /* URLs */
     siteUrl:      'https://ghostnet.zerounbound.art',
-    ogImage:      'https://ghostnet.zerounbound.art/sprites/logo.svg',
+    ogImage:      'https://ghostnet.zerounbound.art/sprites/gostnet_Banner.png',
     startUrl:     '/?source=pwa-ghostnet',
     rpc: [   
       'https://ghostnet.tezos.ecadinfra.com',  // ECAD Infra (May-2025 domain)
@@ -42,10 +43,11 @@ const nets = {
     themeColor:   '#00c48c',
     borderVar:    '--zu-mainnet',
     manifestName: 'ZeroUnbound.art',
+    siteLogo:     '/sprites/logo.svg',
     ctaFirst:     '/explore',
     description:  'Create 100 % on-chain art collections on Tezos mainnet.',
     siteUrl:      'https://zerounbound.art',
-    ogImage:      'https://zerounbound.art/sprites/logo.svg',
+    ogImage:      'https://zerounbound.art/sprites/Banner.png',
     startUrl:     '/?source=pwa-mainnet',
     rpc: [
       'https://prod.tcinfra.net/rpc/mainnet',   // Tezos Commons – autoscaling cluster
@@ -84,6 +86,9 @@ export const TZKT_API       = NET.tzkt;
 export const REDIRECTS      = NET.redirects;
 export const PACKAGE_NAME   = NET.pkgName;
 export const DEV_PORT       = NET.devPort;
+
+/*homepage logo*/
+export const SITE_LOGO       = NET.siteLogo;
 
 /*──── explorer bases (consumed by OperationOverlay) ────*/
 export const URL_BCD_BASE   = TARGET === 'ghostnet'

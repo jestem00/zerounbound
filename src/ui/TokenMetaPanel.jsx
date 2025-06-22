@@ -1,7 +1,9 @@
-/*Developed by @jams2blues – ZeroContract Studio
+/*─────────────────────────────────────────────────────────────
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/TokenMetaPanel.jsx
-  Rev :    r744‑c   2025‑07‑24
-  Summary: fix hook‑mismatch, mobile‑safe badge, integrity first */
+  Rev :    r744‑d   2025‑07‑24
+  Summary: responsive integrity chip legend (mobile a11y)
+──────────────────────────────────────────────────────────────*/
 import React, {
   useEffect, useMemo, useState, useRef, useCallback,
 } from 'react';
@@ -14,9 +16,12 @@ import { jFetch }           from '../core/net.js';
 import LoadingSpinner       from './LoadingSpinner.jsx';
 import PixelButton          from './PixelButton.jsx';
 import { checkOnChainIntegrity } from '../utils/onChainValidator.js';
-import { INTEGRITY_BADGES }      from '../constants/integrityBadges.js';
+import {
+  getIntegrityInfo,
+}                           from '../constants/integrityBadges.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
+
 
 /*──────── helpers ───────────────────────────────────────────*/
 const unwrapImgSrc = (s = '') =>
@@ -76,17 +81,11 @@ const Card = styled.div`
   position:relative;
 `;
 const Title = styled.h4`
-  margin:0 0 2px;
-  font-size:.8rem;
-  text-align:center;
-  color:var(--zu-accent);
-  white-space:nowrap;
-  overflow:hidden;
-  text-overflow:ellipsis;
+  margin:0 0 2px;font-size:.8rem;text-align:center;
+  color:var(--zu-accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 `;
 const AddrRow = styled.div`
-  font-size:.65rem;
-  text-align:center;
+  font-size:.65rem;text-align:center;
   display:flex;justify-content:center;align-items:center;gap:4px;
   margin-bottom:4px;
 `;
@@ -94,31 +93,35 @@ const Warn = styled.div`
   position:absolute;inset:0;background:rgba(0,0,0,.9);
   display:flex;flex-direction:column;align-items:center;justify-content:center;
   text-align:center;padding:1rem;
-  border:2px dashed var(--zu-accent-sec,#ff0080);
-  z-index:5;
+  border:2px dashed var(--zu-accent-sec,#ff0080);z-index:5;
   p{margin:.5rem 0;font-size:.7rem;line-height:1.35;}
   a{color:var(--zu-accent);text-decoration:underline;cursor:pointer;}
 `;
 const Stats = styled.p`
   margin:0 0 6px;font-size:.72rem;text-align:center;
   display:flex;gap:6px;justify-content:center;align-items:center;
-  span{display:inline-block;padding:1px 4px;
-       border:1px solid var(--zu-fg);white-space:nowrap;}
+  span{display:inline-block;padding:1px 4px;border:1px solid var(--zu-fg);white-space:nowrap;}
 `;
-const RelStats = styled(Stats)`
-  margin-top:-2px;gap:4px;font-size:.68rem;opacity:.9;
-`;
+const RelStats = styled(Stats)`margin-top:-2px;gap:4px;font-size:.68rem;opacity:.9;`;
 const MetaGrid = styled.dl`
   margin:0;display:grid;grid-template-columns:max-content 1fr;
   column-gap:6px;row-gap:2px;
   dt{white-space:nowrap;color:var(--zu-accent);}
   dd{margin:0;word-break:break-word;}
 `;
-const Badge = styled.span`
+
+/* responsive integrity chip */
+const IntegrityChip = styled.span`
   position:absolute;top:4px;right:4px;z-index:4;
-  font-size:1rem;
-  /* tap‑friendly touch area */
-  padding:.2rem;
+  display:flex;align-items:center;gap:4px;
+  font-size:1rem;line-height:1;padding:.15rem .35rem;
+  border:1px solid var(--zu-fg);border-radius:3px;
+  background:var(--zu-bg);
+  .label{font-size:.55rem;}
+  @media(min-width:480px){
+    background:transparent;border:none;gap:0;
+    .label{display:none;}
+  }
 `;
 
 export default function TokenMetaPanel({
@@ -138,16 +141,11 @@ export default function TokenMetaPanel({
 
   /* suppress repeat warnings after user dismiss */
   const supRef = useRef(new Set());
-
-  const suppressWarn = useCallback((reason) => {
-    if (supRef.current.has(reason)) return;
-    setWarn(reason);
+  const suppressWarn = useCallback((r) => {
+    if (supRef.current.has(r)) return;
+    setWarn(r);
   }, []);
-
-  const dismissWarn = () => {
-    if (warn) supRef.current.add(warn);
-    setWarn('');
-  };
+  const dismissWarn = () => { if (warn) supRef.current.add(warn); setWarn(''); };
 
   /* global AdminTools opener */
   const openTool = useCallback((key) => {
@@ -157,13 +155,16 @@ export default function TokenMetaPanel({
     }));
   }, [contractAddress]);
 
-  /* memoised derivations (run every render → stable hook count) */
-  const metaObj    = typeof meta === 'object' && meta ? meta : {};
-  const hero       = useMemo(() => pickUri(metaObj), [metaObj]);
-  const uriArr     = useMemo(() => listUriKeys(metaObj), [metaObj]);
-  const integrity  = useMemo(() => checkOnChainIntegrity(metaObj), [metaObj]);
-  const badgeChar  = INTEGRITY_BADGES[integrity.status] || INTEGRITY_BADGES.unknown;
-  const kvPairs    = useMemo(() => {
+   /* stable memo‑derived values */
+  const metaObj   = typeof meta === 'object' && meta ? meta : {};
+  const hero      = useMemo(() => pickUri(metaObj), [metaObj]);
+  const uriArr    = useMemo(() => listUriKeys(metaObj), [metaObj]);
+  const integrity = useMemo(() => checkOnChainIntegrity(metaObj), [metaObj]);
+  const { badge, label } = useMemo(
+    () => getIntegrityInfo(integrity.status),
+    [integrity.status],
+  );
+  const kvPairs = useMemo(() => {
     const keys = [
       'name','description','mimeType','authors','creators','rights',
       'royalties','mintingTool','accessibility','contentRating',
@@ -182,19 +183,17 @@ export default function TokenMetaPanel({
     if (!contractAddress || typeof navigator === 'undefined') return;
     try {
       await navigator.clipboard.writeText(contractAddress);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 800);
-    } catch {/* ignore */}
+      setCopied(true); setTimeout(() => setCopied(false), 800);
+    } catch {}
   };
 
-  /*── relationship counts ─────────────────*/
+
+  /* relationship counts */
   useEffect(() => {
     if (!contractAddress) return;
-    const base =
-      network === 'mainnet'
-        ? 'https://api.tzkt.io/v1'
-        : 'https://api.ghostnet.tzkt.io/v1';
-
+    const base = network === 'mainnet'
+      ? 'https://api.tzkt.io/v1'
+      : 'https://api.ghostnet.tzkt.io/v1';
     (async () => {
       try {
         const st = await jFetch(`${base}/contracts/${contractAddress}/storage`);
@@ -207,35 +206,27 @@ export default function TokenMetaPanel({
     })();
   }, [contractAddress, network]);
 
-  /*── supply & balance ────────────────────*/
+   /* supply & wallet balance */
   useEffect(() => {
     let cancelled = false;
     const safeSet = (fn, v) => { if (!cancelled) fn(v); };
+    if (!contractAddress || tokenId === '') { setSupply(null); setOwned(null); return; }
 
-    if (!contractAddress || tokenId === '') {
-      setSupply(null); setOwned(null); return;
-    }
     const base = network === 'mainnet'
       ? 'https://api.tzkt.io/v1'
       : 'https://api.ghostnet.tzkt.io/v1';
 
     const sumBalances = async () => {
       const rows = await jFetch(
-        `${base}/tokens/balances`
-        + `?token.contract=${contractAddress}`
-        + `&token.tokenId=${tokenId}`
-        + `&select=balance&limit=10000`,
+        `${base}/tokens/balances?token.contract=${contractAddress}&token.tokenId=${tokenId}&select=balance&limit=10000`,
       ).catch(() => []);
-      return Array.isArray(rows) && rows.length
-        ? rows.reduce((t, b) => t + Number(b || 0), 0)
-        : NaN;
+      return rows.length ? rows.reduce((t, b) => t + Number(b || 0), 0) : NaN;
     };
 
     const fetchSupply = async () => {
       try {
         const [row] = await jFetch(
-          `${base}/tokens?contract=${contractAddress}`
-          + `&tokenId=${tokenId}&select=totalSupply&limit=1`,
+          `${base}/tokens?contract=${contractAddress}&tokenId=${tokenId}&select=totalSupply&limit=1`,
         ).catch(() => []);
         if (row !== undefined && row !== null) {
           const n = Number(typeof row === 'object' ? row.totalSupply : row);
@@ -244,15 +235,12 @@ export default function TokenMetaPanel({
       } catch {}
       try {
         const bm = await jFetch(
-          `${base}/contracts/${contractAddress}`
-          + `/bigmaps/total_supply/keys/${tokenId}`,
+          `${base}/contracts/${contractAddress}/bigmaps/total_supply/keys/${tokenId}`,
         ).catch(() => null);
         if (bm?.value?.int) return Number(bm.value.int);
       } catch {}
       try {
-        const st = await jFetch(
-          `${base}/contracts/${contractAddress}/storage`,
-        ).catch(() => null);
+        const st = await jFetch(`${base}/contracts/${contractAddress}/storage`).catch(() => null);
         const v = st?.total_supply?.[tokenId];
         if (v?.int) return Number(v.int);
         if (Number.isFinite(+v)) return Number(v);
@@ -260,18 +248,13 @@ export default function TokenMetaPanel({
       return sumBalances();
     };
 
+
     const fetchOwned = async () => {
       if (!wallet) return NaN;
-      const rows = await jFetch(
-        `${base}/tokens/balances`
-        + `?account=${wallet}`
-        + `&token.contract=${contractAddress}`
-        + `&token.tokenId=${tokenId}`
-        + `&limit=1`,
+      const [row] = await jFetch(
+        `${base}/tokens/balances?account=${wallet}&token.contract=${contractAddress}&token.tokenId=${tokenId}&limit=1`,
       ).catch(() => []);
-      if (!rows.length) return 0;
-      const row = rows[0];
-      return Number(typeof row === 'object' ? row.balance : row);
+      return row ? Number(row.balance || row) : 0;
     };
 
     (async () => {
@@ -279,9 +262,9 @@ export default function TokenMetaPanel({
       safeSet(setSupply, Number.isFinite(sup) ? sup : undefined);
       safeSet(setOwned , Number.isFinite(own) ? own : undefined);
     })();
-
     return () => { cancelled = true; };
   }, [contractAddress, tokenId, wallet, network]);
+
 
   /*── render ──────────────────────────────*/
   if (tokenId === '') return null;           // ok – hooks already ran
@@ -294,37 +277,44 @@ export default function TokenMetaPanel({
     );
   }
 
+  /*──────── render ───────────────────────────────────────────*/
+  if (tokenId === '') return null;
+  if (meta === null) {
+    return (
+      <Card style={{ textAlign:'center' }}>
+        <LoadingSpinner size={48} style={{ margin:'12px auto' }} />
+      </Card>
+    );
+  }
+
   return (
     <Card>
       {integrity.status !== 'unknown' && (
-        <Badge
-          aria-label={integrity.status === 'full'
-            ? 'Fully on‑chain'
-            : 'Partially on‑chain'}
-          title={integrity.status === 'full'
-            ? 'Fully on‑chain ✅'
-            : `Partially on‑chain – ${integrity.reasons.join('; ')}`}
+        <IntegrityChip
+          aria-label={label}
+          title={integrity.status === 'partial'
+            ? `${label} – ${integrity.reasons.join('; ')}`
+            : label}
         >
-          {badgeChar}
-        </Badge>
+          {badge}<span className="label">{label}</span>
+        </IntegrityChip>
       )}
 
       {ktShort && (
         <AddrRow>
-          <code style={{ opacity: .8 }}>{ktShort}</code>
+          <code style={{ opacity:.8 }}>{ktShort}</code>
           <PixelButton
             size="xs"
             title="copy KT1"
             aria-label={copied ? 'Address copied' : 'Copy contract address'}
             onClick={copyAddr}
-            style={{ padding: '0 4px', lineHeight: 1 }}
+            style={{ padding:'0 4px', lineHeight:1 }}
           >
             {copied ? '✓' : '📋'}
           </PixelButton>
         </AddrRow>
       )}
 
-      {/* editions + wallet balance */}
       <Stats>
         {supply === null
           ? <LoadingSpinner size={16} />
@@ -340,62 +330,40 @@ export default function TokenMetaPanel({
         )}
       </Stats>
 
-      {/* relationship counts */}
       <RelStats>
         <span title="Parent addresses">P&nbsp;{rel.parent}</span>
         <span title="Children addresses">C&nbsp;{rel.child}</span>
         <span title="Collaborators">Collab&nbsp;{rel.coll}</span>
       </RelStats>
 
-      {/* preview */}
       {hero && !supRef.current.has('hero') && (
         <RenderMedia
           uri={hero}
           alt={metaObj.name}
-          style={{
-            width: 96,
-            height: 96,
-            objectFit: 'contain',
-            display: 'block',
-            margin: '0 auto 6px',
-          }}
-          onInvalid={(r) => {
-            supRef.current.add('hero');
-            suppressWarn(r);
-          }}
+          style={{ width:96,height:96,objectFit:'contain',display:'block',margin:'0 auto 6px' }}
+          onInvalid={(r) => { supRef.current.add('hero'); suppressWarn(r); }}
         />
       )}
 
-      {/* integrity‑related warn overlay (unchanged) */}
       {warn && (
         <Warn>
-          <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--zu-accent-sec)' }}>
+          <h3 style={{ margin:0,fontSize:'1rem',color:'var(--zu-accent-sec)' }}>
             Broken&nbsp;Media&nbsp;URI
           </h3>
           <p>
             This token’s media link looks invalid
-            <br />
-            (reason: {warn})
-            <br />
-            To avoid broken previews on marketplaces:
+            <br />(reason: {warn})
+            <br />To avoid broken previews on marketplaces:
           </p>
           <p>
-            <strong>Options:</strong>
-            <br />
+            <strong>Options:</strong><br />
             1)&nbsp;If your batch sign sequence was interrupted,&nbsp;
-            <a
-              href="#repair_uri"
-              onClick={(e) => { e.preventDefault(); openTool('repair_uri'); }}
-            >
+            <a href="#repair_uri" onClick={(e)=>{e.preventDefault();openTool('repair_uri');}}>
               REPAIR&nbsp;URI
             </a>
-            &nbsp;— resume from last slice (upload <em>exact</em> original file).
-            <br />
+            &nbsp;— resume from last slice.<br />
             2)&nbsp;
-            <a
-              href="#clear_uri"
-              onClick={(e) => { e.preventDefault(); openTool('clear_uri'); }}
-            >
+            <a href="#clear_uri" onClick={(e)=>{e.preventDefault();openTool('clear_uri');}}>
               CLEAR&nbsp;URI
             </a>
             &nbsp;then append a fresh URI.
@@ -404,31 +372,29 @@ export default function TokenMetaPanel({
         </Warn>
       )}
 
-      {/* metadata grid */}
       <MetaGrid>
-        {kvPairs.map(([k, v]) => (
+        {kvPairs.map(([k,v])=>(
           <React.Fragment key={k}>
-            <dt>{k}</dt>
-            <dd>{v}</dd>
+            <dt>{k}</dt><dd>{v}</dd>
           </React.Fragment>
         ))}
-        {uriArr.map((k) => (
+        {uriArr.map((k)=>(
           <React.Fragment key={k}>
             <dt>{k}</dt>
-            <dd style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <dd style={{ display:'flex',alignItems:'center',gap:6 }}>
               <RenderMedia
                 uri={metaObj[k]}
                 alt={k}
-                style={{ width: 48, height: 48, objectFit: 'contain' }}
-                onInvalid={(r) => suppressWarn(`${k}: ${r}`)}
+                style={{ width:48,height:48,objectFit:'contain' }}
+                onInvalid={(r)=>suppressWarn(`${k}: ${r}`)}
               />
               {onRemove && (
                 <PixelButton
                   size="xs"
                   warning
                   title="delete uri"
-                  style={{ marginLeft: 'auto' }}
-                  onClick={() => onRemove(k)}
+                  style={{ marginLeft:'auto' }}
+                  onClick={()=>onRemove(k)}
                 >
                   DELETE
                 </PixelButton>
@@ -441,10 +407,8 @@ export default function TokenMetaPanel({
   );
 }
 /* What changed & why:
-   • Moved all hooks above conditional rendering to stabilise hook order
-     (fixes “Rendered more hooks” runtime error).
-   • Integrity computed unconditionally; spinner/empty states moved to
-     return branch, ensuring hook count parity.
-   • Badge now wraps in touch‑friendly area; aria‑label added for mobile
-     accessibility. */
+   • Introduced IntegrityChip identical to Contract panel for
+     consistent UX; shows short text on mobile, hides on desktop.
+   • Centralised badge/label via getIntegrityInfo().
+   • Removed legacy Badge vars (no dead constants). */
 /* EOF */

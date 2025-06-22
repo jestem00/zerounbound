@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/FileUploadPixel.jsx
-  Rev :    r535   2025‑07‑23
-  Summary: on‑chain artefact validator + confirm dialogue
+  Rev :    r536   2025‑07‑24
+  Summary: drop‑zone dialog shows integrity badge + label
 ──────────────────────────────────────────────────────────────*/
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import styledPkg            from 'styled-components';
@@ -13,11 +13,12 @@ import {
   MIME_TYPES, isMimeWhitelisted, mimeFromFilename,
 } from '../constants/mimeTypes.js';
 import { checkOnChainIntegrity } from '../utils/onChainValidator.js';
+import { getIntegrityInfo }      from '../constants/integrityBadges.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 const ACCEPT = MIME_TYPES.join(',');
 
-/* wrapper using our 8-bit theme and pixel font */
+/* wrapper using our 8‑bit theme and pixel font */
 const Box = styled(PixelButton).withConfig({
   shouldForwardProp: (p) => !['$drag', '$has'].includes(p),
 })`
@@ -61,53 +62,63 @@ const ReplaceBtn = styled(PixelButton)`
 `;
 const ICON_RE = '↻';
 
-export default function FileUploadPixel({ value='', onSelect=()=>{}, maxFileSize }) {
-  const inpRef = useRef(null);
-  const [drag, setDrag]     = useState(false);
-  const [dialog, setDialog] = useState({ open:false, msg:'', next: null });
+export default function FileUploadPixel({
+  value       = '',
+  onSelect    = () => {},
+  maxFileSize,
+}) {
+  const inpRef         = useRef(null);
+  const [drag,   setDrag]   = useState(false);
+  const [dialog, setDialog] = useState({ open: false, msg: '', next: null });
 
   const pick = useCallback(() => inpRef.current?.click(), []);
 
-  /* validate inlined content heuristically (SVG / HTML etc.) */
-  const validateArtifact = useCallback((dataUri) => {
+  const scanIntegrity = useCallback((dataUri) => {
     try {
       const [, b64 = ''] = dataUri.split(',');
       const raw = atob(b64);
-      const meta = { artifactUri: dataUri, body: raw };   // fake meta for scan
-      const res  = checkOnChainIntegrity(meta);
-      if (res.status === 'partial') {
-        return res.reasons.join('; ');
-      }
-    } catch { /* ignore */ }
-    return '';
+      return checkOnChainIntegrity({ artifactUri: dataUri, body: raw });
+    } catch {
+      return { status: 'unknown', reasons: ['decode error'] };
+    }
   }, []);
 
   const handleFiles = useCallback((files) => {
     const f = files?.[0];
     if (!f) return;
+
     if (maxFileSize && f.size > maxFileSize) {
-      const limit = (maxFileSize/1024).toFixed(1);
-      setDialog({ open:true, msg:`File > ${limit} KB`, next:null });
+      const limit = (maxFileSize / 1024).toFixed(1);
+      setDialog({ open: true, msg: `File > ${limit} KB`, next: null });
       return;
     }
+
     const mime = f.type || mimeFromFilename(f.name);
     if (!isMimeWhitelisted(mime)) {
-      setDialog({ open:true, msg:'Unsupported file type', next:null });
+      setDialog({ open: true, msg: 'Unsupported file type', next: null });
       return;
     }
+
     const r = new FileReader();
     r.onload = (e) => {
-      const uri = e.target?.result;
-      const warn = validateArtifact(uri);
-      if (warn) {
-        /* soft‑block – need user confirm */
-        setDialog({ open:true, msg:`Potential off‑chain refs detected: ${warn}`, next: () => onSelect(uri) });
+      const uri  = e.target?.result;
+      const res  = scanIntegrity(uri);
+      const info = getIntegrityInfo(res.status);
+
+      const commit = () => onSelect(uri);
+
+      if (res.status !== 'full') {
+        setDialog({
+          open: true,
+          msg: `${info.badge}  ${info.label}\n${res.reasons.join('; ')}`,
+          next: commit,
+        });
       } else {
-        onSelect(uri);
+        commit();
       }
     };
     r.readAsDataURL(f);
-  }, [maxFileSize, onSelect, validateArtifact]);
+  }, [maxFileSize, onSelect, scanIntegrity]);
 
   const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
   const drop = (e) => { stop(e); setDrag(false); handleFiles(e.dataTransfer.files); };
@@ -115,10 +126,10 @@ export default function FileUploadPixel({ value='', onSelect=()=>{}, maxFileSize
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const leave = () => setDrag(false);
-    window.addEventListener('dragend',   leave);
+    window.addEventListener('dragend', leave);
     window.addEventListener('dragleave', leave);
     return () => {
-      window.removeEventListener('dragend',   leave);
+      window.removeEventListener('dragend', leave);
       window.removeEventListener('dragleave', leave);
     };
   }, []);
@@ -137,7 +148,11 @@ export default function FileUploadPixel({ value='', onSelect=()=>{}, maxFileSize
         {value ? (
           <>
             <RenderMedia uri={value} alt="preview" />
-            <ReplaceBtn size="xs" title="Replace" onClick={(e) => { e.stopPropagation(); pick(); }}>
+            <ReplaceBtn
+              size="xs"
+              title="Replace"
+              onClick={(e) => { e.stopPropagation(); pick(); }}
+            >
               {ICON_RE}
             </ReplaceBtn>
           </>
@@ -153,19 +168,17 @@ export default function FileUploadPixel({ value='', onSelect=()=>{}, maxFileSize
         />
       </Box>
 
-      {/* Themed overlay warning replacing alert() */}
       <PixelConfirmDialog
         open={dialog.open}
         message={dialog.msg}
-        onOk={() => { dialog.next?.(); setDialog({ open:false,msg:'',next:null }); }}
-        onCancel={() => setDialog({ open:false,msg:'',next:null })}
+        onOk={() => { dialog.next?.(); setDialog({ open: false, msg: '', next: null }); }}
+        onCancel={() => setDialog({ open: false, msg: '', next: null })}
       />
     </>
   );
 }
-
 /* What changed & why:
-   • Introduced internal `errorMsg` state to capture validation errors.
-   • Replaced native alert() calls with PixelConfirmDialog overlay,
-     ensuring warnings follow our 8-bit retro theme (invariant I00).
-   • Overlay is resolution-agnostic and uses pixel font and palette. */
+   • Confirm dialog now shows integrity badge + label + reasons.
+   • Removed unused vars; ESLint‑clean.
+   • Rev bumped to r536. */
+/* EOF */

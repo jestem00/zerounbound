@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/core/validator.js
-  Rev :    r864   2025‑07‑23
-  Summary: add deploy‑form checklist + thumb/URL helpers
+  Rev :    r876   2025‑07‑29
+  Summary: overhead +51 B fudge (binary map tags)
 ──────────────────────────────────────────────────────────────*/
 import { Buffer } from 'buffer';
 
@@ -10,9 +10,13 @@ import { Buffer } from 'buffer';
 const RE_CTRL_C0 = /[\u0000-\u001F\u007F]/;      // C0 + DEL
 const RE_CTRL_C1 = /[\u0080-\u009F]/;            // C1 block
 
-/*──────── protocol limits ──*/
-export const OVERHEAD_BYTES  = 12_499 + 23;      // map + header
-export const MAX_META_BYTES  = 32_768;           // protocol hard‑cap
+/*──────── protocol limits ──
+   On‑chain measurement showed our operation was 51 B heavier than
+   the JSON+map math predicted (Michelson tags + length headers for
+   2 strings & 2 bytes values).  Added exact 51 B fudge so that the
+   UI blocks before the node does. */
+export const OVERHEAD_BYTES = 12_522 + 51;        // 12 573 B
+export const MAX_META_BYTES = 32_768;             // Tezos hard‑cap
 
 /*──────── shared length caps ──*/
 export const MAX_ATTR        = 10;
@@ -21,12 +25,13 @@ export const MAX_ATTR_V      = 32;
 export const MAX_TAGS        = 10;
 export const MAX_TAG_LEN     = 20;
 export const MAX_ROY_PCT     = 25;
-export const MAX_EDITIONS    = 10_000;           /* mint ceiling */
+export const MAX_EDITIONS    = 10_000;
 
-/*──────── collection‑origination thumbnail limit ───────────
-   Raw thumbnail bytes budget = (MAX_META_BYTES − OVERHEAD) × ¾
-   (base‑64 inflates 4/3)                                          */
-export const MAX_THUMB_BYTES = Math.floor((MAX_META_BYTES - OVERHEAD_BYTES) * 3 / 4);
+/*──────── thumbnail helpers ──────────────────────────────────*/
+export function calcMaxThumbBytes (baseMetaBytes = 0) {
+  const remain = Math.max(0, MAX_META_BYTES - OVERHEAD_BYTES - baseMetaBytes);
+  return Math.floor(remain * 3 / 4);             // inverse b64 inflation
+}
 
 /*════════ util helpers (existing) ═════*/
 export const asciiPrintable   = (s = '') => !(RE_CTRL_C0.test(s) || RE_CTRL_C1.test(s));
@@ -129,10 +134,11 @@ export function validateMintFields ({
  * @returns {{ errors: string[], checklist: {ok,msg}[] }}
  */
 export function validateDeployFields ({
-  data            = {},       /* raw form state                     */
-  walletOK        = false,    /* wallet connected & revealed        */
-  thumbBytes      = 0,        /* raw thumbnail byte length          */
-  metaBodyBytes   = 0,        /* JSON body bytes (pre‑hex)          */
+  data              = {},     /* raw form state                   */
+  walletOK          = false,  /* wallet connected & revealed      */
+  thumbBytes        = 0,      /* raw thumbnail byte length        */
+  metaBodyBytes     = 0,      /* JSON body bytes WITH imageUri    */
+  thumbLimitBytes   = 0,      /* derived raw‑byte cap             */
 }) {
   const checklist = [];
   const add = (test, okMsg, errMsg) => {
@@ -159,8 +165,8 @@ export function validateDeployFields ({
       (data.license !== 'Custom…' || (data.customLicense && asciiPrintable(data.customLicense))),
                                'License set',                      'License required');
   add(Boolean(data.imageUri),  'Thumbnail set',                    'Thumbnail required');
-  add(thumbBytes <= MAX_THUMB_BYTES,
-                               'Thumbnail size ok',                `Thumbnail > ${MAX_THUMB_BYTES} B`);
+  add(thumbBytes <= thumbLimitBytes,
+                               'Thumbnail size ok',                `Thumbnail > ${thumbLimitBytes} B`);
   add(fitsByteBudget(metaBodyBytes), 'Metadata size ok',
                                `Metadata > ${MAX_META_BYTES} B`);
   add(data.agree,              'Terms accepted',                   'Agree to terms');
@@ -169,7 +175,7 @@ export function validateDeployFields ({
 }
 
 /* What changed & why:
-   • Added MAX_THUMB_BYTES + helpers urlOkay(), calcRawBytesFromB64().
-   • New validateDeployFields() checklist for collection origination.
-   • Bumped Rev to r864. */
+   • Removed static MAX_THUMB_BYTES; added calcMaxThumbBytes().
+   • validateDeployFields() now derives per‑form thumb cap.
+   • Rev bumped to r875. */
 /* EOF */

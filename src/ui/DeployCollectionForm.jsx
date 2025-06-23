@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/DeployCollectionForm.jsx
-  Rev :    r680   2025-07-29
-  Summary: “✕ Close” button (top-right → homepage redirect)
+  Rev :    r681   2025‑07‑29
+  Summary: live thumb budget + meta calc sync
 ──────────────────────────────────────────────────────────────*/
 import React, { useEffect, useMemo, useState } from 'react';
 import styledPkg                from 'styled-components';
@@ -16,8 +16,8 @@ import PixelHeading             from './PixelHeading.jsx';
 import { useWallet }            from '../contexts/WalletContext.js';
 
 import {
-  OVERHEAD_BYTES, MAX_META_BYTES, MAX_THUMB_BYTES,
-  calcRawBytesFromB64, validateDeployFields,
+  OVERHEAD_BYTES, MAX_META_BYTES, calcRawBytesFromB64,
+  calcMaxThumbBytes, validateDeployFields,
 }                               from '../core/validator.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
@@ -91,7 +91,7 @@ export default function DeployCollectionForm({ onDeploy }) {
   },[address]);
 
   /*──────── metadata builders ──────────────────────────────*/
-  const meta = useMemo(()=>({
+  const metaBase = useMemo(()=>({
     name:data.name.trim(),
     symbol:data.symbol.trim(),
     description:data.description.trim(),
@@ -102,32 +102,41 @@ export default function DeployCollectionForm({ onDeploy }) {
     homepage:data.homepage.trim()||undefined,
     type:data.type,
     interfaces:['TZIP-012','TZIP-016'],
-    imageUri:data.imageUri,
+    views:viewsJson.views,
   }),[data]);
 
-  const ordered = useMemo(()=>({
-    ...meta,
-    version:'ZeroContractV4',
-    views:viewsJson.views,
-  }),[meta]);
+  /* baseline meta (no thumbnail) */
+  const baseBytes = useMemo(()=>(
+    char2Bytes(JSON.stringify({ ...metaBase, imageUri:'' })).length/2
+  ),[metaBase]);
 
-  /* size */
-  const metaBodyBytes = useMemo(()=>char2Bytes(JSON.stringify(ordered)).length/2,[ordered]);
+  /* per‑form thumbnail limit */
+  const thumbLimit = useMemo(()=>calcMaxThumbBytes(baseBytes),[baseBytes]);
+
+  /* thumbnail size detection */
   const thumbBytes = useMemo(()=>{
     const b64 = data.imageUri.split(',')[1]||'';
     return calcRawBytesFromB64(b64);
   },[data.imageUri]);
 
+  /* full meta including thumbnail */
+  const metaBodyBytes = useMemo(()=>(
+    baseBytes + (data.imageUri ? Math.ceil(thumbBytes * 4 / 3) : 0)
+  ),[baseBytes,thumbBytes,data.imageUri]);
+
   /* validation */
   const { errors, checklist } = validateDeployFields({
-    data, walletOK:Boolean(address&&wallet),
-    thumbBytes, metaBodyBytes,
+    data,
+    walletOK:Boolean(address&&wallet),
+    thumbBytes,
+    metaBodyBytes,
+    thumbLimitBytes:thumbLimit,
   });
 
   const handleSubmit = e=>{
     e.preventDefault();
     if(errors.length) return;
-    onDeploy(meta);
+    onDeploy({ ...metaBase, imageUri:data.imageUri });
   };
 
   /*──────── render ─────────────────────────────────────────*/
@@ -178,7 +187,7 @@ export default function DeployCollectionForm({ onDeploy }) {
 
         {/* authors */}
         <Pair>
-          <label>Author(s)* <Hint>(comma-sep)</Hint></label>
+          <label>Author(s)* <Hint>(comma‑sep)</Hint></label>
           <PixelInput name="authors" maxLength={LEN.authors}
             placeholder="jams2blues, JestemZero"
             value={data.authors} onChange={setField}/>
@@ -231,11 +240,13 @@ export default function DeployCollectionForm({ onDeploy }) {
 
         {/* thumbnail */}
         <Pair>
-          <label style={{textAlign:'center'}}>Collection Thumbnail (1:1 recommended)</label>
+          <label style={{textAlign:'center'}}>
+            Collection Thumbnail&nbsp;<Hint>(1:1 recommended)</Hint>
+          </label>
           <FileUploadPixel value={data.imageUri}
             onSelect={uri=>setData(p=>({...p,imageUri:uri}))}
-            maxFileSize={MAX_THUMB_BYTES}/>
-          <Hint>Max thumbnail: {(MAX_THUMB_BYTES/1024).toFixed(1)} KB</Hint>
+            maxFileSize={thumbLimit}/>
+          <Hint>Max thumbnail: {(thumbLimit/1024).toFixed(1)} KB</Hint>
         </Pair>
 
         {/* terms */}
@@ -252,7 +263,7 @@ export default function DeployCollectionForm({ onDeploy }) {
         <Pair>
           <Cnt style={metaBodyBytes+OVERHEAD_BYTES>MAX_META_BYTES
             ?{color:'var(--zu-accent-sec)'}:undefined}>
-            Meta&nbsp;{(metaBodyBytes+OVERHEAD_BYTES).toLocaleString()} / {MAX_META_BYTES} B
+            Meta&nbsp;{(metaBodyBytes+OVERHEAD_BYTES).toLocaleString()} / {MAX_META_BYTES} B
           </Cnt>
         </Pair>
 
@@ -271,7 +282,9 @@ export default function DeployCollectionForm({ onDeploy }) {
 }
 
 /* What changed & why:
-   • Added <Wrap> relative container + styled CloseBtn.
-   • “✕ Close” in top-right sends user to root “/”, cancelling flow.
-   • No functional logic altered; validation & checklist intact. */
+   • Computes baseline meta bytes (thumb‑less) each render.
+   • Derives live thumbLimit via calcMaxThumbBytes().
+   • Updates FileUploadPixel + hint + validator to use thumbLimit.
+   • Meta size readout now includes encoded thumbnail cost.
+   • Rev bumped to r681. */
 /* EOF */

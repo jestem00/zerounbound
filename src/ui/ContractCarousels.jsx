@@ -273,9 +273,8 @@ const BusyWrap = styled.div`
   justify-content: center;
   background: #000c;
   z-index: 4;
-  img { width: 46px; height: 46px; animation: spin 1s linear infinite; }
+  img { width: 46px; height: 46px; }
   p   { font-size: .75rem; margin: 0; color: #fff; }
-  @keyframes spin { to { transform: rotate(360deg); } }
 `;
 
 const ICON_EYE  = '👁️';

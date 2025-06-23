@@ -1,14 +1,14 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/FileUploadPixel.jsx
-  Rev :    r536   2025‑07‑24
-  Summary: drop‑zone dialog shows integrity badge + label
+  Rev :    r538   2025‑07‑25
+  Summary: div wrapper (no nested <button>); hover cursor
 ──────────────────────────────────────────────────────────────*/
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import styledPkg            from 'styled-components';
-import PixelButton          from './PixelButton.jsx';
-import RenderMedia          from '../utils/RenderMedia.jsx';
-import PixelConfirmDialog   from './PixelConfirmDialog.jsx';
+import styledPkg      from 'styled-components';
+import PixelButton    from './PixelButton.jsx';
+import RenderMedia    from '../utils/RenderMedia.jsx';
+import PixelConfirmDialog from './PixelConfirmDialog.jsx';
 import {
   MIME_TYPES, isMimeWhitelisted, mimeFromFilename,
 } from '../constants/mimeTypes.js';
@@ -18,8 +18,8 @@ import { getIntegrityInfo }      from '../constants/integrityBadges.js';
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 const ACCEPT = MIME_TYPES.join(',');
 
-/* wrapper using our 8‑bit theme and pixel font */
-const Box = styled(PixelButton).withConfig({
+/* visual drop‑zone box (DIV to avoid nested‑button warning) */
+const Box = styled.div.withConfig({
   shouldForwardProp: (p) => !['$drag', '$has'].includes(p),
 })`
   position: relative;
@@ -32,6 +32,8 @@ const Box = styled(PixelButton).withConfig({
   ${({ $drag }) => $drag && 'background: var(--zu-accent-sec);'}
   ${({ $has  }) => $has  && 'border-style: solid;'}
   overflow: hidden;
+  cursor: pointer;
+  user-select: none;
 
   img, video, model-viewer, iframe, audio {
     width: 100%;
@@ -40,7 +42,7 @@ const Box = styled(PixelButton).withConfig({
   }
 `;
 
-const Hint       = styled.span`
+const Hint = styled.span`
   position: absolute;
   inset: 0;
   display: flex;
@@ -63,39 +65,37 @@ const ReplaceBtn = styled(PixelButton)`
 const ICON_RE = '↻';
 
 export default function FileUploadPixel({
-  value       = '',
-  onSelect    = () => {},
+  value = '',
+  onSelect = () => {},
   maxFileSize,
 }) {
-  const inpRef         = useRef(null);
-  const [drag,   setDrag]   = useState(false);
-  const [dialog, setDialog] = useState({ open: false, msg: '', next: null });
+  const inpRef = useRef(null);
+  const [drag, setDrag]   = useState(false);
+  const [dialog, setDialog] = useState({ open:false, msg:'', next:null });
 
   const pick = useCallback(() => inpRef.current?.click(), []);
 
-  const scanIntegrity = useCallback((dataUri) => {
+  const scanIntegrity = useCallback((uri) => {
     try {
-      const [, b64 = ''] = dataUri.split(',');
+      const [, b64 = ''] = uri.split(',');
       const raw = atob(b64);
-      return checkOnChainIntegrity({ artifactUri: dataUri, body: raw });
+      return checkOnChainIntegrity({ artifactUri: uri, body: raw });
     } catch {
       return { status: 'unknown', reasons: ['decode error'] };
     }
   }, []);
 
-  const handleFiles = useCallback((files) => {
+  const handle = useCallback((files) => {
     const f = files?.[0];
     if (!f) return;
 
     if (maxFileSize && f.size > maxFileSize) {
-      const limit = (maxFileSize / 1024).toFixed(1);
-      setDialog({ open: true, msg: `File > ${limit} KB`, next: null });
+      setDialog({ open:true, msg:`File > ${(maxFileSize/1024).toFixed(1)} KB`, next:null });
       return;
     }
-
     const mime = f.type || mimeFromFilename(f.name);
     if (!isMimeWhitelisted(mime)) {
-      setDialog({ open: true, msg: 'Unsupported file type', next: null });
+      setDialog({ open:true, msg:'Unsupported file type', next:null });
       return;
     }
 
@@ -103,25 +103,19 @@ export default function FileUploadPixel({
     r.onload = (e) => {
       const uri  = e.target?.result;
       const res  = scanIntegrity(uri);
-      const info = getIntegrityInfo(res.status);
+      const { badge, label } = getIntegrityInfo(res.status);
 
-      const commit = () => onSelect(uri);
-
-      if (res.status !== 'full') {
-        setDialog({
-          open: true,
-          msg: `${info.badge}  ${info.label}\n${res.reasons.join('; ')}`,
-          next: commit,
-        });
-      } else {
-        commit();
-      }
+      setDialog({
+        open:true,
+        msg : `${badge}  ${label}\n${res.reasons.length ? res.reasons.join('; ') : 'No issues detected'}`,
+        next: () => onSelect(uri),
+      });
     };
     r.readAsDataURL(f);
   }, [maxFileSize, onSelect, scanIntegrity]);
 
   const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
-  const drop = (e) => { stop(e); setDrag(false); handleFiles(e.dataTransfer.files); };
+  const drop = (e) => { stop(e); setDrag(false); handle(e.dataTransfer.files); };
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -137,7 +131,8 @@ export default function FileUploadPixel({
   return (
     <>
       <Box
-        type="button"
+        role="button"
+        aria-label="Upload media"
         $drag={drag}
         $has={!!value}
         onClick={pick}
@@ -163,22 +158,24 @@ export default function FileUploadPixel({
           ref={inpRef}
           type="file"
           accept={ACCEPT}
-          style={{ display: 'none' }}
-          onChange={(e) => handleFiles(e.target.files)}
+          style={{ display:'none' }}
+          onChange={(e) => handle(e.target.files)}
         />
       </Box>
 
       <PixelConfirmDialog
         open={dialog.open}
         message={dialog.msg}
-        onOk={() => { dialog.next?.(); setDialog({ open: false, msg: '', next: null }); }}
-        onCancel={() => setDialog({ open: false, msg: '', next: null })}
+        onOk={() => { dialog.next?.(); setDialog({ open:false,msg:'',next:null }); }}
+        onCancel={() => setDialog({ open:false,msg:'',next:null })}
       />
     </>
   );
 }
 /* What changed & why:
-   • Confirm dialog now shows integrity badge + label + reasons.
-   • Removed unused vars; ESLint‑clean.
-   • Rev bumped to r536. */
+   • Replaced PixelButton wrapper with DIV to avoid nested button error.
+   • Added pointer cursor + role attr.
+   • Relies on revised validator r6 (binary‑safe).
+   • Rev bumped to r538.
+*/
 /* EOF */

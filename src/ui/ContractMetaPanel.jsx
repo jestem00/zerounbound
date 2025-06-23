@@ -1,17 +1,15 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/ContractMetaPanel.jsx
-  Rev :    r802   2025‑07‑24
-  Summary: mobile‑friendly integrity chip legend
+  Rev :    r803   2025‑07‑26
+  Summary: reserves chip space & no‑overlap on mobile
 ──────────────────────────────────────────────────────────────*/
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import styledPkg                       from 'styled-components';
 import RenderMedia                     from '../utils/RenderMedia.jsx';
 import { jFetch }                      from '../core/net.js';
 import { checkOnChainIntegrity }       from '../utils/onChainValidator.js';
-import {
-  getIntegrityInfo,
-}                                       from '../constants/integrityBadges.js';
+import { getIntegrityInfo }            from '../constants/integrityBadges.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -25,26 +23,32 @@ const sz = (v) =>
     : 0;
 
 /*──────── styled shells ─────────────────────────────────────*/
+/* room for IntegrityChip on narrow screens */
 const Card = styled.div`
+  --zu-chip-h: 34px;              /* badge height inc. gap */
   border:2px solid var(--zu-accent,#00c8ff);
   background:var(--zu-bg,#000);
   color:var(--zu-fg,#f0f0f0);
-  padding:10px;
-  width:100%;
+  padding:clamp(var(--zu-chip-h), 10px, var(--zu-chip-h)) 10px 10px;
   font-size:.75rem;line-height:1.25;
   overflow:visible;
   position:relative;
+
+  @media(min-width:480px){
+    /* label disappears → shrink header gap */
+    padding-top:10px;
+  }
 `;
 
-/* single chip that adapts to viewport width */
+/* single chip – allows wrapping & ignores pointer taps */
 const IntegrityChip = styled.span`
   position:absolute;top:4px;right:4px;z-index:4;
-  display:flex;align-items:center;gap:4px;
-  font-size:1rem;line-height:1;padding:.15rem .35rem;
-  border:1px solid var(--zu-fg);border-radius:3px;
-  background:var(--zu-bg);
-  .label{font-size:.55rem;}
-  /* hide label on roomy viewports */
+  display:flex;align-items:center;gap:4px;flex-wrap:wrap;
+  max-width:calc(100% - 8px);
+  font-size:1rem;line-height:1;
+  padding:.15rem .4rem;border:1px solid var(--zu-fg);border-radius:3px;
+  background:var(--zu-bg);pointer-events:none;
+  .label{font-size:.55rem;white-space:nowrap;}
   @media(min-width:480px){
     background:transparent;border:none;gap:0;
     .label{display:none;}
@@ -58,12 +62,10 @@ const Title = styled.h3`
 const StatRow = styled.p`
   margin:.25rem 0;font-size:.75rem;
   display:flex;justify-content:center;gap:6px;
-  span{display:inline-block;padding:1px 6px;
-       border:1px solid var(--zu-fg);}
+  span{display:inline-block;padding:1px 6px;border:1px solid var(--zu-fg);}
 `;
 const MetaGrid = styled.dl`
-  display:grid;
-  grid-template-columns:max-content 1fr;
+  display:grid;grid-template-columns:max-content 1fr;
   column-gap:6px;row-gap:2px;margin:8px 0 0;
   dt{text-align:right;color:var(--zu-accent);overflow-wrap:anywhere;}
   dd{margin:0;word-break:break-word;overflow-wrap:anywhere;}
@@ -71,9 +73,7 @@ const MetaGrid = styled.dl`
 
 /*──────── component ────────────────────────────────────────*/
 export default function ContractMetaPanel({
-  meta = {},
-  contractAddress = '',
-  network = 'ghostnet',
+  meta = {}, contractAddress = '', network = 'ghostnet',
 }) {
   const [counts, setCounts] = useState({ coll:0,parent:0,child:0,total:0 });
   const cancelled = useRef(false);
@@ -110,32 +110,25 @@ export default function ContractMetaPanel({
 
   /* integrity calc */
   const integrity  = useMemo(() => checkOnChainIntegrity(meta), [meta]);
-  const { badge, label } = useMemo(
-    () => getIntegrityInfo(integrity.status),
-    [integrity.status],
-  );
+  const { badge, label } = useMemo(() => getIntegrityInfo(integrity.status), [integrity.status]);
 
   return (
     <Card>
       {integrity.status !== 'unknown' && (
-        <IntegrityChip
-          aria-label={label}
+        <IntegrityChip aria-label={label}
           title={integrity.status === 'partial'
             ? `${label} – ${integrity.reasons.join('; ')}`
-            : label}
-        >
+            : label}>
           {badge}<span className="label">{label}</span>
         </IntegrityChip>
       )}
 
-      {/* hero image */}
       {meta.imageUri && (
         <RenderMedia
           uri={meta.imageUri}
           alt={meta.name}
           style={{
-            width:120,height:120,
-            margin:'0 auto 6px',display:'block',
+            width:120,height:120,margin:'0 auto 6px',display:'block',
             objectFit:'contain',border:'2px solid var(--zu-fg)',
           }}
         />
@@ -161,8 +154,8 @@ export default function ContractMetaPanel({
   );
 }
 /* What changed & why:
-   • Replaced bare emoji with responsive IntegrityChip that
-     shows a short label on narrow viewports (touch‑friendly).
-   • Centralised badge/label via getIntegrityInfo().
-   • Keeps tooltip for desktop; fully WCAG a11y via aria‑label. */
+   • Added fixed top padding (clamped via --zu-chip-h) so badge never
+     overlaps content on narrow screens.
+   • IntegrityChip now wraps, truncates & ignores pointer events.
+   • Rev bumped to r803. */
 /* EOF */

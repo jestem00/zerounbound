@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/TokenMetaPanel.jsx
-  Rev :    r744‑d   2025‑07‑24
-  Summary: responsive integrity chip legend (mobile a11y)
+  Rev :    r745   2025‑07‑26
+  Summary: chip wrap + reserved header space (mobile fix)
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useEffect, useMemo, useState, useRef, useCallback,
@@ -16,12 +16,9 @@ import { jFetch }           from '../core/net.js';
 import LoadingSpinner       from './LoadingSpinner.jsx';
 import PixelButton          from './PixelButton.jsx';
 import { checkOnChainIntegrity } from '../utils/onChainValidator.js';
-import {
-  getIntegrityInfo,
-}                           from '../constants/integrityBadges.js';
+import { getIntegrityInfo }       from '../constants/integrityBadges.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
-
 
 /*──────── helpers ───────────────────────────────────────────*/
 const unwrapImgSrc = (s = '') =>
@@ -73,13 +70,19 @@ const sz = (v) =>
 
 /*──────── styled shells ─────────────────────────────────────*/
 const Card = styled.div`
+  --zu-chip-h: 34px;
   border:2px solid var(--zu-accent,#00c8ff);
   background:var(--zu-bg,#000);
   color:var(--zu-fg,#f0f0f0);
-  padding:6px 8px 8px;
+  padding:clamp(var(--zu-chip-h), 6px, var(--zu-chip-h)) 8px 8px;
   font-size:.75rem;line-height:1.25;overflow:hidden;
   position:relative;
+
+  @media(min-width:480px){
+    padding-top:6px;
+  }
 `;
+
 const Title = styled.h4`
   margin:0 0 2px;font-size:.8rem;text-align:center;
   color:var(--zu-accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
@@ -113,11 +116,12 @@ const MetaGrid = styled.dl`
 /* responsive integrity chip */
 const IntegrityChip = styled.span`
   position:absolute;top:4px;right:4px;z-index:4;
-  display:flex;align-items:center;gap:4px;
-  font-size:1rem;line-height:1;padding:.15rem .35rem;
-  border:1px solid var(--zu-fg);border-radius:3px;
-  background:var(--zu-bg);
-  .label{font-size:.55rem;}
+  display:flex;align-items:center;gap:4px;flex-wrap:wrap;
+  max-width:calc(100% - 8px);
+  font-size:1rem;line-height:1;
+  padding:.15rem .4rem;border:1px solid var(--zu-fg);border-radius:3px;
+  background:var(--zu-bg);pointer-events:none;
+  .label{font-size:.55rem;white-space:nowrap;}
   @media(min-width:480px){
     background:transparent;border:none;gap:0;
     .label{display:none;}

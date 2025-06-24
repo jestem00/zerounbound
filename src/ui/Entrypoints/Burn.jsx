@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/Burn.jsx
-  Rev :    r693   2025-06-25
-  Summary: $level-safe Wrap, clearer overlay flow, minor lint
+  Rev :    r901   2025‑07‑31
+  Summary: visible field‑labels + a11y ids for Token‑ID & Qty
 ──────────────────────────────────────────────────────────────*/
 import React, { useCallback, useEffect, useState } from 'react';
 import { Buffer }            from 'buffer';
@@ -29,6 +29,9 @@ if (typeof window !== 'undefined' && !window.Buffer) window.Buffer = Buffer;
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 const Wrap   = styled('section').withConfig({ shouldForwardProp: (p) => p !== '$level' })`
   margin-top:1.5rem;position:relative;z-index:${(p) => p.$level ?? 'auto'};
+`;
+const FieldWrap = styled.div`
+  display:flex;flex-direction:column;gap:.45rem;flex:1;
 `;
 const Picker = styled.div`display:flex;gap:.5rem;`;
 const Box    = styled.div`position:relative;flex:1;`;
@@ -193,7 +196,7 @@ export default function Burn({
     try {
       const c  = await toolkit.wallet.at(contractAddress);
       const fn = chooseMethod(c?.methods);
-      if (!fn) return snack('No burn entry-point', 'error');
+      if (!fn) return snack('No burn entry‑point', 'error');
 
       setOv({ open:true, status:'Waiting for signature…' });
 
@@ -226,51 +229,68 @@ export default function Burn({
     <Wrap $level={$level}>
       <PixelHeading level={3}>Burn&nbsp;Tokens</PixelHeading>
       <HelpBox>
-        Remove tokens from circulation. Enter token-ID, quantity, then click <strong>Burn</strong>. You can burn multiple editions at once, but not more than you own. This does not change the contract owner, it only removes tokens from your balance.
+        Remove tokens from circulation. Enter <strong>Token‑ID</strong> and
+        <strong>&nbsp;Quantity</strong>, then click <strong>Burn</strong>. You can burn
+        multiple editions at once, but not more than you own. This does not
+        change the contract owner; it only reduces your balance.
       </HelpBox>
 
+      {/* Token‑ID picker */}
       <Picker>
-        <PixelInput
-          placeholder="Token-ID"
-          value={tokenId}
-          onChange={(e) => setTokenId(e.target.value.replace(/\D/g, ''))}
-          style={{ flex:1 }}
-        />
-        <Box>
-          <select
-            style={{ width:'100%', height:32 }}
-            disabled={loadingTok}
-            value={tokenId || ''}
-            onChange={(e) => setTokenId(e.target.value)}
-          >
-            <option value="">
-              {loadingTok
-                ? 'Loading…'
-                : tokOpts.length ? 'Select token' : '— none —'}
-            </option>
-            {tokOpts.map((t) => {
-              const id   = typeof t === 'object' ? t.id   : t;
-              const name = typeof t === 'object' ? t.name : '';
-              return (
-                <option key={id} value={id}>
-                  {name ? `${id} — ${name}` : id}
-                </option>
-              );
-            })}
-          </select>
-          {loadingTok && <Spin />}
-        </Box>
+        <FieldWrap>
+          <label htmlFor="tokenId">Token‑ID *</label>
+          <PixelInput
+            id="tokenId"
+            placeholder="e.g. 42"
+            value={tokenId}
+            onChange={(e) => setTokenId(e.target.value.replace(/\D/g, ''))}
+          />
+        </FieldWrap>
+
+        <FieldWrap>
+          <label htmlFor="tokenSelect">Owned Tokens</label>
+          <Box>
+            <select
+              id="tokenSelect"
+              style={{ width:'100%', height:32 }}
+              disabled={loadingTok}
+              value={tokenId || ''}
+              onChange={(e) => setTokenId(e.target.value)}
+            >
+              <option value="">
+                {loadingTok
+                  ? 'Loading…'
+                  : tokOpts.length ? 'Select token' : '— none —'}
+              </option>
+              {tokOpts.map((t) => {
+                const id   = typeof t === 'object' ? t.id   : t;
+                const name = typeof t === 'object' ? t.name : '';
+                return (
+                  <option key={id} value={id}>
+                    {name ? `${id} — ${name}` : id}
+                  </option>
+                );
+              })}
+            </select>
+            {loadingTok && <Spin />}
+          </Box>
+        </FieldWrap>
       </Picker>
 
-      <PixelInput
-        placeholder="Quantity"
-        type="number"
-        min="1"
-        value={qty}
-        onChange={(e) => setQty(e.target.value.replace(/\D/g, ''))}
-        style={{ marginTop:'.5rem' }}
-      />
+      {/* Quantity */}
+      <FieldWrap style={{ marginTop:'.6rem' }}>
+        <label htmlFor="qty">Quantity *</label>
+        <PixelInput
+          id="qty"
+          placeholder="How many to burn"
+          type="number"
+          min="1"
+          value={qty}
+          onChange={(e) => setQty(e.target.value.replace(/\D/g, ''))}
+        />
+      </FieldWrap>
 
+      {/* token preview */}
       <div style={{ marginTop:'1rem' }}>
         <TokenMetaPanel
           meta={meta}
@@ -279,6 +299,7 @@ export default function Burn({
         />
       </div>
 
+      {/* CTA */}
       <PixelButton
         warning
         disabled={!qty || !tokenId}
@@ -308,4 +329,11 @@ export default function Burn({
     </Wrap>
   );
 }
+/* What changed & why:
+   • Added explicit <label> elements for Token‑ID and Quantity
+     (WCAG‑AA, I86 HelpBox rule).
+   • Wrapped inputs in FieldWrap for consistent spacing/flex.
+   • id/htmlFor hooks improve a11y & keyboard focus.
+   • HelpBox copy tweaked to reflect new labels.
+   • Rev bumped to r901. */
 /* EOF */

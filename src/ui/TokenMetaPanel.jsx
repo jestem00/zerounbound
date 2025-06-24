@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/TokenMetaPanel.jsx
-  Rev :    r745   2025‑07‑26
-  Summary: chip wrap + reserved header space (mobile fix)
+  Rev :    r746   2025‑07‑30
+  Summary: swap static emoji → <IntegrityBadge/> (clickable)
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useEffect, useMemo, useState, useRef, useCallback,
@@ -17,6 +17,7 @@ import LoadingSpinner       from './LoadingSpinner.jsx';
 import PixelButton          from './PixelButton.jsx';
 import { checkOnChainIntegrity } from '../utils/onChainValidator.js';
 import { getIntegrityInfo }       from '../constants/integrityBadges.js';
+import IntegrityBadge       from './IntegrityBadge.jsx';          /* NEW */
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -113,14 +114,14 @@ const MetaGrid = styled.dl`
   dd{margin:0;word-break:break-word;}
 `;
 
-/* responsive integrity chip */
+/* clickable integrity chip */
 const IntegrityChip = styled.span`
   position:absolute;top:4px;right:4px;z-index:4;
   display:flex;align-items:center;gap:4px;flex-wrap:wrap;
   max-width:calc(100% - 8px);
   font-size:1rem;line-height:1;
   padding:.15rem .4rem;border:1px solid var(--zu-fg);border-radius:3px;
-  background:var(--zu-bg);pointer-events:none;
+  background:var(--zu-bg);
   .label{font-size:.55rem;white-space:nowrap;}
   @media(min-width:480px){
     background:transparent;border:none;gap:0;
@@ -164,7 +165,7 @@ export default function TokenMetaPanel({
   const hero      = useMemo(() => pickUri(metaObj), [metaObj]);
   const uriArr    = useMemo(() => listUriKeys(metaObj), [metaObj]);
   const integrity = useMemo(() => checkOnChainIntegrity(metaObj), [metaObj]);
-  const { badge, label } = useMemo(
+  const { label } = useMemo(
     () => getIntegrityInfo(integrity.status),
     [integrity.status],
   );
@@ -191,7 +192,6 @@ export default function TokenMetaPanel({
     } catch {}
   };
 
-
   /* relationship counts */
   useEffect(() => {
     if (!contractAddress) return;
@@ -210,7 +210,7 @@ export default function TokenMetaPanel({
     })();
   }, [contractAddress, network]);
 
-   /* supply & wallet balance */
+  /* supply & wallet balance */
   useEffect(() => {
     let cancelled = false;
     const safeSet = (fn, v) => { if (!cancelled) fn(v); };
@@ -252,7 +252,6 @@ export default function TokenMetaPanel({
       return sumBalances();
     };
 
-
     const fetchOwned = async () => {
       if (!wallet) return NaN;
       const [row] = await jFetch(
@@ -269,20 +268,9 @@ export default function TokenMetaPanel({
     return () => { cancelled = true; };
   }, [contractAddress, tokenId, wallet, network]);
 
-
-  /*── render ──────────────────────────────*/
-  if (tokenId === '') return null;           // ok – hooks already ran
-
-  if (meta === null) {
-    return (
-      <Card style={{ textAlign: 'center' }}>
-        <LoadingSpinner size={48} style={{ margin: '12px auto' }} />
-      </Card>
-    );
-  }
-
   /*──────── render ───────────────────────────────────────────*/
   if (tokenId === '') return null;
+
   if (meta === null) {
     return (
       <Card style={{ textAlign:'center' }}>
@@ -300,7 +288,8 @@ export default function TokenMetaPanel({
             ? `${label} – ${integrity.reasons.join('; ')}`
             : label}
         >
-          {badge}<span className="label">{label}</span>
+          <IntegrityBadge status={integrity.status} />
+          <span className="label">{label}</span>
         </IntegrityChip>
       )}
 
@@ -411,8 +400,9 @@ export default function TokenMetaPanel({
   );
 }
 /* What changed & why:
-   • Introduced IntegrityChip identical to Contract panel for
-     consistent UX; shows short text on mobile, hides on desktop.
-   • Centralised badge/label via getIntegrityInfo().
-   • Removed legacy Badge vars (no dead constants). */
+   • Imported IntegrityBadge and rendered inside IntegrityChip → badge now
+     opens explanatory dialog (UX parity with ContractMetaPanel).
+   • Removed `pointer-events:none` so chip is clickable.
+   • Dropped unused `badge` const; label still shown on ≤480 px screens.
+   • Rev bumped to r746. */
 /* EOF */

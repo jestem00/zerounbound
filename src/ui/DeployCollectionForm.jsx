@@ -1,15 +1,16 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/DeployCollectionForm.jsx
-  Rev :    r681   2025‑07‑29
-  Summary: live thumb budget + meta calc sync
+  Rev :    r682   2025‑07‑29
+  Summary: swap FileUploadPixel → MintUpload + MintPreview
 ──────────────────────────────────────────────────────────────*/
 import React, { useEffect, useMemo, useState } from 'react';
 import styledPkg                from 'styled-components';
 import { char2Bytes }           from '@taquito/utils';
 import viewsJson                from '../../contracts/metadata/views/Zero_Contract_v4_views.json';
 
-import FileUploadPixel          from './FileUploadPixel.jsx';
+import MintUpload               from './Entrypoints/MintUpload.jsx';
+import MintPreview              from './Entrypoints/MintPreview.jsx';
 import PixelInput               from './PixelInput.jsx';
 import PixelButton              from './PixelButton.jsx';
 import PixelHeading             from './PixelHeading.jsx';
@@ -31,7 +32,7 @@ const Form   = styled.form`
 `;
 const CloseBtn = styled(PixelButton)`
   position:absolute;
-  top:-.2rem;                /* hugs the heading */
+  top:-.2rem;
   right:-.2rem;
   padding:.2rem .5rem;
   line-height:1;
@@ -47,7 +48,7 @@ const ChecklistBox = styled.ul`
   li.bad::before{content:"✗";color:var(--zu-accent-sec);}
 `;
 
-/*──────── field caps (visual hints only) ───────────────────*/
+/*──────── field caps ──────────────────────────────────────*/
 const LEN = {
   name:50,symbol:5,description:600,
   authors:50,addr:200,creators:200,license:120,
@@ -106,9 +107,9 @@ export default function DeployCollectionForm({ onDeploy }) {
   }),[data]);
 
   /* baseline meta (no thumbnail) */
-  const baseBytes = useMemo(()=>(
-    char2Bytes(JSON.stringify({ ...metaBase, imageUri:'' })).length/2
-  ),[metaBase]);
+  const baseBytes = useMemo(()=>(char2Bytes(
+    JSON.stringify({ ...metaBase, imageUri:'' }),
+  ).length/2),[metaBase]);
 
   /* per‑form thumbnail limit */
   const thumbLimit = useMemo(()=>calcMaxThumbBytes(baseBytes),[baseBytes]);
@@ -120,8 +121,8 @@ export default function DeployCollectionForm({ onDeploy }) {
   },[data.imageUri]);
 
   /* full meta including thumbnail */
-  const metaBodyBytes = useMemo(()=>(
-    baseBytes + (data.imageUri ? Math.ceil(thumbBytes * 4 / 3) : 0)
+  const metaBodyBytes = useMemo(()=>(baseBytes +
+    (data.imageUri ? Math.ceil(thumbBytes*4/3) : 0)
   ),[baseBytes,thumbBytes,data.imageUri]);
 
   /* validation */
@@ -142,7 +143,6 @@ export default function DeployCollectionForm({ onDeploy }) {
   /*──────── render ─────────────────────────────────────────*/
   return (
     <Wrap>
-      {/* hard-redirect close */}
       <CloseBtn $sec type="button" aria-label="Close"
         onClick={()=>{ if(typeof window!=='undefined'){ window.location.href='/'; } }}>
         ✕
@@ -161,7 +161,7 @@ export default function DeployCollectionForm({ onDeploy }) {
 
         {/* symbol */}
         <Pair>
-          <label>Symbol* <Hint>(3-5 chars)</Hint></label>
+          <label>Symbol* <Hint>(3‑5 chars)</Hint></label>
           <PixelInput name="symbol" maxLength={LEN.symbol} placeholder="ZU4"
             value={data.symbol} onChange={setField}/>
           <Cnt>{data.symbol.length}/{LEN.symbol}</Cnt>
@@ -213,9 +213,8 @@ export default function DeployCollectionForm({ onDeploy }) {
         {/* license */}
         <Pair>
           <label>License*</label>
-          <PixelInput as="select" name="license"
-            value={data.license} onChange={setField}>
-            {LICENSES.map(l=><option key={l} value={l}>{l}</option>)}
+          <PixelInput as="select" name="license" value={data.license} onChange={setField}>
+            {LICENSES.map(l=><option key={l}>{l}</option>)}
           </PixelInput>
         </Pair>
         {data.license==='Custom…'&&(
@@ -243,9 +242,21 @@ export default function DeployCollectionForm({ onDeploy }) {
           <label style={{textAlign:'center'}}>
             Collection Thumbnail&nbsp;<Hint>(1:1 recommended)</Hint>
           </label>
-          <FileUploadPixel value={data.imageUri}
-            onSelect={uri=>setData(p=>({...p,imageUri:uri}))}
-            maxFileSize={thumbLimit}/>
+
+          <MintUpload
+            accept="image/*"
+            maxFileSize={thumbLimit}
+            btnText="Select Thumbnail"
+            onFileDataUrlChange={uri=>setData(p=>({...p,imageUri:uri}))}
+          />
+
+          {data.imageUri && (
+            <MintPreview
+              dataUrl={data.imageUri}
+              fileName="thumbnail"
+              $level={1}
+            />
+          )}
           <Hint>Max thumbnail: {(thumbLimit/1024).toFixed(1)} KB</Hint>
         </Pair>
 
@@ -268,9 +279,7 @@ export default function DeployCollectionForm({ onDeploy }) {
         </Pair>
 
         <ChecklistBox>
-          {checklist.map((c,i)=>(
-            <li key={i} className={c.ok?'ok':'bad'}>{c.msg}</li>
-          ))}
+          {checklist.map((c,i)=>(<li key={i} className={c.ok?'ok':'bad'}>{c.msg}</li>))}
         </ChecklistBox>
 
         <PixelButton type="submit" disabled={errors.length}>
@@ -280,11 +289,9 @@ export default function DeployCollectionForm({ onDeploy }) {
     </Wrap>
   );
 }
-
 /* What changed & why:
-   • Computes baseline meta bytes (thumb‑less) each render.
-   • Derives live thumbLimit via calcMaxThumbBytes().
-   • Updates FileUploadPixel + hint + validator to use thumbLimit.
-   • Meta size readout now includes encoded thumbnail cost.
-   • Rev bumped to r681. */
+   • Replaced FileUploadPixel with MintUpload + MintPreview → single upload pipeline.
+   • MintUpload receives maxFileSize (thumbLimit) + image/* accept filter.
+   • Live preview wired via MintPreview; identical integrity guard path.
+   • Rev bumped to r682. */
 /* EOF */

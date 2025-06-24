@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/ContractMetaPanel.jsx
-  Rev :    r803   2025‑07‑26
-  Summary: reserves chip space & no‑overlap on mobile
+  Rev :    r813     2025‑07‑29
+  Summary: fix undefined var, hook IntegrityBadge, enable click
 ──────────────────────────────────────────────────────────────*/
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import styledPkg                       from 'styled-components';
@@ -10,6 +10,7 @@ import RenderMedia                     from '../utils/RenderMedia.jsx';
 import { jFetch }                      from '../core/net.js';
 import { checkOnChainIntegrity }       from '../utils/onChainValidator.js';
 import { getIntegrityInfo }            from '../constants/integrityBadges.js';
+import IntegrityBadge                  from './IntegrityBadge.jsx';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -40,14 +41,14 @@ const Card = styled.div`
   }
 `;
 
-/* single chip – allows wrapping & ignores pointer taps */
+/* single chip – allows wrapping & preserves pointer events */
 const IntegrityChip = styled.span`
   position:absolute;top:4px;right:4px;z-index:4;
   display:flex;align-items:center;gap:4px;flex-wrap:wrap;
   max-width:calc(100% - 8px);
   font-size:1rem;line-height:1;
   padding:.15rem .4rem;border:1px solid var(--zu-fg);border-radius:3px;
-  background:var(--zu-bg);pointer-events:none;
+  background:var(--zu-bg);
   .label{font-size:.55rem;white-space:nowrap;}
   @media(min-width:480px){
     background:transparent;border:none;gap:0;
@@ -78,6 +79,7 @@ export default function ContractMetaPanel({
   const [counts, setCounts] = useState({ coll:0,parent:0,child:0,total:0 });
   const cancelled = useRef(false);
 
+  /* live chain counts */
   useEffect(() => {
     cancelled.current = false;
     if (!contractAddress) return;
@@ -99,6 +101,7 @@ export default function ContractMetaPanel({
     return () => { cancelled.current = true; };
   }, [contractAddress, network]);
 
+  /* ordered key/value pairs for grid */
   const ORDER=[
     'name','symbol','description','version','license','authors',
     'homepage','authoraddress','creators','type','interfaces',
@@ -109,8 +112,10 @@ export default function ContractMetaPanel({
   [meta]);
 
   /* integrity calc */
-  const integrity  = useMemo(() => checkOnChainIntegrity(meta), [meta]);
-  const { badge, label } = useMemo(() => getIntegrityInfo(integrity.status), [integrity.status]);
+  const integrity = useMemo(() => checkOnChainIntegrity(meta), [meta]);
+  const { badge, label } = useMemo(
+    () => getIntegrityInfo(integrity.status),
+  [integrity.status]);
 
   return (
     <Card>
@@ -119,7 +124,8 @@ export default function ContractMetaPanel({
           title={integrity.status === 'partial'
             ? `${label} – ${integrity.reasons.join('; ')}`
             : label}>
-          {badge}<span className="label">{label}</span>
+          <IntegrityBadge status={integrity.status}/>
+          <span className="label">{label}</span>
         </IntegrityChip>
       )}
 
@@ -154,8 +160,9 @@ export default function ContractMetaPanel({
   );
 }
 /* What changed & why:
-   • Added fixed top padding (clamped via --zu-chip-h) so badge never
-     overlaps content on narrow screens.
-   • IntegrityChip now wraps, truncates & ignores pointer events.
-   • Rev bumped to r803. */
+   • Replaced undefined `contract` var with on‑the‑fly integrity
+     analysis via checkOnChainIntegrity(meta).
+   • Swapped raw emoji for interactive <IntegrityBadge/>.
+   • Restored pointer events on IntegrityChip for click support.
+   • Removed unused checkOnChainIntegrity import warning. */
 /* EOF */

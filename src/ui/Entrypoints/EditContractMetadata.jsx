@@ -1,8 +1,9 @@
-/*Developed by @jams2blues – ZeroContract Studio
+/*─────────────────────────────────────────────────────────────
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/EditContractMetadata.jsx
-  Rev :    r805   2025-07-05
-  Summary: inline error <Err> + toast hook uses new validator
-────────────────────────────────────────────────────────────────*/
+  Rev :    r813     2025‑07‑29
+  Summary: drop leaking $level prop + minor lint fixes
+──────────────────────────────────────────────────────────────*/
 import React, {
   useCallback, useEffect, useMemo, useRef, useState,
 }                           from 'react';
@@ -142,13 +143,11 @@ function validateField(form, k, v) {
   }
 }
 
-
 /*──────────────── component ───────────────────────────────*/
 export default function EditContractMetadata({
   contractAddress = '',
   setSnackbar     = () => {},
   onMutate        = () => {},
-  $level,
 }) {
   const { toolkit, network = 'ghostnet' } = useWalletContext() || {};
   const snack = (msg, sev = 'info') =>
@@ -229,9 +228,6 @@ export default function EditContractMetadata({
   if (!Object.keys(labelMap.current).length) {
     FIELDS.forEach(({k,label}) => { labelMap.current[k] = label; });
   }
-
-  const onChange = (k) => (e) =>
-    setForm((f) => ({ ...f, [k]: e.target.value }));
 
   /*──────── validation ───────────────────────────────────*/
   const errs = useMemo(() => {
@@ -320,7 +316,7 @@ export default function EditContractMetadata({
 
   /*──────── render ───────────────────────────────────────*/
   return (
-    <section $level={$level}>
+    <section>
       <PixelHeading level={3}>Edit Contract&nbsp;Metadata</PixelHeading>
       <Notice>Must own all editions to use this entry-point</Notice>
       <HelpBox>
@@ -431,7 +427,7 @@ export default function EditContractMetadata({
   );
 }
 /* What changed & why:
-   • Added inline <Err> feedback under each field for clarity.
-   • asciiPrintable now Unicode-safe; emojis & accents accepted.
-   • Validation messages updated, control-char wording clearer. */
+   • Removed leaked `$level` prop (invalid DOM attr).
+   • Minor lint: unused `onChange` helper removed; imports tidy.
+   • Rev bumped to r813. */
 /* EOF */

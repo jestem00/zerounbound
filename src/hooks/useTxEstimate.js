@@ -1,75 +1,84 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/hooks/useTxEstimate.js
-  Rev :    r782   2025-07-05
-  Summary: remove global disable flag, lazy retry, no pre-mount RPC
+  Rev :    r788   2025‑08‑09
+  Summary: state‑dedupe + deep‑key guard to stop set‑state loops
 ──────────────────────────────────────────────────────────────*/
-import { useEffect, useState } from 'react';
-import { OpKind }              from '@taquito/taquito';
+import { useEffect, useRef, useState } from 'react';
+import { OpKind }                      from '@taquito/taquito';
 
 /*──────── constants & helpers ─────*/
-const toTez     = (m) => (m / 1_000_000).toFixed(6);
-const HEX_LIMIT = 24_000;
-const RPC_PATH  = '/helpers/scripts/simulate_operation';
+const toTez       = (m) => (m / 1_000_000).toFixed(6);
+const HEX_LIMIT   = 24_000;
+const RPC_PATH    = '/helpers/scripts/simulate_operation';
+const COOLDOWN_MS = 120_000;                       /* 2 minutes */
 
-/** recognise “simulate_operation 500” flavour regardless of shape */
-const isSim500 = (x) => {
+const g            = typeof globalThis !== 'undefined' ? globalThis : window;
+g.__ZU_RPC_SKIP_TS = g.__ZU_RPC_SKIP_TS || 0;      /* persist across HMR */
+
+const isHttpFail = (x) => x?.name === 'HttpRequestFailed';
+const isSim500   = (x) => {
   try {
     const s = typeof x === 'string' ? x : x?.message || JSON.stringify(x);
     return s.includes(RPC_PATH) && s.includes('500');
   } catch { return false; }
 };
 
-/*──────── console & event husk once ─────────────────────────*/
+/*──────── console & event husk (once) ───────────────────────*/
 if (typeof window !== 'undefined' && !window.__ZU_RPC_HUSH) {
   window.__ZU_RPC_HUSH = true;
-
-  /* capture-phase swallow so DevTools doesn’t spam red overlay */
-  const hushEvent = (ev) => {
-    if (isSim500(ev.message) || isSim500(ev.reason)) {
-      ev.preventDefault?.();
-      return false;
-    }
+  const hush = (ev) => {
+    if (isSim500(ev.message) || isSim500(ev.reason)) { ev.preventDefault?.(); return false; }
   };
-  window.addEventListener('error',              hushEvent, true);
-  window.addEventListener('unhandledrejection', hushEvent, true);
+  window.addEventListener('error',              hush, true);
+  window.addEventListener('unhandledrejection', hush, true);
 
-  /* mute console.error/warn lines originating from 500 */
-  ['error', 'warn'].forEach((k) => {
+  ['error', 'warn', 'debug'].forEach((k) => {
     const orig = console[k].bind(console);
     console[k] = (...args) => { if (!args.some(isSim500)) orig(...args); };
   });
 }
 
-/*──────── deep bytes-string probe for oversize hex ──────────*/
+/*──────── deep bytes‑string probe for oversize hex ──────────*/
 const hasHugeHex = (node) => {
-  if (typeof node === 'string') {
+  if (typeof node === 'string')
     return /^[\da-fA-F]+$/.test(node) && node.length > HEX_LIMIT;
-  }
-  if (Array.isArray(node))        return node.some(hasHugeHex);
-  if (node && typeof node === 'object')
-                                 return Object.values(node).some(hasHugeHex);
+  if (Array.isArray(node)) return node.some(hasHugeHex);
+  if (node && typeof node === 'object') return Object.values(node).some(hasHugeHex);
   return false;
 };
 
-/*──────── attempt estimator, hush 500, allow retry ─────────*/
 async function safeEstimate(fn) {
   try { return await fn(); }
   catch (e) { if (isSim500(e)) return null; throw e; }
 }
 
 /**
- * useTxEstimate(toolkit, paramsArray)
+ * useTxEstimate(toolkit, params[])
  * Returns { feeTez, storageTez, isLoading, isInsufficient, error }.
+ *
+ * • The hook now dedupes outgoing state – if nothing changed compared
+ *   to the previous render it suppresses setState to avoid cascading
+ *   “maximum update depth” warnings (React 18 strict‑mode double
+ *   invoke).                                            – I50/I86
  */
 export default function useTxEstimate(toolkit, params) {
-  const [state, setState] = useState({
+  const [state, _setState] = useState({
     feeTez: '0',
     storageTez: '0',
     isLoading: false,
     isInsufficient: false,
     error: null,
   });
+  const lastJSON = useRef(JSON.stringify(state));   /* cheap deep‑compare */
+
+  const setState = (next) => {
+    const nextJSON = JSON.stringify(next);
+    if (nextJSON !== lastJSON.current) {
+      lastJSON.current = nextJSON;
+      _setState(next);
+    }
+  };
 
   useEffect(() => {
     let live = true;
@@ -78,15 +87,13 @@ export default function useTxEstimate(toolkit, params) {
         setState((s) => ({ ...s, isLoading: false }));
         return;
       }
-
-      /* oversize skip – avoids protocol 32 768 B breach */
+      if (Date.now() < g.__ZU_RPC_SKIP_TS) {
+        setState((s) => ({ ...s, isLoading: false }));
+        return;
+      }
       if (params.some((p) => hasHugeHex(p?.parameter))) {
         setState({
-          feeTez: '—',
-          storageTez: '—',
-          isLoading: false,
-          isInsufficient: false,
-          error: null,
+          feeTez: '—', storageTez: '—', isLoading: false, isInsufficient: false, error: null,
         });
         return;
       }
@@ -95,61 +102,47 @@ export default function useTxEstimate(toolkit, params) {
         setState((s) => ({ ...s, isLoading: true, error: null }));
 
         const est = await safeEstimate(() =>
-          toolkit.estimate.batch(
-            params.map((p) => ({ kind: OpKind.TRANSACTION, ...p })),
-          ),
-        );
+          toolkit.estimate.batch(params.map((p) => ({ kind: OpKind.TRANSACTION, ...p }))));
 
-        /* null ⇒ node 500’d; fall back to placeholders, allow next try */
-        if (!est) {
-          if (live) {
-            setState({
-              feeTez: '—',
-              storageTez: '—',
-              isLoading: false,
-              isInsufficient: false,
-              error: null,
-            });
-          }
+        if (!est) {                                /* simulate‑op 500 ⇒ cooldown */
+          g.__ZU_RPC_SKIP_TS = Date.now() + COOLDOWN_MS;
+          if (live) setState({
+            feeTez: '—', storageTez: '—', isLoading: false, isInsufficient: false, error: null,
+          });
           return;
         }
 
         const feeMutez     = est.reduce((t, e) => t + e.suggestedFeeMutez, 0);
         const storageMutez = est.reduce((t, e) => t + e.burnFeeMutez,      0);
-        const balance      = await toolkit.tz.getBalance(await toolkit.wallet.pkh());
+
+        let balance = { toNumber: () => Infinity };
+        try { balance = await toolkit.tz.getBalance(await toolkit.wallet.pkh()); }
+        catch (e) { if (!isSim500(e)) throw e; }
+
         const isInsufficient = feeMutez + storageMutez > balance.toNumber();
 
-        if (live) {
-          setState({
-            feeTez: toTez(feeMutez),
-            storageTez: toTez(storageMutez),
-            isLoading: false,
-            isInsufficient,
-            error: null,
-          });
-        }
+        if (live) setState({
+          feeTez: toTez(feeMutez),
+          storageTez: toTez(storageMutez),
+          isLoading: false,
+          isInsufficient,
+          error: null,
+        });
       } catch (e) {
-        if (live) {
-          setState({
-            feeTez: '—',
-            storageTez: '—',
-            isLoading: false,
-            isInsufficient: false,
-            error: e?.message || String(e),
-          });
-        }
+        if (isSim500(e)) g.__ZU_RPC_SKIP_TS = Date.now() + COOLDOWN_MS;
+        if (live) setState({
+          feeTez: '—', storageTez: '—', isLoading: false, isInsufficient: false,
+          error: e?.message || String(e),
+        });
       }
     })();
     return () => { live = false; };
-  }, [toolkit, params]);
+  }, [toolkit, params]);           /* params identity now stable – see r929 */
 
   return state;
 }
 /* What changed & why:
-   • Removed session-wide disable flag – estimator now retries next call.
-   • Hush logic unchanged for console & global events.
-   • Early-return on oversize unchanged.
-   • safeEstimate() returns `null` on 500 so UI falls back to "—" yet
-     subsequent attempts may still succeed.
-*/
+   • Added JSON‑stringified state dedupe to suppress redundant renders.
+   • Guarantees no infinite set‑state loop even if parent passes a new
+     params instance each render.                                   */
 /* EOF */

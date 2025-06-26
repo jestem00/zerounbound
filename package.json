@@ -28,7 +28,7 @@
     "@walletconnect/keyvaluestorage": "^1.1.1",
     "clsx": "^1.2.1",
     "embla-carousel-react": "^8.6.0",
-    "next": "15.3.2",
+    "next": "^15.3.4",
     "react": "18.2.0",
     "react-dom": "18.2.0",
     "react-feather": "^2.0.10",

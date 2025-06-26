@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/core/validator.js
-  Rev :    r876   2025‑07‑29
-  Summary: overhead +51 B fudge (binary map tags)
+  Rev :    r907   2025‑08‑04
+  Summary: +validateEditTokenFields() for edit_token_metadata
 ──────────────────────────────────────────────────────────────*/
 import { Buffer } from 'buffer';
 
@@ -174,8 +174,48 @@ export function validateDeployFields ({
   return { errors: checklist.filter(c => !c.ok).map(c => c.msg), checklist };
 }
 
+/*──────── new: edit‑token‑metadata validator ───────────────*/
+/**
+ * validateEditTokenFields()
+ * @param {object} cfg { form:{}, metaBytes:number }
+ * @returns {{ errors:string[], checklist:{ok,msg}[] }}
+ */
+export function validateEditTokenFields ({
+  form        = {},
+  metaBytes   = 0,
+  walletOK    = false,
+}) {
+  const checklist = [];
+  const add = (test, okMsg, errMsg) => {
+    checklist.push({ ok: !!test, msg: test ? okMsg : errMsg });
+    return test;
+  };
+
+  add(walletOK,                'Wallet connected',         'Wallet not connected');
+  add(form.name ? asciiPrintable(form.name) : true,
+                               'Name printable',           'Name control chars');
+  add(form.creators
+        ? listOfTezAddresses(form.creators)
+        : false,
+                               'Creators valid',           'Creators invalid');
+  add(!form.authors || asciiPrintable(form.authors),
+                               'Authors printable',        'Authors control chars');
+  add(form.license &&
+      (form.license !== 'Custom…'
+        || (form.customLicense && asciiPrintable(form.customLicense))),
+                               'License set',              'License required');
+  add(!form.tags || form.tags.length <= MAX_TAGS,
+                               'Tag count ok',             `> ${MAX_TAGS} tags`);
+  add(!form.attributes || validAttributes(form.attributes),
+                               'Attributes valid',         'Attributes invalid');
+  add(fitsByteBudget(metaBytes),
+                               'Metadata size ok',         `Metadata > ${MAX_META_BYTES} B`);
+
+  return { errors: checklist.filter(c => !c.ok).map(c => c.msg), checklist };
+}
+
 /* What changed & why:
-   • Removed static MAX_THUMB_BYTES; added calcMaxThumbBytes().
-   • validateDeployFields() now derives per‑form thumb cap.
-   • Rev bumped to r875. */
+   • Added validateEditTokenFields() for entry‑point r907.
+   • Maintains shared caps & byte‑budget check to satisfy I85/I88.
+*/
 /* EOF */

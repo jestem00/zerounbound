@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/OperationOverlay.jsx
-  Rev :    r725   2025-07-28
-  Summary: fun-lines adopt theme accent colour
+  Rev :    r726   2025‑08‑01
+  Summary: fun‑line <li> now nowrap + ellipsis, no overlap
 ──────────────────────────────────────────────────────────────*/
 import React, { useMemo, useState, useRef } from 'react';
 import styled, { css, keyframes } from 'styled-components';
@@ -68,7 +68,7 @@ const Caption = styled.p`
   margin:.75rem 0 0;font-size:.9rem;
 `;
 
-/*── CSS-steps Solari board ─────────────────────────────────*/
+/*── CSS‑steps Solari board ─────────────────────────────────*/
 const wrapH = '1.2em';
 const makeFlip = (n)=>keyframes`
   to{transform:translateY(-${n*parseFloat(wrapH)}em);}
@@ -80,7 +80,11 @@ const List = styled.ul.attrs(p=>({$n:p.$n}))`
 
   li{
     height:${wrapH};
-    color:var(--zu-accent);          /* ← accent contrast colour */
+    line-height:${wrapH};
+    color:var(--zu-accent);
+    white-space:nowrap;           /* prevent wrapping */
+    overflow:hidden;              /* hide spill */
+    text-overflow:ellipsis;       /* graceful truncation */
   }
 `;
 
@@ -165,13 +169,13 @@ export default function OperationOverlay(props){
 
         {walletHint && (
           <p style={{fontSize:'.8rem',opacity:.8,marginTop:4}}>
-            Wallet pop-up opening.<br/><strong>Review total fees</strong> then sign.<br/>Confirmation may take a while.
+            Wallet pop‑up opening.<br/><strong>Review total fees</strong> then sign.<br/>Confirmation may take a while.
           </p>
         )}
 
         {error && total>1 && (
           <p style={{ fontSize:'.8rem', opacity:.8, marginTop:4 }}>
-            Already-confirmed slices won’t be resent on retry.
+            Already‑confirmed slices won’t be resent on retry.
           </p>
         )}
 
@@ -192,7 +196,7 @@ export default function OperationOverlay(props){
   );
 }
 /* What changed & why:
-   • Added `color:var(--zu-accent)` on fun-line <li> elements so text
-     contrasts with current theme palette across dark/light modes.
-   • Rev bump r725. All prior fixes retained; purely visual tweak. */
+   • <li> now uses white‑space:nowrap + ellipsis to stop wrap/overlap.
+   • Added line‑height to match fixed height for vertical centring.
+   • Rev bump r726.                                              */
 /* EOF */

@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/ClearUri.jsx
-  Rev :    r693   2025-06-25
-  Summary: $level-safe Wrap, style parity, minor lint polish
+  Rev :    r903   2025‑08‑01
+  Summary: I101‑compliant picker, drop /contracts link
 ──────────────────────────────────────────────────────────────*/
 import React, { useCallback, useEffect, useState } from 'react';
 import { Buffer }            from 'buffer';
@@ -26,6 +26,10 @@ const styled  = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 const Wrap    = styled('section').withConfig({ shouldForwardProp: (p) => p !== '$level' })`
   margin-top:1.5rem;position:relative;z-index:${(p) => p.$level ?? 'auto'};
 `;
+const FieldWrap = styled.div`
+  display:flex;flex-direction:column;gap:.45rem;flex:1;
+`;
+const Picker = styled.div`display:flex;gap:.5rem;`;
 const SelectWrap = styled.div`position:relative;flex:1;`;
 const Spinner = styled(LoadingSpinner).attrs({ size:16 })`
   position:absolute;top:8px;right:8px;
@@ -45,7 +49,7 @@ export default function ClearUri({
   onMutate        = () => {},
   $level,
 }) {
-  const { toolkit } = useWalletContext() || {};
+  const { toolkit, network='ghostnet' } = useWalletContext() || {};
   const snack = (m, s='info') => setSnackbar({ open:true, message:m, severity:s });
 
   /* token list */
@@ -55,9 +59,10 @@ export default function ClearUri({
   const fetchTokens = useCallback(async () => {
     if (!contractAddress) return;
     setLoadingTok(true);
-    setTokOpts(await listLiveTokenIds(contractAddress, undefined, true));
+    const live = await listLiveTokenIds(contractAddress, network, true);
+    setTokOpts(live);
     setLoadingTok(false);
-  }, [contractAddress]);
+  }, [contractAddress, network]);
 
   useEffect(() => { void fetchTokens(); }, [fetchTokens]);
 
@@ -94,7 +99,7 @@ export default function ClearUri({
     if (!toolkit) return snack('Connect wallet', 'error');
     try {
       setOv({ open:true, status:'Waiting for signature…' });
-      const c = await toolkit.wallet.at(contractAddress);
+      const c  = await toolkit.wallet.at(contractAddress);
       const op = await c.methods.clear_uri(+tokenId, k).send();
       setOv({ open:true, status:'Broadcasting…' });
       await op.confirmation();
@@ -110,40 +115,52 @@ export default function ClearUri({
     <Wrap $level={$level}>
       <PixelHeading level={3}>Clear&nbsp;URI</PixelHeading>
       <HelpBox>
-        Removes any metadata URI key from a token using the v4 zerocontract (artifactUri, thumbnailUri, extrauri_* …). Pick token → click trash icon on the key → confirm. Handy before re-uploading or fixing typos.
+        Remove any metadata URI key from a token (e.g.&nbsp;artifactUri, thumbnailUri,
+        extrauri_*). Pick <strong>Token‑ID</strong> → click trash icon beside the key →
+        confirm. Useful before re‑uploading or fixing typos.
       </HelpBox>  
-      <div style={{ display:'flex', gap:'.5rem' }}>
-        <PixelInput
-          placeholder="Token-ID"
-          style={{ flex:1 }}
-          value={tokenId}
-          onChange={(e) => setTokenId(e.target.value.replace(/\D/g, ''))}
-        />
-        <SelectWrap>
-          <select
-            style={{ width:'100%', height:32 }}
-            disabled={loadingTok}
-            value={tokenId || ''}
-            onChange={(e) => setTokenId(e.target.value)}
-          >
-            <option value="">
-              {loadingTok
-                ? 'Loading…'
-                : tokOpts.length ? 'Select token' : '— none —'}
-            </option>
-            {tokOpts.map((t) => {
-              const id   = typeof t === 'object' ? t.id   : t;
-              const name = typeof t === 'object' ? t.name : '';
-              return (
-                <option key={id} value={id}>
-                  {name ? `${id} — ${name}` : id}
-                </option>
-              );
-            })}
-          </select>
-          {loadingTok && <Spinner />}
-        </SelectWrap>
-      </div>
+
+      {/* token picker */}
+      <Picker>
+        <FieldWrap>
+          <label htmlFor="tokenId">Token‑ID *</label>
+          <PixelInput
+            id="tokenId"
+            placeholder="e.g. 42"
+            value={tokenId}
+            onChange={(e) => setTokenId(e.target.value.replace(/\D/g, ''))}
+          />
+        </FieldWrap>
+
+        <FieldWrap>
+          <label htmlFor="tokSelect">Owned Tokens</label>
+          <SelectWrap>
+            <select
+              id="tokSelect"
+              style={{ width:'100%', height:32 }}
+              disabled={loadingTok}
+              value={tokenId || ''}
+              onChange={(e) => setTokenId(e.target.value)}
+            >
+              <option value="">
+                {loadingTok
+                  ? 'Loading…'
+                  : tokOpts.length ? 'Select token' : '— none —'}
+              </option>
+              {tokOpts.map((t) => {
+                const id   = typeof t === 'object' ? t.id   : t;
+                const name = typeof t === 'object' ? t.name : '';
+                return (
+                  <option key={id} value={id}>
+                    {name ? `${id} — ${name}` : id}
+                  </option>
+                );
+              })}
+            </select>
+            {loadingTok && <Spinner />}
+          </SelectWrap>
+        </FieldWrap>
+      </Picker>
 
       {/* preview + inline delete */}
       <div style={{ marginTop:'1rem' }}>
@@ -154,18 +171,6 @@ export default function ClearUri({
           onRemove={(k) => setConfirmKey(k)}
         />
       </div>
-
-      {tokenId && (
-        <p style={{ fontSize:'.7rem', textAlign:'center', marginTop:'.4rem' }}>
-          <a
-            href={`/contracts/${contractAddress}`}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            open&nbsp;in&nbsp;/contracts/{contractAddress}
-          </a>
-        </p>
-      )}
 
       <PixelConfirmDialog
         open={!!confirmKey}
@@ -184,4 +189,8 @@ export default function ClearUri({
     </Wrap>
   );
 }
+/* What changed & why:
+   • Conformed to I101 token‑picker spec (FieldWrap + labels + names).
+   • Removed redundant “open in /contracts/…” link.
+   • Rev bump to r903; style parity & a11y labels added. */
 /* EOF */

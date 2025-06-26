@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/PixelHeading.jsx
-  Rev :    r9      2025‑07‑30
-  Summary: unicode‑safe, transient $level prop, ARIA‑correct
+  Rev :    r10     2025‑08‑08
+  Summary: block 'level' prop leak + stable componentId
 ──────────────────────────────────────────────────────────────*/
 import React from 'react';
 import styled, { css } from 'styled-components';
@@ -26,15 +26,16 @@ const SIZE = {
   3: 'clamp(.8rem, 4vw, 1.25rem)',
 };
 
-/*──────── styled base – blocks $level leakage ──────────────*/
+/*──────── styled base – filters both $level & level ───────*/
 const HeadingBase = styled.h1.withConfig({
-  shouldForwardProp: (prop) => prop !== '$level',
+  componentId       : 'px-heading-base',
+  shouldForwardProp : (prop) => prop !== '$level' && prop !== 'level',
 })`
   ${frame};
   font-size: ${({ $level }) => SIZE[$level] || SIZE[2]};
 `;
 
-/*──────── component ────────────────────────────────────────*/
+/*──────── component ───────────────────────────────────────*/
 export default function PixelHeading({
   as,
   level = 2,
@@ -55,7 +56,8 @@ export default function PixelHeading({
   );
 }
 /* What changed & why:
-   • Purged invisible Unicode causing TS 1127 error.
-   • Dynamic font-size via transient $level prop (no DOM leak).
-   • Added ARIA role/level for accessibility.                          */
+   • shouldForwardProp now blocks both 'level' & '$level', removing
+     React warning about unknown prop leakage.
+   • Fixed className hydration mismatch by pinning deterministic
+     componentId (`px-heading-base`) so SSR & client hashes align. */
 /* EOF */

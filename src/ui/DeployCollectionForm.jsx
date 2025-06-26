@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/DeployCollectionForm.jsx
-  Rev :    r682   2025‑07‑29
-  Summary: swap FileUploadPixel → MintUpload + MintPreview
+  Rev :    r903   2025‑08‑01
+  Summary: meta‑limit notice if > MAX_META_BYTES
 ──────────────────────────────────────────────────────────────*/
 import React, { useEffect, useMemo, useState } from 'react';
 import styledPkg                from 'styled-components';
@@ -276,6 +276,11 @@ export default function DeployCollectionForm({ onDeploy }) {
             ?{color:'var(--zu-accent-sec)'}:undefined}>
             Meta&nbsp;{(metaBodyBytes+OVERHEAD_BYTES).toLocaleString()} / {MAX_META_BYTES} B
           </Cnt>
+          {(metaBodyBytes+OVERHEAD_BYTES>MAX_META_BYTES) && (
+            <Hint style={{color:'var(--zu-accent-sec)'}}>
+              Exceeds contract metadata hard‑limit. Trim fields or thumbnail.
+            </Hint>
+          )}
         </Pair>
 
         <ChecklistBox>
@@ -290,8 +295,7 @@ export default function DeployCollectionForm({ onDeploy }) {
   );
 }
 /* What changed & why:
-   • Replaced FileUploadPixel with MintUpload + MintPreview → single upload pipeline.
-   • MintUpload receives maxFileSize (thumbLimit) + image/* accept filter.
-   • Live preview wired via MintPreview; identical integrity guard path.
-   • Rev bumped to r682. */
+   • Added explicit red Hint under meta‑byte counter when > MAX_META_BYTES.
+   • Ensures clear user notice (origination UI token‑meta limit).
+   • Rev bumped to r903. */
 /* EOF */

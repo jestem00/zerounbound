@@ -1,7 +1,9 @@
-/*Developed by @jams2blues – ZeroContract Studio
+/*─────────────────────────────────────────────────────────────
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/manage.js
-  Rev :    r744‑h17   2025‑07‑21
-  Summary: concurrency‑safe load guard */
+  Rev :    r745‑h18   2025‑08‑09
+  Summary: deterministic <Title> componentId fixes SSR mismatch
+──────────────────────────────────────────────────────────────*/
 
 import React, {
   useState, useEffect, useCallback, useRef,
@@ -28,7 +30,12 @@ const ContractCarousels = dynamic(
 /*──────────────── styled shells ─────────────────────────────*/
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
-const Title = styled(PixelHeading).attrs({ level: 2 })`
+/* NOTE — .withConfig({componentId}) guarantees identical
+   className hashes on both server & client, eliminating the
+   “Prop className did not match” hydration warning. */
+const Title = styled(PixelHeading).attrs({ level: 2 }).withConfig({
+  componentId: 'px-manage-title',
+})`
   margin: 0 0 .35rem;
   scroll-margin-top: var(--hdr);
 `;
@@ -212,6 +219,9 @@ export default function ManagePage() {
     </Wrap>
   );
 }
-/* What changed & why: added concurrency guard via loadSeq ref
-   to prevent race‑condition causing wrong contract to load. */
+/* What changed & why:
+   • Title now uses withConfig({componentId:'px-manage-title'}) to
+     generate a stable className hash, eliminating SSR/client
+     mismatch warnings after full‑page reloads (Invariant I35).
+*/
 /* EOF */

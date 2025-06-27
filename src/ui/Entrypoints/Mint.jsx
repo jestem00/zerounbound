@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/Mint.jsx
-  Rev :    r864   2025‑07‑23
-  Summary: diff‑aware slice resume, import trim, lint‑clean
+  Rev :    r866   2025‑08‑11
+  Summary: +SIFR ZERO community‑mint CTA button
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useRef, useState, useEffect, useMemo, useCallback,
@@ -213,7 +213,7 @@ export default function Mint({
   const [f, setF]         = useState(init);
   const [attrs, setAttrs] = useState([{ name: '', value: '' }]);
   const [tags, setTags]   = useState([]);
-  const [tagInput, setTagInput] = useState('');
+  const [tagInput, setTagInput]     = useState('');
   const [file, setFile]   = useState(null);
   const [url, setUrl]     = useState('');
   const [roys, setRoys]   = useState([{ address: wallet || '', sharePct: '' }]);
@@ -550,12 +550,26 @@ export default function Mint({
   return (
     <Wrap $level={$level}>
       {snackNode}
+
+      {/* SIFR ZERO community‑mint redirect */}
+      <PixelButton
+        as="a"
+        href="https://sifrzero.art"
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{ alignSelf: 'center', padding: '0.35rem 0.8rem', fontSize: '0.8rem' }}
+      >
+        Looking for the SIFR ZERO community mint?
+      </PixelButton>
+
       <PixelHeading level={3}>Mint NFT</PixelHeading>
       <HelpBox>
-        Creates new NFT(s). Fill title, upload media, royalties ≤&nbsp;
-        {MAX_ROY_PCT}%&nbsp;then<strong> Mint NFT</strong>. Large files are chunked
+        Creates new NFT(s). Fill title, upload media, royalties ≤ 
+        {MAX_ROY_PCT}% then<strong> Mint NFT</strong>. Large files are chunked
         automatically; interrupted uploads resume exactly where they stopped.
-        Estimated fees appear before signing.
+        Estimated fees appear before signing.<br />
+        <strong>Contract v4 forbids removing “mature” or “flashing” flags after
+        mint</strong> – choose wisely.
       </HelpBox>
 
       {/* ‑‑‑ Core fields */}
@@ -840,12 +854,8 @@ export default function Mint({
 }
 
 /* What changed & why:
-   • Added diff‑aware slice resume: buildBatches consults sliceCache, sendBatch
-     skips satisfied slices and updates checkpoints post‑confirm.
-   • Imported loadSliceCheckpoint; trimmed unused imports (cleanDescription,
-     mismatch, needsReveal).
-   • Auto‑skip already‑applied operations → gas‑safe, idempotent retries.
-   • Updated helper copy & hover text to reflect resumable uploads.
-   • Lint‑clean (unused vars, consistent arrow‑returns, semicolons).
+   • Rev‑bump r865: HelpBox now warns that NSFW (mature) and
+     Flashing hazard flags are immutable under contract v4.
+   • No functional logic altered.
 */
 /* EOF */

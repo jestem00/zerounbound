@@ -1,7 +1,9 @@
-/* Developed by @jams2blues – ZeroContract Studio
-   File:    src/ui/Header.jsx
-   Rev :    r744‑a1  2025‑07‑01 T15:02 UTC
-   Summary: NET fallback via deployTarget; removes duplicate default */
+/*─────────────────────────────────────────────────────────────
+  Developed by @jams2blues – ZeroContract Studio
+  File:    src/ui/Header.jsx
+  Rev :    r744‑a2  2025‑08‑11 T09:04 UTC
+  Summary: +SIFR ZERO link • β‑badge • polish lint
+──────────────────────────────────────────────────────────────*/
 import React, {
   useCallback, useEffect, useMemo, useRef, useState,
 } from 'react';
@@ -47,6 +49,8 @@ const Wrap = styled.div`
 const BrandLine = styled(Link)`
   font: 700 1.35rem/1 'PixeloidSansBold', monospace;
   color: var(--zu-heading); text-decoration: none;
+  display: inline-flex; align-items: baseline; gap: 0.15rem;
+  sup { font-size: 0.55em; color: var(--zu-accent); }
 `;
 const Note = styled.span`
   font: 0.7rem/1.2 'PixeloidMono', monospace;
@@ -151,6 +155,9 @@ export default function Header() {
       <Link href="/deploy">Create Collection</Link>
       <Link href="/manage">Manage Collections</Link>
       <Link href="/explore">Explore FOC</Link>
+      <a href="https://sifrzero.art" target="_blank" rel="noopener noreferrer">
+        SIFR ZERO Mint
+      </a>
       <Link href="/terms">Terms</Link>
     </>
   );
@@ -161,7 +168,10 @@ export default function Header() {
         <Wrap ref={wrapRef}>
           {/* logo + net label */}
           <div style={{ display:'flex', flexDirection:'column' }}>
-            <BrandLine href="/">ZERO UNBOUND</BrandLine>
+            <BrandLine href="/">
+              <span>ZERO UNBOUND</span>
+              <sup>β</sup>
+            </BrandLine>
             <Note>you are on <b>{network.toUpperCase()}</b></Note>
           </div>
 
@@ -226,8 +236,8 @@ export default function Header() {
   );
 }
 /* What changed & why:
-   • Header now defaults to NETWORK_KEY when wallet not yet connected,
-     eliminating hard‑coded 'ghostnet' leakage and keeping divergence
-     centralised in deployTarget.js (I10, I63).  No UI regressions.
+   • Added external “SIFR ZERO Mint” link to both desktop and mobile menus.
+   • Appended β‑badge after ZERO UNBOUND brand for live‑beta notice.
+   • Comments & minor lint tidy; keeps existing logic intact.
 */
 /* EOF */

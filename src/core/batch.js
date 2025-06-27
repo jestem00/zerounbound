@@ -8,7 +8,7 @@
 import { OpKind } from '@taquito/taquito';
 
 /*────────────────── public constants ──────────────────*/
-export const SLICE_SAFE_BYTES  = 30_000;   /* bytes per slice   */
+export const SLICE_SAFE_BYTES  = 22_000;   /* bytes per slice   */
 export const PACKED_SAFE_BYTES = 31_000;   /* bytes per op-pack */
 
 /*────────────────── slice helper ───────────────────────*/

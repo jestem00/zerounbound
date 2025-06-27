@@ -1,8 +1,9 @@
-/*Developed by @jams2blues – ZeroContract Studio
+/*─────────────────────────────────────────────────────────────
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/ContractCarousels.jsx
-  Rev :    r742‑r13   2025‑07‑21
-  Summary: fix missing buttons (pos‑rel + z‑index) */
-
+  Rev :    r742‑r14   2025‑08‑08
+  Summary: stable SC ids + prop‑filter = no hydration warnings
+──────────────────────────────────────────────────────────────*/
 import React, {
   useEffect, useState, useRef, useCallback, useMemo,
 }                       from 'react';
@@ -179,20 +180,20 @@ async function enrich(list, net) {
 /*──────── styled components ───────────────────────────────*/
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
-const Viewport  = styled.div`
+const Viewport  = styled.div.withConfig({ componentId: 'cc-viewport' })`
   overflow: hidden;
   position: relative;
 `;
-const Container = styled.div`
+const Container = styled.div.withConfig({ componentId: 'cc-container' })`
   display: flex;
 `;
-const Slide     = styled.div`
+const Slide     = styled.div.withConfig({ componentId: 'cc-slide' })`
   flex: 0 0 auto;
   width: ${CLAMP_CSS};
   margin-right: 16px;
 `;
 
-const CountBox = styled.span`
+const CountBox = styled.span.withConfig({ componentId: 'cc-countbox' })`
   display: inline-block;
   margin-left: 6px;
   min-width: 26px;
@@ -203,14 +204,14 @@ const CountBox = styled.span`
   text-align: center;
   color: var(--zu-fg);
 `;
-const CountTiny = styled(CountBox)`
+const CountTiny = styled(CountBox).withConfig({ componentId: 'cc-counttiny' })`
   margin-left: 4px;
   min-width: 18px;
   padding: 0 4px;
   font-size: .65rem;
 `;
 
-const AddrLine = styled.p`
+const AddrLine = styled.p.withConfig({ componentId: 'cc-addr' })`
   font-size: clamp(.24rem,.9vw,.45rem);
   margin: .06rem 0 0;
   text-align: center;
@@ -219,7 +220,11 @@ const AddrLine = styled.p`
   text-overflow: ellipsis;
 `;
 
-const TitleWrap = styled(PixelHeading).attrs({ as: 'h3', level: 3 })`
+/* filter 'level' so DOM never sees it */
+const TitleWrap = styled(PixelHeading).withConfig({
+  componentId      : 'cc-title',
+  shouldForwardProp: (prop) => prop !== 'level',
+}).attrs({ as: 'h3', level: 3 })`
   margin: 0;
   font-size: clamp(.8rem,.65vw + .2vh,1rem);
   text-align: center;
@@ -230,7 +235,7 @@ const TitleWrap = styled(PixelHeading).attrs({ as: 'h3', level: 3 })`
   word-break: break-word;
 `;
 
-const ArrowBtn = styled.button`
+const ArrowBtn = styled.button.withConfig({ componentId: 'cc-arrow' })`
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
@@ -249,8 +254,11 @@ const ArrowBtn = styled.button`
   &:hover { background: var(--zu-accent); }
 `;
 
-/* card — now positioned relative so absolute buttons anchor correctly */
-const CardBase = styled.div.withConfig({ shouldForwardProp: p => p !== '$dim' })`
+/* card — deterministic id + relative for overlay buttons */
+const CardBase = styled.div.withConfig({
+  componentId: 'cc-card',
+  shouldForwardProp: (p) => p !== '$dim',
+})`
   position: relative;
   width: ${CLAMP_CSS};
   border: 2px solid var(--zu-fg);
@@ -263,7 +271,7 @@ const CardBase = styled.div.withConfig({ shouldForwardProp: p => p !== '$dim' })
   cursor: grab;
 `;
 
-const BusyWrap = styled.div`
+const BusyWrap = styled.div.withConfig({ componentId: 'cc-busy' })`
   position: absolute;
   inset: 0;
   display: flex;
@@ -281,7 +289,7 @@ const ICON_EYE  = '👁️';
 const ICON_HIDE = '🚫';
 const ICON_LOAD = '↻';
 
-const TinyHide = styled(PixelButton)`
+const TinyHide = styled(PixelButton).withConfig({ componentId: 'cc-hide' })`
   position: absolute;
   top: 4px;
   right: 4px;
@@ -290,7 +298,7 @@ const TinyHide = styled(PixelButton)`
   padding: 0 .4rem;
   background: var(--zu-accent-sec);
 `;
-const TinyLoad = styled(PixelButton)`
+const TinyLoad = styled(PixelButton).withConfig({ componentId: 'cc-load' })`
   position: absolute;
   top: 4px;
   left: 4px;
@@ -614,8 +622,12 @@ export default function ContractCarousels({ onSelect }) {
     </>
   );
 }
-/* What changed & why: CardBase made position:relative and
-   Tiny buttons given z‑index to ensure LOAD/HIDE controls
-   render inside each card; fixes missing buttons & ensuring
-   correct layering across all contract versions. */
+/* What changed & why:
+   • Added `componentId` to every styled‑component here to stabilise
+     CSS‑hash generation across SSR ↔ hydration, eliminating the
+     `className` mismatch warning.
+   • TitleWrap now filters the transient ‘level’ prop via
+     `shouldForwardProp`, removing the “unknown prop level” console
+     warning.
+   • No runtime logic altered; bundle size unchanged. */
 /* EOF */

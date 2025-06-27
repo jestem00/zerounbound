@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/Mint.jsx
-  Rev :    r863   2025‑07‑23
-  Summary: central‑validator sync, live hover‑checklist, lint‑clean
+  Rev :    r864   2025‑07‑23
+  Summary: diff‑aware slice resume, import trim, lint‑clean
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useRef, useState, useEffect, useMemo, useCallback,
@@ -23,16 +23,16 @@ import OperationConfirmDialog from '../OperationConfirmDialog.jsx';
 
 import { useWalletContext } from '../../contexts/WalletContext.js';
 import {
-  asciiPrintable, cleanDescription,
+  asciiPrintable,
   MAX_ATTR, MAX_ATTR_N, MAX_ATTR_V,
   MAX_TAGS, MAX_TAG_LEN,
   MAX_ROY_PCT, MAX_EDITIONS, MAX_META_BYTES,
   isTezosAddress, royaltyUnder25, validAttributes,
 } from '../../core/validator.js';
-import { ROOT_URL }                from '../../config/deployTarget.js';
+import { ROOT_URL }                   from '../../config/deployTarget.js';
 import { SLICE_SAFE_BYTES, sliceHex } from '../../core/batch.js';
 import {
-  saveSliceCheckpoint, purgeExpiredSliceCache,
+  saveSliceCheckpoint, loadSliceCheckpoint, purgeExpiredSliceCache,
 } from '../../utils/sliceCache.js';
 
 import {
@@ -112,7 +112,9 @@ const ChecklistBox = styled.ul`
 const hex = (s = '') => `0x${Buffer.from(s, 'utf8').toString('hex')}`;
 
 /* build Michelson map */
-const buildMeta = ({ f, attrs, tags, dataUrl, mime, shares }) => {
+const buildMeta = ({
+  f, attrs, tags, dataUrl, mime, shares,
+}) => {
   const m = new MichelsonMap();
   m.set('name', hex(f.name));
   m.set('decimals', hex('0'));
@@ -168,29 +170,31 @@ function useSnackbarBridge(cb) {
        : setLocal({ open: true, message: msg, severity: sev });
   };
   const node = local?.open && (
-    <div role="alert"
+    <div
+      role="alert"
       style={{
         position: 'fixed', bottom: 20, left: '50%', transform: 'translateX(-50%)',
         background: '#222', color: '#fff', padding: '6px 12px', borderRadius: 4,
         fontSize: '.8rem', zIndex: 2600, cursor: 'pointer',
       }}
       onClick={() => setLocal(null)}
-    >{local.message}</div>
+    >{local.message}
+    </div>
   );
   return [api, node];
 }
 
 /*════════ component ═══════════════════════════════════════*/
-export default function Mint({ contractAddress, contractVersion = 'v4',
-  setSnackbar, onMutate, $level }) {
+export default function Mint({
+  contractAddress, contractVersion = 'v4',
+  setSnackbar, onMutate, $level,
+}) {
   /* slice‑cache hygiene */
   useEffect(() => { purgeExpiredSliceCache(); }, []);
 
   /* wallet / toolkit */
   const wc = useWalletContext() || {};
-  const {
-    address: wallet, toolkit: toolkitExt, mismatch, needsReveal,
-  } = wc;
+  const { address: wallet, toolkit: toolkitExt } = wc;
   const toolkit =
     toolkitExt
       || (typeof window !== 'undefined' && window.tezosToolkit);
@@ -388,7 +392,7 @@ export default function Mint({ contractAddress, contractVersion = 'v4',
     } finally { setIsEstim(false); }
   };
 
-  /*──────── batch builder ─────────────────────────*/
+  /*──────── batch builder (diff‑aware) ─────────────────────*/
   const baseIdRef = useRef(0);
   const buildBatches = useCallback(async () => {
     const c = await toolkit.wallet.at(contractAddress);
@@ -396,43 +400,48 @@ export default function Mint({ contractAddress, contractVersion = 'v4',
     try {
       const st = await c.storage?.();
       baseId = Number(st?.next_token_id || 0);
-    } catch {/* ignore */}
+    } catch {/* ignore */ }
     baseIdRef.current = baseId;
 
     const mintParams = {
       kind: OpKind.TRANSACTION,
-      ...(await buildMintCall(c, contractVersion, f.amount, metaMap, f.toAddress).toTransferParams()),
+      ...(await buildMintCall(
+        c, contractVersion, f.amount, metaMap, f.toAddress,
+      ).toTransferParams()),
     };
 
     const out = [[mintParams]];                     /* batch‑0 = mint */
 
     const amt = parseInt(f.amount, 10) || 1;
     if (appendSlices.length) {
+      /* hash once per run so checkpoints stay stable */
+      let digest = '';
+      try {
+        const buf = new TextEncoder().encode(`0x${artifactHex}`);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', buf);
+        digest = Array.from(new Uint8Array(hashBuffer))
+          .map((b) => b.toString(16).padStart(2, '0')).join('');
+      } catch { /* hashing errors ignored */ }
+
       for (let i = 0; i < amt; i += 1) {
         const tokenId = baseId + i;
-        appendSlices.forEach((hx) => {
+        const cp = loadSliceCheckpoint(contractAddress, tokenId, 'artifactUri') || {};
+        const startSlice = cp.next ?? 1;                  // 1‑based index
+        for (let s = startSlice; s <= appendSlices.length; s += 1) {
+          const hx = appendSlices[s - 1];
           out.push([{
             kind: OpKind.TRANSACTION,
             ...(c.methods.append_artifact_uri(tokenId, hx).toTransferParams()),
           }]);
+        }
+
+        /* persist / update checkpoint */
+        saveSliceCheckpoint(contractAddress, tokenId, 'artifactUri', {
+          total: appendSlices.length + 1,
+          next: startSlice,
+          hash: cp.hash || `sha256:${digest}`,
         });
       }
-      /* save slice checkpoints for resumable upload */
-      try {
-        const fullHex = `0x${artifactHex}`;
-        const buf = new TextEncoder().encode(fullHex);
-        const hashBuffer = await crypto.subtle.digest('SHA-256', buf);
-        const digest = Array.from(new Uint8Array(hashBuffer))
-          .map((b) => b.toString(16).padStart(2, '0')).join('');
-        for (let i = 0; i < amt; i += 1) {
-          const tokenId = baseId + i;
-          saveSliceCheckpoint(contractAddress, tokenId, 'artifactUri', {
-            total: appendSlices.length + 1,
-            next: 1,
-            hash: `sha256:${digest}`,
-          });
-        }
-      } catch {/* hashing errors ignored */}
     }
     return out;
   }, [toolkit, contractAddress, contractVersion, f.amount, metaMap, f.toAddress,
@@ -445,34 +454,84 @@ export default function Mint({ contractAddress, contractVersion = 'v4',
 
   /*──────── sender loop guarded by confirmCount ──*/
   const sendBatch = useCallback(async () => {
-    if (!batches || !batches.length) return;
-    if (stepIdx >= batches.length)  return;
+    if (!batches || stepIdx >= batches.length) return;
 
-    const params = batches[stepIdx];
+    let currentIdx = stepIdx;
+    /* auto‑skip satisfied append batches */
+    while (currentIdx < batches.length) {
+      const params = batches[currentIdx];
+      const first = params[0]?.parameter;
+      if (first?.entrypoint !== 'append_artifact_uri') break;     /* mint or misc */
+
+      try {
+        const tokenId = Number(first.value.args[0].int);
+        const hx      = `0x${first.value.args[1].bytes}`;
+        const cp      = loadSliceCheckpoint(contractAddress, tokenId, 'artifactUri');
+        const already = cp && appendSlices.findIndex((s) => s === hx) < (cp.next ?? 1) - 1;
+        if (!already) break;     /* needs to send */
+      } catch { break; }         /* parse failure → just send */
+
+      currentIdx += 1;           /* skip already applied slice */
+    }
+
+    if (currentIdx >= batches.length) return;      /* nothing left */
+
+    if (currentIdx !== stepIdx) {                  /* advance silently */
+      setStepIdx(currentIdx);
+    }
+
+    const params = batches[currentIdx];
     try {
-      setOv({ open: true, status: 'Waiting for signature…', step: stepIdx + 1, total: batches.length });
+      setOv({
+        open: true,
+        status: 'Waiting for signature…',
+        step: currentIdx + 1,
+        total: batches.length,
+      });
       const op = await toolkit.wallet.batch(params).send();
-      setOv({ open: true, status: 'Broadcasting…', step: stepIdx + 1, total: batches.length });
+      setOv({
+        open: true,
+        status: 'Broadcasting…',
+        step: currentIdx + 1,
+        total: batches.length,
+      });
       await op.confirmation();
 
-      if (stepIdx + 1 === batches.length) {
-        setOv({ open: true, opHash: op.opHash, step: batches.length, total: batches.length });
+      /* checkpoint progress if slice append */
+      const first = params[0]?.parameter;
+      if (first?.entrypoint === 'append_artifact_uri') {
+        try {
+          const tokenId = Number(first.value.args[0].int);
+          const cp = loadSliceCheckpoint(contractAddress, tokenId, 'artifactUri');
+          if (cp) {
+            const next = Math.min(cp.next + 1, cp.total);
+            saveSliceCheckpoint(contractAddress, tokenId, 'artifactUri', { ...cp, next });
+          }
+        } catch {/* ignore parse errors */}
+      }
+
+      if (currentIdx + 1 === batches.length) {
+        setOv({
+          open: true, opHash: op.opHash,
+          step: batches.length, total: batches.length,
+        });
         onMutate?.();
         /* reset */
         setBatches(null); setStepIdx(0); setConfirmCount(0);
       } else {
-        setStepIdx((i) => i + 1);
+        setStepIdx(currentIdx + 1);
       }
     } catch (e) {
       setOv({
         open: true, error: true, status: e.message || String(e),
-        step: stepIdx + 1, total: batches.length,
+        step: currentIdx + 1, total: batches.length,
       });
     }
-  }, [batches, stepIdx, toolkit, onMutate]);
+  }, [batches, stepIdx, toolkit, onMutate, contractAddress, appendSlices]);
 
   /* arm loop on confirm */
-  useEffect(() => { if (confirmCount === 1 && batches) sendBatch(); }, [confirmCount, batches, sendBatch]);
+  useEffect(() => { if (confirmCount === 1 && batches) sendBatch(); },
+    [confirmCount, batches, sendBatch]);
 
   /*──────── retry hook ───────────────────────────*/
   const retry = () => {
@@ -493,9 +552,10 @@ export default function Mint({ contractAddress, contractVersion = 'v4',
       {snackNode}
       <PixelHeading level={3}>Mint NFT</PixelHeading>
       <HelpBox>
-        Creates new NFT(s). Fill title, upload media, royalties ≤ {MAX_ROY_PCT} %, agree
-        to terms, then **Mint NFT**. Large files are chunked automatically; if a slice
-        fails you can resume from the banner. Estimated fees appear before signing.
+        Creates new NFT(s). Fill title, upload media, royalties ≤&nbsp;
+        {MAX_ROY_PCT}%&nbsp;then<strong> Mint NFT</strong>. Large files are chunked
+        automatically; interrupted uploads resume exactly where they stopped.
+        Estimated fees appear before signing.
       </HelpBox>
 
       {/* ‑‑‑ Core fields */}
@@ -713,14 +773,21 @@ export default function Mint({ contractAddress, contractVersion = 'v4',
         {' '}
         I agree to the&nbsp;
         <a href="/terms" target="_blank" rel="noopener noreferrer">
-          terms & conditions
+          terms &amp; conditions
         </a>
         .
       </label>
 
       {/* Summary & CTA */}
-      <Note>Metadata size:&nbsp;
-        {metaBytes.toLocaleString()} / {MAX_META_BYTES.toLocaleString()} bytes
+      <Note>
+        Metadata size:&nbsp;
+        {metaBytes.toLocaleString()}
+        {' '}
+        /
+        {' '}
+        {MAX_META_BYTES.toLocaleString()}
+        {' '}
+        bytes
       </Note>
 
       <PixelButton
@@ -773,10 +840,12 @@ export default function Mint({ contractAddress, contractVersion = 'v4',
 }
 
 /* What changed & why:
-   • Centralised all field guards → live checklist; CTA disabled until green.
-   • Imports trimmed (removed unused validateMintFields).
-   • Hover checklist (<ChecklistBox>) with ok/✗ indicators.
-   • Validation thresholds now reference shared MAX_META_BYTES (32 768 B).
-   • Minor lint fixes & Rev bump to r863.
+   • Added diff‑aware slice resume: buildBatches consults sliceCache, sendBatch
+     skips satisfied slices and updates checkpoints post‑confirm.
+   • Imported loadSliceCheckpoint; trimmed unused imports (cleanDescription,
+     mismatch, needsReveal).
+   • Auto‑skip already‑applied operations → gas‑safe, idempotent retries.
+   • Updated helper copy & hover text to reflect resumable uploads.
+   • Lint‑clean (unused vars, consistent arrow‑returns, semicolons).
 */
 /* EOF */

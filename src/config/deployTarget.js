@@ -4,7 +4,7 @@
            (RPCs, theming, explorer bases, PWA meta, devPort) updates. */
 
 /*───────── flip when promoting to mainnet ─────────*/
-export const TARGET = 'mainnet';           // 'ghostnet' | 'mainnet'
+export const TARGET = 'ghostnet';           // 'ghostnet' | 'mainnet'
 /*──────────────────────────────────────────────────*/
 
 /*──── per-network dictionaries ────*/

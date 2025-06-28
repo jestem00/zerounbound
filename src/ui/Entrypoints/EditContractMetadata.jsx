@@ -1,8 +1,9 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/EditContractMetadata.jsx
-  Rev :    r813     2025‑07‑29
-  Summary: drop leaking $level prop + minor lint fixes
+  Rev :    r815   2025‑08‑12
+  Summary: swaps local validators for central
+           validateEditContractFields(); live field‑error map
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useCallback, useEffect, useMemo, useRef, useState,
@@ -25,56 +26,37 @@ import { useWalletContext } from '../../contexts/WalletContext.js';
 import { jFetch }           from '../../core/net.js';
 
 import {
-  asciiPrintable, asciiPrintableLn, listOfTezAddresses,
+  validateEditContractFields,
 } from '../../core/validator.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
 /*──────── layout shells ─────────────────────────────────────*/
 const Wrapper = styled.div`
-  display: grid;
-  gap: 1.6rem;
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 34%);
-  width: 100%;
-  overflow-x: hidden;
-
-  @media (min-width: 1800px){
-    gap: 1.2rem;
-    grid-template-columns: minmax(0, 1fr) minmax(360px, 28%);
+  display:grid;gap:1.6rem;
+  grid-template-columns:minmax(0,1fr) minmax(300px,34%);
+  width:100%;overflow-x:hidden;
+  @media(min-width:1800px){
+    gap:1.2rem;grid-template-columns:minmax(0,1fr) minmax(360px,28%);
   }
-  @media (max-width: 900px){
-    grid-template-columns: 1fr;
-  }
+  @media(max-width:900px){grid-template-columns:1fr;}
 `;
 const FormGrid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 1.1rem;
-
-  @media (min-width: 1800px){
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 1rem;
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+  gap:1.1rem;
+  @media(min-width:1800px){
+    grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem;
   }
 `;
 const FieldWrap = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: .45rem;
-  textarea { min-height: 6rem; }
+  display:flex;flex-direction:column;gap:.45rem;
+  textarea{min-height:6rem;}
 `;
-const Err = styled.span`
-  font-size: .8rem;
-  color: var(--zu-accent-sec);
-`;
-const Notice = styled.p`
-  font-size: .8rem;
-  margin: .25rem 0 1rem;
-  text-align: center;
-  color: var(--zu-accent-sec);
-`;
-const HelpBox = styled.p`
-  font-size:.75rem;line-height:1.25;margin:.5rem 0 .9rem;
-`;
+const Err = styled.span`font-size:.8rem;color:var(--zu-accent-sec);`;
+const Notice  = styled.p`font-size:.8rem;margin:.25rem 0 1rem;text-align:center;
+                   color:var(--zu-accent-sec);`;
+const HelpBox = styled.p`font-size:.75rem;line-height:1.25;margin:.5rem 0 .9rem;`;
+
 /*──────── constants & helpers ───────────────────────────────*/
 const CUSTOM_LABEL = 'Custom…';
 const IMAGE_CUTOFF = 28_000;
@@ -86,62 +68,6 @@ const LICENSES = [
   'MIT', 'GPL-3.0', 'CAL-1.0', CUSTOM_LABEL,
 ];
 const isCustom = (v = '') => v === CUSTOM_LABEL || v === 'Custom...';
-
-const LEN = {
-  name: 50, symbol: 10, description: 5000,
-  authors: 200, addr: 200, creators: 200,
-  license: 120, homepage: 160,
-};
-const urlOkay = (v = '') =>
-  /^(https?:\/\/|ipfs:\/\/|ipns:\/\/|ar:\/\/)[\w./#?=-]+$/i.test(v.trim());
-
-function validateField(form, k, v) {
-  switch (k) {
-    case 'name':
-      if (!v.trim()) return 'Required';
-      if (!asciiPrintable(v)) return 'Invalid control char';
-      if (v.length > LEN.name) return `≤ ${LEN.name}`;
-      return '';
-    case 'symbol':
-      if (!v.trim()) return 'Required';
-      if (!asciiPrintable(v)) return 'Invalid control char';
-      if (v.length > LEN.symbol) return `≤ ${LEN.symbol}`;
-      return '';
-    case 'description':
-      if (!v.trim()) return 'Required';
-      if (!asciiPrintableLn(v)) return 'Invalid control char';
-      if (v.length > LEN.description) return `≤ ${LEN.description}`;
-      return '';
-    case 'homepage':
-      if (!v.trim()) return '';
-      if (!urlOkay(v)) return 'Invalid URL';
-      if (v.length > LEN.homepage) return `≤ ${LEN.homepage}`;
-      return '';
-    case 'authors':
-      if (!v.trim()) return 'Required';
-      if (!asciiPrintable(v)) return 'Invalid control char';
-      if (v.length > LEN.authors) return `≤ ${LEN.authors}`;
-      return '';
-    case 'authoraddress':
-      if (!v.trim()) return 'Required';
-      if (!listOfTezAddresses(v)) return 'Comma-sep tz/KT';
-      if (v.length > LEN.addr) return `≤ ${LEN.addr}`;
-      return '';
-    case 'creators':
-      if (!v.trim()) return 'Required';
-      if (!listOfTezAddresses(v)) return 'Comma-sep tz/KT';
-      if (v.length > LEN.creators) return `≤ ${LEN.creators}`;
-      return '';
-    case 'customLicense':
-      if (!isCustom(form.license)) return '';
-      if (!v.trim()) return 'Required';
-      if (!asciiPrintable(v)) return 'Invalid control char';
-      if (v.length > LEN.license) return `≤ ${LEN.license}`;
-      return '';
-    default:
-      return '';
-  }
-}
 
 /*──────────────── component ───────────────────────────────*/
 export default function EditContractMetadata({
@@ -171,9 +97,8 @@ export default function EditContractMetadata({
     authors:'', homepage:'', authoraddress:'', creators:'', type:'',
   });
 
-  /*──────── live error tracking for toast diff ───────────*/
-  const prevErrs = useRef({});
-  const labelMap = useRef({});
+  /*──────── field‑error diff toast ───────────────────────*/
+  const prevFieldErrs = useRef({});
 
   /*──────── fetch current metadata ───────────────────────*/
   const fetchMeta = useCallback(async () => {
@@ -185,7 +110,7 @@ export default function EditContractMetadata({
       if (row?.extras) m = { ...m, ...row.extras };
       if (!Object.keys(m).length) {
         const bm = await jFetch(
-          `${BASE}/contracts/${contractAddress}/bigmaps/metadata/keys/content`, 1,
+          `${BASE}/contracts/${contractAddress}/bigmaps/metadata/keys/content`,
         ).catch(() => null);
         if (bm?.value)
           m = JSON.parse(Buffer.from(bm.value.replace(/^0x/i,''),'hex').toString('utf8'));
@@ -193,7 +118,6 @@ export default function EditContractMetadata({
       ['authors','authoraddress','creators'].forEach((k) => {
         if (Array.isArray(m[k])) m[k] = m[k].join(', ');
       });
-
       const licenceInList = LICENSES.includes(m.license);
       setForm({
         name          : m.name    ?? '',
@@ -213,45 +137,7 @@ export default function EditContractMetadata({
 
   useEffect(() => { fetchMeta(); }, [fetchMeta]);
 
-  /*──────── field defs ───────────────────────────────────*/
-  const FIELDS = [
-    { k:'name',          label:'Name', mandatory:true },
-    { k:'symbol',        label:'Symbol', mandatory:true },
-    { k:'description',   label:'Description', tag:'textarea', rows:6, mandatory:true },
-    { k:'license',       label:'License', tag:'select', mandatory:true },
-    { k:'authors',       label:'Author(s)', tag:'textarea', rows:2, mandatory:true },
-    { k:'homepage',      label:'Homepage', tag:'textarea', rows:2 },
-    { k:'authoraddress', label:'Author address(es)', tag:'textarea', rows:2, mandatory:true },
-    { k:'creators',      label:'Creator wallet(s)', tag:'textarea', rows:2, mandatory:true },
-    { k:'type',          label:'Type', tag:'select', mandatory:true },
-  ];
-  if (!Object.keys(labelMap.current).length) {
-    FIELDS.forEach(({k,label}) => { labelMap.current[k] = label; });
-  }
-
-  /*──────── validation ───────────────────────────────────*/
-  const errs = useMemo(() => {
-    const e = {};
-    Object.keys(form).forEach((k) => {
-      const msg = validateField(form, k, form[k]);
-      if (msg) e[k] = msg;
-    });
-    return e;
-  }, [form]);
-
-  /*──────── toast newly-added errors ─────────────────────*/
-  useEffect(() => {
-    const newErrKeys = Object.keys(errs)
-      .filter((k) => errs[k] && !prevErrs.current[k]);
-    newErrKeys.forEach((k) =>
-      snack(`${labelMap.current[k] || k}: ${errs[k]}`, 'error'),
-    );
-    prevErrs.current = errs;
-  }, [errs]);              // eslint-disable-line react-hooks/exhaustive-deps
-
-  const disabled = !!Object.keys(errs).length || busy || !toolkit;
-
-  /*──────── ordered payload ──────────────────────────────*/
+  /*──────── validation (centralised) ─────────────────────*/
   const licence = isCustom(form.license) ? form.customLicense : form.license;
   const ordered = useMemo(() => ({
     name       : form.name.trim(),
@@ -259,24 +145,43 @@ export default function EditContractMetadata({
     description: form.description.trim(),
     version    : meta?.version ?? 'ZeroContractV4',
     license    : licence,
-    authors    : form.authors.split(',').map((s)=>s.trim()).filter(Boolean),
+    authors    : form.authors.split(',').map(s=>s.trim()).filter(Boolean),
     homepage   : form.homepage.trim() || undefined,
-    authoraddress: form.authoraddress.split(',').map((s)=>s.trim()).filter(Boolean),
-    creators   : form.creators.split(',').map((s)=>s.trim()).filter(Boolean),
+    authoraddress: form.authoraddress.split(',').map(s=>s.trim()).filter(Boolean),
+    creators   : form.creators.split(',').map(s=>s.trim()).filter(Boolean),
     type       : form.type,
     interfaces : meta?.interfaces || ['TZIP-012', 'TZIP-016'],
     imageUri   : meta?.imageUri || '',
   }), [form, licence, meta]);
 
-  /*──────── estimator params (oversize-safe) ─────────────*/
+  const metaBytes = Buffer.byteLength(JSON.stringify(ordered, null, 2), 'utf8');
+  const { errors, fieldErrors } = useMemo(
+    () => validateEditContractFields({
+      data: { ...form, license: form.license, customLicense: form.customLicense },
+      walletOK: !!toolkit,
+      metaBytes,
+    }),
+    [form, toolkit, metaBytes],
+  );
+
+  /* toast new errors */
+  useEffect(() => {
+    Object.keys(fieldErrors)
+      .filter((k) => fieldErrors[k] && fieldErrors[k] !== prevFieldErrs.current[k])
+      .forEach((k) => snack(`${k}: ${fieldErrors[k]}`, 'error'));
+    prevFieldErrs.current = fieldErrors;
+  }, [fieldErrors]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const disabled = errors.length > 0 || busy || !toolkit;
+
+  /*──────── estimator params (oversize‑safe) ─────────────*/
   useEffect(() => {
     (async () => {
       if (!toolkit || !contractAddress || disabled) { setParams([]); return; }
-
+      /* remove imageUri if massive to keep dry‑run light */
       const slim = { ...ordered };
-      const imageBytes = Buffer.byteLength(ordered.imageUri || '', 'utf8');
-      if (imageBytes >= IMAGE_CUTOFF) delete slim.imageUri;
-
+      const imgB = Buffer.byteLength(ordered.imageUri || '', 'utf8');
+      if (imgB >= IMAGE_CUTOFF) delete slim.imageUri;
       try {
         const c  = await toolkit.contract.at(contractAddress);
         const tp = await c.methods.edit_contract_metadata(
@@ -287,19 +192,15 @@ export default function EditContractMetadata({
     })();
   }, [toolkit, contractAddress, ordered, disabled]);
 
-  /*──────── estimator ────────────────────────────────────*/
   const est = useTxEstimate(toolkit, confirm ? params : []);
 
   /*──────── submit ──────────────────────────────────────*/
   const submit = async () => {
-    if (disabled) {
-      snack('Fix highlighted errors first', 'error');
-      return;
-    }
+    if (disabled) { snack('Fix highlighted errors first', 'error'); return; }
     try {
       setBusy(true);
       setOv({ open:true, status:'Waiting for signature…', total:1, current:1 });
-      const c = await toolkit.wallet.at(contractAddress);
+      const c  = await toolkit.wallet.at(contractAddress);
       const op = await c.methods.edit_contract_metadata(
         `0x${char2Bytes(JSON.stringify(ordered, null, 2))}`,
       ).send();
@@ -318,33 +219,43 @@ export default function EditContractMetadata({
   return (
     <section>
       <PixelHeading level={3}>Edit Contract&nbsp;Metadata</PixelHeading>
-      <Notice>Must own all editions to use this entry-point</Notice>
+      <Notice>Must own all editions to use this entry‑point</Notice>
       <HelpBox>
-        Updates *contract-level* TZIP-16 JSON (name, description, license, etc.). Fields validate live; red text marks issues. When happy, **Update**—one transaction, no slicing.
-        <br/>
-        <strong>Note:</strong> this does not change the contract owner, it only updates metadata.
-        <br/>
-        <strong>Tip:</strong> use the <code>type</code> field to categorize your contract (art, music, collectible, etc.).
+        Updates <em>contract‑level</em> TZIP‑16 JSON (name, description, license, etc.).
+        Fields validate live; red text marks issues. When happy, **Update** —
+        one transaction, no slicing.
       </HelpBox>
-      {loading && (
-        <LoadingSpinner
-          size={48}
-          style={{ margin:'1rem auto', display:'block' }}
-        />
-      )}
+
+      {loading && <LoadingSpinner size={48} style={{ margin:'1rem auto',display:'block' }}/>}
 
       {meta && (
         <Wrapper>
-           <FormGrid>
-            {FIELDS.map(({ k,label,tag,rows,mandatory }) => (
+          <FormGrid>
+            {[
+              { k:'name',          label:'Name', mandatory:true },
+              { k:'symbol',        label:'Symbol', mandatory:true },
+              { k:'description',   label:'Description', tag:'textarea', rows:6, mandatory:true },
+              { k:'license',       label:'License', tag:'select', mandatory:true },
+              { k:'authors',       label:'Author(s)', tag:'textarea', rows:2, mandatory:true },
+              { k:'homepage',      label:'Homepage', tag:'textarea', rows:2 },
+              { k:'authoraddress', label:'Author address(es)', tag:'textarea', rows:2, mandatory:true },
+              { k:'creators',      label:'Creator wallet(s)', tag:'textarea', rows:2, mandatory:true },
+              { k:'type',          label:'Type', tag:'select', mandatory:true },
+            ].map(({ k,label,tag,rows,mandatory }) => (
               <React.Fragment key={k}>
                 <FieldWrap style={k==='description'?{gridColumn:'1 / -1'}:undefined}>
                   <label htmlFor={k}>{label}{mandatory && ' *'}</label>
                   {tag==='select' ? (
-                    <PixelInput as="select" id={k} value={form[k]} onChange={e=>setForm(f=>({...f,[k]:e.target.value}))}>
+                    <PixelInput
+                      as="select"
+                      id={k}
+                      value={form[k]}
+                      onChange={(e)=>setForm(f=>({ ...f, [k]:e.target.value }))}
+                    >
                       {k==='license' && LICENSES.map((l)=><option key={l}>{l}</option>)}
                       {k==='type' && (
                         <>
+                          <option value="">— choose —</option>
                           <option value="art">Art</option>
                           <option value="music">Music</option>
                           <option value="collectible">Collectible</option>
@@ -356,15 +267,15 @@ export default function EditContractMetadata({
                     <PixelInput
                       as={tag}
                       id={k}
-                      placeholder={label}
                       rows={rows}
+                      placeholder={label}
                       value={form[k]}
-                      onChange={e=>setForm(f=>({...f,[k]:e.target.value}))}
-                      aria-invalid={!!errs[k]}
-                      style={errs[k] ? { borderColor:'var(--zu-accent-sec)' } : undefined}
+                      onChange={(e)=>setForm(f=>({ ...f, [k]:e.target.value }))}
+                      aria-invalid={!!fieldErrors[k]}
+                      style={fieldErrors[k] ? { borderColor:'var(--zu-accent-sec)' } : undefined}
                     />
                   )}
-                  {errs[k] && <Err>{errs[k]}</Err>}
+                  {fieldErrors[k] && <Err>{fieldErrors[k]}</Err>}
                 </FieldWrap>
 
                 {k==='license' && isCustom(form.license) && (
@@ -374,23 +285,20 @@ export default function EditContractMetadata({
                       as="textarea"
                       id="customLicense"
                       rows={2}
-                      placeholder="Enter custom license text or URI"
                       value={form.customLicense}
-                      onChange={e=>setForm(f=>({...f,customLicense:e.target.value}))}
-                      aria-invalid={!!errs.customLicense}
-                      style={errs.customLicense ? { borderColor:'var(--zu-accent-sec)' } : undefined}
+                      onChange={(e)=>setForm(f=>({ ...f, customLicense:e.target.value }))}
+                      aria-invalid={!!fieldErrors.customLicense}
+                      style={fieldErrors.customLicense ? { borderColor:'var(--zu-accent-sec)' } : undefined}
                     />
-                    {errs.customLicense && <Err>{errs.customLicense}</Err>}
+                    {fieldErrors.customLicense && <Err>{fieldErrors.customLicense}</Err>}
                   </FieldWrap>
                 )}
               </React.Fragment>
             ))}
 
+            {/* CTA */}
             <div style={{
-              gridColumn:'1 / -1',
-              display:'flex',
-              gap:'.8rem',
-              marginTop:'1rem',
+              gridColumn:'1 / -1',display:'flex',gap:'.8rem',marginTop:'1rem',
             }}>
               <PixelButton
                 style={{ flexGrow:1 }}
@@ -420,14 +328,15 @@ export default function EditContractMetadata({
           onCancel={() => setConf(false)}
         />
       )}
-      {overlay.open && (
-        <OperationOverlay {...overlay} onCancel={() => setOv({ open:false })} />
-      )}
+      {overlay.open && <OperationOverlay {...overlay} onCancel={()=>setOv({open:false})} />}
     </section>
   );
 }
 /* What changed & why:
-   • Removed leaked `$level` prop (invalid DOM attr).
-   • Minor lint: unused `onChange` helper removed; imports tidy.
-   • Rev bumped to r813. */
+   • Deleted bespoke validateField & LEN constants — now import
+     validateEditContractFields() from core/validator.js.
+   • fieldErrors map drives inline <Err/> plus toast diff logic.
+   • Disabled state & estimator tie to central validator ensuring
+     consistent rules with deploy flow (Invariant I85/I88).
+   • Redundant util imports removed; rev bumped to r815. */
 /* EOF */

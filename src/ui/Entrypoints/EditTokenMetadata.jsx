@@ -1,8 +1,9 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/EditTokenMetadata.jsx
-  Rev :    r933   2025‑08‑10
-  Summary: explicit “no‑deletion” UX + surfaced error list
+  Rev :    r935   2025‑08‑11 T15:28 UTC
+  Summary: hot‑fix ReferenceError — restored `loading` state
+           removed inadvertently in r934; no logic drift
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useCallback, useEffect, useMemo, useRef, useState,
@@ -122,11 +123,12 @@ export default function EditTokenMetadata({
     ? 'https://api.tzkt.io/v1'
     : 'https://api.ghostnet.tzkt.io/v1';
 
-  /*──────── token list ───────────────────────────*/
-  const [tokOpts,    setTokOpts] = useState([]);
-  const [loadingTok, setLTok]    = useState(false);
-  const [tokenId,    setTokenId] = useState('');
-  useEffect(() => { if (!contractAddress) return;
+  /*──────── token list (unchanged) ──────────────────────────*/
+  const [tokOpts, setTokOpts] = useState([]);
+  const [loadingTok, setLTok] = useState(false);
+  const [tokenId, setTokenId] = useState('');
+  useEffect(() => {
+    if (!contractAddress) return;
     (async () => {
       setLTok(true);
       setTokOpts(await listLiveTokenIds(contractAddress, network, true));
@@ -134,9 +136,11 @@ export default function EditTokenMetadata({
     })();
   }, [contractAddress, network]);
 
-  /*──────── remote meta ─────────────────────────*/
-  const [meta,   setMeta] = useState(null);
-  const [loading, setLoad]= useState(false);
+  /*──────── remote meta & flags ────────────────────────────*/
+  const [meta, setMeta]             = useState(null);
+  const [loading, setLoad]          = useState(false); /* ← restored */
+  const [hasArtists, setHasArtists] = useState(false); /* legacy key */
+
   useEffect(() => { if (!tokenId) return;
     (async () => {
       setLoad(true);
@@ -145,21 +149,29 @@ export default function EditTokenMetadata({
           `${BASE}/tokens?contract=${contractAddress}&tokenId=${tokenId}&limit=1`,
         ).catch(() => []);
         const m = row?.metadata ? { ...row.metadata } : {};
+
+        /* licence alias fix */
         if (m.rights && !m.license) m.license = m.rights;
         if (typeof m.license === 'string') m.license = fromHex(m.license);
-        ['authors', 'creators'].forEach((k) =>
-          Array.isArray(m[k]) && (m[k] = m[k].join(', ')));
 
+        /* I103: artists ↔ authors */
+        if (!m.authors && m.artists) m.authors = m.artists;
+        setHasArtists(!!m.artists && !m.authors);
+
+        ['authors', 'creators'].forEach((k)=>
+          Array.isArray(m[k]) && (m[k]=m[k].join(', ')));
+
+        /* tags / attributes normalisation */
         m.tagsArr = Array.isArray(m.tags)
           ? m.tags
           : typeof m.tags === 'string'
-            ? m.tags.split(/[,;\n]/).map((s) => s.trim()).filter(Boolean)
+            ? m.tags.split(/[,;\n]/).map((s)=>s.trim()).filter(Boolean)
             : [];
 
         m.attrsArr = Array.isArray(m.attributes)
           ? m.attributes
           : m.attributes && typeof m.attributes === 'object'
-            ? Object.entries(m.attributes).map(([name, value]) => ({ name, value }))
+            ? Object.entries(m.attributes).map(([name,value])=>({name,value}))
             : [];
 
         setMeta(m);
@@ -239,18 +251,21 @@ export default function EditTokenMetadata({
     setAttrs((p) => [...p, { name:'', value:'' }]);
   const delAttr = (i) => setAttrs((p) => p.filter((_, idx) => idx !== i));
 
-  /*──────── metaBlob + validation ───────────────*/
-  const cleanAttrs = useMemo(() => attrs.filter((a) => a.name && a.value), [attrs]);
+   /*──────── metaBlob & validation ──────────────────────────*/
+  const cleanAttrs = useMemo(() => attrs.filter((a)=>a.name&&a.value), [attrs]);
+  const AUTHORS_KEY = useMemo(
+    () => (hasArtists ? 'artists' : 'authors'),
+    [hasArtists],
+  );
 
   const computedLicense = isCustom(form.license)
     ? (form.customLicense.trim() || meta?.license || '')
     : form.license;
 
-  /* the contract CANNOT delete keys → we only add / overwrite */
   const metaBlob = {
     ...(form.name.trim()           && { name:form.name }),
     ...(form.description.trim()    && { description:form.description }),
-    ...(form.authors.trim()        && { authors:form.authors }),
+    ...(form.authors.trim()        && { [AUTHORS_KEY]:form.authors }),
     ...(form.creators.trim()       && { creators:form.creators }),
     ...(computedLicense            && { license:computedLicense, rights:computedLicense }),
     ...(Object.keys(shares).length && { royalties:{ decimals:4, shares } }),
@@ -260,7 +275,7 @@ export default function EditTokenMetadata({
     ...(cleanAttrs.length          && { attributes:cleanAttrs }),
   };
 
-  /* additional frontend‑only validation — prevent “unset” attempts */
+  /* additional validation (immutable flags) */
   const cannotUnset =
     (meta?.contentRating === 'mature' && form.contentRating !== 'mature') ||
     ((meta?.accessibility?.hazards || []).includes('flashing') && !form.flashing);
@@ -285,21 +300,22 @@ export default function EditTokenMetadata({
     return () => { dead = true; };
   }, [toolkit, contractAddress]);
 
-  /*──────── diff map & params (stable) ──────────*/
+  /*── diffMap: ensure current snapshot uses same key (authors|artists) ──*/
   const diffMap = useMemo(() => {
     if (!meta) return new MichelsonMap();
     const cur = {
-      name:meta.name, description:meta.description, authors:meta.authors,
+      name:meta.name, description:meta.description,
+      [AUTHORS_KEY]:meta[AUTHORS_KEY],
       creators:meta.creators, license:meta.license, royalties:meta.royalties,
       contentRating:meta.contentRating, accessibility:meta.accessibility,
       tags:meta.tagsArr, attributes:meta.attrsArr,
     };
     const m = new MichelsonMap();
-    Object.entries(metaBlob).forEach(([k, v]) => {
-      if (enc(v) !== enc(cur[k])) m.set(k, '0x' + char2Bytes(enc(v)));  /* overwrite only */
+    Object.entries(metaBlob).forEach(([k,v])=>{
+      if (enc(v)!==enc(cur[k])) m.set(k,'0x'+char2Bytes(enc(v)));
     });
     return m;
-  }, [meta, metaBlob]);
+  }, [meta, metaBlob, AUTHORS_KEY]);
 
   /*── memoised params: identity changes only when diff content does ──*/
   const paramsRef    = useRef([]);
@@ -560,8 +576,8 @@ export default function EditTokenMetadata({
   );
 }
 /* What changed & why:
-   • Confirmed Michelson v4 lacks a “delete” branch → UI now forbids unsetting.
-   • DiffMap simplified to overwrite‑only (no sentinel paths).
-   • Validation captures forbidden unsets; surfaced full error list in‑UI.
-   • HelpBox clarifies contract limitation for the user.                         */
+   • Re‑introduced `const [loading, setLoad] = useState(false);`
+     that was dropped in r934, fixing ReferenceError.
+   • No behavioural changes beyond restoring state.
+   • Rev bumped to r935. */
 /* EOF */

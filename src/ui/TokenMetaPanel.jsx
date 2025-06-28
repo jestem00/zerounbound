@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/TokenMetaPanel.jsx
-  Rev :    r746   2025‑07‑30
-  Summary: swap static emoji → <IntegrityBadge/> (clickable)
+  Rev :    r747   2025‑08‑11 T15:02 UTC
+  Summary: I103 — display “artists” synonymously with “authors”
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useEffect, useMemo, useState, useRef, useCallback,
@@ -129,6 +129,12 @@ const IntegrityChip = styled.span`
   }
 `;
 
+/* small util to pick primary author‑like key */
+const primaryAuthorKey = (m = {}) =>
+  m.authors !== undefined ? 'authors'
+  : m.artists !== undefined ? 'artists'
+  : 'authors';
+
 export default function TokenMetaPanel({
   meta            = null,
   tokenId         = '',
@@ -160,24 +166,24 @@ export default function TokenMetaPanel({
     }));
   }, [contractAddress]);
 
-   /* stable memo‑derived values */
+  /*──────── memo‑derived values (updated keys list) ────────*/
   const metaObj   = typeof meta === 'object' && meta ? meta : {};
   const hero      = useMemo(() => pickUri(metaObj), [metaObj]);
   const uriArr    = useMemo(() => listUriKeys(metaObj), [metaObj]);
+
   const integrity = useMemo(() => checkOnChainIntegrity(metaObj), [metaObj]);
-  const { label } = useMemo(
-    () => getIntegrityInfo(integrity.status),
-    [integrity.status],
-  );
+  const { label } = useMemo(()=>getIntegrityInfo(integrity.status),[integrity.status]);
+
   const kvPairs = useMemo(() => {
+    const aKey = primaryAuthorKey(metaObj);
     const keys = [
-      'name','description','mimeType','authors','creators','rights',
+      'name','description','mimeType',aKey,'creators','rights',
       'royalties','mintingTool','accessibility','contentRating',
       'tags','attributes','decimals',
     ];
     return keys
-      .filter((k) => metaObj[k] !== undefined)
-      .map((k) => [k, pretty(k, metaObj[k])]);
+      .filter((k)=>metaObj[k]!==undefined)
+      .map((k)=>[k, pretty(k, metaObj[k])]);
   }, [metaObj]);
 
   const ktShort = contractAddress
@@ -400,9 +406,7 @@ export default function TokenMetaPanel({
   );
 }
 /* What changed & why:
-   • Imported IntegrityBadge and rendered inside IntegrityChip → badge now
-     opens explanatory dialog (UX parity with ContractMetaPanel).
-   • Removed `pointer-events:none` so chip is clickable.
-   • Dropped unused `badge` const; label still shown on ≤480 px screens.
-   • Rev bumped to r746. */
+   • Added primaryAuthorKey() helper; kvPairs now displays whichever of
+     “authors” or legacy “artists” exists, fulfilling invariant I103.
+   • Rev bumped to r747. */
 /* EOF */

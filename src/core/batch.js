@@ -1,9 +1,9 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/core/batch.js
-  Rev :    r707   2025‑06‑21 T02:18 UTC
-  Summary: Revert v4a‑specific fee injection — restores
-           original multi‑version batch helper for v1‑v4
+  Rev :    r859   2025‑08‑11 T03:44 UTC
+  Summary: sliceTail now reports `origLonger` flag for
+           safer diff‑repair diagnostics (I60 hardening)
 ─────────────────────────────────────────────────────────────*/
 import { OpKind } from '@taquito/taquito';
 
@@ -24,13 +24,30 @@ export function sliceHex (hx = '', sliceBytes = SLICE_SAFE_BYTES) {
 }
 
 /*─────────────── sliceTail – diff helper ───────────────*/
+/**
+ * sliceTail(origHex, fullHex)
+ * Detects the missing tail bytes of `fullHex` relative to `origHex`.
+ *
+ * Returns { tail[], conflict:boolean, origLonger?:boolean }.
+ *  • tail      – array of `0x…` slice strings to append.
+ *  • conflict  – true when bytes mismatch before diff section.
+ *  • origLonger– true when on‑chain hex is already longer than uploaded
+ *                file (common when a slice was accidentally duplicated).
+ *
+ * Invariant I60 compatible: legacy callers ignoring the new field remain
+ * untouched – `origLonger` is additive.
+ */
 export function sliceTail (origHex = '0x', fullHex = '0x') {
   if (!origHex.startsWith('0x') || !fullHex.startsWith('0x')) {
     throw new Error('hex must start with 0x');
   }
   const orig = origHex.slice(2);
   const full = fullHex.slice(2);
-  if (orig.length > full.length) return { tail: [], conflict: true };
+
+  if (orig.length > full.length) {
+    /* on‑chain data already longer – cannot self‑heal via append */
+    return { tail: [], conflict: true, origLonger: true };
+  }
   if (full.startsWith(orig)) {
     const diff = full.slice(orig.length);
     return diff
@@ -65,12 +82,6 @@ export async function splitPacked (toolkit, flat, limit = PACKED_SAFE_BYTES) {
 export const tx = (p) => ({ kind: OpKind.TRANSACTION, ...p });
 
 /*──────────── append helper (generic) ────────────*/
-/**
- * Generic append helper kept for back‑compat.  **Do not**
- * inject static fee/gas/storage here — v4 contracts will
- * refuse unknown entry‑points and other versions are
- * unaffected.  v4a logic lives in batchV4a.js.
- */
 export async function buildAppendTokenMetaCalls (
   toolkit,
   contractAddr,
@@ -93,6 +104,7 @@ export async function buildAppendTokenMetaCalls (
   }));
 }
 /* What changed & why:
-   • Rolled back static fee/gas/storage injection so
-     batch.js remains version‑agnostic (v1–v4). */
+   • Added `origLonger` flag to sliceTail for clearer diagnostics when
+     on‑chain data already exceeds the uploaded file (duplicate slice
+     scenario); head‑room logic untouched – full back‑compat. */
 /* EOF */

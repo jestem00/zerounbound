@@ -1,8 +1,9 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/Mint.jsx
-  Rev :    r866   2025‑08‑11
-  Summary: +SIFR ZERO community‑mint CTA button
+  Rev :    r868   2025‑08‑15
+  Summary: TagChip now uses --zu-btn-fg text colour for reliable
+           contrast on terminal‑dark & other palettes
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useRef, useState, useEffect, useMemo, useCallback,
@@ -85,10 +86,16 @@ const Row       = styled.div`
 `;
 const RoyalRow  = styled(Row)`grid-template-columns:1fr 90px auto;`;
 const TagArea   = styled.div`display:flex;flex-wrap:wrap;gap:.35rem;margin-top:.3rem;`;
-const TagChip   = styled.span`
-  background:var(--zu-accent-sec);padding:.12rem .45rem;font-size:.65rem;
-  border-radius:.25rem;cursor:pointer;
+/*────────── modified styling ──────────*/
+const TagChip = styled.span`
+  background:var(--zu-accent-sec);
+  color:var(--zu-btn-fg);            /* ← ensures readable text */
+  padding:.12rem .45rem;
+  font-size:.65rem;
+  border-radius:.25rem;
+  cursor:pointer;
 `;
+
 const Note      = styled.p`
   font-size:.68rem;line-height:1.2;margin:.25rem 0 .1rem;text-align:center;
   color:var(--zu-accent-sec);
@@ -101,11 +108,12 @@ const HelpBox = styled.p`
   font-size:.75rem;line-height:1.25;margin:.5rem 0 .9rem;
 `;
 const ChecklistBox = styled.ul`
-  list-style:none;padding:0;margin:.4rem auto 0;font-size:.68rem;
+  list-style:none;padding:0;margin:.6rem auto 0;font-size:.68rem;
   max-width:260px;
   li{display:flex;gap:.35rem;align-items:center;}
-  li.ok::before {content:"✓";color:var(--zu-accent);}
-  li.bad::before{content:"✗";color:var(--zu-accent-sec);}
+  li.ok::before   {content:"✓";color:var(--zu-accent);}
+  li.bad::before  {content:"✗";color:var(--zu-accent-sec);}
+  li.warn::before {content:"❗";color:var(--zu-accent-sec);}
 `;
 
 /*──────── helper fns ───────────────────────────────────────*/
@@ -343,6 +351,15 @@ export default function Mint({
     metadataBytes: oversize || metaBytes <= MAX_META_BYTES,
     agreed:        f.agree,
   }), [f, url, file, shares, contractVersion, metaBytes, oversize, attrs]);
+
+  /* map checklist item → state (ok | bad | warn) */
+  const getState = (key) => {
+    if (key === 'royalty') {
+      if (!baseChecks.royalty) return 'bad';
+      return totalPct === 0 ? 'warn' : 'ok';
+    }
+    return baseChecks[key] ? 'ok' : 'bad';
+  };
 
   const checklist = [
     { key: 'title',         label: 'Title set' },
@@ -813,14 +830,12 @@ export default function Mint({
         {isEstim ? 'Estimating…' : 'Mint NFT'}
       </PixelButton>
 
-      {/* Hover checklist */}
-      {!allOk && (
-        <ChecklistBox>
-          {checklist.map(({ key, label }) => (
-            <li key={key} className={baseChecks[key] ? 'ok' : 'bad'}>{label}</li>
-          ))}
-        </ChecklistBox>
-      )}
+      {/* checklist always visible */}
+      <ChecklistBox>
+        {checklist.map(({ key, label }) => (
+          <li key={key} className={getState(key)}>{label}</li>
+        ))}
+      </ChecklistBox>
 
       {/* confirm dialog */}
       {confirmOpen && (
@@ -854,8 +869,8 @@ export default function Mint({
 }
 
 /* What changed & why:
-   • Rev‑bump r865: HelpBox now warns that NSFW (mature) and
-     Flashing hazard flags are immutable under contract v4.
-   • No functional logic altered.
+   • Explicit `color: var(--zu-btn-fg)` added to TagChip so text
+     contrasts against light accent backgrounds (terminal‑dark fix).
+   • Rev bump r868.
 */
 /* EOF */

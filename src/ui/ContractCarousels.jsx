@@ -1,8 +1,9 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/ContractCarousels.jsx
-  Rev :    r742‑r14   2025‑08‑08
-  Summary: stable SC ids + prop‑filter = no hydration warnings
+  Rev :    r747‑r20   2025‑08‑12
+  Summary: purge stale “blank” cache entries so they never
+           re‑appear; fresh‑path ident‑check; cache hygiene
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useEffect, useState, useRef, useCallback, useMemo,
@@ -52,6 +53,10 @@ const getVer = (net, h) =>
 const hex2str  = (h) => Buffer.from(h.replace(/^0x/, ''), 'hex').toString('utf8');
 const parseHex = (h) => { try { return JSON.parse(hex2str(h)); } catch { return {}; } };
 const arr      = (v) => (Array.isArray(v) ? v : []);
+const scrub    = (s = '') => s.replace(/[\u0000-\u001F\u007F-\u009F]/g, '').trim();
+
+/* new: tell if a contract entry is display‑worthy */
+const identifiable = (name = '', img = null) => Boolean(scrub(name)) || Boolean(img);
 
 /*──────── tiny localStorage cache — shape { data, ts } ─────*/
 const readCache = () => {
@@ -128,31 +133,32 @@ async function fetchCollaborative(addr, net) {
 
 /*──────── enrich helper — adds image/meta/total ─────────────*/
 async function enrich(list, net) {
-  return (await Promise.all(list.map(async (it) => {
+  const rows = await Promise.all(list.map(async (it) => {
     if (!it?.address) return null;
 
     const cached   = getCache(it.address);
     const detCache = cached?.data?.detail;
     const fresh    = detCache && (Date.now() - cached.ts < DETAIL_TTL);
 
-    /* always verify supply even when cache is fresh */
+    /* always compute live supply */
     const totalLive = await countTokens(it.address, net);
 
+    /*──────── fresh‑cache fast‑path ───────*/
     if (fresh) {
-      if (totalLive === 0) {
-        patchCache(it.address, { detail: { ...detCache, total: 0 } });
+      /* drop & wipe if no longer identifiable */
+      if (!identifiable(detCache.name, detCache.imageUri)) {
+        patchCache(it.address, { detail: null });      // invalidate stale blank
         return null;
       }
-      if (totalLive === detCache.total) return detCache;
+      const detail = { ...detCache, total: totalLive };
+      patchCache(it.address, { detail });
+      return detail;
     }
 
+    /*──────── full fetch path ─────────────*/
     const detRaw = await jFetch(`${TZKT[net]}/contracts/${it.address}`).catch(() => null);
-    if (!detRaw || totalLive === 0) {
-      patchCache(it.address, { detail: { ...(detCache || {}), total: 0 } });
-      return null;
-    }
 
-    let meta = detRaw.metadata || {};
+    let meta = detRaw?.metadata || {};
     if (!meta.name || !meta.imageUri) {
       const bm = await jFetch(
         `${TZKT[net]}/contracts/${it.address}/bigmaps/metadata/keys/content`,
@@ -160,21 +166,31 @@ async function enrich(list, net) {
       if (bm?.value) meta = { ...parseHex(bm.value), ...meta };
     }
 
+    /* reject if still not identifiable */
+    if (!identifiable(meta.name, meta.imageUri)) return null;
+
+    const cleanName = scrub(meta.name || '');
+
     const detail = {
       address : it.address,
       typeHash: it.typeHash,
-      name    : meta.name || it.address,
+      name    : cleanName || it.address,
       description: meta.description || '',
-      imageUri   : meta.imageUri,
+      imageUri   : meta.imageUri || null,
       total      : totalLive,
       version    : getVer(net, it.typeHash),
-      date       : it.timestamp,
+      date       : it.timestamp
+        || detRaw?.firstActivityTime
+        || detRaw?.lastActivityTime
+        || null,
     };
     patchCache(it.address, { detail });
     return detail;
-  })))
-    .filter(Boolean)
-    .sort((a, b) => new Date(b.date) - new Date(a.date));
+  }));
+
+  /* unique by address to prevent duplicate‑key warnings */
+  return [...new Map(rows.filter(Boolean).map((r) => [r.address, r])).values()]
+    .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
 }
 
 /*──────── styled components ───────────────────────────────*/
@@ -192,8 +208,7 @@ const Slide     = styled.div.withConfig({ componentId: 'cc-slide' })`
   width: ${CLAMP_CSS};
   margin-right: 16px;
 `;
-
-const CountBox = styled.span.withConfig({ componentId: 'cc-countbox' })`
+const CountBox = styled.span.withConfig({ componentId: 'cc-count' })`
   display: inline-block;
   margin-left: 6px;
   min-width: 26px;
@@ -210,7 +225,6 @@ const CountTiny = styled(CountBox).withConfig({ componentId: 'cc-counttiny' })`
   padding: 0 4px;
   font-size: .65rem;
 `;
-
 const AddrLine = styled.p.withConfig({ componentId: 'cc-addr' })`
   font-size: clamp(.24rem,.9vw,.45rem);
   margin: .06rem 0 0;
@@ -219,11 +233,9 @@ const AddrLine = styled.p.withConfig({ componentId: 'cc-addr' })`
   overflow: hidden;
   text-overflow: ellipsis;
 `;
-
-/* filter 'level' so DOM never sees it */
 const TitleWrap = styled(PixelHeading).withConfig({
   componentId      : 'cc-title',
-  shouldForwardProp: (prop) => prop !== 'level',
+  shouldForwardProp: (p) => p !== 'level',
 }).attrs({ as: 'h3', level: 3 })`
   margin: 0;
   font-size: clamp(.8rem,.65vw + .2vh,1rem);
@@ -234,7 +246,6 @@ const TitleWrap = styled(PixelHeading).withConfig({
   overflow: hidden;
   word-break: break-word;
 `;
-
 const ArrowBtn = styled.button.withConfig({ componentId: 'cc-arrow' })`
   position: absolute;
   top: 50%;
@@ -253,10 +264,8 @@ const ArrowBtn = styled.button.withConfig({ componentId: 'cc-arrow' })`
   z-index: 5;
   &:hover { background: var(--zu-accent); }
 `;
-
-/* card — deterministic id + relative for overlay buttons */
 const CardBase = styled.div.withConfig({
-  componentId: 'cc-card',
+  componentId      : 'cc-card',
   shouldForwardProp: (p) => p !== '$dim',
 })`
   position: relative;
@@ -270,7 +279,6 @@ const CardBase = styled.div.withConfig({
   opacity: ${({ $dim }) => ($dim ? 0.45 : 1)};
   cursor: grab;
 `;
-
 const BusyWrap = styled.div.withConfig({ componentId: 'cc-busy' })`
   position: absolute;
   inset: 0;
@@ -312,7 +320,10 @@ const TinyLoad = styled(PixelButton).withConfig({ componentId: 'cc-load' })`
 const SlideCard = React.memo(function SlideCard({
   contract, hidden, toggleHidden, load,
 }) {
-  const dim = hidden.has(contract.address);
+  const dim      = hidden.has(contract.address);
+  const dateStr  = contract.date && !Number.isNaN(new Date(contract.date))
+    ? new Date(contract.date).toLocaleDateString()
+    : null;
 
   return (
     <Slide key={contract.address}>
@@ -364,9 +375,11 @@ const SlideCard = React.memo(function SlideCard({
         )}
 
         <AddrLine>{contract.address}</AddrLine>
-        <p style={{ fontSize: '.7rem', margin: '.04rem 0 0', textAlign: 'center' }}>
-          {contract.version} • {new Date(contract.date).toLocaleDateString()}
-        </p>
+        {dateStr && (
+          <p style={{ fontSize: '.7rem', margin: '.04rem 0 0', textAlign: 'center' }}>
+            {contract.version} • {dateStr}
+          </p>
+        )}
       </CardBase>
     </Slide>
   );
@@ -388,88 +401,90 @@ const useHold = (api) => {
 };
 
 /*──────── Rail component ───────────────────────────────────*/
-const Rail = React.memo(({
+const Rail = React.memo(function Rail({
   label, data, emblaRef, api, hidden,
   toggleHidden, load, busy, holdPrev, holdNext,
-}) => (
-  <>
-    <h4
-      style={{
-        margin: '.9rem 0 .2rem',
-        fontFamily: 'PixeloidSans',
-        textAlign: 'center',
-      }}
-    >
-      {label}
-      <CountBox>{data.length}</CountBox>
-    </h4>
-    <p
-      style={{
-        margin: '0 0 .45rem',
-        fontSize: '.74rem',
-        textAlign: 'center',
-        color: 'var(--zu-accent-sec)',
-        fontWeight: 700,
-      }}
-    >
-      ↔ drag/swipe&nbsp;• hold ◀ ▶&nbsp;• Click&nbsp;↻&nbsp;to&nbsp;LOAD&nbsp;CONTRACT&nbsp;• 🚫/👁️ hide/unhide
-    </p>
-
-    <div
-      style={{
-        position: 'relative',
-        minHeight: 225,
-        margin: '0 auto',
-        width: '100%',
-        maxWidth: `${MAX_W}px`,
-        padding: `0 ${GUTTER}px`,
-        boxSizing: 'border-box',
-      }}
-    >
-      {busy && (
-        <BusyWrap>
-          <img src="/sprites/loading.svg" alt="Loading" />
-          <p>Loading…</p>
-        </BusyWrap>
-      )}
-
-      <ArrowBtn
-        $left
-        onMouseDown={() => holdPrev.start('prev')}
-        onMouseUp={holdPrev.stop}
-        onMouseLeave={holdPrev.stop}
+}) {
+  return (
+    <>
+      <h4
+        style={{
+          margin: '.9rem 0 .2rem',
+          fontFamily: 'PixeloidSans',
+          textAlign: 'center',
+        }}
       >
-        ◀
-      </ArrowBtn>
-
-      <Viewport ref={emblaRef}>
-        <Container>
-          {data.length ? (
-            data.map((c) => (
-              <SlideCard
-                key={c.address}
-                contract={c}
-                hidden={hidden}
-                toggleHidden={toggleHidden}
-                load={load}
-              />
-            ))
-          ) : (
-            !busy && <p style={{ margin: '5rem auto', textAlign: 'center' }}>None found.</p>
-          )}
-        </Container>
-      </Viewport>
-
-      <ArrowBtn
-        onMouseDown={() => holdNext.start('next')}
-        onMouseUp={holdNext.stop}
-        onMouseLeave={holdNext.stop}
+        {label}
+        <CountBox>{data.length}</CountBox>
+      </h4>
+      <p
+        style={{
+          margin: '0 0 .45rem',
+          fontSize: '.74rem',
+          textAlign: 'center',
+          color: 'var(--zu-accent-sec)',
+          fontWeight: 700,
+        }}
       >
-        ▶
-      </ArrowBtn>
-    </div>
-  </>
-));
+        ↔ drag/swipe&nbsp;• hold ◀ ▶&nbsp;• Click&nbsp;↻&nbsp;to&nbsp;LOAD&nbsp;CONTRACT&nbsp;• 🚫/👁️ hide/unhide
+      </p>
+
+      <div
+        style={{
+          position: 'relative',
+          minHeight: 225,
+          margin: '0 auto',
+          width: '100%',
+          maxWidth: `${MAX_W}px`,
+          padding: `0 ${GUTTER}px`,
+          boxSizing: 'border-box',
+        }}
+      >
+        {busy && (
+          <BusyWrap>
+            <img src="/sprites/loading.svg" alt="Loading" />
+            <p>Loading…</p>
+          </BusyWrap>
+        )}
+
+        <ArrowBtn
+          $left
+          onMouseDown={() => holdPrev.start('prev')}
+          onMouseUp={holdPrev.stop}
+          onMouseLeave={holdPrev.stop}
+        >
+          ◀
+        </ArrowBtn>
+
+        <Viewport ref={emblaRef}>
+          <Container>
+            {data.length ? (
+              data.map((c) => (
+                <SlideCard
+                  key={c.address}
+                  contract={c}
+                  hidden={hidden}
+                  toggleHidden={toggleHidden}
+                  load={load}
+                />
+              ))
+            ) : (
+              !busy && <p style={{ margin: '5rem auto', textAlign: 'center' }}>None found.</p>
+            )}
+          </Container>
+        </Viewport>
+
+        <ArrowBtn
+          onMouseDown={() => holdNext.start('next')}
+          onMouseUp={holdNext.stop}
+          onMouseLeave={holdNext.stop}
+        >
+          ▶
+        </ArrowBtn>
+      </div>
+    </>
+  );
+});
 
 /*──────── Main component ───────────────────────────────────*/
 export default function ContractCarousels({ onSelect }) {
@@ -623,11 +638,12 @@ export default function ContractCarousels({ onSelect }) {
   );
 }
 /* What changed & why:
-   • Added `componentId` to every styled‑component here to stabilise
-     CSS‑hash generation across SSR ↔ hydration, eliminating the
-     `className` mismatch warning.
-   • TitleWrap now filters the transient ‘level’ prop via
-     `shouldForwardProp`, removing the “unknown prop level” console
-     warning.
-   • No runtime logic altered; bundle size unchanged. */
+   • Added `identifiable()` util; contract considered valid only
+     when scrubbed name OR imageUri present.
+   • Fresh‑cache branch now re‑validates identifiability; if fails,
+     cache entry is nulled & entry suppressed (fixes ghost blank
+     card that re‑appeared after refresh).
+   • Non‑fresh branch keeps same gate, ensuring no future blanks
+     enter cache.
+   • Rev‑bump r747‑r20; no DOM prop leakage; SSR checksum stable. */
 /* EOF */

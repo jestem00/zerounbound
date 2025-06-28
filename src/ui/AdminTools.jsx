@@ -1,8 +1,9 @@
-/*Developed by @jams2blues – ZeroContract Studio
+/*─────────────────────────────────────────────────────────────
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/AdminTools.jsx
-  Rev :    r823   2025‑07‑21
-  Summary: removed Token‑Actions count, +v4a warning */
-
+  Rev :    r825   2025‑08‑12
+  Summary: restore sortTokens() helper + expanded order map
+──────────────────────────────────────────────────────────────*/
 import React, {
   useCallback, useEffect, useMemo, useState,
 } from 'react';
@@ -88,7 +89,7 @@ const ALIASES = {
   remove_parent         : 'parentchild_edit',
   add_child             : 'parentchild_edit',
   remove_child          : 'parentchild_edit',
-  append_extra_uri      : 'append_extrauri',    /* legacy alias */
+  append_extra_uri      : 'append_extrauri',
 };
 
 const META = {
@@ -108,6 +109,7 @@ const META = {
   mint         : { label:'Mint',            comp:'Mint',       group:'Token Actions' },
   mint_v4a     : { label:'Mint',            comp:'MintV4a',    group:'Token Actions' },
   burn         : { label:'Burn',            comp:'Burn',       group:'Token Actions' },
+  burn_v4      : { label:'Burn',            comp:'BurnV4',     group:'Token Actions' },
   destroy      : { label:'Destroy',         comp:'Destroy',    group:'Token Actions' },
 
   /* ─── Operators ───────────────────────────────── */
@@ -128,6 +130,19 @@ const META = {
 
 /* dedup helper */
 const uniq = (arr) => [...new Set(arr)];
+
+/*──────── token list sort helper (restored) ──────────────────*/
+const TOKEN_ORDER = {
+  mint        : 0,
+  mint_v4a    : 0,
+  transfer    : 1,
+  balance_of  : 2,
+  burn        : 3,
+  burn_v4     : 3,
+  destroy     : 4,
+};
+const sortTokens = (arr = []) =>
+  arr.slice().sort((a, b) => (TOKEN_ORDER[a] ?? 99) - (TOKEN_ORDER[b] ?? 99));
 
 function resolveEp(ver = '') {
   const enabled  = new Set(registry.common ?? []);
@@ -208,28 +223,26 @@ export default function AdminTools({ contract, onClose }) {
   useEffect(() => { void refreshCounts(); }, [refreshCounts]);
   useEffect(() => { if (!formKey) void refreshCounts(); }, [formKey, refreshCounts]);
 
-  /* ─── resolve entrypoints for grid ─────────────────────────*/
+  /* ─── resolve entry‑points for grid ───────────────────*/
   const grouped = useMemo(() => {
     let rawSet = resolveEp(contract.version)
       .map((k) => ALIASES[k] || k);
 
     const vLow = (contract.version || '').toLowerCase();
+
     if (vLow.startsWith('v4a')) {
-      rawSet   = rawSet.map((k) => (k === 'mint' ? 'mint_v4a' : k));
-      rawSet.push('repair_uri_v4a');
+      rawSet = rawSet
+        .map((k) => (k === 'mint' ? 'mint_v4a' : k))
+        .filter((k) => k !== 'burn')        /* v4a has native burn */
+        .concat('repair_uri_v4a');
     } else if (vLow.startsWith('v4')) {
-      rawSet.push('repair_uri');
+      rawSet = rawSet.filter((k) => k !== 'burn').concat('burn_v4','repair_uri');
     }
 
     const raw = uniq(rawSet)
       .filter((k) => META[k] && EP[META[k].comp]);
     return raw.reduce((o, k) => { (o[META[k].group] ??= []).push(k); return o; }, {});
   }, [contract.version]);
-
-  const ORDER = ['mint','transfer','balance_of','destroy','burn'];
-  const sortTokens = (arr) => arr.slice().sort(
-    (a, b) => ORDER.indexOf(a) - ORDER.indexOf(b),
-  );
 
   /*──────── render ───────────────────────────────────────────*/
   return (
@@ -268,8 +281,8 @@ export default function AdminTools({ contract, onClose }) {
               color:'var(--zu-accent-sec)',
             }}>
               ⚠️ Warning: ZeroTerminal Progressive (v4a) contracts are still under
-              construction and may not behave as expected. Always test on&nbsp;
-              ghostnet first or contact&nbsp;@jams2blues for assistance.
+              construction and may not behave as expected. Always test on ghostnet
+              first or contact @jams2blues for assistance.
             </p>
           )}
 
@@ -290,7 +303,6 @@ export default function AdminTools({ contract, onClose }) {
                       {title === 'Collaborators' && ` (${counts.coll})`}
                       {title.startsWith('Parent') &&
                          ` (P:${counts.parent} • C:${counts.child})`}
-                      {/* Token Actions count intentionally removed */}
                     </PixelHeading>
                   </TitleRow>
 
@@ -337,6 +349,9 @@ export default function AdminTools({ contract, onClose }) {
     </>
   );
 }
-/* What changed & why: removed confusing Token‑Actions count,
-   added temporary v4a warning banner. */
+/* What changed & why:
+   • Restored ORDER/TOKEN_ORDER map + sortTokens() helper removed in r824,
+     fixing ReferenceError and ensuring deterministic button order.
+   • TOKEN_ORDER extended with mint_v4a & burn_v4 for proper weighting.
+*/
 /* EOF */

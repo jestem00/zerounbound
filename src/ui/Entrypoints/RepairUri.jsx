@@ -1,10 +1,10 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/RepairUri.jsx
-  Rev :    r812   2025-07-11 T04:18 UTC
-  Summary: resumable uploads + stronger fault-tolerance,
-           faster resume banner, per-slice checkpoints
-──────────────────────────────────────────────────────────────*/
+  Rev :    r862   2025‑08‑11 T14:07 UTC
+  Summary: confirmation watchdog + auto‑retry; fixes “stuck on
+           Broadcasting…” after slice #2 (wallet never re‑opens)
+─────────────────────────────────────────────────────────────*/
 import React, {
   useCallback, useEffect, useState, useMemo,
 } from 'react';
@@ -37,6 +37,25 @@ import {
 } from '../../utils/sliceCache.js';
 import listLiveTokenIds    from '../../utils/listLiveTokenIds.js';
 import { estimateChunked } from '../../core/feeEstimator.js';
+
+/*──────── constants ─────*/
+const CONFIRM_TIMEOUT_MS = 120_000;          /* 2 min per batch */
+
+/*──────── confirmation watchdog ─────────────────────────────*/
+/**
+ * Waits for 1‑block confirmation or rejects after CONFIRM_TIMEOUT_MS.
+ * Ensures the UI surfaces a retry instead of hanging forever when a node
+ * drops the heads subscription (root cause of “stuck on Broadcasting…”).
+ */
+async function confirmOrTimeout(op, timeout = CONFIRM_TIMEOUT_MS) {
+  return Promise.race([
+    op.confirmation(1),
+    new Promise((_, rej) =>
+      setTimeout(() =>
+        rej(new Error('Confirmation timeout — network congestion. ' +
+                       'Click RETRY or RESUME later.')), timeout)),
+  ]);
+}
 
 /*──────── styled shells ─────*/
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
@@ -93,7 +112,10 @@ export default function RepairUri({
   const [estimate,    setEstimate]    = useState(null);
   const [overlay,     setOverlay]     = useState({ open:false });
   const [confirmOpen, setConfirm]     = useState(false);
+
+  /* conflict dialog */
   const [conflictOpen,setConflict]    = useState(false);
+  const [conflictMsg, setConflictMsg] = useState('');
 
   /* housekeeping */
   useEffect(() => { purgeExpiredSliceCache(); }, []);
@@ -159,10 +181,10 @@ export default function RepairUri({
   const onUpload = useCallback((v) => {
     if (!v) { setFile(null); setDataUrl(''); setDiff([]); return; }
 
-    const f  = v instanceof File           ? v
-             : v?.file instanceof File      ? v.file
+    const f  = v instanceof File            ? v
+             : v?.file instanceof File       ? v.file
              : null;
-    const du = typeof v === 'string'        ? v
+    const du = typeof v === 'string'         ? v
              : typeof v?.dataUrl === 'string' ? v.dataUrl
              : '';
 
@@ -179,9 +201,22 @@ export default function RepairUri({
   /* keep diff live when either source changes */
   useEffect(() => {
     if (!dataUrl || !origHex) return;
-    const { tail, conflict } = sliceTail(origHex, `0x${char2Bytes(dataUrl)}`);
-    if (conflict) { setConflict(true); setDiff([]); return; }
-    setConflict(false); setDiff(tail);
+    const { tail, conflict, origLonger } =
+      sliceTail(origHex, `0x${char2Bytes(dataUrl)}`);
+
+    if (conflict) {
+      setConflict(true);
+      setDiff([]);
+      const msg = origLonger
+        ? 'On‑chain data is already longer than the uploaded file. ' +
+          'A duplicate or garbage slice was likely appended earlier. ' +
+          'Use “Clear URI” (or Update Token Metadata) to replace the ' +
+          'entire value and then re‑upload.'
+        : 'Uploaded file differs before missing tail. Pick the exact original file.';
+      setConflictMsg(msg);
+      return;
+    }
+    setConflict(false); setConflictMsg(''); setDiff(tail);
   }, [dataUrl, origHex]);
 
   /*──── estimator & batch-builder ───────────────────────────*/
@@ -236,11 +271,13 @@ export default function RepairUri({
     if (!batches || idx >= batches.length) return;
     try {
       setOverlay({ open:true, status:'Waiting for signature…',
-                   current:idx+1, total:batches.length });
+                   current:idx+1, total:batches.length, error:false });
       const op = await toolkit.wallet.batch(batches[idx]).send();
+
       setOverlay({ open:true, status:'Broadcasting…',
-                   current:idx+1, total:batches.length });
-      await op.confirmation();
+                   current:idx+1, total:batches.length, error:false });
+
+      await confirmOrTimeout(op);
 
       /* update checkpoint */
       saveSliceCheckpoint(...checkpointKeyArgs, {
@@ -256,7 +293,8 @@ export default function RepairUri({
         onMutate(); setBatches(null); setResumeInfo(null);
       }
     } catch (e) {
-      setOverlay({ open:true, error:true, status:e.message || String(e),
+      setOverlay({ open:true, error:true,
+                   status:e.message || String(e),
                    current:idx+1, total:batches.length });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -320,9 +358,16 @@ export default function RepairUri({
       </div>
 
       <HelpBox>
-        ① Pick token → ② choose URI key → ③ upload same original file.
-        The missing tail bytes will be appended exactly where the last slice stopped.❗after repair it takes 10-30 seconds on average for the chain to update, refresh
-        the page a few times every 10 seconds or so to see the changes.
+        ① Pick token → ② choose URI key → ③ upload the <em>exact</em> original
+        file. If bytes are missing, they will be appended precisely where the
+        last slice stopped.<br />
+        ⚠ If the on‑chain value is <strong>longer</strong> than your upload
+        (e.g.&nbsp;duplicate slice), this tool cannot truncate bytes — use
+        <code> Clear&nbsp;URI</code> or
+        <code> append&nbsp;artifact/extra&nbsp;uri</code> instead.<br />
+        ⛓ Repairs are chunked; you will sign once per ≤ 8 slices. A watchdog
+        aborts if the node fails to confirm within 2 min, letting you RETRY or
+        RESUME safely. Overall payloads ≈ 2 MiB keep RPC & wallet stable.
       </HelpBox>
 
       {/* resume banner */}
@@ -390,9 +435,14 @@ export default function RepairUri({
       {conflictOpen && (
         <PixelConfirmDialog
           title="Conflict detected"
-          message="Uploaded file differs before missing tail. Pick the exact original file."
+          message={conflictMsg}
           confirmLabel="OK"
-          onConfirm={() => { setConflict(false); setFile(null); setDataUrl(''); }}
+          onConfirm={() => {
+            setConflict(false);
+            setConflictMsg('');
+            setFile(null);
+            setDataUrl('');
+          }}
         />
       )}
 
@@ -419,15 +469,11 @@ export default function RepairUri({
   );
 }
 /* What changed & why:
-   • **Resumable checkpoints** — RepairUri now reads / writes slice
-     progress via `sliceCache.js`; failed or interrupted sessions
-     resume instantly, fixing blank-screen & re-upload pain-points.
-   • **Resume banner** with one-click RESUME when a checkpoint exists.
-   • Checkpoint saved before first signature *and* after every batch,
-     so tab-switches or wallet stalls can’t lose state.
-   • Overlay messaging tweaked; conflict flag reset on new upload.
-   • No change to `batch.js` constants or helpers — full
-     back-compat with Mint / Append flows maintained.
-   • Lint-clean, invariants I55-I61 intact.
-*/
+   • Added confirmOrTimeout() watchdog (120 s) to prevent infinite
+     “Broadcasting…” when node loses head‑subscription.
+   • runSlice now surfaces timeout via overlay error + RETRY path.
+   • HelpBox updated to mention watchdog & per‑batch signatures.
+   • Overlay status always includes error:false while pending to
+     avoid stale error banner reuse.
+   • No API surface changes; fully back‑compat with I60/I61. */
 /* EOF */

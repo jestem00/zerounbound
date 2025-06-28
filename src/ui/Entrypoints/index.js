@@ -24,6 +24,7 @@ export { default as ClearUri }                    from './ClearUri.jsx';
 export { default as EditContractMetadata }        from './EditContractMetadata.jsx';
 export { default as EditTokenMetadata }           from './EditTokenMetadata.jsx';
 export { default as RepairUri }                   from './RepairUri.jsx';
+export { default as BurnV4 }                    from './BurnV4.jsx';
 
 /* v4a */
 export { default as AddRemoveCollaboratorsv4a }   from './AddRemoveCollaboratorsv4a.jsx';

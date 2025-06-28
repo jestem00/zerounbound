@@ -1,11 +1,14 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/OperationOverlay.jsx
-  Rev :    r726   2025‑08‑01
-  Summary: fun‑line <li> now nowrap + ellipsis, no overlap
+  Rev :    r952   2025‑08‑14
+  Summary: palette‑aware overlay – adaptive bg/fg, var‑driven
 ──────────────────────────────────────────────────────────────*/
-import React, { useMemo, useState, useRef } from 'react';
+import React, {
+  useMemo, useState, useRef, useCallback,
+} from 'react';
 import styled, { css, keyframes } from 'styled-components';
+
 import CanvasFireworks            from './canvasFireworks.jsx';
 import PixelButton                from './PixelButton.jsx';
 import FUN_LINES                  from '../constants/funLines.js';
@@ -14,34 +17,58 @@ import {
 }                                  from '../config/deployTarget.js';
 import useWheelTunnel             from '../utils/useWheelTunnel.js';
 
-/*──────── shells ───────────────────────────────────────────*/
+/*──────── palette‑aware helpers ─────────*/
+const varOr = (v, d) => `var(${v},${d})`;
+
+/*──────── shells ────────────────────────*/
 const Back = styled.div`
-  position: fixed;
-  top: var(--hdr,0); left:0; right:0;
-  height: calc(100vh - var(--hdr,0));
+  position:fixed;inset-inline:0;top:var(--hdr,0);
+  height:calc(100vh - var(--hdr,0));
   display:flex;justify-content:center;align-items:center;
-  background: rgba(0,0,0,.88); z-index:2500;
+  background:rgba(0,0,0,.88);                /* always‑dark backdrop */
+  z-index:2500;
 `;
-const Panel = styled.div`
-  position:relative;width:90vw;max-width:480px;padding:2rem 3rem;
-  background:#0b0b0b;border:2px solid #bebebe;
+
+const Panel = styled.div.attrs({ role:'dialog','aria-modal':true })`
+  --bg:  ${varOr('--zu-bg-alt', '#0b0b0b')};
+  --fg:  ${varOr('--zu-fg',     '#e8e8e8')};
+  --brd: ${varOr('--zu-heading','#bebebe')};
+
+  position:relative;
+  width:clamp(280px,90vw,480px);
+  padding:2rem 3rem;
+  background:var(--bg);
+  border:2px solid var(--brd);
   box-shadow:0 0 0 2px #000,0 0 12px #000;
-  text-align:center;font-family:var(--font-pixel);
-  color:var(--zu-fg,#e8e8e8);
+  text-align:center;
+  font-family:var(--font-pixel);
+  color:var(--fg);
+
   &::before{
-    content:'';position:absolute;inset:0;pointer-events:none;
-    background:repeating-linear-gradient(0deg,
-      transparent 0 1px,rgba(0,0,0,.22) 2px 3px);
+    content:'';
+    position:absolute;inset:0;
+    pointer-events:none;
+    background:repeating-linear-gradient(
+      0deg,
+      transparent      0 1px,
+      rgba(0,0,0,.22)  2px 3px
+    );
     animation:scan 6s linear infinite;
   }
   @keyframes scan{to{transform:translateY(3px);}}
+
+  /* honour reduced‑motion */
+  @media (prefers-reduced-motion:reduce){
+    &::before{ animation:none; }
+  }
 `;
 
-const Bar = styled.div.attrs(p=>({style:{transform:`scaleX(${p.$p})`}}))`
-  position:absolute;top:0;left:0;right:0;height:4px;
-  background:var(--zu-accent-pri);
-  transform-origin:left center;
+const Bar = styled.div.attrs((p)=>({style:{transform:`scaleX(${p.$p})`}}))`
+  position:absolute;inset-inline:0;top:0;height:4px;
+  background:${varOr('--zu-accent', '#50fa7b')};
+  transform-origin:left;
   transition:transform .15s linear;
+
   ${({$p})=>$p>=0.99&&css`
     animation:pulse 1.2s ease-in-out infinite alternate;
     @keyframes pulse{from{opacity:.6;}to{opacity:1;}}
@@ -54,96 +81,138 @@ const Gif  = styled.img`
 `;
 const Ring = styled.div`
   width:72px;height:72px;margin:0 auto 1.25rem;
-  border-radius:50%;border:8px solid #444;border-top-color:#6cf;
+  border-radius:50%;
+  border:8px solid #444;
+  border-top-color:${varOr('--zu-accent', '#50fa7b')};
   animation:spin 1s linear infinite;
   @keyframes spin{to{transform:rotate(360deg);}}
+
+  @media (prefers-reduced-motion:reduce){ animation:none; }
 `;
 
 const Addy = styled.p`
-  margin:.5rem 0;font-family:monospace;
-  font-size:.9rem;word-break:break-all;
+  margin:.5rem 0;
+  font-family:monospace;
+  font-size:.9rem;
+  word-break:break-all;
+  color:${varOr('--zu-fg', '#e8e8e8')};
 `;
 
 const Caption = styled.p`
-  margin:.75rem 0 0;font-size:.9rem;
+  margin:.75rem 0 0;
+  font-size:.9rem;
+  color:${({$error})=>$error
+    ? varOr('--zu-accent-sec', '#ff3333')
+    : varOr('--zu-fg', '#e8e8e8')};
 `;
 
-/*── CSS‑steps Solari board ─────────────────────────────────*/
+/*── CSS‑steps Solari board ───────────────────────────────*/
 const wrapH = '1.2em';
 const makeFlip = (n)=>keyframes`
   to{transform:translateY(-${n*parseFloat(wrapH)}em);}
 `;
-const Wrap = styled.div`overflow:hidden;height:${wrapH};margin:.6rem auto 0;`;
-const List = styled.ul.attrs(p=>({$n:p.$n}))`
-  list-style:none;margin:0;padding:0;display:inline-block;width:100%;text-align:center;
-  animation:${p=>css`${makeFlip(p.$n)} ${p.$n*3}s steps(${p.$n}) infinite`};
+const Wrap = styled.div`
+  overflow:hidden;
+  height:${wrapH};
+  margin:.6rem auto 0;
+
+  @media (prefers-reduced-motion:reduce){ display:none; }
+`;
+const List = styled.ul.attrs((p)=>({$n:p.$n}))`
+  list-style:none;margin:0;padding:0;
+  display:inline-block;width:100%;text-align:center;
+  animation:${(p)=>css`${makeFlip(p.$n)} ${p.$n*3}s steps(${p.$n}) infinite`};
 
   li{
     height:${wrapH};
     line-height:${wrapH};
-    color:var(--zu-accent);
-    white-space:nowrap;           /* prevent wrapping */
-    overflow:hidden;              /* hide spill */
-    text-overflow:ellipsis;       /* graceful truncation */
+    color:${varOr('--zu-accent', '#50fa7b')};
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
   }
+
+  @media (prefers-reduced-motion:reduce){ animation:none; }
 `;
 
-/*════════ component ═══════════════════════════════════════*/
-export default function OperationOverlay(props){
-  const {
-    mode       = '',
-    status     = '',
-    progress:progressProp = 0,
-    error,
-    kt1, opHash, contractAddr,
-    current, step, total = 1,
-    onRetry  = undefined,
-    onCancel = () => {},
-  } = props;
-
+/*════════ component ════════════════════════════════════*/
+export default function OperationOverlay({
+  mode      = '',
+  status    = '',
+  progress: progressProp = 0,
+  error,
+  kt1, opHash, contractAddr,      /* contractAddr reserved for future use */
+  current, step, total = 1,
+  onRetry  = undefined,
+  onCancel = () => {},
+}){
+  /* progress calc */
   const cur  = Number.isFinite(current) ? current
              : Number.isFinite(step)    ? step
              : 1;
   const prog = progressProp || (total>0 ? (cur-1)/total : 0);
 
-  const [gifOk, setGifOk] = useState(true);
-  const panelRef          = useRef(null);
+  /* wheel lock */
+  const panelRef = useRef(null);
   useWheelTunnel(panelRef);
 
+  /* fun‑lines shuffle (stable) */
   const lines = useMemo(()=>{
     const a=[...FUN_LINES];
     for(let i=a.length-1;i>0;i--){
       const j=Math.floor(Math.random()*(i+1));
       [a[i],a[j]]=[a[j],a[i]];
     }
-    return [...a,a[0]];                /* seamless loop */
+    return [...a,a[0]];                   /* seamless loop */
   },[]);
 
-  /*──────── success ───*/
-  if (kt1 || opHash) {
-    const linkBtn=(href,txt)=><PixelButton as="a" href={href} target="_blank" rel="noopener noreferrer">{txt}</PixelButton>;
-    const handleClose=()=>{
-      onCancel?.();
-      if (typeof window!=='undefined') window.location.reload();
-    };
+  /* img fallback */
+  const [gifOk,setGifOk]=useState(true);
+
+  /* helpers */
+  const linkBtn = useCallback(
+    (href,txt)=>(<PixelButton as="a" href={href} target="_blank" rel="noopener noreferrer">{txt}</PixelButton>),
+    [],
+  );
+  const handleCopy = useCallback((txt)=>navigator.clipboard.writeText(txt),[]);
+  const handleClose = useCallback(()=>{
+    onCancel?.();
+    if (typeof window!=='undefined') window.location.reload();
+  },[onCancel]);
+
+  /*──────── success branch ───────*/
+  if (kt1 || opHash){
     return (
       <Back>
         <CanvasFireworks active />
-        <Panel>
+        <Panel ref={panelRef}>
           <Bar $p={1}/>
           <h2 style={{margin:'1rem 0 .5rem'}}>Success!</h2>
 
-          {kt1 && <Addy>{kt1}</Addy>}
-          {opHash && (
+          {kt1   && <Addy>{kt1}</Addy>}
+          {opHash&&(
             <Addy style={{display:'flex',gap:6,justifyContent:'center'}}>
               {opHash}
-              <a href={`${URL_TZKT_OP_BASE}${opHash}`} target="_blank" rel="noopener noreferrer" title="View on TzKT" style={{textDecoration:'none'}}>🔗</a>
+              <a
+                href={`${URL_TZKT_OP_BASE}${opHash}`}
+                target="_blank" rel="noopener noreferrer"
+                title="View on TzKT" style={{textDecoration:'none'}}
+              >🔗</a>
             </Addy>
           )}
 
-          <div style={{display:'flex',flexWrap:'wrap',gap:'1rem',justifyContent:'center',marginTop:'1rem'}}>
-            {kt1 && (<>{linkBtn(`${URL_BCD_BASE}${kt1}`,'BCD')}{linkBtn(`${URL_OBJKT_BASE}${kt1}`,'objkt')}<PixelButton as="a" href={`/manage?addr=${kt1}`}>Manage</PixelButton></>)}
-            <PixelButton onClick={()=>navigator.clipboard.writeText(kt1||opHash)}>Copy</PixelButton>
+          <div style={{
+            display:'flex',flexWrap:'wrap',
+            gap:'1rem',justifyContent:'center',marginTop:'1rem',
+          }}>
+            {kt1 && (
+              <>
+                {linkBtn(`${URL_BCD_BASE}${kt1}`,'BCD')}
+                {linkBtn(`${URL_OBJKT_BASE}${kt1}`,'objkt')}
+                <PixelButton as="a" href={`/manage?addr=${kt1}`}>Manage</PixelButton>
+              </>
+            )}
+            <PixelButton onClick={()=>handleCopy(kt1||opHash)}>Copy</PixelButton>
             <PixelButton onClick={handleClose}>Close</PixelButton>
           </div>
         </Panel>
@@ -151,31 +220,43 @@ export default function OperationOverlay(props){
     );
   }
 
-  /* progress / error branch */
-  const caption    = error ? props.status : (props.status||'Preparing request…');
+  /*──────── progress / error branch ─────*/
+  const caption = error ? status : (status||'Preparing request…');
   const walletHint = /wallet/i.test(caption)&&!error;
-  const showSig    = props.total>1 && !error;
+  const showSig    = total>1 && !error;
 
   return (
     <Back>
-      <CanvasFireworks active={!!(kt1||opHash)}/>
+      <CanvasFireworks active={false}/>
       <Panel ref={panelRef}>
         <Bar $p={prog}/>
-        {gifOk ? <Gif src="/sprites/loading48x48.gif" alt="loading" onError={()=>setGifOk(false)}/> : <Ring />}
-        {showSig && <h3 style={{margin:'.25rem 0 .4rem',fontSize:'1rem'}}>Signature {cur} of {total}</h3>}
+        {gifOk
+          ? <Gif src="/sprites/loading48x48.gif" alt="loading" onError={()=>setGifOk(false)}/>
+          : <Ring />}
 
-        {error && <h2 style={{color:'var(--zu-accent-sec)'}}>Error</h2>}
-        <Caption>{caption}</Caption>
+        {showSig && (
+          <h3 style={{margin:'.25rem 0 .4rem',fontSize:'1rem'}}>
+            Signature&nbsp;{cur}&nbsp;of&nbsp;{total}
+          </h3>
+        )}
+
+        {error && (
+          <h2 style={{color:varOr('--zu-accent-sec', '#ff3333')}}>Error</h2>
+        )}
+
+        <Caption $error={!!error}>{caption}</Caption>
 
         {walletHint && (
           <p style={{fontSize:'.8rem',opacity:.8,marginTop:4}}>
-            Wallet pop‑up opening.<br/><strong>Review total fees</strong> then sign.<br/>Confirmation may take a while.
+            Wallet pop‑up opening.<br/>
+            <strong>Review total fees</strong> then sign.<br/>
+            Confirmation may take a while.
           </p>
         )}
 
         {error && total>1 && (
-          <p style={{ fontSize:'.8rem', opacity:.8, marginTop:4 }}>
-            Already‑confirmed slices won’t be resent on retry.
+          <p style={{fontSize:'.8rem',opacity:.8,marginTop:4}}>
+            Already‑confirmed slices won’t be resent on retry.
           </p>
         )}
 
@@ -187,16 +268,25 @@ export default function OperationOverlay(props){
           </Wrap>
         )}
 
-        <div style={{display:'flex',gap:'1rem',justifyContent:'center',marginTop:'1rem'}}>
+        <div style={{
+          display:'flex',gap:'1rem',
+          justifyContent:'center',marginTop:'1rem',
+        }}>
           {error && onRetry && <PixelButton onClick={onRetry}>Retry</PixelButton>}
-          <PixelButton onClick={onCancel}>{error ? 'Close' : 'Cancel'}</PixelButton>
+          <PixelButton warning={!error} onClick={onCancel}>
+            {error ? 'Close' : 'Cancel'}
+          </PixelButton>
         </div>
       </Panel>
     </Back>
   );
 }
 /* What changed & why:
-   • <li> now uses white‑space:nowrap + ellipsis to stop wrap/overlap.
-   • Added line‑height to match fixed height for vertical centring.
-   • Rev bump r726.                                              */
+   • Re‑applied r951 palette‑aware refactor: Panel/Bar/Ring now drive
+     colours from CSS vars → readable on light palettes.
+   • Added ARIA dialog attributes + reduced‑motion guards.
+   • Progress bar uses `--zu-accent`; fallback fixed.
+   • Caption/error colours var‑driven; background/fg adapt via vars.
+   • Kept Solari board but hides when prefers‑reduced‑motion.
+   • Close reloads page (I97).  */
 /* EOF */

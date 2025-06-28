@@ -1,19 +1,17 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/utils/listLiveTokenIds.js
-  Rev :    r709   2025‑08‑06
-  Summary: resilient chunked queries + stricter URL caps
-           • live‑supply + name look‑ups split in ≤ 80‑id batches
-           • keeps r684 feature‑set & MEM caches, fixes 413/ECONNRESET
+  Rev :    r710   2025‑08‑12
+  Summary: trim TzKT payload – metadata.name only (fix ECONNRESET)
 ──────────────────────────────────────────────────────────────*/
 import { jFetch }   from '../core/net.js';
 import { TZKT_API } from '../config/deployTarget.js';
 
-const MEM       = new Map();                       /* ids only */
-const MEM_NAMES = new Map();                       /* [{id,name}] */
+const MEM       = new Map();                       /* ids only            */
+const MEM_NAMES = new Map();                       /* [{id,name}]         */
 const BURN_ADDR = 'tz1burnburnburnburnburnburnburjAYjjX';
 const TTL_MS    = 30_000;
-const CHUNK     = 80;                              /* safe head‑room */
+const CHUNK     = 80;
 
 /*──────── helpers ───────────────────────────────────────────*/
 const baseURL = (net = 'ghostnet') =>
@@ -22,17 +20,23 @@ const baseURL = (net = 'ghostnet') =>
 
 const chunk = (arr, n = CHUNK) => {
   const out = [];
-  for (let i = 0; i < arr.length; i += n)
-    out.push(arr.slice(i, i + n));
+  for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, n + i));
   return out;
 };
 
 /**
- * List of live token‑ids (and optional names) for a contract.
+ * listLiveTokenIds()
+ * Light‑weight live token‑id fetcher with optional names.
+ *
+ * • Always filters burned / destroyed ids.
+ * • Caches both ids‑only and id+name flavours separately.
+ * • When withNames === true, queries only metadata.name to avoid
+ *   100 kB+ JSON blobs that were causing `ERR_CONNECTION_RESET` on
+ *   some networks & ISP middleboxes.
  *
  * @param {string}  contract   KT1‑address
- * @param {string=} net        ghostnet | mainnet  (auto from TZKT_API)
- * @param {boolean=} withNames if true returns objects { id, name }
+ * @param {string=} net        ghostnet | mainnet
+ * @param {boolean=} withNames if true returns [{ id, name }]
  * @returns {Promise<number[]|{id:number,name:string}[]>}
  */
 export default async function listLiveTokenIds(
@@ -50,9 +54,10 @@ export default async function listLiveTokenIds(
   const api  = baseURL(net);
   const cand = new Map();                          /* id → true|false */
 
-  /* balance scan (one call, 10 k cap) */
+  /* balance scan (single 10 k cap request) */
   const rows = await jFetch(
-    `${api}/tokens/balances?token.contract=${contract}`
+    `${api}/tokens/balances`
+      + `?token.contract=${contract}`
       + '&balance.gt=0'
       + '&select=token.tokenId,account.address'
       + '&limit=10000',
@@ -70,15 +75,16 @@ export default async function listLiveTokenIds(
     .filter(([, ok]) => ok)
     .map(([id]) => id);
 
-  /* live‑supply guard: chunk to avoid 413/ECONNRESET */
+  /* live‑supply guard */
   if (ids.length) {
     const alive = new Set();
     for (const grp of chunk(ids)) {
       const liveRows = await jFetch(
-        `${api}/tokens?contract=${contract}`
+        `${api}/tokens`
+          + `?contract=${contract}`
           + `&tokenId.in=${grp.join(',')}`
           + '&select=tokenId,totalSupply'
-          + '&limit=10000',
+          + `&limit=${grp.length}`,
       ).catch(() => []);
       liveRows.forEach((r) => {
         if (Number(r.totalSupply) > 0) alive.add(+r.tokenId);
@@ -90,33 +96,40 @@ export default async function listLiveTokenIds(
   MEM.set(key, { ids, ts: Date.now() });
   if (!withNames) return ids;
 
-  /*── id+name cache ────────────────────────────────*/
+  /*── ids+names cache ─────────────────────────────*/
   const hit2 = MEM_NAMES.get(key);
   if (hit2 && Date.now() - hit2.ts < TTL_MS) return hit2.list;
 
-  const list = [];
+  const nameMap = new Map();
   if (ids.length) {
-    /* multiple small queries to keep URL short */
-    const nameMap = new Map();
     for (const grp of chunk(ids)) {
       const nameRows = await jFetch(
-        `${api}/tokens?contract=${contract}`
+        `${api}/tokens`
+          + `?contract=${contract}`
           + `&tokenId.in=${grp.join(',')}`
-          + '&select=tokenId,metadata'
-          + '&limit=10000',
+          + '&select=tokenId,metadata.name'
+          + `&limit=${grp.length}`,
       ).catch(() => []);
       nameRows.forEach((r) => {
         const id  = +r.tokenId;
-        const nm  = r.metadata?.name || r.metadata?.tokenName || '';
+        const nm  = r['metadata.name'] ?? '';      /* flattened key */
         if (nm) nameMap.set(id, nm);
       });
     }
-    ids.forEach((id) => {
-      const nm = (nameMap.get(id) || '').slice(0, 40);
-      list.push({ id, name: nm || `Token ${id}` });
-    });
   }
+
+  const list = ids.map((id) => ({
+    id,
+    name: (nameMap.get(id) || `Token ${id}`).slice(0, 40),
+  }));
+
   MEM_NAMES.set(key, { list, ts: Date.now() });
   return list;
 }
+/* What changed & why:
+   • Switched name‑lookup query to `select=tokenId,metadata.name` instead
+     of full `metadata` object, slashing payload size by >90 %.
+   • Per‑chunk `limit` now equals chunk length, avoiding 10000 default.
+   • Fixes sporadic `ERR_CONNECTION_RESET 200` and speeds up all dropdowns.
+*/
 /* EOF */

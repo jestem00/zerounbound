@@ -20,6 +20,7 @@ const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
 /*──────── helpers ───────────────────────────────────────────*/
 const ipfsToHttp = (u='') => u.replace(/^ipfs:\/\//,'https://ipfs.io/ipfs/');
+const PLACEHOLDER = '/sprites/cover_default.svg';
 
 /*──────── styled shells ─────────────────────────────────────*/
 const Card = styled.section`
@@ -99,9 +100,10 @@ export default function ContractMetaPanelContracts({
     setTimeout(() => setCopied(false), 900);
   };
 
-  const thumb = ipfsToHttp(
-    meta.imageUri || meta.thumbnailUri || meta.displayUri || '',
-  );
+  const [thumbOk, setThumbOk] = useState(true);
+  const thumb = thumbOk
+    ? ipfsToHttp(meta.imageUri || meta.thumbnailUri || meta.displayUri || '')
+    : PLACEHOLDER;
 
   return (
     <Card>
@@ -109,6 +111,7 @@ export default function ContractMetaPanelContracts({
         <RenderMedia
           uri={thumb}
           alt={meta.name}
+          onInvalid={()=>setThumbOk(false)}
         />
       </Thumb>
 

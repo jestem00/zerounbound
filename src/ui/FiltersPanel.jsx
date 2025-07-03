@@ -57,15 +57,23 @@ export default function FiltersPanel({ tokens = [], filters, setFilters, renderT
   });
 
   /* handlers */
+  const closeIfMobile = () => {
+    if (window.innerWidth < 1100) setShow(false);
+  };
+
   const toggleSetVal = (setName, val) => {
     setFilters((f) => {
       const s = new Set(f[setName]);
       s.has(val) ? s.delete(val) : s.add(val);
       return { ...f, [setName]: s };
     });
+    closeIfMobile();
   };
 
-  const onRadio = (key, val) => setFilters((f) => ({ ...f, [key]: val }));
+  const onRadio = (key, val) => {
+    setFilters((f) => ({ ...f, [key]: val }));
+    closeIfMobile();
+  };
 
   /* mobile modal close on resize */
   useEffect(() => {
@@ -148,7 +156,6 @@ export default function FiltersPanel({ tokens = [], filters, setFilters, renderT
         ))}
       </Section>
 
-      <PixelButton onClick={()=>setFilters({...filters})}>APPLY</PixelButton>
     </Panel>
   );
 

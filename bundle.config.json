@@ -19,6 +19,7 @@
         "src/ui/ContractMetaPanelContracts.jsx",
         "src/ui/TokenIdSelect.jsx",
         "src/ui/TokenCard.jsx",
+        "src/ui/MakeOfferDialog.jsx",
         "src/ui/FiltersPanel.jsx",
         "src/utils/decodeHexFields.js",
         "src/ui/ExploreNav.jsx",
@@ -30,9 +31,7 @@
         "src/deployTarget.js",
         "src/constants/integrityBadges.js",
         "src/utils/onChainValidator.js",
-        "src/utils/listLiveTokenIds.js",
-        "src/ui/ContractMetaPanel.jsx",
-        "src/ui/TokenMetaPanel.jsx"
+        "src/utils/listLiveTokenIds.js"
       ]
     },
 

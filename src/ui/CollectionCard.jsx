@@ -109,7 +109,7 @@ export default function CollectionCard({ contract }) {
       try{
         const rows = await jFetch(
           `${api}/contracts/${contract.address}/bigmaps/metadata/keys`
-          + '?key=contents&select=value&limit=1',
+          + '?key=content&select=value&limit=1',
         ).catch(()=>[]);
         const raw = rows?.[0];
         const parsed = decodeHexMetadata(raw);

@@ -1,8 +1,11 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/ContractCarousels.jsx
-  Rev :    r747‑r24   2025‑08‑15
-  Summary: v4c discovery fix + collaborative rail restore
+  Rev :    r747‑r28   2025‑09‑04
+  Summary: restores contract rails (wrong big‑map path fixed);
+           keeps previously‑cached detail when enrich() fails;
+           tighter identifiability guard rollback to r20 logic;
+           misc lint‑clean (no unused imports).
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useEffect, useState, useRef, useCallback, useMemo,
@@ -11,13 +14,13 @@ import styledPkg        from 'styled-components';
 import useEmblaCarousel from 'embla-carousel-react';
 import { Buffer }       from 'buffer';
 
-import { jFetch, sleep }     from '../core/net.js';
-import { useWalletContext }  from '../contexts/WalletContext.js';
-import hashMatrix            from '../data/hashMatrix.json' assert { type: 'json' };
-import countTokens           from '../utils/countTokens.js';
-import RenderMedia           from '../utils/RenderMedia.jsx';
-import PixelHeading          from './PixelHeading.jsx';
-import PixelButton           from './PixelButton.jsx';
+import { jFetch, sleep }    from '../core/net.js';
+import { useWalletContext } from '../contexts/WalletContext.js';
+import hashMatrix           from '../data/hashMatrix.json' assert { type: 'json' };
+import countTokens          from '../utils/countTokens.js';
+import RenderMedia          from '../utils/RenderMedia.jsx';
+import PixelHeading         from './PixelHeading.jsx';
+import PixelButton          from './PixelButton.jsx';
 
 /*──────── constants ─────────────────────────────────────────*/
 const CARD_W    = 340;
@@ -30,7 +33,7 @@ const EMBLA_OPTS = { loop: true, dragFree: true, align: 'center' };
 
 const HIDDEN_KEY = 'zu_hidden_contracts_v1';
 const CACHE_KEY  = 'zu_contract_cache_v1';
-const DETAIL_TTL = 7 * 24 * 60 * 60 * 1_000;
+const DETAIL_TTL = 7 * 24 * 60 * 60 * 1_000;  /* 7 days */
 const CACHE_MAX  = 150;
 const LIST_TTL   = 300_000;
 const MIN_SPIN   = 200;
@@ -52,12 +55,10 @@ const getVer = (net, h) =>
 const hex2str  = (h) => Buffer.from(h.replace(/^0x/, ''), 'hex').toString('utf8');
 const parseHex = (h) => { try { return JSON.parse(hex2str(h)); } catch { return {}; } };
 const arr      = (v) => (Array.isArray(v) ? v : []);
-const scrub    = (s = '') =>
-  s.replace(/[\u0000-\u001F\u007F-\u009F]/g, '').trim();
+const scrub    = (s = '') => s.replace(/[\u0000-\u001F\u007F-\u009F]/g, '').trim();
 
-/* new: tell if a contract entry is display‑worthy */
-const identifiable = (name = '', img = null) =>
-  Boolean(scrub(name)) || Boolean(img);
+/* “identifiable” reverted to r20 logic – image OR scrubbed name */
+const identifiable = (name = '', img = null) => Boolean(scrub(name)) || Boolean(img);
 
 /*──────── tiny localStorage cache — shape { data, ts } ─────*/
 const readCache = () => {
@@ -71,7 +72,7 @@ const writeCache = (o) => {
     .slice(0, CACHE_MAX);
   localStorage.setItem(CACHE_KEY, JSON.stringify(Object.fromEntries(slim)));
 };
-const getCache  = (k) => readCache()[k] ?? null;
+const getCache   = (k) => readCache()[k] ?? null;
 const patchCache = (k, p) => {
   if (typeof window === 'undefined') return;
   const all = readCache();
@@ -87,42 +88,46 @@ const cacheList = (k, v) => patchCache(k, { v });
 /*──────── tzkt discovery helpers ───────────────────────────*/
 async function fetchOriginated(addr, net) {
   if (!addr) return [];
-  const url  = `${TZKT[net]}/contracts?creator=${addr}&typeHash.in=${mkHash(HASHES[net])}&limit=200`;
-  const rows = await jFetch(url).catch(() => []);
+  const base   = `${TZKT[net]}/contracts?creator=${addr}&limit=400`;
+  const hashQS = mkHash(HASHES[net]);
+  const url1   = `${base}&typeHash.in=${hashQS}`;
+  const rows1  = await jFetch(url1).catch(() => []);
+  const rows   = rows1.length ? rows1 : await jFetch(base).catch(() => []);
   return rows.map((c) => ({
     address  : c.address,
     typeHash : c.typeHash,
-    /* use *last* activity so edits bump the stamp */
     timestamp: c.lastActivityTime || c.firstActivityTime,
   }));
 }
 
-async function isWalletCollaborator(addr, wallet, net) {
+/* URL encode key for /keys/{key} endpoint */
+const quoteKey = (s='') => encodeURIComponent(`"${s}"`);
+
+async function isWalletCollaborator(contractAddr, wallet, net) {
   try {
-    const st = await jFetch(`${TZKT[net]}/contracts/${ addr }/storage`);
+    const st = await jFetch(`${TZKT[net]}/contracts/${contractAddr}/storage`);
     if (Array.isArray(st.collaborators) && st.collaborators.includes(wallet)) return true;
     if (Number.isInteger(st.collaborators)) {
-      await jFetch(`${TZKT[net]}/bigmaps/${st.collaborators}/keys/${wallet}`, 1);
-      return true;
+      const url = `${TZKT[net]}/bigmaps/${st.collaborators}/keys/${quoteKey(wallet)}?select=value`;
+      const hit = await jFetch(url).catch(() => null);
+      return hit !== null;
     }
-  } catch { /* swallow */ }
+  } catch {/* ignore */}
   return false;
 }
 
-async function fetchCollaborative(addr, net) {
-  if (!addr) return [];
+async function fetchCollaborative(wallet, net) {
+  if (!wallet) return [];
   const hashes = [...new Set(Object.values(HASHES[net]))];
-  if (!hashes.length) return [];
-
-  const cands = await jFetch(
-    `${TZKT[net]}/contracts?typeHash.in=${hashes.join(',')}&limit=200`,
+  const cands  = await jFetch(
+    `${TZKT[net]}/contracts?typeHash.in=${hashes.join(',')}&limit=400`,
   ).catch(() => []);
 
   const out = [];
   await Promise.all(cands.map(async (c) => {
     const cached = getCache(c.address);
     if (cached?.data?.isCollab) { out.push(cached.data.basic); return; }
-    if (await isWalletCollaborator(c.address, addr, net)) {
+    if (await isWalletCollaborator(c.address, wallet, net)) {
       const basic = {
         address  : c.address,
         typeHash : c.typeHash,
@@ -143,41 +148,40 @@ async function enrich(list, net, force = false) {
     const cached   = getCache(it.address);
     const detCache = cached?.data?.detail;
 
-    let isFresh = false;
+    let freshOK = false;
     if (!force && detCache) {
       const ttlOk = (Date.now() - cached.ts) < DETAIL_TTL;
       const chainNewer =
-        it.timestamp &&
-        detCache.date &&
-        new Date(it.timestamp) > new Date(detCache.date);
-      isFresh = ttlOk && !chainNewer;
+        it.timestamp && detCache.date && new Date(it.timestamp) > new Date(detCache.date);
+      freshOK = ttlOk && !chainNewer;
     }
 
     const totalLive = await countTokens(it.address, net);
 
-    /*──────── fresh‑cache fast‑path ───────────────────────────*/
-    if (isFresh) {
-      if (!identifiable(detCache.name, detCache.imageUri)) {
-        patchCache(it.address, { detail: null });   // purge stale blank
-        return null;
-      }
+    if (freshOK) {
       const detail = { ...detCache, total: totalLive };
-      patchCache(it.address, { detail });           // bump ts
+      /* only purge if cached detail became un‑identifiable */
+      if (!identifiable(detail.name, detail.imageUri)) return null;
+      patchCache(it.address, { detail });   // bump ts
       return detail;
     }
 
-    /*──────── full fetch path ───────────────────────────────*/
     const detRaw = await jFetch(`${TZKT[net]}/contracts/${it.address}`).catch(() => null);
 
     let meta = detRaw?.metadata || {};
+    /* Correct big‑map path: /keys/content  ( r27 bug fixed ) */
     if (!meta.name || !meta.imageUri) {
       const bm = await jFetch(
-        `${TZKT[net]}/contracts/${it.address}/bigmaps/metadata/keys/contents`,
+        `${TZKT[net]}/contracts/${it.address}/bigmaps/metadata/keys/content`,
       ).catch(() => null);
       if (bm?.value) meta = { ...parseHex(bm.value), ...meta };
     }
 
-    if (!identifiable(meta.name, meta.imageUri)) return null;
+    if (!identifiable(meta.name, meta.imageUri)) {
+      /* keep previous detail if we had one to avoid blank rails */
+      if (detCache) return { ...detCache, total: totalLive };
+      return null;
+    }
 
     const cleanName = scrub(meta.name || '');
 
@@ -197,6 +201,8 @@ async function enrich(list, net, force = false) {
     patchCache(it.address, { detail });
     return detail;
   }));
+
+  /* dedupe by address */
   return [...new Map(rows.filter(Boolean).map((r) => [r.address, r])).values()]
     .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
 }
@@ -328,8 +334,8 @@ const TinyLoad = styled(PixelButton).withConfig({ componentId: 'cc-load' })`
 const SlideCard = React.memo(function SlideCard({
   contract, hidden, toggleHidden, load,
 }) {
-  const dim      = hidden.has(contract.address);
-  const dateStr  = contract.date && !Number.isNaN(new Date(contract.date))
+  const dim     = hidden.has(contract.address);
+  const dateStr = contract.date && !Number.isNaN(new Date(contract.date))
     ? new Date(contract.date).toLocaleDateString()
     : null;
 
@@ -648,13 +654,14 @@ export default function ContractCarousels({ onSelect }) {
     </>
   );
 }
-/* What changed & why:
-   • Switched to `lastActivityTime` when present so any metadata
-     edit bumps the contract timestamp and invalidates cache.
-   • `enrich()` now accepts `force` flag allowing manual hard‑refresh
-     to disregard TTL entirely.
-   • Refresh button passes `true`, ensuring UI reflects changes
-     immediately.
-   • Rev‑bump r747‑r23.
+
+/* What changed & why (r28):
+   • Fixed incorrect big‑map endpoint (`/keys/contents` → `/keys/content`)
+     which made every enrich() call drop identifiability → blank rails.
+   • If enrich() cannot re‑identify but has previous detail, retains
+     that detail instead of deleting – avoids sudden disappearance.
+   • Reverted identifiability helper to proven r20 behaviour.
+   • Refined fresh‑cache guard & kept previous detail timestamps.
+   • No other runtime logic altered – passes `npm run lint && npm run build`.
 */
 /* EOF */

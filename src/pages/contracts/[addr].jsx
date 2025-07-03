@@ -1,26 +1,25 @@
-/*──────── src/pages/contracts/[addr].jsx ────────*/
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/contracts/[addr].jsx
-  Rev :    r9     2025‑08‑22
-  Summary: token list derives from listLiveTokenIds → burn‑held
-           ids excluded; banner stats sync; meta fallback decode
+  Rev :    r11    2025‑08‑24
+  Summary: hex‑metadata decode + name/desc fix
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useEffect, useMemo, useState,
 } from 'react';
-import { useRouter }        from 'next/router';
-import styledPkg            from 'styled-components';
+import { useRouter }      from 'next/router';
+import styledPkg          from 'styled-components';
 
-import ExploreNav                   from '../../ui/ExploreNav.jsx';
-import ContractMetaPanelContracts   from '../../ui/ContractMetaPanelContracts.jsx';
-import TokenCard                    from '../../ui/TokenCard.jsx';
-import PixelInput                   from '../../ui/PixelInput.jsx';
-import PixelButton                  from '../../ui/PixelButton.jsx';
+import ExploreNav                 from '../../ui/ExploreNav.jsx';
+import ContractMetaPanelContracts from '../../ui/ContractMetaPanelContracts.jsx';
+import TokenCard                  from '../../ui/TokenCard.jsx';
+import PixelInput                 from '../../ui/PixelInput.jsx';
+import PixelButton                from '../../ui/PixelButton.jsx';
+import TokenIdSelect              from '../../ui/TokenIdSelect.jsx';
 
-import countOwners                  from '../../utils/countOwners.js';
-import listLiveTokenIds             from '../../utils/listLiveTokenIds.js';
-import { jFetch }                   from '../../core/net.js';
+import countOwners      from '../../utils/countOwners.js';
+import listLiveTokenIds from '../../utils/listLiveTokenIds.js';
+import { jFetch }       from '../../core/net.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -45,6 +44,22 @@ const Grid = styled.div`
 /*──────── helpers ───────────────────────────────────────────*/
 const ipfsToHttp = (u='') => u.replace(/^ipfs:\/\//,'https://ipfs.io/ipfs/');
 
+function decodeHexMetadata(val = '') {
+  try {
+    if (typeof val !== 'string') return null;
+    const s = val.trim();
+    if (s.startsWith('{') && s.endsWith('}')) return JSON.parse(s);
+    const hex = s.replace(/^0x/, '');
+    if (!/^[0-9a-f]+$/i.test(hex) || hex.length % 2) return null;
+    const bytes = new Uint8Array(hex.match(/.{1,2}/g).map((b) => parseInt(b, 16)));
+    return JSON.parse(
+      new TextDecoder().decode(bytes).replace(/[\u0000-\u001F\u007F]/g, ''),
+    );
+  } catch {
+    return null;
+  }
+}
+
 /*──────── component ───────────────────────────────────────*/
 export default function ContractPage() {
   const router           = useRouter();
@@ -52,10 +67,12 @@ export default function ContractPage() {
   const net              = 'ghostnet';
 
   /* data */
-  const [meta, setMeta]        = useState(null);
-  const [tokens, setTokens]    = useState([]);
-  const [owners, setOwners]    = useState(null);
-  const [loading, setLoading]  = useState(true);
+  const [meta, setMeta]       = useState(null);
+  const [tokens, setTokens]   = useState([]);
+  const [owners, setOwners]   = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [tokOpts, setTokOpts] = useState([]);
+  const [tokSel,  setTokSel]  = useState('');
 
   /* ui */
   const [search, setSearch] = useState('');
@@ -66,40 +83,41 @@ export default function ContractPage() {
     if (!addr) return;
     const api = 'https://api.ghostnet.tzkt.io/v1';
 
-    /* 1 · contract metadata w/ fallback big‑map decode */
+    /* 1 · contract metadata (hex → JSON fallback) */
     (async () => {
       try {
         const r = await jFetch(`${api}/contracts/${addr}`);
-        setMeta(r?.metadata ?? {});
-        if (!r?.metadata?.imageUri) {
+        let m   = r?.metadata ?? {};
+        if (!m?.name) {
           const [v] = await jFetch(
             `${api}/contracts/${addr}/bigmaps/metadata/keys?key=content&select=value`,
           ).catch(() => []);
-          if (v && !cancel) {
-            const hex = String(v).replace(/^0x/,'');
-            try {
-              const j = JSON.parse(
-                new TextDecoder().decode(
-                  new Uint8Array(hex.match(/.{1,2}/g).map((b)=>parseInt(b,16))),
-                ),
-              );
-              setMeta((m)=>({ ...j, ...m }));
-            } catch {/* ignore */}
-          }
+          const decoded = decodeHexMetadata(v);
+          if (decoded) m = { ...decoded, ...m };
         }
+        if (!cancel) setMeta(m);
       } catch { if (!cancel) setMeta({}); }
     })();
 
-    /* 2 · tokens raw */
+    /* 2 · tokens & dropdown names */
     (async () => {
       try {
-        const [raw, goodIds] = await Promise.all([
+        const [raw, live] = await Promise.all([
           jFetch(`${api}/tokens?contract=${addr}&limit=10000`),
-          listLiveTokenIds(addr, net),
+          listLiveTokenIds(addr, net, true),
         ]);
         if (cancel) return;
-        const allow = new Set(goodIds);
-        setTokens((raw || []).filter((t)=>allow.has(+t.tokenId)));
+        const allow = new Set(live.map((o) => +o.id));
+        const decoded = (raw || []).filter((t) => allow.has(+t.tokenId))
+          .map((t) => {
+            if (typeof t.metadata === 'string') {
+              const j = decodeHexMetadata(t.metadata);
+              if (j) t.metadata = j;           // eslint-disable-line no-param-reassign
+            }
+            return t;
+          });
+        setTokens(decoded);
+        setTokOpts(live);
       } finally { if (!cancel) setLoading(false); }
     })();
 
@@ -109,9 +127,11 @@ export default function ContractPage() {
     return () => { cancel = true; };
   }, [addr, net]);
 
-  /*── search + sort ───────────────────────────────────────*/
+  /*── search + sort + token‑id filter ─────────────────────*/
   const list = useMemo(() => {
     let out = [...tokens];
+    if (tokSel) return out.filter((t) => String(t.tokenId) === String(tokSel));
+
     const q = search.trim().toLowerCase();
     if (q) {
       out = out.filter((t) => {
@@ -127,12 +147,13 @@ export default function ContractPage() {
       });
     }
     switch (sort) {
-      case 'oldest': out.sort((a,b)=>a.tokenId - b.tokenId); break;
-      default:       out.sort((a,b)=>b.tokenId - a.tokenId);
+      case 'oldest': out.sort((a, b) => a.tokenId - b.tokenId); break;
+      default:       out.sort((a, b) => b.tokenId - a.tokenId);
     }
     return out;
-  }, [tokens, search, sort]);
+  }, [tokens, search, sort, tokSel]);
 
+  /* token cards */
   const cards = useMemo(() =>
     list.map((t) => (
       <TokenCard
@@ -167,16 +188,26 @@ export default function ContractPage() {
         <PixelInput
           placeholder="Search tokens…"
           value={search}
-          onChange={(e)=>setSearch(e.target.value)}
+          onChange={(e) => setSearch(e.target.value)}
         />
         <select
           value={sort}
-          onChange={(e)=>setSort(e.target.value)}
+          onChange={(e) => setSort(e.target.value)}
           style={{ fontFamily:'inherit',padding:'4px 6px' }}
         >
           <option value="newest">Newest</option>
           <option value="oldest">Oldest</option>
         </select>
+        <TokenIdSelect
+          options={tokOpts}
+          value={tokSel}
+          onChange={setTokSel}
+        />
+        {tokSel && (
+          <PixelButton size="sm" onClick={() => setTokSel('')}>
+            CLEAR
+          </PixelButton>
+        )}
       </ControlsRow>
 
       {loading
@@ -185,9 +216,9 @@ export default function ContractPage() {
     </Wrap>
   );
 }
-/* What changed & why (r9):
-   • Token list intersects raw query with listLiveTokenIds() output,
-     guaranteeing burn‑held IDs are excluded everywhere (I67).
-   • Banner stats derive from filtered list.
-   • Metadata fallback decodes contract big‑map when TzKT meta empty.
-   • ipfs:// thumb auto‑rewritten → https://ipfs.io/ipfs/. */
+/* What changed & why (r11):
+   • Added decodeHexMetadata() to parse hex‑encoded contract & token
+     metadata, restoring collection name/description and token info.
+   • Contract big‑map fallback reinstated when TzKT meta empty.
+   • Tokens array now holds decoded metadata; dropdown unchanged. */
+/* EOF */

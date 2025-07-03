@@ -1,9 +1,11 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/RepairUriV4a.jsx
-  Rev :    r830   2025‑08‑16
-  Summary: parity with v4 watchdog, diff diagnostics, uri‑key
-           picker, dynamic storageLimit & packed batching.
+  Rev :    r831   2025‑08‑17
+  Summary: dropdown now lists *only* tokens the connected
+           wallet appears in `metadata.creators`; retains
+           watchdog, diff diagnostics, dynamic storageLimit,
+           packed batching, and uri‑key picker.
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useCallback, useEffect, useState, useMemo,
@@ -39,6 +41,7 @@ import { useWalletContext } from '../../contexts/WalletContext.js';
 
 /*──────── constants ─────*/
 const CONFIRM_TIMEOUT_MS = 120_000;
+const CHUNK              = 80;            /* ids per filter‑query        */
 
 /*──────── watchdog ─────*/
 async function confirmOrTimeout(op, timeout = CONFIRM_TIMEOUT_MS) {
@@ -68,7 +71,11 @@ export default function RepairUriV4a({
   onMutate    = () => {},
   $level,
 }) {
-  const { toolkit, network = 'ghostnet' } = useWalletContext() || {};
+  const {
+    toolkit,
+    network = 'ghostnet',
+    address: walletAddress,
+  } = useWalletContext() || {};
   const snack = (m, s = 'info') =>
     setSnackbar({ open:true, message:m, severity:s });
 
@@ -78,9 +85,48 @@ export default function RepairUriV4a({
   const fetchTokens = useCallback(async () => {
     if (!contractAddress) return;
     setLoadingTok(true);
-    setTokOpts(await listLiveTokenIds(contractAddress, network, true));
+
+    /* step‑1: base list (ids + names) */
+    let base = await listLiveTokenIds(contractAddress, network, true);
+
+    /* step‑2: filter to tokens whose `metadata.creators`
+       array includes the connected wallet.  If wallet not
+       connected we keep the full list (read‑only browse).   */
+    if (walletAddress && base.length) {
+      const api = `${TZKT_API}/v1`;
+      const mine = [];
+
+      for (let i = 0; i < base.length; i += CHUNK) {
+        const sliceIds = base.slice(i, i + CHUNK).map((t) => t.id);
+        const rows = await jFetch(
+          `${api}/tokens`
+          + `?contract=${contractAddress}`
+          + `&tokenId.in=${sliceIds.join(',')}`
+          + '&select=tokenId,metadata.name,metadata.creators'
+          + `&limit=${sliceIds.length}`,
+        ).catch(() => []);
+
+        rows.forEach((r) => {
+          const creators = r['metadata.creators'] || [];
+          const id       = +r.tokenId;
+          const nm       = r['metadata.name'] ?? `Token ${id}`;
+          const match =
+            Array.isArray(creators)
+              ? creators.some((c) =>
+                  String(c).toLowerCase() === walletAddress.toLowerCase())
+              : typeof creators === 'string'
+                  && creators.toLowerCase().includes(walletAddress.toLowerCase());
+
+          if (match) mine.push({ id, name: nm.slice(0, 40) });
+        });
+      }
+      base = mine;
+    }
+
+    base.sort((a, b) => a.id - b.id);
+    setTokOpts(base);
     setLoadingTok(false);
-  }, [contractAddress, network]);
+  }, [contractAddress, network, walletAddress]);
   useEffect(() => { void fetchTokens(); }, [fetchTokens]);
 
   /* local state */
@@ -338,8 +384,8 @@ export default function RepairUriV4a({
         ① Pick token → ② choose URI key → ③ upload the <em>exact</em> original
         file. Missing bytes will be appended automatically.<br/>
         ⚠ If on‑chain bytes are <strong>longer</strong> than your upload
-        (duplicate slice), clear the URI first.<br/>
-        ⛓ Repairs are chunked; a watchdog aborts if confirmation exceeds 2 min,
+        (duplicate slice), you will have to clear the uri with the proper update_token_metadata entrypoint for ZeroTerminal minted tokens<br/>
+        ⛓ Repairs are chunked; a watchdog aborts if confirmation exceeds&nbsp;2 min,
         allowing safe RETRY / RESUME.
       </HelpBox>
 

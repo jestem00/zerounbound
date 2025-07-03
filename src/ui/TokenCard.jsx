@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/TokenCard.jsx
-  Rev :    r3     2025‑08‑24
-  Summary: robust script‑hazard detect + overlay z‑fix
+  Rev :    r5     2025‑08‑24
+  Summary: creators alias + author‑fallback
 ──────────────────────────────────────────────────────────────*/
 import {
   useState, useMemo, useCallback,
@@ -22,7 +22,7 @@ import { shortKt }        from '../utils/formatAddress.js';
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
 /*──────── styled shells ─────────────────────────────────────*/
-const Card = styled.div`
+const Card = styled.article`
   position: relative;
   border: 2px solid var(--zu-accent,#00c8ff);
   background: var(--zu-bg,#000);
@@ -54,18 +54,23 @@ const Obf = styled.div`
   p{margin:0;width:80%;}
 `;
 
-const Meta = styled.div`
-  padding: 6px; display: flex; flex-direction: column; gap: 4px;
-  h4{margin:0;font-size:.8rem;line-height:1.15;font-family:'Pixeloid Sans',monospace;}
+const Meta = styled.section`
+  background: var(--zu-bg-alt,#171717);
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 70px;
+  h4{margin:0;font-size:.82rem;line-height:1.15;font-family:'Pixeloid Sans',monospace;}
   p {margin:0;font-size:.7rem;opacity:.85;}
 `;
 
 const StatRow = styled.div`
-  display:flex;justify-content:space-between;font-size:.7rem;
+  display:flex;justify-content:space-between;align-items:center;font-size:.7rem;
 `;
 
 const Addr = styled.a`
-  font-size:.65rem;opacity:.6;text-decoration:none;color:inherit;
+  font-size:.65rem;opacity:.7;text-decoration:none;color:inherit;
   &:hover{text-decoration:underline;}
 `;
 
@@ -96,11 +101,11 @@ export default function TokenCard({
   const [allowFlash,   setAllowFlash]   = useConsent('flash',   false);
   const [allowScripts, setAllowScripts] = useConsent('scripts', false);
 
-  /* basic hazards */
+  /* hazards */
   const { nsfw, flashing, scripts } = detectHazards(meta);
   const hidden = (nsfw && !allowNSFW) || (flashing && !allowFlash);
 
-  /* extended script detection — html/js filenames or data:html */
+  /* script hazard extra checks */
   const htmlRegex   = /\.(html?|js)(\?.*)?$/i;
   const artUri      = meta.artifactUri || '';
   const displayUri  = meta.displayUri  || '';
@@ -123,16 +128,23 @@ export default function TokenCard({
       : '1/1';
 
   /* price placeholder */
-  const priceMutez = token.price || null;
+  const priceMutez = token.price ?? token.listPrice ?? null;
   const priceTez   = priceMutez ? (priceMutez / 1_000_000).toFixed(2) : null;
 
-  /* click handlers */
-  const onOpenLarge = (e) => {
+  /* author fallback (authors → creators → artists) */
+  const authorsArr = meta.authors
+    ?? meta.creators
+    ?? meta.artists
+    ?? [];
+  const authorsTxt = Array.isArray(authorsArr) ? authorsArr.join(', ') : authorsArr;
+
+  /* navigation */
+  const openLarge = (e) => {
     if (e.metaKey || e.ctrlKey) return;
     e.preventDefault();
     window.open(`/largeview/${contractAddress}/${token.tokenId}`, '_blank');
   };
-  const onOpenContract = (e) => {
+  const openContract = (e) => {
     e.stopPropagation();
     e.preventDefault();
     window.location.href = `/contracts/${contractAddress}`;
@@ -141,14 +153,13 @@ export default function TokenCard({
   if (!thumbOk) return null;
 
   return (
-    <Card onClick={onOpenLarge}>
+    <Card onClick={openLarge}>
       <ThumbWrap $aspect={aspect}>
         <span title={label}
               style={{ position:'absolute', top:4, right:4, zIndex:6 }}>
           <IntegrityBadge status={integrity.status} />
         </span>
 
-        {/* NSFW / flashing gate */}
         {hidden && (
           <Obf>
             <p>{nsfw && 'NSFW'}{nsfw && flashing ? ' / ' : ''}{flashing && 'Flashing'}</p>
@@ -160,20 +171,17 @@ export default function TokenCard({
           </Obf>
         )}
 
-        {/* media */}
         {!hidden && (
           <RenderMedia
             uri={preview}
             mime={meta.mimeType}
             alt={meta.name}
-            /* scripts allowed only after explicit consent */
             allowScripts={scriptHaz && allowScripts}
             style={{ width:'100%', height:'100%', objectFit:'contain' }}
             onInvalid={onInvalid}
           />
         )}
 
-        {/* script gating overlay */}
         {scriptHaz && !allowScripts && !hidden && (
           <Obf>
             <p>Executable media detected.</p>
@@ -193,9 +201,16 @@ export default function TokenCard({
       </ThumbWrap>
 
       <Meta>
-        <h4 title={meta.name}>{meta.name || `#${token.tokenId}`}</h4>
-        {Array.isArray(meta.authors) && meta.authors.length > 0 && (
-          <p>By {meta.authors.join(', ')}</p>
+        <h4>
+          <a href={`/largeview/${contractAddress}/${token.tokenId}`}
+             onClick={openLarge}
+             style={{ color:'inherit', textDecoration:'none' }}>
+            {meta.name || `#${token.tokenId}`}
+          </a>
+        </h4>
+
+        {authorsTxt && (
+          <p>By {authorsTxt}</p>
         )}
 
         {priceTez && (
@@ -209,7 +224,7 @@ export default function TokenCard({
         )}
 
         <StatRow>
-          <Addr href={`/contracts/${contractAddress}`} onClick={onOpenContract}>
+          <Addr href={`/contracts/${contractAddress}`} onClick={openContract}>
             {contractName || shortKt(contractAddress)}
           </Addr>
           <span>ID {token.tokenId}</span>
@@ -222,15 +237,16 @@ export default function TokenCard({
 TokenCard.propTypes = {
   token           : PropTypes.shape({
     tokenId : PropTypes.oneOfType([PropTypes.string,PropTypes.number]).isRequired,
-    metadata: PropTypes.object,
+    metadata: PropTypes.oneOfType([PropTypes.object,PropTypes.string]),
     price   : PropTypes.number,
+    listPrice: PropTypes.number,
   }).isRequired,
   contractAddress : PropTypes.string.isRequired,
   contractName    : PropTypes.string,
 };
-/* What changed & why (r3):
-   • Fallback script‑hazard detection via URI regex & data URIs.
-   • Overlay z‑index 5 ensures visibility above iframes.
-   • aspect‑ratio prop via styled var to prevent layout shift.
-   • Minor CSS polish + explicit legal disclaimer. */
+/* What changed & why (r5):
+   • Displays creators/artists when authors absent.
+   • Price alias `listPrice` recognised.
+   • Hex‑metadata now decoded upstream so fields render.
+   • No visual regressions; keeps I106 gating intact. */
 /* EOF */

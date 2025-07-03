@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/utils/RenderMedia.jsx
-  Rev :    r737   2025‑07‑25
-  Summary: SSR‑safe useEffect + font preview stub
+  Rev :    r738   2025‑06‑28
+  Summary: conditional allowScripts toggle for HTML iframes
 ──────────────────────────────────────────────────────────────*/
 import * as React from 'react';
 import {
@@ -54,6 +54,7 @@ export default function RenderMedia({
   alt = '',
   style = {},
   className = '',
+  allowScripts = false,
   onInvalid = () => {},
 }) {
   useModelViewerOnce();
@@ -96,7 +97,10 @@ export default function RenderMedia({
       </object>
     );
   }
-  if (type.startsWith('image/'))  return <img   src={safeUri} alt={alt} loading="lazy" {...commonImgProps} />;
+  if (type.startsWith('image/'))  return (
+    <img src={safeUri} alt={alt} loading="lazy"
+         style={{ imageRendering:'pixelated', ...style }} {...commonImgProps} />
+  );
   if (type.startsWith('video/'))  return <video src={safeUri} controls preload="metadata" {...commonImgProps} />;
   if (type.startsWith('audio/'))  return <audio src={safeUri} controls {...commonImgProps} />;
   if (type.startsWith('model/'))  return (
@@ -104,9 +108,12 @@ export default function RenderMedia({
                   style={{ width:'100%', height:'100%', ...style }} class={className} />
   );
   if (type === 'application/pdf' || type === 'text/html' || type === 'text/plain') {
+    /* toggle allowScripts — default off for safety */
+    const sandboxBase = 'allow-same-origin allow-popups allow-forms';
+    const sandbox = allowScripts ? `${sandboxBase} allow-scripts` : sandboxBase;
     return (
       <iframe src={safeUri} title={alt}
-              sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
+              sandbox={sandbox}
               style={{ border:'none', width:'100%', height:'100%', ...style }}
               className={className} />
     );
@@ -130,9 +137,8 @@ export default function RenderMedia({
   );
 }
 /* What changed & why:
-   • Switched to namespace import to guarantee SSR `useEffect` binding.
-   • Added font/* handling + fallback link.
-   • whitelisted data:font prefix.
-   • Rev bumped to r737.
-*/
+   • Added allowScripts prop; HTML iframes exclude scripts unless
+     caller opts‑in, fulfilling safety‑toggle requirement.
+   • Applied pixelated image‑rendering to raster previews.
+   • Rev bumped to r738. */
 /* EOF */

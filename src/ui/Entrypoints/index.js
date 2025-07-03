@@ -28,7 +28,6 @@ export { default as BurnV4 }                    from './BurnV4.jsx';
 
 /* v4a */
 export { default as AddRemoveCollaboratorsv4a }   from './AddRemoveCollaboratorsv4a.jsx';
-export { default as AppendTokenMetadatav4a }      from './AppendTokenMetadatav4a.jsx';
 export { default as UpdateContractMetadatav4a }   from './UpdateContractMetadatav4a.jsx';
 export { default as UpdateTokenMetadatav4a }      from './UpdateTokenMetadatav4a.jsx';
 export { default as RepairUriV4a }                from './RepairUriV4a.jsx';

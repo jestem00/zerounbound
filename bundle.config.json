@@ -6,6 +6,32 @@
       "bundleName": "contracts_bundle",
       "patterns": ["contracts/**/*.tz", "contracts/**/*.json"]
     },
+    
+    {
+      "bundleName": "explore_bundle",
+      "patterns": [
+        "src/hooks/useConsent.js", 
+        "src/pages/contracts/[addr].jsx",
+        "src/pages/explore/[[...filter]].jsx",
+        "src/pages/search.jsx",
+        "src/pages/largeview/[addr]/[tokenId].jsx",
+        "src/ui/CollectionCard.jsx",
+        "src/ui/ContractMetaPanelContracts.jsx",
+        "src/ui/TokenCard.jsx",
+        "src/ui/ExploreNav.jsx",
+        "src/utils/countOwners.js",
+        "src/utils/formatAddress.js",
+        "src/utils/hazards.js",
+        "src/constants/mimeTypes.js",
+        "src/utils/RenderMedia.jsx",
+        "src/deployTarget.js",
+        "src/constants/integrityBadges.js",
+        "src/utils/onChainValidator.js",
+        "src/utils/listLiveTokenIds.js",
+        "src/ui/ContractMetaPanel.jsx",
+        "src/ui/TokenMetaPanel.jsx"
+      ]
+    },
 
     {
       "bundleName": "assets_bundle",

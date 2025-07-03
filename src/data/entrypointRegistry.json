@@ -68,5 +68,15 @@
     "remove_collaborator":false,
     "add_collaborators":  false,
     "remove_collaborators": false
+  },
+
+  "v4c": {
+    "$extends": "v4a",
+    "add_collaborators": false,
+    "remove_collaborators": false,
+    "add_collaborator": false,
+    "remove_collaborator": false,
+    "update_contract_metadata": false
   }
 }
+

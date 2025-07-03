@@ -1,9 +1,8 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/ContractCarousels.jsx
-  Rev :    r747‑r20   2025‑08‑12
-  Summary: purge stale “blank” cache entries so they never
-           re‑appear; fresh‑path ident‑check; cache hygiene
+  Rev :    r747‑r24   2025‑08‑15
+  Summary: v4c discovery fix + collaborative rail restore
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useEffect, useState, useRef, useCallback, useMemo,
@@ -53,10 +52,12 @@ const getVer = (net, h) =>
 const hex2str  = (h) => Buffer.from(h.replace(/^0x/, ''), 'hex').toString('utf8');
 const parseHex = (h) => { try { return JSON.parse(hex2str(h)); } catch { return {}; } };
 const arr      = (v) => (Array.isArray(v) ? v : []);
-const scrub    = (s = '') => s.replace(/[\u0000-\u001F\u007F-\u009F]/g, '').trim();
+const scrub    = (s = '') =>
+  s.replace(/[\u0000-\u001F\u007F-\u009F]/g, '').trim();
 
 /* new: tell if a contract entry is display‑worthy */
-const identifiable = (name = '', img = null) => Boolean(scrub(name)) || Boolean(img);
+const identifiable = (name = '', img = null) =>
+  Boolean(scrub(name)) || Boolean(img);
 
 /*──────── tiny localStorage cache — shape { data, ts } ─────*/
 const readCache = () => {
@@ -91,27 +92,33 @@ async function fetchOriginated(addr, net) {
   return rows.map((c) => ({
     address  : c.address,
     typeHash : c.typeHash,
-    timestamp: c.firstActivityTime || c.lastActivityTime,
+    /* use *last* activity so edits bump the stamp */
+    timestamp: c.lastActivityTime || c.firstActivityTime,
   }));
 }
 
 async function isWalletCollaborator(addr, wallet, net) {
   try {
-    const st = await jFetch(`${TZKT[net]}/contracts/${addr}/storage`);
+    const st = await jFetch(`${TZKT[net]}/contracts/${ addr }/storage`);
     if (Array.isArray(st.collaborators) && st.collaborators.includes(wallet)) return true;
     if (Number.isInteger(st.collaborators)) {
       await jFetch(`${TZKT[net]}/bigmaps/${st.collaborators}/keys/${wallet}`, 1);
       return true;
     }
-  } catch {/* swallow */}
+  } catch { /* swallow */ }
   return false;
 }
 
 async function fetchCollaborative(addr, net) {
   if (!addr) return [];
-  const { v3, v4 } = HASHES[net];
+  /* include all progressive (v3 / v4*) hashes so v4c is discovered */
+  const progHashes = Object.entries(HASHES[net])
+    .filter(([ver]) => ver.startsWith('v3') || ver.startsWith('v4'))
+    .map(([, h]) => h);
+  if (!progHashes.length) return [];
+
   const cands = await jFetch(
-    `${TZKT[net]}/contracts?typeHash.in=${v3},${v4}&limit=200`,
+    `${TZKT[net]}/contracts?typeHash.in=${[...new Set(progHashes)].join(',')}&limit=200`,
   ).catch(() => []);
 
   const out = [];
@@ -122,7 +129,7 @@ async function fetchCollaborative(addr, net) {
       const basic = {
         address  : c.address,
         typeHash : c.typeHash,
-        timestamp: c.firstActivityTime || c.lastActivityTime,
+        timestamp: c.lastActivityTime || c.firstActivityTime,
       };
       out.push(basic);
       patchCache(c.address, { isCollab: true, basic });
@@ -132,30 +139,37 @@ async function fetchCollaborative(addr, net) {
 }
 
 /*──────── enrich helper — adds image/meta/total ─────────────*/
-async function enrich(list, net) {
+async function enrich(list, net, force = false) {
   const rows = await Promise.all(list.map(async (it) => {
     if (!it?.address) return null;
 
     const cached   = getCache(it.address);
     const detCache = cached?.data?.detail;
-    const fresh    = detCache && (Date.now() - cached.ts < DETAIL_TTL);
 
-    /* always compute live supply */
+    let isFresh = false;
+    if (!force && detCache) {
+      const ttlOk = (Date.now() - cached.ts) < DETAIL_TTL;
+      const chainNewer =
+        it.timestamp &&
+        detCache.date &&
+        new Date(it.timestamp) > new Date(detCache.date);
+      isFresh = ttlOk && !chainNewer;
+    }
+
     const totalLive = await countTokens(it.address, net);
 
-    /*──────── fresh‑cache fast‑path ───────*/
-    if (fresh) {
-      /* drop & wipe if no longer identifiable */
+    /*──────── fresh‑cache fast‑path ───────────────────────────*/
+    if (isFresh) {
       if (!identifiable(detCache.name, detCache.imageUri)) {
-        patchCache(it.address, { detail: null });      // invalidate stale blank
+        patchCache(it.address, { detail: null });   // purge stale blank
         return null;
       }
       const detail = { ...detCache, total: totalLive };
-      patchCache(it.address, { detail });
+      patchCache(it.address, { detail });           // bump ts
       return detail;
     }
 
-    /*──────── full fetch path ─────────────*/
+    /*──────── full fetch path ───────────────────────────────*/
     const detRaw = await jFetch(`${TZKT[net]}/contracts/${it.address}`).catch(() => null);
 
     let meta = detRaw?.metadata || {};
@@ -166,15 +180,14 @@ async function enrich(list, net) {
       if (bm?.value) meta = { ...parseHex(bm.value), ...meta };
     }
 
-    /* reject if still not identifiable */
     if (!identifiable(meta.name, meta.imageUri)) return null;
 
     const cleanName = scrub(meta.name || '');
 
     const detail = {
-      address : it.address,
-      typeHash: it.typeHash,
-      name    : cleanName || it.address,
+      address    : it.address,
+      typeHash   : it.typeHash,
+      name       : cleanName || it.address,
       description: meta.description || '',
       imageUri   : meta.imageUri || null,
       total      : totalLive,
@@ -187,8 +200,6 @@ async function enrich(list, net) {
     patchCache(it.address, { detail });
     return detail;
   }));
-
-  /* unique by address to prevent duplicate‑key warnings */
   return [...new Map(rows.filter(Boolean).map((r) => [r.address, r])).values()]
     .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
 }
@@ -523,7 +534,7 @@ export default function ContractCarousels({ onSelect }) {
   const [stage, setStage] = useState('init');
   const [spinStart, setSpinStart] = useState(0);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (hard = false) => {
     if (!walletAddress) { setOrig([]); setColl([]); return; }
     setStage('init');
     setSpinStart(Date.now());
@@ -555,7 +566,10 @@ export default function ContractCarousels({ onSelect }) {
     cacheList(listKey('orig', walletAddress, network), oBasic);
     cacheList(listKey('coll', walletAddress, network), cBasic);
 
-    const [oDet, cDet] = await Promise.all([enrich(oRaw, network), enrich(cRaw, network)]);
+    const [oDet, cDet] = await Promise.all([
+      enrich(oRaw, network, hard),
+      enrich(cRaw, network, hard),
+    ]);
     const wait = MIN_SPIN - Math.max(0, Date.now() - spinStart);
     if (wait > 0) await sleep(wait);
     setOrig(oDet); setColl(cDet); setStage('detail');
@@ -629,7 +643,7 @@ export default function ContractCarousels({ onSelect }) {
       <div style={{ textAlign: 'center', marginTop: '1rem' }}>
         <button
           style={{ font: '700 .9rem PixeloidSans', padding: '.35rem .9rem' }}
-          onClick={refresh}
+          onClick={() => refresh(true)}
         >
           Refresh
         </button>
@@ -638,12 +652,12 @@ export default function ContractCarousels({ onSelect }) {
   );
 }
 /* What changed & why:
-   • Added `identifiable()` util; contract considered valid only
-     when scrubbed name OR imageUri present.
-   • Fresh‑cache branch now re‑validates identifiability; if fails,
-     cache entry is nulled & entry suppressed (fixes ghost blank
-     card that re‑appeared after refresh).
-   • Non‑fresh branch keeps same gate, ensuring no future blanks
-     enter cache.
-   • Rev‑bump r747‑r20; no DOM prop leakage; SSR checksum stable. */
+   • Switched to `lastActivityTime` when present so any metadata
+     edit bumps the contract timestamp and invalidates cache.
+   • `enrich()` now accepts `force` flag allowing manual hard‑refresh
+     to disregard TTL entirely.
+   • Refresh button passes `true`, ensuring UI reflects changes
+     immediately.
+   • Rev‑bump r747‑r23.
+*/
 /* EOF */

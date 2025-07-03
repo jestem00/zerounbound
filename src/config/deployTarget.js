@@ -1,7 +1,9 @@
-/*Developed by @jams2blues with love for the Tezos community
+/*─────────────────────────────────────────────────────────────
+  Developed by @jams2blues with love for the Tezos community
   File: src/config/deployTarget.js
-  Summary: Authoritative switch-board. Flip TARGET once → everything
-           (RPCs, theming, explorer bases, PWA meta, devPort) updates. */
+  Rev : r747‑r24   2025‑08‑14
+  Summary: network switch‑board + ZeroTerminal bridges
+──────────────────────────────────────────────────────────────*/
 
 /*───────── flip when promoting to mainnet ─────────*/
 export const TARGET = 'ghostnet';           // 'ghostnet' | 'mainnet'
@@ -18,15 +20,15 @@ const nets = {
     siteLogo:     '/sprites/ghostnet_logo.svg',
     /* UX */
     ctaFirst:     '/deploy',
-    description:  'Test your fully-on-chain art collection risk-free on Ghostnet.',
+    description:  'Test your fully-on-chain art collection risk‑free on Ghostnet.',
     /* URLs */
     siteUrl:      'https://ghostnet.zerounbound.art',
     ogImage:      'https://ghostnet.zerounbound.art/sprites/ghostnetBanner.png',
     startUrl:     '/?source=pwa-ghostnet',
-    rpc: [   
-      'https://ghostnet.tezos.ecadinfra.com',  // ECAD Infra (May-2025 domain)
-      'https://rpc.ghostnet.teztnets.com',      // Rapid EU+US CDN
-      'https://rpc.tzkt.io/ghostnet'            // Baking Bad – high U.S. uptime
+    rpc: [
+      'https://ghostnet.tezos.ecadinfra.com',
+      'https://rpc.ghostnet.teztnets.com',
+      'https://rpc.tzkt.io/ghostnet',
     ],
     tzkt:         'https://api.ghostnet.tzkt.io',
     redirects: [{
@@ -36,6 +38,8 @@ const nets = {
     }],
     pkgName:      'zerounbound-ghostnet',
     devPort:      3000,
+    /* ZeroTerminal */
+    ztBase:       'https://testnet.zeroterminal.art',
   },
 
   mainnet: {
@@ -45,18 +49,20 @@ const nets = {
     manifestName: 'ZeroUnbound.art',
     siteLogo:     '/sprites/logo.svg',
     ctaFirst:     '/explore',
-    description:  'Create 100 % on-chain art collections on Tezos mainnet.',
+    description:  'Create 100 % on‑chain art collections on Tezos mainnet.',
     siteUrl:      'https://zerounbound.art',
     ogImage:      'https://zerounbound.art/sprites/Banner.png',
     startUrl:     '/?source=pwa-mainnet',
     rpc: [
-      'https://prod.tcinfra.net/rpc/mainnet',   // Tezos Commons – autoscaling cluster
-      'https://mainnet.tezos.ecadinfra.com'
+      'https://prod.tcinfra.net/rpc/mainnet',
+      'https://mainnet.tezos.ecadinfra.com',
     ],
     tzkt:       'https://api.tzkt.io',
     redirects:  [],
     pkgName:    'zerounbound-mainnet',
     devPort:    4000,
+    /* ZeroTerminal */
+    ztBase:     'https://zeroterminal.art',
   },
 };
 
@@ -103,7 +109,23 @@ export const URL_TZKT_OP_BASE = TARGET === 'ghostnet'
   ? 'https://ghostnet.tzkt.io/'
   : 'https://tzkt.io/';
 
+/*────────── ZeroTerminal helpers ───────────────────────────*/
+/** Base domain for ZeroTerminal (network‑aware) */
+export const ZT_BASE_URL  = NET.ztBase;
+
+/** Direct mint‑new link on ZeroTerminal */
+export const ZT_MINT_URL  = `${ZT_BASE_URL}/?cmd=tokendata`;
+
+/**
+ * Build a ZeroTerminal URL for viewing/updating an existing token’s
+ * metadata (`cid` = contract, `tid` = token‑id).
+ */
+export const ztTokenUrl = (contract, tokenId) =>
+  `${ZT_MINT_URL}&cid=${encodeURIComponent(contract)}&tid=${encodeURIComponent(tokenId)}`;
+
 /* What changed & why:
-   • ghostnet RPC list updated to three *real* endpoints exposing full RPC.
+   • Added ZeroTerminal bridge constants (ZT_BASE_URL, ZT_MINT_URL, ztTokenUrl)
+     so UI components can redirect instead of performing non‑compliant ops.
+   • Rev‑bump r747‑r24.
 */
 /* EOF */

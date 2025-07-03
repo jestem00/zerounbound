@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/AdminTools.jsx
-  Rev :    r825   2025‑08‑12
-  Summary: restore sortTokens() helper + expanded order map
+  Rev :    r827   2025‑08‑15
+  Summary: remove obsolete append‑token‑metadata entrypoint
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useCallback, useEffect, useMemo, useState,
@@ -15,13 +15,13 @@ import registry             from '../data/entrypointRegistry.json' assert { type
 import RenderMedia          from '../utils/RenderMedia.jsx';
 import countTokens          from '../utils/countTokens.js';
 import { useWalletContext } from '../contexts/WalletContext.js';
-import { NETWORK_KEY }       from '../config/deployTarget.js';
-import { jFetch }            from '../core/net.js';
+import { NETWORK_KEY }      from '../config/deployTarget.js';
+import { jFetch }           from '../core/net.js';
 
 const styled =
   typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
-/*──────── helper utils (unchanged) ───────────────────────────*/
+/*──────── helper utils ───────────────────────────*/
 const sz = (v) =>
   Array.isArray(v)                     ? v.length
     : v && typeof v.size === 'number'  ? v.size
@@ -44,7 +44,7 @@ async function tzktCounts(addr, net = 'ghostnet') {
   };
 }
 
-/*──────── styled shells (unchanged) ─────────────────────────*/
+/*──────── styled shells ─────────────────────────*/
 const Overlay  = styled.div`
   position:fixed;inset-inline:0;top:var(--hdr,0);
   height:calc(var(--vh) - var(--hdr,0));padding:.6rem;
@@ -79,7 +79,7 @@ const ActionBtn = styled(PixelButton)`
 const TinyBtn   = styled(PixelButton)`
   font-size:.5rem;padding:0 .32rem;background:var(--zu-accent-sec);`;
 
-/*──────── EP meta & resolver (unchanged) ────────────────────*/
+/*──────── ALIASES ──────────────────────────────────────────*/
 const ALIASES = {
   add_collaborator      : 'collab_edit',
   remove_collaborator   : 'collab_edit',
@@ -92,6 +92,8 @@ const ALIASES = {
   append_extra_uri      : 'append_extrauri',
 };
 
+/*──────── META ─────────────────────────────────────────────
+   Obsolete `append_token_metadata` entry removed            */
 const META = {
   /* ─── Collaborators ───────────────────────────── */
   collab_edit               : { label:'Add / Remove Collaborator',    comp:'AddRemoveCollaborator',     group:'Collaborators' },
@@ -121,7 +123,6 @@ const META = {
   clear_uri                 : { label:'Clear URI',                    comp:'ClearUri',                  group:'Metadata Ops' },
   edit_contract_metadata    : { label:'Edit Contract Metadata',       comp:'EditContractMetadata',      group:'Metadata Ops' },
   edit_token_metadata       : { label:'Edit Token Metadata',          comp:'EditTokenMetadata',         group:'Metadata Ops' },
-  append_token_metadata     : { label:'Append Token Metadata',        comp:'AppendTokenMetadatav4a',    group:'Metadata Ops' },
   update_token_metadata     : { label:'Update Token Metadata',        comp:'UpdateTokenMetadatav4a',    group:'Metadata Ops' },
   update_contract_metadata  : { label:'Update Contract Metadata',     comp:'UpdateContractMetadatav4a', group:'Metadata Ops' },
   repair_uri                : { label:'Repair URI',                   comp:'RepairUri',                 group:'Metadata Ops' },
@@ -131,7 +132,7 @@ const META = {
 /* dedup helper */
 const uniq = (arr) => [...new Set(arr)];
 
-/*──────── token list sort helper (restored) ──────────────────*/
+/*──────── token list sort helper (unchanged) ──────────────────*/
 const TOKEN_ORDER = {
   mint        : 0,
   mint_v4a    : 0,
@@ -159,8 +160,14 @@ function resolveEp(ver = '') {
     vLoop = spec.$extends;
   }
   const vLow = (ver || '').toLowerCase();
-  if (vLow.startsWith('v4a'))    enabled.add('manage_collaborators_v4a');
-  else                            enabled.add('manage_collaborators');
+
+  /* collaborator manager injection */
+  if (vLow.startsWith('v4a')) {
+    enabled.add('manage_collaborators_v4a');
+  } else if (!vLow.startsWith('v4c')) {
+    enabled.add('manage_collaborators');
+  }
+
   if (enabled.has('parentchild_edit')) enabled.add('manage_parent_child');
   return uniq([...enabled]);
 }
@@ -235,6 +242,10 @@ export default function AdminTools({ contract, onClose }) {
         .map((k) => (k === 'mint' ? 'mint_v4a' : k))
         .filter((k) => k !== 'burn')        /* v4a has native burn */
         .concat('repair_uri_v4a');
+    } else if (vLow.startsWith('v4c')) {     /* NEW – v4c path */
+      rawSet = rawSet
+        .map((k) => (k === 'mint' ? 'mint_v4a' : k))
+        .concat('repair_uri_v4a');
     } else if (vLow.startsWith('v4')) {
       rawSet = rawSet.filter((k) => k !== 'burn').concat('burn_v4','repair_uri');
     }
@@ -270,8 +281,9 @@ export default function AdminTools({ contract, onClose }) {
             </div>
           </Preview>
 
-          {/* v4a warning banner */}
-          {contract.version?.toLowerCase().startsWith('v4a') && (
+          {/* v4a / v4c warning banner */}
+          {(contract.version?.toLowerCase().startsWith('v4a')
+            || contract.version?.toLowerCase().startsWith('v4c')) && (
             <p style={{
               margin:'.15rem auto 0',
               maxWidth:'600px',
@@ -280,9 +292,8 @@ export default function AdminTools({ contract, onClose }) {
               fontWeight:700,
               color:'var(--zu-accent-sec)',
             }}>
-              ⚠️ Warning: ZeroTerminal Progressive (v4a) contracts are still under
-              construction and may not behave as expected. Always test on ghostnet
-              first or contact @jams2blues for assistance.
+              ⚠️ Warning: ZeroTerminal progressive contracts are experimental.
+              Test on ghostnet first or contact @jams2blues for assistance.
             </p>
           )}
 
@@ -350,8 +361,10 @@ export default function AdminTools({ contract, onClose }) {
   );
 }
 /* What changed & why:
-   • Restored ORDER/TOKEN_ORDER map + sortTokens() helper removed in r824,
-     fixing ReferenceError and ensuring deterministic button order.
-   • TOKEN_ORDER extended with mint_v4a & burn_v4 for proper weighting.
-*/
+   • Added v4c handling:
+     – resolveEp() skips collaborator manager for v4c.
+     – grouped builder maps mint→mint_v4a, keeps burn,
+       adds repair_uri_v4a for v4c.
+   • Experimental warning banner now covers v4c.
+   • Rev‑bump r826. */
 /* EOF */

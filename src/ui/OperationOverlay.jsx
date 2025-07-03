@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/OperationOverlay.jsx
-  Rev :    r952   2025‑08‑14
-  Summary: palette‑aware overlay – adaptive bg/fg, var‑driven
+  Rev :    r953   2025‑08‑14
+  Summary: Close → clear SW & CacheStorage, then hard reload
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useMemo, useState, useRef, useCallback,
@@ -25,7 +25,7 @@ const Back = styled.div`
   position:fixed;inset-inline:0;top:var(--hdr,0);
   height:calc(100vh - var(--hdr,0));
   display:flex;justify-content:center;align-items:center;
-  background:rgba(0,0,0,.88);                /* always‑dark backdrop */
+  background:rgba(0,0,0,.88);
   z-index:2500;
 `;
 
@@ -57,7 +57,6 @@ const Panel = styled.div.attrs({ role:'dialog','aria-modal':true })`
   }
   @keyframes scan{to{transform:translateY(3px);}}
 
-  /* honour reduced‑motion */
   @media (prefers-reduced-motion:reduce){
     &::before{ animation:none; }
   }
@@ -141,7 +140,7 @@ export default function OperationOverlay({
   status    = '',
   progress: progressProp = 0,
   error,
-  kt1, opHash, contractAddr,      /* contractAddr reserved for future use */
+  kt1, opHash, contractAddr,
   current, step, total = 1,
   onRetry  = undefined,
   onCancel = () => {},
@@ -157,13 +156,9 @@ export default function OperationOverlay({
   useWheelTunnel(panelRef);
 
   /* fun‑lines shuffle (stable) */
-  const lines = useMemo(()=>{
-    const a=[...FUN_LINES];
-    for(let i=a.length-1;i>0;i--){
-      const j=Math.floor(Math.random()*(i+1));
-      [a[i],a[j]]=[a[j],a[i]];
-    }
-    return [...a,a[0]];                   /* seamless loop */
+  const lines = useMemo(()=>{ const a=[...FUN_LINES];
+    for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; }
+    return [...a,a[0]];
   },[]);
 
   /* img fallback */
@@ -175,10 +170,26 @@ export default function OperationOverlay({
     [],
   );
   const handleCopy = useCallback((txt)=>navigator.clipboard.writeText(txt),[]);
-  const handleClose = useCallback(()=>{
+
+  const clearCachesAndReload = useCallback(async () => {
+    try {
+      if ('caches' in window) {
+        const names = await caches.keys();
+        await Promise.all(names.map((n) => caches.delete(n)));
+      }
+      if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map((r) => r.unregister()));
+      }
+    } finally {
+      window.location.reload();
+    }
+  }, []);
+
+  const handleClose = useCallback(() => {
     onCancel?.();
-    if (typeof window!=='undefined') window.location.reload();
-  },[onCancel]);
+    if (typeof window !== 'undefined') clearCachesAndReload();
+  }, [onCancel, clearCachesAndReload]);
 
   /*──────── success branch ───────*/
   if (kt1 || opHash){
@@ -282,11 +293,9 @@ export default function OperationOverlay({
   );
 }
 /* What changed & why:
-   • Re‑applied r951 palette‑aware refactor: Panel/Bar/Ring now drive
-     colours from CSS vars → readable on light palettes.
-   • Added ARIA dialog attributes + reduced‑motion guards.
-   • Progress bar uses `--zu-accent`; fallback fixed.
-   • Caption/error colours var‑driven; background/fg adapt via vars.
-   • Kept Solari board but hides when prefers‑reduced‑motion.
-   • Close reloads page (I97).  */
+   • Added clearCachesAndReload(): deletes CacheStorage + unregisters
+     service‑workers, then reloads → approximates “hard reload”.
+   • Success Close button now invokes the new routine.
+   • Rev bump → r953.
+*/
 /* EOF */

@@ -1,9 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/core/validator.js
-  Rev :    r910   2025‑08‑12
-  Summary: +validateEditContractFields() centralises contract‑edit
-           form checks, returns field‑level messages
+  Rev :    r911   2025‑08‑12
+  Summary: edit‑contract byte‑budget uses full 32 768 B cap
 ──────────────────────────────────────────────────────────────*/
 import { Buffer } from 'buffer';
 
@@ -211,7 +210,7 @@ export function validateEditTokenFields ({
   return { errors: checklist.filter(c => !c.ok).map(c => c.msg), checklist };
 }
 
-/*──────── new: edit‑contract‑metadata validator ───────────*/
+/*──────── edit‑contract‑metadata validator ───────────*/
 /**
  * validateEditContractFields()
  * Mirrors deploy‑validator but omits thumbnail rules & symbol regex
@@ -312,15 +311,19 @@ export function validateEditContractFields ({
                                     fail('type', 'Required');
   else                                push(true, 'Type ok', '');
 
-  /* byte budget – JSON body only (thumbnail never changes here) */
-  push(fitsByteBudget(metaBytes), 'Size ok', `> ${MAX_META_BYTES} B`);
+  /* byte budget – JSON body only (no deployment overhead) */
+  push(
+    metaBytes <= MAX_META_BYTES,
+    'Size ok',
+    `Metadata > ${MAX_META_BYTES} B`,
+  );
 
   return { errors, fieldErrors, checklist };
 }
-
 /* What changed & why:
-   • Added urlOkay export earlier; new validateEditContractFields()
-     performs full per‑field & size checks, exposes fieldErrors map.
-   • No existing exports altered – deploy & mint validators untouched.
+   • Replaced fitsByteBudget() (origination‑only overhead) with
+     direct cap check against 32 768 B, reflecting true Michelson
+     limit for edit_contract_metadata parameter bytes.
+   • Rev → r911.
 */
 /* EOF */

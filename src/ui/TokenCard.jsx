@@ -1,9 +1,6 @@
-/*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
-  File:    src/ui/TokenCard.jsx
-  Rev :    r7     2025‑08‑26
-  Summary: “Make Offer” wired → zu:makeOffer event, dedupe imports
-──────────────────────────────────────────────────────────────*/
+/*Developed by @jams2blues with love for the Tezos community
+  File: src/ui/TokenCard.jsx
+  Summary: overlay now offers view button to open large view */
 import {
   useState, useMemo, useCallback,
 }                         from 'react';
@@ -104,7 +101,6 @@ export default function TokenCard({
   const { nsfw, flashing, scripts: scriptHaz } = detectHazards(meta);
   const hidden = (nsfw && !allowNSFW) || (flashing && !allowFlash);
 
-  /* pick best preview */
   const preview = ipfsToHttp(
     meta.displayUri   ||
     meta.imageUri     ||
@@ -135,7 +131,6 @@ export default function TokenCard({
     window.location.href = `/contracts/${contractAddress}`;
   };
 
-  /* marketplace integration – custom global handler opens entrypoint UI */
   const makeOffer = (e) => {
     e.stopPropagation();
     window.dispatchEvent(new CustomEvent('zu:makeOffer', {
@@ -145,7 +140,6 @@ export default function TokenCard({
 
   if (!thumbOk) return null;
 
-  /* authors fallback chain: authors → artists → creators */
   const authorArr = meta.authors || meta.artists || meta.creators || [];
 
   return (
@@ -157,12 +151,17 @@ export default function TokenCard({
         </span>
 
         {hidden && (
-          <Obf>
+          <Obf onClick={openLarge}>
             <p>{nsfw && 'NSFW'}{nsfw && flashing ? ' / ' : ''}{flashing && 'Flashing'}</p>
-            <PixelButton size="sm" onClick={(e)=>{e.stopPropagation();
-              if (nsfw)    setAllowNSFW(true);
-              if (flashing)setAllowFlash(true);
-            }}>Unhide</PixelButton>
+            <div style={{ display:'flex',gap:6 }}>
+              <PixelButton size="sm" onClick={(e)=>{e.stopPropagation();
+                if (nsfw)    setAllowNSFW(true);
+                if (flashing)setAllowFlash(true);
+              }}>Unhide</PixelButton>
+              <PixelButton size="sm" onClick={(e)=>{e.stopPropagation();openLarge(e);}}>
+                View
+              </PixelButton>
+            </div>
           </Obf>
         )}
 
@@ -178,16 +177,21 @@ export default function TokenCard({
         )}
 
         {scriptHaz && !allowScripts && !hidden && (
-          <Obf>
+          <Obf onClick={openLarge}>
             <p>Executable media detected.</p>
-            <PixelButton size="sm" warning onClick={(e)=>{e.stopPropagation();
-              if (window.confirm(
-                'This token embeds executable code (HTML/JS).\n'
-                + 'Enable scripts ONLY if you fully trust the author.',
-              )) {
-                setAllowScripts(true);
-              }
-            }}>Allow scripts</PixelButton>
+            <div style={{ display:'flex',gap:6 }}>
+              <PixelButton size="sm" warning onClick={(e)=>{e.stopPropagation();
+                if (window.confirm(
+                  'This token embeds executable code (HTML/JS).\n'
+                  + 'Enable scripts ONLY if you fully trust the author.',
+                )) {
+                  setAllowScripts(true);
+                }
+              }}>Allow scripts</PixelButton>
+              <PixelButton size="sm" onClick={(e)=>{e.stopPropagation();openLarge(e);}}>
+                View
+              </PixelButton>
+            </div>
           </Obf>
         )}
       </ThumbWrap>
@@ -234,7 +238,5 @@ TokenCard.propTypes = {
   contractAddress : PropTypes.string.isRequired,
   contractName    : PropTypes.string,
 };
-/* What changed & why (r7):
-   • Make Offer dispatches global zu:makeOffer event (marketplace hook).
-   • Minor lint clean‑ups; unchanged UI.
-*/
+/* What changed & why: overlay offers open button for hidden/script items */
+/* EOF */

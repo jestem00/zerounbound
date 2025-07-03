@@ -107,13 +107,13 @@ export default function TokenCard({
   const hidden = (nsfw && !allowNSFW) || (flashing && !allowFlash);
 
   /* pick best preview */
-  const preview = ipfsToHttp(
+  const previewSrc =
     meta.displayUri   ||
     meta.imageUri     ||
     meta.thumbnailUri ||
     meta.artifactUri  ||
-    '',
-  );
+    '';
+  const preview = ipfsToHttp(previewSrc);
 
   const [thumbOk, setThumbOk] = useState(true);
   const onInvalid = useCallback(() => setThumbOk(false), []);

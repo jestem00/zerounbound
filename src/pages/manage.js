@@ -83,7 +83,7 @@ async function fetchMeta(addr = '', net = 'ghostnet') {
     const det  = await jFetch(base);
     let  meta  = det.metadata || {};
     if (!meta.name || !meta.imageUri) {
-      const bm = await jFetch(`${base}/bigmaps/metadata/keys/content`).catch(() => null);
+      const bm = await jFetch(`${base}/bigmaps/metadata/keys/contents`).catch(() => null);
       if (bm?.value) meta = { ...parseHex(bm.value), ...meta };
     }
     return {

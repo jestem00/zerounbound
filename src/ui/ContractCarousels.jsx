@@ -111,14 +111,11 @@ async function isWalletCollaborator(addr, wallet, net) {
 
 async function fetchCollaborative(addr, net) {
   if (!addr) return [];
-  /* include all progressive (v3 / v4*) hashes so v4c is discovered */
-  const progHashes = Object.entries(HASHES[net])
-    .filter(([ver]) => ver.startsWith('v3') || ver.startsWith('v4'))
-    .map(([, h]) => h);
-  if (!progHashes.length) return [];
+  const hashes = [...new Set(Object.values(HASHES[net]))];
+  if (!hashes.length) return [];
 
   const cands = await jFetch(
-    `${TZKT[net]}/contracts?typeHash.in=${[...new Set(progHashes)].join(',')}&limit=200`,
+    `${TZKT[net]}/contracts?typeHash.in=${hashes.join(',')}&limit=200`,
   ).catch(() => []);
 
   const out = [];
@@ -175,7 +172,7 @@ async function enrich(list, net, force = false) {
     let meta = detRaw?.metadata || {};
     if (!meta.name || !meta.imageUri) {
       const bm = await jFetch(
-        `${TZKT[net]}/contracts/${it.address}/bigmaps/metadata/keys/content`,
+        `${TZKT[net]}/contracts/${it.address}/bigmaps/metadata/keys/contents`,
       ).catch(() => null);
       if (bm?.value) meta = { ...parseHex(bm.value), ...meta };
     }

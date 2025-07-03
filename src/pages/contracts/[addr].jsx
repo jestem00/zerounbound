@@ -19,6 +19,7 @@ import TokenIdSelect              from '../../ui/TokenIdSelect.jsx';
 import FiltersPanel               from '../../ui/FiltersPanel.jsx';
 
 import countOwners      from '../../utils/countOwners.js';
+import countTokens      from '../../utils/countTokens.js';
 import listLiveTokenIds from '../../utils/listLiveTokenIds.js';
 import decodeHexFields, { decodeHexJson } from '../../utils/decodeHexFields.js';
 import { jFetch }       from '../../core/net.js';
@@ -66,7 +67,8 @@ export default function ContractPage() {
 
   const [meta, setMeta]       = useState(null);
   const [tokens, setTokens]   = useState([]);
-  const [owners, setOwners]   = useState(null);
+  const [tokCount, setTokCount] = useState('…');
+  const [owners, setOwners]   = useState('…');
   const [loading, setLoading] = useState(true);
   const [tokOpts, setTokOpts] = useState([]);
   const [tokSel,  setTokSel]  = useState('');
@@ -129,8 +131,13 @@ export default function ContractPage() {
       } finally { if (!cancel) setLoading(false); }
     })();
 
-    /* 3 · owners */
-    countOwners(addr, NETWORK).then((n) => { if (!cancel) setOwners(n); });
+    /* 3 · counts */
+    countOwners(addr, NETWORK).then((n) => {
+      if (!cancel) setOwners(n);
+    });
+    countTokens(addr, NETWORK).then((n) => {
+      if (!cancel) setTokCount(n);
+    });
 
     return () => { cancel = true; };
   }, [addr]);
@@ -213,9 +220,9 @@ export default function ContractPage() {
 
   /* stats */
   const stats = {
-    tokens : tokens.length,
-    owners : owners ?? '—',
-    sales  : tokens.filter((t) => Number(t.price) > 0).length,
+    tokens : tokCount,
+    owners : owners,
+    sales  : loading ? '…' : tokens.filter((t) => Number(t.price) > 0).length,
   };
 
   /*──────── render ─────────────────────────────────────────*/

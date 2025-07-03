@@ -19,6 +19,8 @@ import PixelButton        from './PixelButton.jsx';
 import IntegrityBadge     from './IntegrityBadge.jsx';
 import { shortKt }        from '../utils/formatAddress.js';
 
+const PLACEHOLDER = '/sprites/cover_default.svg';
+
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
 /*──────── styled shells (unchanged) ──────────────────────────*/
@@ -143,7 +145,7 @@ export default function TokenCard({
     }));
   };
 
-  if (!thumbOk) return null;
+  const showPlaceholder = !thumbOk || !preview;
 
   /* authors fallback chain: authors → artists → creators */
   const authorArr = meta.authors || meta.artists || meta.creators || [];
@@ -171,7 +173,7 @@ export default function TokenCard({
           </Obf>
         )}
 
-        {!hidden && (
+        {!hidden && !showPlaceholder && (
           <RenderMedia
             uri={preview}
             mime={meta.mimeType}
@@ -179,6 +181,13 @@ export default function TokenCard({
             allowScripts={scriptHaz && allowScripts}
             style={{ width:'100%', height:'100%', objectFit:'contain' }}
             onInvalid={onInvalid}
+          />
+        )}
+        {!hidden && showPlaceholder && (
+          <img
+            src={PLACEHOLDER}
+            alt=""
+            style={{ width:'60%', opacity:.45 }}
           />
         )}
 

@@ -85,7 +85,7 @@ export default function ContractMetaPanelContracts({
   meta = {},
   contractAddress = '',
   network = 'ghostnet',
-  stats = { tokens:0, owners:0, sales:0 },
+  stats = { tokens:'…', owners:'…', sales:'…' },
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -149,9 +149,9 @@ ContractMetaPanelContracts.propTypes = {
   contractAddress: PropTypes.string.isRequired,
   network: PropTypes.string,
   stats: PropTypes.shape({
-    tokens : PropTypes.number,
-    owners : PropTypes.oneOfType([PropTypes.number,PropTypes.string]),
-    sales  : PropTypes.number,
+    tokens : PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+    owners : PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+    sales  : PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
   }),
 };
 /* What changed & why (r2):

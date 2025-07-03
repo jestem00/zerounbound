@@ -157,12 +157,17 @@ export default function TokenCard({
         </span>
 
         {hidden && (
-          <Obf>
+          <Obf onClick={openLarge}>
             <p>{nsfw && 'NSFW'}{nsfw && flashing ? ' / ' : ''}{flashing && 'Flashing'}</p>
-            <PixelButton size="sm" onClick={(e)=>{e.stopPropagation();
-              if (nsfw)    setAllowNSFW(true);
-              if (flashing)setAllowFlash(true);
-            }}>Unhide</PixelButton>
+            <div style={{ display:'flex',gap:6 }}>
+              <PixelButton size="sm" onClick={(e)=>{e.stopPropagation();
+                if (nsfw)    setAllowNSFW(true);
+                if (flashing)setAllowFlash(true);
+              }}>Unhide</PixelButton>
+              <PixelButton size="sm" onClick={(e)=>{e.stopPropagation();openLarge(e);}}>
+                View
+              </PixelButton>
+            </div>
           </Obf>
         )}
 
@@ -178,16 +183,21 @@ export default function TokenCard({
         )}
 
         {scriptHaz && !allowScripts && !hidden && (
-          <Obf>
+          <Obf onClick={openLarge}>
             <p>Executable media detected.</p>
-            <PixelButton size="sm" warning onClick={(e)=>{e.stopPropagation();
-              if (window.confirm(
-                'This token embeds executable code (HTML/JS).\n'
-                + 'Enable scripts ONLY if you fully trust the author.',
-              )) {
-                setAllowScripts(true);
-              }
-            }}>Allow scripts</PixelButton>
+            <div style={{ display:'flex',gap:6 }}>
+              <PixelButton size="sm" warning onClick={(e)=>{e.stopPropagation();
+                if (window.confirm(
+                  'This token embeds executable code (HTML/JS).\n'
+                  + 'Enable scripts ONLY if you fully trust the author.',
+                )) {
+                  setAllowScripts(true);
+                }
+              }}>Allow scripts</PixelButton>
+              <PixelButton size="sm" onClick={(e)=>{e.stopPropagation();openLarge(e);}}>
+                View
+              </PixelButton>
+            </div>
           </Obf>
         )}
       </ThumbWrap>

@@ -31,7 +31,9 @@
         "src/deployTarget.js",
         "src/constants/integrityBadges.js",
         "src/utils/onChainValidator.js",
-        "src/utils/listLiveTokenIds.js"
+        "src/utils/listLiveTokenIds.js",
+        "src/config/**/*.js",
+        "src/data/**/*.json"
       ]
     },
 

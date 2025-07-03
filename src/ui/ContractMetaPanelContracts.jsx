@@ -105,16 +105,21 @@ export default function ContractMetaPanelContracts({
     || meta.thumbnailUri
     || meta.displayUri
     || '';
-  const thumb = thumbOk ? ipfsToHttp(thumbSrc) : PLACEHOLDER;
+  const showPlaceholder = !thumbSrc || !thumbOk;
+  const thumb = showPlaceholder ? PLACEHOLDER : ipfsToHttp(thumbSrc);
 
   return (
     <Card>
       <Thumb>
-        <RenderMedia
-          uri={thumb}
-          alt={meta.name}
-          onInvalid={()=>setThumbOk(false)}
-        />
+        {showPlaceholder ? (
+          <img src={PLACEHOLDER} alt="" />
+        ) : (
+          <RenderMedia
+            uri={thumb}
+            alt={meta.name}
+            onInvalid={() => setThumbOk(false)}
+          />
+        )}
       </Thumb>
 
       <Body>

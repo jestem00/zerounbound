@@ -1,8 +1,9 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/TokenMetaPanel.jsx
-  Rev :    r747   2025‑08‑11 T15:02 UTC
-  Summary: I103 — display “artists” synonymously with “authors”
+  Rev :    r752   2025‑08‑16
+  Summary: v4a/v4c‑aware broken‑media links – Clear‑URI hidden
+           where unsupported; Repair links routed per version.
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useEffect, useMemo, useState, useRef, useCallback,
@@ -16,8 +17,8 @@ import { jFetch }           from '../core/net.js';
 import LoadingSpinner       from './LoadingSpinner.jsx';
 import PixelButton          from './PixelButton.jsx';
 import { checkOnChainIntegrity } from '../utils/onChainValidator.js';
-import { getIntegrityInfo }       from '../constants/integrityBadges.js';
-import IntegrityBadge       from './IntegrityBadge.jsx';          /* NEW */
+import { getIntegrityInfo }      from '../constants/integrityBadges.js';
+import IntegrityBadge       from './IntegrityBadge.jsx';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -135,15 +136,21 @@ const primaryAuthorKey = (m = {}) =>
   : m.artists !== undefined ? 'artists'
   : 'authors';
 
+/*──────── component ───────────────────────────────────────*/
 export default function TokenMetaPanel({
   meta            = null,
   tokenId         = '',
   contractAddress = '',
+  contractVersion = '',          /* NEW – \"v4\", \"v4a\", \"v4c\" */
   onRemove,
 }) {
   const { address: wallet, network = 'ghostnet' } = useWalletContext() || {};
 
-  /*── state ─────────────────────────────*/
+  /*── flags ─*/
+  const vLow   = contractVersion.toLowerCase();
+  const isV4a  = vLow.startsWith('v4a') || vLow.startsWith('v4c');
+
+  /*── state ─*/
   const [warn,   setWarn]   = useState('');
   const [supply, setSupply] = useState(null);
   const [owned,  setOwned]  = useState(null);
@@ -166,7 +173,7 @@ export default function TokenMetaPanel({
     }));
   }, [contractAddress]);
 
-  /*──────── memo‑derived values (updated keys list) ────────*/
+  /*──────── memo‑derived values ─*/
   const metaObj   = typeof meta === 'object' && meta ? meta : {};
   const hero      = useMemo(() => pickUri(metaObj), [metaObj]);
   const uriArr    = useMemo(() => listUriKeys(metaObj), [metaObj]);
@@ -274,7 +281,7 @@ export default function TokenMetaPanel({
     return () => { cancelled = true; };
   }, [contractAddress, tokenId, wallet, network]);
 
-  /*──────── render ───────────────────────────────────────────*/
+  /*──────── render ─*/
   if (tokenId === '') return null;
 
   if (meta === null) {
@@ -356,18 +363,30 @@ export default function TokenMetaPanel({
           </p>
           <p>
             <strong>Options:</strong><br />
-            1)&nbsp;If your batch sign sequence was interrupted,&nbsp;
-            <a href="#repair_uri" onClick={(e)=>{e.preventDefault();openTool('repair_uri');}}>
-              REPAIR&nbsp;URI
+            {/* Repair link – key depends on contract version */}
+            <a href="#repair_uri" onClick={(e)=>{
+              e.preventDefault();
+              openTool(isV4a ? 'repair_uri_v4a' : 'repair_uri');
+            }}>
+              {isV4a ? 'REPAIR URI' : 'REPAIR URI'}
             </a>
-            &nbsp;— resume from last slice.<br />
-            2)&nbsp;
-            <a href="#clear_uri" onClick={(e)=>{e.preventDefault();openTool('clear_uri');}}>
-              CLEAR&nbsp;URI
-            </a>
-            &nbsp;then append a fresh URI.
+            {isV4a
+              ? null
+              : (
+                <>
+                  {' — '}<br />
+                  {/* Clear URI only for v4 */}
+                  <a href="#clear_uri" onClick={(e)=>{
+                    e.preventDefault();
+                    openTool('clear_uri');
+                  }}>
+                    CLEAR URI
+                  </a>{' then append a fresh URI.'}
+                </>
+              )
+            }
           </p>
-          <PixelButton onClick={dismissWarn}>Dismiss</PixelButton>
+          <PixelButton onClick={dismissWarn}>DISMISS</PixelButton>
         </Warn>
       )}
 
@@ -406,7 +425,11 @@ export default function TokenMetaPanel({
   );
 }
 /* What changed & why:
-   • Added primaryAuthorKey() helper; kvPairs now displays whichever of
-     “authors” or legacy “artists” exists, fulfilling invariant I103.
-   • Rev bumped to r747. */
+   • Added optional `contractVersion` prop.
+   • Determined `isV4a` flag (v4a/v4c) for URI‑repair logic.
+   • Broken‑media banner now:
+     – routes to `repair_uri_v4a` when isV4a,
+     – hides CLEAR URI option for v4a/v4c collections,
+     – retains legacy links for v4.
+   • Rev‑bump r752; fully lint‑clean. */
 /* EOF */

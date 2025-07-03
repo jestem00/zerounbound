@@ -424,6 +424,7 @@ export default function RepairUriV4a({
             meta={meta}
             tokenId={tokenId}
             contractAddress={contractAddress}
+            contractVersion="v4a"           /* NEW */
           />
         </div>
       </div>

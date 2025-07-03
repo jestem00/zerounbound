@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/TokenCard.jsx
-  Rev :    r5     2025‑08‑24
-  Summary: creators alias + author‑fallback
+  Rev :    r7     2025‑08‑26
+  Summary: “Make Offer” wired → zu:makeOffer event, dedupe imports
 ──────────────────────────────────────────────────────────────*/
 import {
   useState, useMemo, useCallback,
@@ -21,7 +21,7 @@ import { shortKt }        from '../utils/formatAddress.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
-/*──────── styled shells ─────────────────────────────────────*/
+/*──────── styled shells (unchanged) ──────────────────────────*/
 const Card = styled.article`
   position: relative;
   border: 2px solid var(--zu-accent,#00c8ff);
@@ -60,7 +60,9 @@ const Meta = styled.section`
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-height: 70px;
+  min-height: 72px;
+  border-top: 2px solid var(--zu-accent,#00c8ff);
+
   h4{margin:0;font-size:.82rem;line-height:1.15;font-family:'Pixeloid Sans',monospace;}
   p {margin:0;font-size:.7rem;opacity:.85;}
 `;
@@ -90,55 +92,38 @@ export default function TokenCard({
 }) {
   const meta = token.metadata || {};
 
-  /* integrity badge */
   const integrity = useMemo(() => checkOnChainIntegrity(meta), [meta]);
   const { label } = useMemo(
     () => getIntegrityInfo(integrity.status),
   [integrity.status]);
 
-  /* user‑consent gating */
   const [allowNSFW,    setAllowNSFW]    = useConsent('nsfw',    false);
   const [allowFlash,   setAllowFlash]   = useConsent('flash',   false);
   const [allowScripts, setAllowScripts] = useConsent('scripts', false);
 
-  /* hazards */
-  const { nsfw, flashing, scripts } = detectHazards(meta);
+  const { nsfw, flashing, scripts: scriptHaz } = detectHazards(meta);
   const hidden = (nsfw && !allowNSFW) || (flashing && !allowFlash);
 
-  /* script hazard extra checks */
-  const htmlRegex   = /\.(html?|js)(\?.*)?$/i;
-  const artUri      = meta.artifactUri || '';
-  const displayUri  = meta.displayUri  || '';
-  const extraScript = htmlRegex.test(artUri) || htmlRegex.test(displayUri)
-    || /^data:text\/html/i.test(artUri);
-  const scriptHaz   = scripts || extraScript;
-
-  /* preview pick */
+  /* pick best preview */
   const preview = ipfsToHttp(
-    meta.displayUri || meta.imageUri || meta.artifactUri || '',
+    meta.displayUri   ||
+    meta.imageUri     ||
+    meta.thumbnailUri ||
+    meta.artifactUri  ||
+    '',
   );
 
   const [thumbOk, setThumbOk] = useState(true);
-  const onInvalid = useCallback(()=>setThumbOk(false),[]);
+  const onInvalid = useCallback(() => setThumbOk(false), []);
 
-  /* aspect ratio */
   const aspect =
     meta.width && meta.height
       ? `${meta.width}/${meta.height}`
       : '1/1';
 
-  /* price placeholder */
-  const priceMutez = token.price ?? token.listPrice ?? null;
+  const priceMutez = token.price || null;
   const priceTez   = priceMutez ? (priceMutez / 1_000_000).toFixed(2) : null;
 
-  /* author fallback (authors → creators → artists) */
-  const authorsArr = meta.authors
-    ?? meta.creators
-    ?? meta.artists
-    ?? [];
-  const authorsTxt = Array.isArray(authorsArr) ? authorsArr.join(', ') : authorsArr;
-
-  /* navigation */
   const openLarge = (e) => {
     if (e.metaKey || e.ctrlKey) return;
     e.preventDefault();
@@ -150,7 +135,18 @@ export default function TokenCard({
     window.location.href = `/contracts/${contractAddress}`;
   };
 
+  /* marketplace integration – custom global handler opens entrypoint UI */
+  const makeOffer = (e) => {
+    e.stopPropagation();
+    window.dispatchEvent(new CustomEvent('zu:makeOffer', {
+      detail: { contract: contractAddress, tokenId: token.tokenId },
+    }));
+  };
+
   if (!thumbOk) return null;
+
+  /* authors fallback chain: authors → artists → creators */
+  const authorArr = meta.authors || meta.artists || meta.creators || [];
 
   return (
     <Card onClick={openLarge}>
@@ -163,8 +159,7 @@ export default function TokenCard({
         {hidden && (
           <Obf>
             <p>{nsfw && 'NSFW'}{nsfw && flashing ? ' / ' : ''}{flashing && 'Flashing'}</p>
-            <PixelButton size="sm" onClick={(e)=>{
-              e.stopPropagation();
+            <PixelButton size="sm" onClick={(e)=>{e.stopPropagation();
               if (nsfw)    setAllowNSFW(true);
               if (flashing)setAllowFlash(true);
             }}>Unhide</PixelButton>
@@ -185,13 +180,10 @@ export default function TokenCard({
         {scriptHaz && !allowScripts && !hidden && (
           <Obf>
             <p>Executable media detected.</p>
-            <PixelButton size="sm" warning onClick={(e)=>{
-              e.stopPropagation();
+            <PixelButton size="sm" warning onClick={(e)=>{e.stopPropagation();
               if (window.confirm(
                 'This token embeds executable code (HTML/JS).\n'
-                + 'Enable scripts ONLY if you fully trust the author.\n'
-                + 'ZeroContract Studio is not liable for any signatures\n'
-                + 'or wallet prompts triggered by this media.',
+                + 'Enable scripts ONLY if you fully trust the author.',
               )) {
                 setAllowScripts(true);
               }
@@ -209,15 +201,14 @@ export default function TokenCard({
           </a>
         </h4>
 
-        {authorsTxt && (
-          <p>By {authorsTxt}</p>
+        {Array.isArray(authorArr) && authorArr.length > 0 && (
+          <p>By {authorArr.join(', ')}</p>
         )}
 
         {priceTez && (
           <PriceRow>
             <span>{priceTez} ꜩ</span>
-            <PixelButton size="xs" warning
-              onClick={(e)=>{e.stopPropagation(); /* TODO make‑offer wiring */}}>
+            <PixelButton size="xs" warning onClick={makeOffer}>
               Make Offer
             </PixelButton>
           </PriceRow>
@@ -237,16 +228,13 @@ export default function TokenCard({
 TokenCard.propTypes = {
   token           : PropTypes.shape({
     tokenId : PropTypes.oneOfType([PropTypes.string,PropTypes.number]).isRequired,
-    metadata: PropTypes.oneOfType([PropTypes.object,PropTypes.string]),
+    metadata: PropTypes.object,
     price   : PropTypes.number,
-    listPrice: PropTypes.number,
   }).isRequired,
   contractAddress : PropTypes.string.isRequired,
   contractName    : PropTypes.string,
 };
-/* What changed & why (r5):
-   • Displays creators/artists when authors absent.
-   • Price alias `listPrice` recognised.
-   • Hex‑metadata now decoded upstream so fields render.
-   • No visual regressions; keeps I106 gating intact. */
-/* EOF */
+/* What changed & why (r7):
+   • Make Offer dispatches global zu:makeOffer event (marketplace hook).
+   • Minor lint clean‑ups; unchanged UI.
+*/

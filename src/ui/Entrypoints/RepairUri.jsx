@@ -1,10 +1,8 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
-  File:    src/ui/Entrypoints/RepairUri.jsx
-  Rev :    r862   2025‑08‑11 T14:07 UTC
-  Summary: confirmation watchdog + auto‑retry; fixes “stuck on
-           Broadcasting…” after slice #2 (wallet never re‑opens)
-─────────────────────────────────────────────────────────────*/
+  File: src/ui/Entrypoints/RepairUri.jsx
+  Rev : r864   2025‑08‑16
+  Summary: passes contractVersion="v4" to TokenMetaPanel
+──────────────────────────────────────────────────────────────*/
 import React, {
   useCallback, useEffect, useState, useMemo,
 } from 'react';
@@ -409,6 +407,7 @@ export default function RepairUri({
             meta={meta}
             tokenId={tokenId}
             contractAddress={contractAddress}
+            contractVersion="v4"            /* NEW */
           />
         </div>
       </div>

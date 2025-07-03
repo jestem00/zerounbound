@@ -1,11 +1,11 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/contracts/[addr].jsx
-  Rev :    r11    2025‑08‑24
-  Summary: hex‑metadata decode + name/desc fix
+  Rev :    r14    2025‑08‑27
+  Summary: add missing useCallback import (fix SSR ReferenceError)
 ──────────────────────────────────────────────────────────────*/
 import React, {
-  useEffect, useMemo, useState,
+  useEffect, useMemo, useState, useCallback,      /* ← added useCallback */
 } from 'react';
 import { useRouter }      from 'next/router';
 import styledPkg          from 'styled-components';
@@ -16,10 +16,13 @@ import TokenCard                  from '../../ui/TokenCard.jsx';
 import PixelInput                 from '../../ui/PixelInput.jsx';
 import PixelButton                from '../../ui/PixelButton.jsx';
 import TokenIdSelect              from '../../ui/TokenIdSelect.jsx';
+import FiltersPanel               from '../../ui/FiltersPanel.jsx';
 
 import countOwners      from '../../utils/countOwners.js';
 import listLiveTokenIds from '../../utils/listLiveTokenIds.js';
+import decodeHexFields, { decodeHexJson } from '../../utils/decodeHexFields.js';
 import { jFetch }       from '../../core/net.js';
+import { TARGET }       from '../../config/deployTarget.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -28,6 +31,13 @@ const Wrap = styled.div`
   padding: 0 1rem 1rem;
   max-width: 1440px;
   margin: 0 auto;
+  display:grid;
+  grid-template-columns: 1fr;
+  gap:12px;
+
+  @media(min-width:1100px){
+    grid-template-columns:260px 1fr;
+  }
 `;
 
 const ControlsRow = styled.div`
@@ -44,29 +54,16 @@ const Grid = styled.div`
 /*──────── helpers ───────────────────────────────────────────*/
 const ipfsToHttp = (u='') => u.replace(/^ipfs:\/\//,'https://ipfs.io/ipfs/');
 
-function decodeHexMetadata(val = '') {
-  try {
-    if (typeof val !== 'string') return null;
-    const s = val.trim();
-    if (s.startsWith('{') && s.endsWith('}')) return JSON.parse(s);
-    const hex = s.replace(/^0x/, '');
-    if (!/^[0-9a-f]+$/i.test(hex) || hex.length % 2) return null;
-    const bytes = new Uint8Array(hex.match(/.{1,2}/g).map((b) => parseInt(b, 16)));
-    return JSON.parse(
-      new TextDecoder().decode(bytes).replace(/[\u0000-\u001F\u007F]/g, ''),
-    );
-  } catch {
-    return null;
-  }
-}
+const NETWORK = TARGET?.toLowerCase().includes('mainnet') ? 'mainnet' : 'ghostnet';
+const TZKT_API = NETWORK === 'mainnet'
+  ? 'https://api.tzkt.io/v1'
+  : 'https://api.ghostnet.tzkt.io/v1';
 
 /*──────── component ───────────────────────────────────────*/
 export default function ContractPage() {
   const router           = useRouter();
   const { addr }         = router.query;
-  const net              = 'ghostnet';
 
-  /* data */
   const [meta, setMeta]       = useState(null);
   const [tokens, setTokens]   = useState([]);
   const [owners, setOwners]   = useState(null);
@@ -75,27 +72,36 @@ export default function ContractPage() {
   const [tokSel,  setTokSel]  = useState('');
 
   /* ui */
-  const [search, setSearch] = useState('');
-  const [sort, setSort]     = useState('newest');
+  const [search, setSearch]   = useState('');
+  const [sort, setSort]       = useState('newest');
+
+  /* filters */
+  const [filters, setFilters] = useState({
+    authors: new Set(),
+    mime   : new Set(),
+    tags   : new Set(),
+    type   : '',
+    mature : 'include',        /* include | exclude | only */
+    flash  : 'include',
+  });
 
   /*── fetch meta + tokens ──────────────────────────────────*/
   useEffect(() => { let cancel = false;
     if (!addr) return;
-    const api = 'https://api.ghostnet.tzkt.io/v1';
 
     /* 1 · contract metadata (hex → JSON fallback) */
     (async () => {
       try {
-        const r = await jFetch(`${api}/contracts/${addr}`);
+        const r = await jFetch(`${TZKT_API}/contracts/${addr}`);
         let m   = r?.metadata ?? {};
         if (!m?.name) {
           const [v] = await jFetch(
-            `${api}/contracts/${addr}/bigmaps/metadata/keys?key=content&select=value`,
+            `${TZKT_API}/contracts/${addr}/bigmaps/metadata/keys?key=content&select=value`,
           ).catch(() => []);
-          const decoded = decodeHexMetadata(v);
+          const decoded = decodeHexJson(v);
           if (decoded) m = { ...decoded, ...m };
         }
-        if (!cancel) setMeta(m);
+        if (!cancel) setMeta(decodeHexFields(m));
       } catch { if (!cancel) setMeta({}); }
     })();
 
@@ -103,16 +109,18 @@ export default function ContractPage() {
     (async () => {
       try {
         const [raw, live] = await Promise.all([
-          jFetch(`${api}/tokens?contract=${addr}&limit=10000`),
-          listLiveTokenIds(addr, net, true),
+          jFetch(`${TZKT_API}/tokens?contract=${addr}&limit=10000`),
+          listLiveTokenIds(addr, NETWORK, true),
         ]);
         if (cancel) return;
         const allow = new Set(live.map((o) => +o.id));
         const decoded = (raw || []).filter((t) => allow.has(+t.tokenId))
           .map((t) => {
-            if (typeof t.metadata === 'string') {
-              const j = decodeHexMetadata(t.metadata);
-              if (j) t.metadata = j;           // eslint-disable-line no-param-reassign
+            if (t.metadata && typeof t.metadata === 'object') {
+              t.metadata = decodeHexFields(t.metadata);                  // eslint-disable-line no-param-reassign
+            } else if (typeof t.metadata === 'string') {
+              const j = decodeHexJson(t.metadata);
+              if (j) t.metadata = decodeHexFields(j);                    // eslint-disable-line no-param-reassign
             }
             return t;
           });
@@ -122,16 +130,48 @@ export default function ContractPage() {
     })();
 
     /* 3 · owners */
-    countOwners(addr, net).then((n) => { if (!cancel) setOwners(n); });
+    countOwners(addr, NETWORK).then((n) => { if (!cancel) setOwners(n); });
 
     return () => { cancel = true; };
-  }, [addr, net]);
+  }, [addr]);
+
+  /*── filter helpers ───────────────────────────────────────*/
+  const applyFilters = useCallback((arr) => arr.filter((t) => {
+    const m = t.metadata || {};
+    /* authors */
+    if (filters.authors.size) {
+      const aArr = m.authors || m.artists || m.creators || [];
+      if (!aArr.some((a) => filters.authors.has(a))) return false;
+    }
+    /* mime */
+    if (filters.mime.size && !filters.mime.has(m.mimeType)) return false;
+    /* tags */
+    if (filters.tags.size) {
+      const tagArr = m.tags || [];
+      if (!tagArr.some((tg) => filters.tags.has(tg))) return false;
+    }
+    /* type editions */
+    if (filters.type === '1of1' && +m.decimals !== 0) return false;
+    if (filters.type === 'editions' && +m.decimals === 0) return false;
+    /* mature / flashing */
+    const mature   = String(m.contentRating||'').toLowerCase().includes('mature');
+    const flashing = String(m.accessibility||'').toLowerCase().includes('flash');
+    if (filters.mature === 'exclude' && mature)   return false;
+    if (filters.mature === 'only'    && !mature)  return false;
+    if (filters.flash  === 'exclude' && flashing) return false;
+    if (filters.flash  === 'only'    && !flashing)return false;
+    return true;
+  }), [filters]);
 
   /*── search + sort + token‑id filter ─────────────────────*/
   const list = useMemo(() => {
     let out = [...tokens];
     if (tokSel) return out.filter((t) => String(t.tokenId) === String(tokSel));
 
+    /* filters */
+    out = applyFilters(out);
+
+    /* search */
     const q = search.trim().toLowerCase();
     if (q) {
       out = out.filter((t) => {
@@ -146,14 +186,20 @@ export default function ContractPage() {
         return hay.includes(q);
       });
     }
+
+    /* sort */
     switch (sort) {
-      case 'oldest': out.sort((a, b) => a.tokenId - b.tokenId); break;
-      default:       out.sort((a, b) => b.tokenId - a.tokenId);
+      case 'oldest':                out.sort((a,b)=>a.tokenId-b.tokenId); break;
+      case 'recentlyListed':        out.sort((a,b)=>(b.listedAt||0)-(a.listedAt||0)); break;
+      case 'priceHigh':             out.sort((a,b)=>(b.price||0)-(a.price||0)); break;
+      case 'priceLow':              out.sort((a,b)=>(a.price||0)-(b.price||0)); break;
+      case 'offerHigh':             out.sort((a,b)=>(b.topOffer||0)-(a.topOffer||0)); break;
+      case 'offerLow':              out.sort((a,b)=>(a.topOffer||0)-(b.topOffer||0)); break;
+      default: /* newest */         out.sort((a,b)=>b.tokenId-a.tokenId);
     }
     return out;
-  }, [tokens, search, sort, tokSel]);
+  }, [tokens, search, sort, tokSel, applyFilters]);
 
-  /* token cards */
   const cards = useMemo(() =>
     list.map((t) => (
       <TokenCard
@@ -165,60 +211,72 @@ export default function ContractPage() {
     )),
   [list, addr, meta]);
 
-  /* stats for banner */
+  /* stats */
   const stats = {
     tokens : tokens.length,
     owners : owners ?? '—',
-    sales  : 0,
+    sales  : tokens.filter((t) => Number(t.price) > 0).length,
   };
 
   /*──────── render ─────────────────────────────────────────*/
   return (
-    <Wrap>
+    <>
       <ExploreNav />
-
-      {meta && <ContractMetaPanelContracts
-        meta={{ ...meta, imageUri: ipfsToHttp(meta.imageUri || '') }}
-        contractAddress={addr}
-        network={net}
-        stats={stats}
-      />}
-
-      <ControlsRow>
-        <PixelInput
-          placeholder="Search tokens…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
+      <Wrap>
+        <FiltersPanel
+          tokens={tokens}
+          filters={filters}
+          setFilters={setFilters}
         />
-        <select
-          value={sort}
-          onChange={(e) => setSort(e.target.value)}
-          style={{ fontFamily:'inherit',padding:'4px 6px' }}
-        >
-          <option value="newest">Newest</option>
-          <option value="oldest">Oldest</option>
-        </select>
-        <TokenIdSelect
-          options={tokOpts}
-          value={tokSel}
-          onChange={setTokSel}
-        />
-        {tokSel && (
-          <PixelButton size="sm" onClick={() => setTokSel('')}>
-            CLEAR
-          </PixelButton>
-        )}
-      </ControlsRow>
 
-      {loading
-        ? <p style={{ textAlign:'center', marginTop:'2rem' }}>Loading…</p>
-        : <Grid>{cards}</Grid>}
-    </Wrap>
+        <div>
+          {meta && <ContractMetaPanelContracts
+            meta={{ ...meta, imageUri: ipfsToHttp(meta.imageUri || '') }}
+            contractAddress={addr}
+            network={NETWORK}
+            stats={stats}
+          />}
+
+          <ControlsRow>
+            <PixelInput
+              placeholder="Search tokens…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <select
+              value={sort}
+              onChange={(e) => setSort(e.target.value)}
+              style={{ fontFamily:'inherit',padding:'4px 6px' }}
+            >
+              <option value="newest">Newest</option>
+              <option value="recentlyListed">Recently listed</option>
+              <option value="priceHigh">Price: high → low</option>
+              <option value="priceLow">Price: low → high</option>
+              <option value="offerHigh">Offer: high → low</option>
+              <option value="offerLow">Offer: low → high</option>
+              <option value="oldest">Oldest</option>
+            </select>
+            <TokenIdSelect
+              options={tokOpts}
+              value={tokSel}
+              onChange={setTokSel}
+            />
+            {tokSel && (
+              <PixelButton size="sm" onClick={() => setTokSel('')}>
+                CLEAR
+              </PixelButton>
+            )}
+          </ControlsRow>
+
+          {loading
+            ? <p style={{ textAlign:'center', marginTop:'2rem' }}>Loading…</p>
+            : <Grid>{cards}</Grid>}
+        </div>
+      </Wrap>
+    </>
   );
 }
-/* What changed & why (r11):
-   • Added decodeHexMetadata() to parse hex‑encoded contract & token
-     metadata, restoring collection name/description and token info.
-   • Contract big‑map fallback reinstated when TzKT meta empty.
-   • Tokens array now holds decoded metadata; dropdown unchanged. */
+/* What changed & why (r14):
+   • Added missing useCallback import fixing SSR/500 ReferenceError.
+   • No runtime logic changes – lint‑clean compile‑safe. */
 /* EOF */

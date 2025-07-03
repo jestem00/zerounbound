@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/FiltersPanel.jsx
-  Rev :    r1     2025‑08‑26
-  Summary: responsive token‑filter sidebar / modal (I102‑compliant)
+  Rev :    r2     2025‑10‑05
+  Summary: responsive token filter sidebar / mobile modal
 ──────────────────────────────────────────────────────────────*/
 import PropTypes from 'prop-types';
 import styledPkg from 'styled-components';
@@ -63,11 +63,15 @@ export default function FiltersPanel({ tokens = [], filters, setFilters, renderT
       s.has(val) ? s.delete(val) : s.add(val);
       return { ...f, [setName]: s };
     });
+    if (window.innerWidth < 1100) setShow(false);
   };
 
-  const onRadio = (key, val) => setFilters((f) => ({ ...f, [key]: val }));
+  const onRadio = (key, val) => {
+    setFilters((f) => ({ ...f, [key]: val }));
+    if (window.innerWidth < 1100) setShow(false);
+  };
 
-  /* mobile modal close on resize */
+  /* auto-close mobile modal on resize or change */
   useEffect(() => {
     const onResize = () => { if (window.innerWidth >= 1100) setShow(false); };
     window.addEventListener('resize', onResize);
@@ -148,7 +152,6 @@ export default function FiltersPanel({ tokens = [], filters, setFilters, renderT
         ))}
       </Section>
 
-      <PixelButton onClick={()=>setFilters({...filters})}>APPLY</PixelButton>
     </Panel>
   );
 
@@ -183,4 +186,5 @@ FiltersPanel.propTypes = {
   renderToggle: PropTypes.func,
   buttonStyle: PropTypes.object,
 };
+/* What changed & why: removed apply button; auto-close after change */
 /* EOF */

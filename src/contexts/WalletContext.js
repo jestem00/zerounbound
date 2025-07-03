@@ -13,7 +13,11 @@ import React, {
 import { TezosToolkit } from '@taquito/taquito';
 import { BeaconWallet }  from '@taquito/beacon-wallet';
 import { BeaconEvent }   from '@airgap/beacon-sdk';
-import { NETWORKS, DEFAULT_NETWORK } from '../config/networkConfig.js';
+import {
+  NETWORKS,
+  DEFAULT_NETWORK,
+  selectFastestRpc,
+} from '../config/networkConfig.js';
 
 /*──────── constants ─────*/
 const APP_NAME      = 'ZeroUnbound.art';
@@ -34,17 +38,10 @@ if (typeof window !== 'undefined' && !window.__ZU_SPAM_LOCK__) {
 }
 
 /*──────── RPC helper ─────*/
-const rpcList = net => NETWORKS[net]?.rpcUrls || [];
-async function pickRpc(net) {
-  for (const url of rpcList(net)) {
-    try {
-      const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 2500);
-      const ok  = await fetch(`${url}/chains/main/chain_id`, { signal: ctl.signal, mode: 'cors' });
-      clearTimeout(t);
-      if (ok.ok) return url;
-    } catch {}
-  }
-  throw new Error(`No reachable RPC for ${net}`);
+async function pickRpc() {
+  return selectFastestRpc().catch(() => {
+    throw new Error('No reachable RPC for active network');
+  });
 }
 
 /*──────── factories ─────*/
@@ -99,7 +96,7 @@ export function WalletProvider({ children, initialNetwork = DEFAULT_NETWORK }) {
   useEffect(() => {
     (async () => {
       // pick RPC and init toolkit
-      const rpc = await pickRpc(network);
+      const rpc = await pickRpc();
       rpcRef.current = rpc;
       tkRef.current  = makeToolkit(rpc);
 

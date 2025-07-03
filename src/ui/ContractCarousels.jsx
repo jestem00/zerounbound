@@ -175,7 +175,7 @@ async function enrich(list, net, force = false) {
     let meta = detRaw?.metadata || {};
     if (!meta.name || !meta.imageUri) {
       const bm = await jFetch(
-        `${TZKT[net]}/contracts/${it.address}/bigmaps/metadata/keys/content`,
+        `${TZKT[net]}/contracts/${it.address}/bigmaps/metadata/keys/contents`,
       ).catch(() => null);
       if (bm?.value) meta = { ...parseHex(bm.value), ...meta };
     }

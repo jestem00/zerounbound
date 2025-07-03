@@ -98,7 +98,7 @@ export default function ContractPage() {
         let m   = r?.metadata ?? {};
         if (!m?.name) {
           const [v] = await jFetch(
-            `${TZKT_API}/contracts/${addr}/bigmaps/metadata/keys?key=content&select=value`,
+            `${TZKT_API}/contracts/${addr}/bigmaps/metadata/keys?key=contents&select=value`,
           ).catch(() => []);
           const decoded = decodeHexJson(v);
           if (decoded) m = { ...decoded, ...m };

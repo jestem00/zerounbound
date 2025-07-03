@@ -101,9 +101,11 @@ export default function ContractMetaPanelContracts({
   };
 
   const [thumbOk, setThumbOk] = useState(true);
-  const thumb = thumbOk
-    ? ipfsToHttp(meta.imageUri || meta.thumbnailUri || meta.displayUri || '')
-    : PLACEHOLDER;
+  const thumbSrc = meta.imageUri
+    || meta.thumbnailUri
+    || meta.displayUri
+    || '';
+  const thumb = thumbOk ? ipfsToHttp(thumbSrc) : PLACEHOLDER;
 
   return (
     <Card>

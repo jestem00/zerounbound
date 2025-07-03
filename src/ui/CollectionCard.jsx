@@ -21,7 +21,7 @@ import { shortKt, copyToClipboard } from '../utils/formatAddress.js';
 import RenderMedia                from '../utils/RenderMedia.jsx';
 import PixelButton                from './PixelButton.jsx';
 import { jFetch }                 from '../core/net.js';
-import decodeHexFields            from '../utils/decodeHexFields.js';
+import decodeHexFields, { decodeHexJson } from '../utils/decodeHexFields.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -76,17 +76,6 @@ const AddrRow = styled.div`
 const ipfsToHttp = (u='') => u.replace(/^ipfs:\/\//,'https://ipfs.io/ipfs/');
 const PLACEHOLDER = '/sprites/cover_default.svg';
 
-function decodeHexMetadata(val='') {
-  try{
-    if(typeof val!=='string') return null;
-    const s = val.trim();
-    if(s.startsWith('{') && s.endsWith('}')) return JSON.parse(s);
-    const hex = s.replace(/^0x/,'');
-    if(!/^[0-9a-f]+$/i.test(hex) || hex.length%2) return null;
-    const bytes = new Uint8Array(hex.match(/.{1,2}/g).map(b=>parseInt(b,16)));
-    return JSON.parse(new TextDecoder().decode(bytes).replace(/[\u0000-\u001F\u007F]/g,''));
-  }catch{return null;}
-}
 
 /*──────── component ─────────────────────────────────────────*/
 export default function CollectionCard({ contract }) {
@@ -112,7 +101,7 @@ export default function CollectionCard({ contract }) {
           + '?key=content&select=value&limit=1',
         ).catch(()=>[]);
         const raw = rows?.[0];
-        const parsed = decodeHexMetadata(raw);
+        const parsed = decodeHexJson(raw);
         if(parsed) m = parsed;
       }catch{/* ignore */}
 
@@ -218,7 +207,7 @@ CollectionCard.propTypes = {
 };
 /* What changed & why (r24):
    • Re‑implemented original big‑map “content” value query (worked in r19).
-   • decodeHexMetadata helper restored → proper JSON extraction.
+   • Hex‑JSON decode via shared util.
    • Placeholder sprite shows when no image or load‑error.
    • Authors/name render from recovered metadata; counts untouched.
    • Removes empty‑key path that broke earlier; cards no longer black.

@@ -1,9 +1,6 @@
-/*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
-  File:    src/ui/TokenCard.jsx
-  Rev :    r7     2025‑08‑26
-  Summary: “Make Offer” wired → zu:makeOffer event, dedupe imports
-──────────────────────────────────────────────────────────────*/
+/*Developed by @jams2blues with love for the Tezos community
+  File: src/ui/TokenCard.jsx
+  Summary: show placeholder when media fails */
 import {
   useState, useMemo, useCallback,
 }                         from 'react';
@@ -83,6 +80,7 @@ const PriceRow = styled.div`
 
 /*──────── helpers ───────────────────────────────────────────*/
 const ipfsToHttp = (u='') => u.replace(/^ipfs:\/\//,'https://ipfs.io/ipfs/');
+const PLACEHOLDER = '/sprites/cover_default.svg';
 
 /*──────── component ─────────────────────────────────────────*/
 export default function TokenCard({
@@ -115,6 +113,7 @@ export default function TokenCard({
 
   const [thumbOk, setThumbOk] = useState(true);
   const onInvalid = useCallback(() => setThumbOk(false), []);
+  const showPlaceholder = !preview || !thumbOk;
 
   const aspect =
     meta.width && meta.height
@@ -143,7 +142,6 @@ export default function TokenCard({
     }));
   };
 
-  if (!thumbOk) return null;
 
   /* authors fallback chain: authors → artists → creators */
   const authorArr = meta.authors || meta.artists || meta.creators || [];
@@ -171,7 +169,7 @@ export default function TokenCard({
           </Obf>
         )}
 
-        {!hidden && (
+        {!hidden && !showPlaceholder && (
           <RenderMedia
             uri={preview}
             mime={meta.mimeType}
@@ -180,6 +178,9 @@ export default function TokenCard({
             style={{ width:'100%', height:'100%', objectFit:'contain' }}
             onInvalid={onInvalid}
           />
+        )}
+        {!hidden && showPlaceholder && (
+          <img src={PLACEHOLDER} alt="" style={{width:'60%',opacity:.45}} />
         )}
 
         {scriptHaz && !allowScripts && !hidden && (
@@ -244,7 +245,4 @@ TokenCard.propTypes = {
   contractAddress : PropTypes.string.isRequired,
   contractName    : PropTypes.string,
 };
-/* What changed & why (r7):
-   • Make Offer dispatches global zu:makeOffer event (marketplace hook).
-   • Minor lint clean‑ups; unchanged UI.
-*/
+/* What changed & why: placeholder sprite shown if media fails */

@@ -1,9 +1,8 @@
-/*──────── src/ui/ContractMetaPanelContracts.jsx ────────*/
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/ContractMetaPanelContracts.jsx
-  Rev :    r2     2025‑08‑22
-  Summary: ipfs:// → https http gateway so preview renders
+  Rev :    r3     2025‑08‑27
+  Summary: show placeholder stats until counts resolve
 ──────────────────────────────────────────────────────────────*/
 import React, { useMemo, useState } from 'react';
 import PropTypes                    from 'prop-types';
@@ -85,7 +84,7 @@ export default function ContractMetaPanelContracts({
   meta = {},
   contractAddress = '',
   network = 'ghostnet',
-  stats = { tokens:0, owners:0, sales:0 },
+  stats = { tokens:'…', owners:'…', sales:'…' },
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -149,11 +148,11 @@ ContractMetaPanelContracts.propTypes = {
   contractAddress: PropTypes.string.isRequired,
   network: PropTypes.string,
   stats: PropTypes.shape({
-    tokens : PropTypes.number,
+    tokens : PropTypes.oneOfType([PropTypes.number,PropTypes.string]),
     owners : PropTypes.oneOfType([PropTypes.number,PropTypes.string]),
-    sales  : PropTypes.number,
+    sales  : PropTypes.oneOfType([PropTypes.number,PropTypes.string]),
   }),
 };
-/* What changed & why (r2):
-   • Converts ipfs:// URIs → https://ipfs.io/ipfs/ ensuring preview
-     renders under RenderMedia (I41) without altering source meta. */
+/* What changed & why (r3):
+   • Shows string placeholders until counts resolve,
+     allowing direct display of '…' characters. */

@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/contracts/[addr].jsx
-  Rev :    r14    2025‑08‑27
-  Summary: add missing useCallback import (fix SSR ReferenceError)
+  Rev :    r15    2025‑08‑27
+  Summary: lazy‑update stats after async counts resolve
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useEffect, useMemo, useState, useCallback,      /* ← added useCallback */
@@ -19,6 +19,7 @@ import TokenIdSelect              from '../../ui/TokenIdSelect.jsx';
 import FiltersPanel               from '../../ui/FiltersPanel.jsx';
 
 import countOwners      from '../../utils/countOwners.js';
+import countTokens      from '../../utils/countTokens.js';
 import listLiveTokenIds from '../../utils/listLiveTokenIds.js';
 import decodeHexFields, { decodeHexJson } from '../../utils/decodeHexFields.js';
 import { jFetch }       from '../../core/net.js';
@@ -66,8 +67,8 @@ export default function ContractPage() {
 
   const [meta, setMeta]       = useState(null);
   const [tokens, setTokens]   = useState([]);
-  const [owners, setOwners]   = useState(null);
   const [loading, setLoading] = useState(true);
+  const [stats, setStats]     = useState({ tokens:'…', owners:'…', sales:'…' });
   const [tokOpts, setTokOpts] = useState([]);
   const [tokSel,  setTokSel]  = useState('');
 
@@ -87,6 +88,7 @@ export default function ContractPage() {
 
   /*── fetch meta + tokens ──────────────────────────────────*/
   useEffect(() => { let cancel = false;
+    setStats({ tokens:'…', owners:'…', sales:'…' });
     if (!addr) return;
 
     /* 1 · contract metadata (hex → JSON fallback) */
@@ -126,11 +128,20 @@ export default function ContractPage() {
           });
         setTokens(decoded);
         setTokOpts(live);
+        const saleCt = decoded.filter((t) => Number(t.price) > 0).length;
+        setStats((s) => ({ ...s, sales: saleCt }));
       } finally { if (!cancel) setLoading(false); }
     })();
 
     /* 3 · owners */
-    countOwners(addr, NETWORK).then((n) => { if (!cancel) setOwners(n); });
+    countOwners(addr, NETWORK).then((n) => {
+      if (!cancel) setStats((s) => ({ ...s, owners: n }));
+    });
+
+    /* 4 · token count */
+    countTokens(addr, NETWORK).then((n) => {
+      if (!cancel) setStats((s) => ({ ...s, tokens: n }));
+    });
 
     return () => { cancel = true; };
   }, [addr]);
@@ -211,12 +222,7 @@ export default function ContractPage() {
     )),
   [list, addr, meta]);
 
-  /* stats */
-  const stats = {
-    tokens : tokens.length,
-    owners : owners ?? '—',
-    sales  : tokens.filter((t) => Number(t.price) > 0).length,
-  };
+  /* stats are updated lazily via countTokens/countOwners */
 
   /*──────── render ─────────────────────────────────────────*/
   return (
@@ -277,7 +283,7 @@ export default function ContractPage() {
     </>
   );
 }
-/* What changed & why (r14):
-   • Added missing useCallback import fixing SSR/500 ReferenceError.
-   • No runtime logic changes – lint‑clean compile‑safe. */
+/* What changed & why (r15):
+   • Stats state starts as "…" and updates after count calls.
+     Tokens-for-sale count updates once token data loads. */
 /* EOF */

@@ -227,6 +227,7 @@ export default function ContractPage() {
           tokens={tokens}
           filters={filters}
           setFilters={setFilters}
+          buttonStyle={{ position:'static', margin:'0 0 8px' }}
         />
 
         <div>

@@ -22,7 +22,8 @@ const Side = styled.aside`
 `;
 
 const ModalWrap = styled.div`
-  position:fixed;inset:0;background:rgba(0,0,0,.9);
+  position:fixed;left:0;right:0;bottom:0;top:var(--hdr,0);
+  background:rgba(0,0,0,.9);
   z-index:9;display:flex;flex-direction:column;align-items:center;
   justify-content:center;padding:1rem;
 `;
@@ -40,7 +41,7 @@ const Section = styled.fieldset`
   input[type="checkbox"]{margin-right:4px;}
 `;
 
-export default function FiltersPanel({ tokens = [], filters, setFilters }) {
+export default function FiltersPanel({ tokens = [], filters, setFilters, renderToggle, buttonStyle }) {
   const [show, setShow] = useState(false);
 
   /* derive quick filter lists */
@@ -157,10 +158,14 @@ export default function FiltersPanel({ tokens = [], filters, setFilters }) {
       <Side>{body}</Side>
 
       {/* mobile toggle */}
-      <PixelButton size="sm"
-        style={{ position:'fixed',bottom:10,right:10,zIndex:8 }}
-        onClick={()=>setShow(true)}
-      >FILTERS</PixelButton>
+      {renderToggle
+        ? renderToggle(() => setShow(true))
+        : (
+          <PixelButton size="sm"
+            style={buttonStyle || { position:'fixed',bottom:10,right:10,zIndex:8 }}
+            onClick={()=>setShow(true)}
+          >FILTERS</PixelButton>
+        )}
 
       {show && (
         <ModalWrap onClick={()=>setShow(false)}>
@@ -175,5 +180,7 @@ FiltersPanel.propTypes = {
   tokens    : PropTypes.array,
   filters   : PropTypes.object.isRequired,
   setFilters: PropTypes.func.isRequired,
+  renderToggle: PropTypes.func,
+  buttonStyle: PropTypes.object,
 };
 /* EOF */

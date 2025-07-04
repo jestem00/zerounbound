@@ -10,7 +10,8 @@
     "dev": "yarn set:ghostnet && node scripts/ensureDevManifest.js && node scripts/startDev.js",
     "build": "node scripts/generateManifest.js && node scripts/updatePkgName.js && next build",
     "start": "next start -p 4000",
-    "lint": "eslint --ext .js,jsx,ts,tsx src --max-warnings 0"
+    "lint": "eslint . --ext js,jsx,ts,tsx --max-warnings 0 --config .eslintrc.cjs",
+    "test": "jest --passWithNoTests"
   },
   "dependencies": {
     "@airgap/beacon-sdk": "4.5.2",
@@ -43,6 +44,7 @@
     "@types/styled-components": "^5.1.26",
     "eslint": "^9.26.0",
     "eslint-config-next": "^15.3.2",
+    "jest": "^29.7.0",
     "eslint-plugin-styled-components-a11y": "^2.2.1",
     "fast-glob": "^3.3.3",
     "glob": "^11.0.2",

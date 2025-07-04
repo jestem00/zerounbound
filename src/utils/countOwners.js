@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/utils/countOwners.js
-  Rev :    r1     2025‑08‑18
-  Summary: fast distinct‑owner counter with 30 s TTL
+  Rev :    r2     2025‑09‑16
+  Summary: fix 0‑owner bug – parse nested account.address
 ──────────────────────────────────────────────────────────────*/
 import { jFetch } from '../core/net.js';
 
@@ -11,7 +11,8 @@ const TTL_MS    = 30_000;
 const PAGE      = 10_000;
 
 /**
- * Returns the number of distinct wallet addresses that hold ≥ 1 token.
+ * Returns the number of distinct wallet addresses that hold ≥ 1 token
+ * (excluding the canonical burn address).
  *
  * Caches result in sessionStorage for 30 s to avoid rate‑limit hits.
  *
@@ -21,6 +22,7 @@ const PAGE      = 10_000;
  */
 export default async function countOwners(contract = '', net = 'ghostnet') {
   if (!contract) return 0;
+
   const KEY = `zu_ownercount_${net}_${contract}`;
   try {
     const cached = sessionStorage?.getItem(KEY);
@@ -35,32 +37,39 @@ export default async function countOwners(contract = '', net = 'ghostnet') {
     : 'https://api.ghostnet.tzkt.io/v1';
 
   const owners = new Set();
-  let offset = 0;
-  // eslint-disable-next-line no-constant-condition
+  let offset   = 0;
+
+  /* full pagination – 10 k rows per request */
+  /* eslint-disable no-constant-condition */
   while (true) {
     const rows = await jFetch(
       `${api}/tokens/balances`
         + `?token.contract=${contract}`
         + '&balance.gt=0'
-        + '&select=account.address'
         + `&limit=${PAGE}`
         + (offset ? `&offset=${offset}` : ''),
     ).catch(() => []);
+
     rows.forEach((r) => {
-      const addr = r['account.address'];
+      const addr = r?.account?.address;
       if (addr && addr !== BURN_ADDR) owners.add(addr);
     });
+
     if (rows.length < PAGE) break;
     offset += PAGE;
   }
+  /* eslint-enable no-constant-condition */
 
   const n = owners.size;
   try {
     sessionStorage?.setItem(KEY, JSON.stringify({ n, ts: Date.now() }));
   } catch { /* ignore */ }
+
   return n;
 }
+
 /* What changed & why:
-   • Initial implementation – paginated scan of balances endpoint,
-     distinct address counting, 30 s session cache, burn‑address skip. */
+   • Dropped `select=account.address` flatten – TzKT returns nested objects.
+     We now read `r.account.address`, fixing false‑zero owner counts.
+   • Fully preserves TTL cache + burn address exclusion. */
 /* EOF */

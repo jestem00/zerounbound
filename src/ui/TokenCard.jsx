@@ -1,309 +1,347 @@
-/*──────── src/ui/TokenCard.jsx ──────────────────────────────
+/*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/TokenCard.jsx
-  Rev :    r16    2025‑09‑09
-  Summary: unobtrusive “⚡ Enable‑scripts” button top‑left;
-           SVG previews now shown even when scripts disabled.
+  Rev :    r31    2025‑09‑17
+  Summary: integrity‑dialog duplication fixed
+           • Badge now relies on <IntegrityBadge/>'s own dialog
+             (removed extra PixelConfirmDialog path)
+           • Cleans out redundant debounce logic
+           • Lint‑clean imports & state
 ──────────────────────────────────────────────────────────────*/
 import {
-  useState, useMemo, useCallback,
+  useState, useMemo, useEffect,
 } from 'react';
-import PropTypes      from 'prop-types';
-import styledPkg      from 'styled-components';
+import PropTypes     from 'prop-types';
+import styledPkg     from 'styled-components';
 
-import useConsent         from '../hooks/useConsent.js';
-import detectHazards      from '../utils/hazards.js';
-import RenderMedia        from '../utils/RenderMedia.jsx';
-import { getIntegrityInfo } from '../constants/integrityBadges.js';
+import useConsent              from '../hooks/useConsent.js';
+import detectHazards           from '../utils/hazards.js';
+import RenderMedia             from '../utils/RenderMedia.jsx';
+import { getIntegrityInfo }    from '../constants/integrityBadges.js';
 import { checkOnChainIntegrity } from '../utils/onChainValidator.js';
-import PixelButton        from './PixelButton.jsx';
-import MakeOfferBtn       from './MakeOfferBtn.jsx';
-import IntegrityBadge     from './IntegrityBadge.jsx';
-import { shortKt }        from '../utils/formatAddress.js';
-import countAmount        from '../utils/countAmount.js';
+import PixelButton             from './PixelButton.jsx';
+import MakeOfferBtn            from './MakeOfferBtn.jsx';
+import IntegrityBadge          from './IntegrityBadge.jsx';
+import { shortKt }             from '../utils/formatAddress.js';
+import countAmount             from '../utils/countAmount.js';
+import { useWalletContext }    from '../contexts/WalletContext.js';
+import { EnableScriptsToggle } from './EnableScripts.jsx';
+import FullscreenModal         from './FullscreenModal.jsx';
+import PixelConfirmDialog      from './PixelConfirmDialog.jsx';
 
 const PLACEHOLDER = '/sprites/cover_default.svg';
 const VALID_DATA  = /^data:/i;
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
-/*── helpers ────────────────────────────────────────────────*/
-const pickDataUri = (m = {}) => [
-  m.displayUri,
-  m.imageUri,
-  m.thumbnailUri,
-  m.artifactUri,
-].find((u) => typeof u === 'string' && VALID_DATA.test(u.trim())) || '';
+/*──────── helpers ───────────────────────────────────────────*/
+const pickDataUri = (m = {}) => (
+  [m.displayUri, m.imageUri, m.thumbnailUri, m.artifactUri]
+    .find((u) => typeof u === 'string' && VALID_DATA.test(u.trim())) || ''
+);
 
-/*── styled shells ─────────────────────────────────────────*/
+const authorArray = (m = {}) =>
+  m.authors || m.artists || m.creators || [];
+
+const isCreator = (meta = {}, addr = '') =>
+  !!addr && authorArray(meta).some((a) => String(a).toLowerCase() === addr.toLowerCase());
+
+function showPlaceholder(uri, ok) { return !uri || !ok; }
+
+/*──────── styled shells ────────────────────────────────────*/
 const Card = styled.article`
   position: relative;
   border: 2px solid var(--zu-accent,#00c8ff);
   background: var(--zu-bg,#000);
   color: var(--zu-fg,#fff);
   overflow: hidden;
-  cursor: pointer;
   display: flex;
   flex-direction: column;
+  min-height: 330px;
   transition: box-shadow .15s;
   &:hover { box-shadow: 0 0 6px var(--zu-accent-sec,#ff0); }
-  &:focus { outline: 2px solid var(--zu-accent-sec,#ff0); }
 `;
 
 const ThumbWrap = styled.div`
-  flex: 0 0 auto;
   position: relative;
   width: 100%;
   background: var(--zu-bg-dim,#111);
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  ${({ $aspect }) => $aspect ? `aspect-ratio:${$aspect};` : ''}
+  ${({ $aspect }) => ($aspect ? `aspect-ratio:${$aspect};` : 'aspect-ratio:1/1;')}
 `;
 
-const Obf = styled.div`
-  position: absolute; inset: 0;
-  background: rgba(0,0,0,.85);
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 10px; text-align: center; font-size: .75rem;
-  z-index: 9;
-  p{margin:0;width:80%;}
+const FSBtn = styled(PixelButton)`
+  position:absolute;
+  bottom:4px;
+  right:4px;
+  opacity:.45;
+  &:hover{ opacity:1; }
+  z-index:7;
 `;
 
 const Meta = styled.section`
   background: var(--zu-bg-alt,#171717);
-  padding: 6px 8px;
+  padding: 6px 8px 10px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  min-height: 78px;
+  gap: 6px;
+  flex: 1 1 auto;
   border-top: 2px solid var(--zu-accent,#00c8ff);
 
   h4{margin:0;font-size:.82rem;line-height:1.15;font-family:'Pixeloid Sans',monospace;}
   p {margin:0;font-size:.7rem;opacity:.85;}
 `;
 
-const StatRow = styled.div`
-  display:flex;justify-content:space-between;align-items:center;font-size:.7rem;
+const Stat = styled.span`
+  display:block;white-space:nowrap;font-size:.68rem;opacity:.85;
 `;
 
-const Addr = styled.a`
-  font-size:.65rem;opacity:.7;text-decoration:none;color:inherit;
-  &:hover{text-decoration:underline;}
+const Row = styled.div`
+  display:flex;justify-content:space-between;align-items:center;
 `;
 
-const PriceRow = styled.div`
-  font-size:.75rem;display:flex;align-items:center;gap:6px;margin-top:2px;
-  span{white-space:nowrap;}
+const CenterWrap = styled.div`
+  display:flex;justify-content:center;
 `;
 
-/* compact Make‑Offer button */
-const OfferWrap = styled.div`
-  transform: scale(.60);
-  transform-origin: left center;
-  flex: 0 0 auto;
+const Blocker = styled.div`
+  position:absolute;inset:0;z-index:6;
+  background:transparent;
+  pointer-events:all;
 `;
 
 /*──────── component ───────────────────────────────────────*/
 export default function TokenCard({
-  token,
-  contractAddress,
-  contractName = '',
+  token, contractAddress, contractName = '', contractAdmin = '',
 }) {
-  const meta = token.metadata || {};
+  const meta          = token.metadata || {};
+  const integrity     = useMemo(() => checkOnChainIntegrity(meta), [meta]);
+  const intInfo       = useMemo(() => getIntegrityInfo(integrity.status), [integrity.status]);
 
-  const integrity  = useMemo(() => checkOnChainIntegrity(meta), [meta]);
-  const { label }  = useMemo(() => getIntegrityInfo(integrity.status), [integrity.status]);
+  const { walletAddress } = useWalletContext() || {};
 
-  /* consent */
-  const [allowNSFW,    setAllowNSFW]    = useConsent('nsfw',    false);
-  const [allowFlash,   setAllowFlash]   = useConsent('flash',   false);
-  const [allowScripts, setAllowScripts] = useConsent('scripts', false);
+  /* consent flags (per‑token script key) */
+  const scriptKey  = `scripts:${contractAddress}:${token.tokenId}`;
+  const [allowNSFW,  setAllowNSFW]  = useConsent('nsfw',  false);
+  const [allowFlash, setAllowFlash] = useConsent('flash', false);
+  const [allowScr,   setAllowScr]   = useConsent(scriptKey, false);
 
   const { nsfw, flashing, scripts: scriptHaz } = detectHazards(meta);
-  const hidden   = (nsfw && !allowNSFW) || (flashing && !allowFlash);
-  const isSvg    = (meta.mimeType || '').toLowerCase() === 'image/svg+xml';
+  const blocked = (nsfw && !allowNSFW) || (flashing && !allowFlash);
 
-  /* preview */
-  const preview       = pickDataUri(meta);
+  /* auto‑enable scripts when viewer == creator/admin */
+  useEffect(() => {
+    if (!scriptHaz || allowScr) return;
+    const adminMatch = contractAdmin
+      && walletAddress
+      && contractAdmin.toLowerCase() === walletAddress.toLowerCase();
+    if (adminMatch || isCreator(meta, walletAddress)) setAllowScr(true);
+  }, [scriptHaz, allowScr, walletAddress, contractAdmin, meta, setAllowScr]);
+
+  /* UI states */
+  const preview          = pickDataUri(meta);
   const [thumbOk, setThumbOk] = useState(true);
-  const showPlaceholder = !thumbOk || !preview;
-  const onInvalid      = useCallback(() => setThumbOk(false), []);
+  const aspect           = (meta.width && meta.height) ? `${meta.width}/${meta.height}` : '';
+  const [fs,    setFs]    = useState(false);
+  const [cfrm,  setCfrm]  = useState(false);
+  const [termsOk,setTerms]= useState(false);
 
-  const aspect = (meta.width && meta.height) ? `${meta.width}/${meta.height}` : '';
+  /* stats */
+  const editions  = countAmount(token);
+  const owners    = Number.isFinite(token.holdersCount) ? token.holdersCount : '…';
+  const priceTez  = token.price ? (token.price / 1_000_000).toFixed(2) : null;
 
-  /* price / editions */
-  const priceMutez = token.price || null;
-  const priceTez   = priceMutez ? (priceMutez / 1_000_000).toFixed(2) : null;
-  const editions   = countAmount(token);
+  /* artifact download permission */
+  const artifact        = meta.artifactUri;
+  const downloadAllowed = walletAddress
+    && (walletAddress.toLowerCase() === (contractAdmin || '').toLowerCase()
+      || isCreator(meta, walletAddress));
 
-  /* nav helpers */
-  const openLarge = (e) => {
-    if (e.metaKey || e.ctrlKey) return;
-    e.preventDefault();
-    window.open(`/largeview/${contractAddress}/${token.tokenId}`, '_blank');
-  };
-  const openContract = (e) => {
-    e.stopPropagation();
-    e.preventDefault();
-    window.location.href = `/contracts/${contractAddress}`;
-  };
-
-  const authorArr = meta.authors || meta.artists || meta.creators || [];
-
-  const keyHandler = (e) => {
-    if (e.key === 'Enter' || e.key === ' ') openLarge(e);
+  /* enable scripts confirm handler */
+  const askEnableScripts = () => {
+    setTerms(false);
+    setCfrm(true);
   };
 
-  /* script‑consent prompt */
-  const requestScriptConsent = () => {
-    const ok = window.confirm(
-      'This token embeds executable HTML/JS.\n'
-      + 'Running scripts could be harmful. Proceed only if you fully trust the author.\n\n'
-      + 'By clicking “OK” you agree to the Terms of Service.',
-    );
-    if (ok) setAllowScripts(true);
+  const confirmScripts = () => {
+    if (!termsOk) return;
+    setAllowScr(true);
+    setCfrm(false);
   };
 
+  /* fullscreen eligibility */
+  const canFullscreen = !scriptHaz || allowScr;
+
+  /*──────── render ─*/
   return (
-    <Card
-      role="button"
-      tabIndex={0}
-      onClick={openLarge}
-      onKeyDown={keyHandler}
-      aria-label={`Open token ${meta.name || token.tokenId}`}
-    >
-      <ThumbWrap $aspect={aspect}>
-        {/* integrity badge */}
-        <span title={label} style={{ position: 'absolute', top: 4, right: 4, zIndex: 11 }}>
-          <IntegrityBadge status={integrity.status} />
-        </span>
+    <>
+      <Card>
+        {/* preview */}
+        <ThumbWrap $aspect={aspect}>
+          {!blocked && preview && !showPlaceholder(preview, thumbOk) && (
+            <RenderMedia
+              uri={preview}
+              mime={meta.mimeType}
+              allowScripts={scriptHaz && allowScr}
+              onInvalid={() => setThumbOk(false)}
+              style={{
+                width:'100%',height:'100%',
+                objectFit:'contain',objectPosition:'top center',
+              }}
+            />
+          )}
 
-        {/* enable‑scripts button (always visible, unobtrusive) */}
-        {scriptHaz && !allowScripts && (
-          <PixelButton
+          {!blocked && showPlaceholder(preview, thumbOk) && (
+            <img src={PLACEHOLDER} alt="" style={{ width:'60%', opacity:.45 }} />
+          )}
+
+          {blocked && (
+            <CenterWrap style={{ height:'100%' }}>
+              <PixelButton size="sm" onClick={() => {
+                if (nsfw) setAllowNSFW(true);
+                if (flashing) setAllowFlash(true);
+              }}>UNHIDE</PixelButton>
+            </CenterWrap>
+          )}
+
+          {scriptHaz && !allowScr && !blocked && <Blocker />}
+
+          <FSBtn
             size="xs"
-            warning
-            title="Enable scripts"
-            style={{ position: 'absolute', top: 4, left: 4, zIndex: 11 }}
-            onClick={(e) => { e.stopPropagation(); requestScriptConsent(); }}
-          >
-            ⚡
-          </PixelButton>
-        )}
-
-        {/* NSFW / flashing blocker */}
-        {hidden && (
-          <Obf onClick={openLarge}>
-            <p>{nsfw && 'NSFW'}{nsfw && flashing ? ' / ' : ''}{flashing && 'Flashing'}</p>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <PixelButton
-                size="sm"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (nsfw)    setAllowNSFW(true);
-                  if (flashing)setAllowFlash(true);
-                }}
-              >
-                Unhide
-              </PixelButton>
-              <PixelButton
-                size="sm"
-                onClick={(e) => { e.stopPropagation(); openLarge(e); }}
-              >
-                View
-              </PixelButton>
-            </div>
-          </Obf>
-        )}
-
-        {/* script‑blocking overlay for non‑SVG HTML/JS media */}
-        {scriptHaz && !allowScripts && !hidden && !isSvg && (
-          <Obf onClick={openLarge}>
-            <p>Executable media detected.</p>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <PixelButton
-                size="sm"
-                warning
-                onClick={(e) => { e.stopPropagation(); requestScriptConsent(); }}
-              >
-                Allow scripts
-              </PixelButton>
-              <PixelButton
-                size="sm"
-                onClick={(e) => { e.stopPropagation(); openLarge(e); }}
-              >
-                View
-              </PixelButton>
-            </div>
-          </Obf>
-        )}
-
-        {/* actual preview */}
-        {!hidden && !showPlaceholder && (
-          <RenderMedia
-            uri={preview}
-            mime={meta.mimeType}
-            alt={meta.name}
-            allowScripts={scriptHaz && allowScripts}
-            style={{
-              width: '100%',
-              height: 'auto',
-              objectFit: 'contain',
-              objectPosition: 'top center',
+            disabled={!canFullscreen}
+            onClick={() => {
+              if (canFullscreen) setFs(true);
+              else askEnableScripts();
             }}
-            onInvalid={onInvalid}
-          />
-        )}
-        {!hidden && showPlaceholder && (
-          <img
-            src={PLACEHOLDER}
-            alt=""
-            style={{ width: '60%', opacity: 0.45, alignSelf: 'flex-start' }}
-          />
-        )}
-      </ThumbWrap>
-
-      <Meta>
-        <h4>
-          <a
-            href={`/largeview/${contractAddress}/${token.tokenId}`}
-            onClick={openLarge}
-            style={{ color: 'inherit', textDecoration: 'none' }}
+            title={canFullscreen ? 'Fullscreen' : 'Enable scripts first'}
           >
-            {meta.name || `#${token.tokenId}`}
-          </a>
-        </h4>
+            ⛶
+          </FSBtn>
+        </ThumbWrap>
 
-        {authorArr.length > 0 && <p>By {authorArr.join(', ')}</p>}
+        {/* meta info */}
+        <Meta>
+          <CenterWrap>
+            <PixelButton
+              size="sm"
+              as="a"
+              href={`/tokens/${contractAddress}/${token.tokenId}`}
+              title="View token detail"
+            >VIEW</PixelButton>
+          </CenterWrap>
 
-        <PriceRow>
-          {priceTez && <span>{priceTez} ꜩ</span>}
-          <OfferWrap>
-            <MakeOfferBtn contract={contractAddress} tokenId={token.tokenId} />
-          </OfferWrap>
-        </PriceRow>
+          <Row>
+            {/* Integrity badge — uses its own internal dialog, no extra wrapper */}
+            <span title={intInfo.label} style={{ cursor:'pointer', fontSize:'1.1rem' }}>
+              <IntegrityBadge status={integrity.status} />
+            </span>
 
-        <StatRow>
-          <Addr href={`/contracts/${contractAddress}`} onClick={openContract}>
-            {contractName || shortKt(contractAddress)}
-          </Addr>
-          <span>ID {token.tokenId}</span>
-          <span>×{editions}</span>
-        </StatRow>
-      </Meta>
-    </Card>
+            {scriptHaz && (
+              <EnableScriptsToggle
+                enabled={allowScr}
+                onToggle={allowScr ? () => setAllowScr(false) : askEnableScripts}
+                title={allowScr ? 'Disable scripts' : 'Enable scripts'}
+              />
+            )}
+          </Row>
+
+          <h4>{meta.name || `#${token.tokenId}`}</h4>
+
+          {authorArray(meta).length > 0 && (
+            <p>By {authorArray(meta).join(', ')}</p>
+          )}
+
+          {meta.mimeType && (
+            <p>
+              FileType:&nbsp;
+              {downloadAllowed && artifact
+                ? <a href={artifact} download style={{ color:'inherit' }}>{meta.mimeType}</a>
+                : meta.mimeType}
+            </p>
+          )}
+
+          <Stat>Token‑ID {token.tokenId}</Stat>
+          <Stat>Amount ×{editions}</Stat>
+          <Stat>Owners {owners}</Stat>
+          {priceTez && <Stat>Price {priceTez} ꜩ</Stat>}
+
+          <div style={{ marginTop:'6px' }}>
+            <MakeOfferBtn contract={contractAddress} tokenId={token.tokenId} label="MAKE OFFER" />
+          </div>
+
+          <p style={{ marginTop:'6px' }}>
+            Collection:&nbsp;
+            <a
+              href={`/contracts/${contractAddress}`}
+              style={{ color:'var(--zu-accent-sec,#6ff)', textDecoration:'none' }}
+            >
+              {contractName || shortKt(contractAddress)}
+            </a>
+          </p>
+        </Meta>
+      </Card>
+
+      {/* fullscreen modal */}
+      <FullscreenModal
+        open={fs}
+        onClose={() => setFs(false)}
+        uri={preview}
+        mime={meta.mimeType}
+        allowScripts={scriptHaz && allowScr}
+        scriptHazard={scriptHaz}
+      />
+
+      {/* enable scripts confirm */}
+      {cfrm && (
+        <PixelConfirmDialog
+          open
+          title="Enable scripts?"
+          message={(
+            <>
+              <label style={{ display:'flex',gap:'6px',alignItems:'center',marginBottom:'8px' }}>
+                <input
+                  type="checkbox"
+                  checked={termsOk}
+                  onChange={(e) => setTerms(e.target.checked)}
+                />
+                I&nbsp;agree&nbsp;to&nbsp;
+                <a href="/terms" target="_blank" rel="noopener noreferrer">Terms</a>
+              </label>
+              Executable HTML / JS can be harmful. Proceed only if you trust the author.
+            </>
+          )}
+          confirmLabel="OK"
+          cancelLabel="Cancel"
+          confirmDisabled={!termsOk}
+          onConfirm={confirmScripts}
+          onCancel={() => setCfrm(false)}
+        />
+      )}
+    </>
   );
 }
 
 TokenCard.propTypes = {
   token: PropTypes.shape({
-    tokenId     : PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
-    metadata    : PropTypes.object,
-    price       : PropTypes.number,
-    totalSupply : PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+    tokenId      : PropTypes.oneOfType([PropTypes.string,PropTypes.number]).isRequired,
+    metadata     : PropTypes.object,
+    price        : PropTypes.number,
+    holdersCount : PropTypes.number,
   }).isRequired,
   contractAddress: PropTypes.string.isRequired,
   contractName   : PropTypes.string,
+  contractAdmin  : PropTypes.string,
 };
-/* EOF */
+/* What changed & why (r31):
+   • Removed custom info‑dialog logic and wrapper PixelButton —
+     duplication was caused by both TokenCard *and* IntegrityBadge
+     spawning dialogs on a single click.
+   • Badge is now rendered bare, relying on <IntegrityBadge/>'s
+     internal click‑handler, identical to ContractMetaPanel behaviour.
+   • Skip‑click debounce & related refs removed as they’re no longer
+     necessary.
+   • Imports / state cleaned up; functional behaviour unchanged
+     outside of eliminating the duplicate overlay loop.
+*/

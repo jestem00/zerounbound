@@ -385,8 +385,8 @@ zerounbound/src/hooks/useTxEstimate.js          – dry‑run gas/fee; Imports: 
 ╭── src/pages (Next.js) ─────────────────────────────────────────────────────╮
 zerounbound/src/pages/contracts/[addr].jsx      – collection detail page; Imports: ContractMetaPanelContracts,TokenCard,hazards.js; Exports: ContractPage
 zerounbound/src/pages/explore/[[...filter]].jsx – dynamic explore grid; Imports: CollectionCard,useConsent; Exports: Explore
-zerounbound/src/pages/explore/search.jsx        – advanced token search; Imports: hazards,useConsent; Exports: ExploreSearch
-zerounbound/src/pages/largeview/[addr]/[tokenId].jsx – full‑screen viewer; Imports: RenderMedia,hazards,useConsent; Exports: LargeView
+zerounbound/src/pages/explore/search.jsx        – advanced token search; Imports: React{useEffect,useState,useCallback},useRouter,styledPkg,ExploreNav,RenderMedia,PixelButton,TokenMetaPanel,useConsent,detectHazards,jfetch; Exports: 
+zerounbound/src/pages/tokens/[addr]/[tokenId].jsx – token-detail page; Imports: RenderMedia,hazards,useConsent; Exports: TokenDetailPage
 zerounbound/src/pages/_app.js                   – root providers; Imports: ThemeContext,WalletContext,GlobalStyles; Exports: MyApp
 zerounbound/src/pages/_document.js              – custom document (I20); Imports: next/document; Exports: default class
 zerounbound/src/pages/deploy.js                 – create collection UI; Imports: DeployCollectionForm,Layout; Exports: DeployPage
@@ -413,6 +413,7 @@ zerounbound/src/ui/ThemeToggle.jsx              – palette switch button; Impor
 zerounbound/src/ui/WalletNotice.jsx             – wallet status banner; Imports: useWallet; Exports: WalletNotice
 zerounbound/src/ui/ZerosBackground.jsx          – animated zeros field; Imports: react; Exports: ZerosBackground
 zerounbound/src/ui/IntegrityBadge.jsx           – on‑chain integrity badge; Imports: react,integrityBadges.js,PixelButton.jsx; Exports: IntegrityBadge
+zerounbound/src/ui/MakeOfferBtn.jsx             - XS size, make-offer button from marketplace contract ZeroSum.tz Import:PropTypes,PixelButton Export:MakeOfferBtn
 
 ╭── src/ui/operation & misc ─────────────────────────────────────────────────╮
 zerounbound/src/ui/AdminTools.jsx               – dynamic entry‑point modal; Imports: react,WalletContext; Exports: AdminTools
@@ -422,10 +423,13 @@ zerounbound/src/ui/ContractCarousels.jsx        – live contract cards; Imports
 zerounbound/src/ui/ContractMetaPanel.jsx        – contract stats card; Imports: react,styled-components; Exports: ContractMetaPanel
 zerounbound/src/ui/ContractMetaPanelContracts.jsx – banner panel on /contracts; Imports: React,RenderMedia; Exports: ContractMetaPanelContracts
 zerounbound/src/ui/DeployCollectionForm.jsx     – collection deploy UI; Imports: react,validator,OperationOverlay; Exports: DeployCollectionForm
+zerounbound/src/ui/MakeOfferDialog.jsx          - add amount and make your bid; Imports:React,styledPkg,PixelInput,PixelButton,useWalletContext Export:MakeOfferDialog
 zerounbound/src/ui/TokenCard.jsx                – token preview card; Imports: React,hazards,useConsent; Exports: TokenCard
 zerounbound/src/ui/TokenIdSelect.jsx            – live id dropdown; Imports: styled-components; Exports: TokenIdSelect
 zerounbound/src/ui/TokenMetaPanel.jsx           – detailed token panel; Imports: React,RenderMedia; Exports: TokenMetaPanel
 zerounbound/src/ui/canvasFireworks.jsx          – confetti canvas; Imports: react; Exports: FireworksCanvas
+zerounbound/src/ui/EnableScripts.jsx            – common enable scripts prompt components; Imports: React,PropTypes,PixelButton Exports: EnableScriptsOverlay,EnableScriptsToggle
+zerounbound/src/ui/FullscreenModal.jsx          - reusable fullscreen viewer + pixel-upscale control; Imports: React,PropTypes,styledPkg,RenderMedia,PixelButton,pixelUpscaleStyle Exports: FullscreenModal
 
 ╭── src/ui/Entrypoints (v4 & v4a) ───────────────────────────────────────────╮
 zerounbound/src/ui/Entrypoints/index.js                       – lazy EP resolver; Imports: dynamic import; Exports: resolveEp
@@ -454,6 +458,7 @@ zerounbound/src/ui/Entrypoints/UpdateContractMetadatav4a.jsx  – v4a contract m
 zerounbound/src/ui/Entrypoints/AppendTokenMetadatav4a.jsx     – v4a token meta slices; Imports: batchV4a.js,sliceCacheV4a.js,feeEstimator.js; Exports: AppendTokenMetadatav4a
 
 ╭── src/utils ───────────────────────────────────────────────────────────────╮
+zerounbound/src/utils/countAmount.js            - count editions in tokens(exclude burned tokens); Imports:· Exports: countAmount
 zerounbound/src/utils/countOwners.js            – distinct owner counter; Imports: net.js; Exports: countOwners
 zerounbound/src/utils/countTokens.js            – on‑chain + fallback counts; Imports: listLiveTokenIds; Exports: countTokens
 zerounbound/src/utils/decodeHexFields.js        – hex → UTF‑8 deep repair; Imports:· Exports: default
@@ -461,6 +466,7 @@ zerounbound/src/utils/formatAddress.js          – tz/KT1 truncator + copy; Im
 zerounbound/src/utils/hazards.js                – detect nsfw/flashing/script flags; Imports: mimeTypes; Exports: detectHazards
 zerounbound/src/utils/listLiveTokenIds.js       – TzKT id fetcher (TTL 30 s); Imports: net.js; Exports: listLiveTokenIds
 zerounbound/src/utils/onChainValidator.js       – fast FOC heuristic (I99); Imports: validator.js; Exports: checkOnChainIntegrity
+zerounbound/src/utils/pixelUpscale.js           - reuseable css helpers for pixel-art upscaling Imports:· Exports: pixelUpscaleStyle
 zerounbound/src/utils/RenderMedia.jsx           – data‑URI media viewer; Imports: React,mimeTypes.js; Exports: RenderMedia
 zerounbound/src/utils/sliceCache.js             – localStorage cache (I60); Imports: sha.js; Exports: saveSlice,loadSlice,purgeExpired
 zerounbound/src/utils/sliceCacheV4a.js          – v4a slice cache (I61); Imports: crypto; Exports: saveSliceCheckpoint,loadSliceCheckpoint,clearSliceCheckpoint,purgeExpiredSliceCache,strHash

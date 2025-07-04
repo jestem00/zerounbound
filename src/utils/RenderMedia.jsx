@@ -1,8 +1,10 @@
-/*──────── src/utils/RenderMedia.jsx ──────────────────────────
+/*──────── src/utils/RenderMedia.jsx ────────*/
+/*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/utils/RenderMedia.jsx
-  Rev :    r739   2025‑09‑09
-  Summary: SVG now rendered <img> (scripts off) ► <object> (on)
+  Rev :    r740   2025‑09‑12
+  Summary: developer‑facing console warnings reinstated for
+           sandboxed SVG/HTML; no runtime side‑effects.
 ──────────────────────────────────────────────────────────────*/
 import * as React from 'react';
 import {
@@ -67,6 +69,20 @@ export default function RenderMedia({
   const type = useMemo(() => resolveMime(safeUri, mime), [safeUri, mime]);
   const [errored, setErrored] = useState(false);
 
+  /* developer visibility – warn when scripts disabled */
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!safeUri) return;
+    if (type === 'image/svg+xml' && !allowScripts) {
+      // eslint-disable-next-line no-console
+      console.info('[RenderMedia] SVG scripts blocked for', safeUri);
+    }
+    if (type === 'text/html' && !allowScripts) {
+      // eslint-disable-next-line no-console
+      console.info('[RenderMedia] HTML iframe sandboxed (scripts off) for', safeUri);
+    }
+  }, [safeUri, type, allowScripts]);
+
   React.useEffect(() => { if (trimmed) onInvalid('sanitised'); }, [trimmed, onInvalid]);
   if (!safeUri) return null;
 
@@ -80,8 +96,14 @@ export default function RenderMedia({
   if (!whitelisted) {
     onInvalid('unsupported');
     return (
-      <a href={safeUri} target="_blank" rel="noopener noreferrer" download
-         className={className} style={{ color: 'var(--zu-accent-sec)' }}>
+      <a
+        href={safeUri}
+        target="_blank"
+        rel="noopener noreferrer"
+        download
+        className={className}
+        style={{ color: 'var(--zu-accent-sec)' }}
+      >
         Unsupported media — open externally.
       </a>
     );
@@ -91,17 +113,30 @@ export default function RenderMedia({
     style,
     className,
     onError: () => {
-      if (!errored) { setErrored(true); onInvalid('load-error'); }
+      if (!errored) {
+        setErrored(true);
+        onInvalid('load-error');
+      }
     },
   };
 
   /* SVG special‑case — safe by default, opt‑in scripts */
   if (type === 'image/svg+xml') {
-    const svgStyle = { imageRendering: 'pixelated', width: '100%', height: '100%', ...style };
+    const svgStyle = {
+      imageRendering: 'pixelated',
+      width: '100%',
+      height: '100%',
+      ...style,
+    };
 
     if (allowScripts) {
       return (
-        <object data={safeUri} type="image/svg+xml" style={svgStyle} className={className}>
+        <object
+          data={safeUri}
+          type="image/svg+xml"
+          style={svgStyle}
+          className={className}
+        >
           <img src={safeUri} alt={alt} loading="lazy" {...commonImgProps} />
         </object>
       );
@@ -120,17 +155,23 @@ export default function RenderMedia({
       />
     );
   }
-  if (type.startsWith('video/'))  return <video src={safeUri} controls preload="metadata" {...commonImgProps} />;
-  if (type.startsWith('audio/'))  return <audio src={safeUri} controls {...commonImgProps} />;
-  if (type.startsWith('model/'))  return (
-    <model-viewer
-      src={safeUri}
-      camera-controls
-      auto-rotate
-      style={{ width: '100%', height: '100%', ...style }}
-      class={className}
-    />
-  );
+  if (type.startsWith('video/')) {
+    return <video src={safeUri} controls preload="metadata" {...commonImgProps} />;
+  }
+  if (type.startsWith('audio/')) {
+    return <audio src={safeUri} controls {...commonImgProps} />;
+  }
+  if (type.startsWith('model/')) {
+    return (
+      <model-viewer
+        src={safeUri}
+        camera-controls
+        auto-rotate
+        style={{ width: '100%', height: '100%', ...style }}
+        class={className}
+      />
+    );
+  }
   if (type === 'application/pdf' || type === 'text/html' || type === 'text/plain') {
     /* toggle allowScripts — off by default for safety */
     const sandboxBase = 'allow-same-origin allow-popups allow-forms';

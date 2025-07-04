@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/FiltersPanel.jsx
-  Rev :    r1     2025‑08‑26
-  Summary: responsive token‑filter sidebar / modal (I102‑compliant)
+  Rev :    r2     2025‑09‑15
+  Summary: hide mobile FILTERS button on ≥ 1100 px
 ──────────────────────────────────────────────────────────────*/
 import PropTypes from 'prop-types';
 import styledPkg from 'styled-components';
@@ -17,7 +17,7 @@ const Side = styled.aside`
   border:2px solid var(--zu-accent,#00c8ff);
   padding:10px;
   font-size:.75rem;
-  display:none;                 /* default – shown via media */
+  display:none;
   @media(min-width:1100px){ display:block; }
 `;
 
@@ -41,8 +41,19 @@ const Section = styled.fieldset`
   input[type="checkbox"]{margin-right:4px;}
 `;
 
-export default function FiltersPanel({ tokens = [], filters, setFilters, renderToggle, buttonStyle }) {
-  const [show, setShow] = useState(false);
+export default function FiltersPanel({
+  tokens = [], filters, setFilters, renderToggle, buttonStyle,
+}) {
+  const [show, setShow]       = useState(false);
+  const [isDesktop,setDesktop]= useState(false);
+
+  /* responsive ‑ SSR‑safe */
+  useEffect(() => {
+    const check = () => setDesktop(window.innerWidth >= 1100);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
 
   /* derive quick filter lists */
   const authSet = new Set();
@@ -57,31 +68,11 @@ export default function FiltersPanel({ tokens = [], filters, setFilters, renderT
   });
 
   /* handlers */
-  const closeIfMobile = () => {
-    if (window.innerWidth < 1100) setShow(false);
-  };
+  const closeIfMobile = () => { if (!isDesktop) setShow(false); };
+  const toggleSetVal  = (setName,val)=> setFilters((f)=>{const s=new Set(f[setName]);s.has(val)?s.delete(val):s.add(val);return {...f,[setName]:s};});
+  const onRadio       = (key,val)=>{setFilters((f)=>({...f,[key]:val}));closeIfMobile();};
 
-  const toggleSetVal = (setName, val) => {
-    setFilters((f) => {
-      const s = new Set(f[setName]);
-      s.has(val) ? s.delete(val) : s.add(val);
-      return { ...f, [setName]: s };
-    });
-    closeIfMobile();
-  };
-
-  const onRadio = (key, val) => {
-    setFilters((f) => ({ ...f, [key]: val }));
-    closeIfMobile();
-  };
-
-  /* mobile modal close on resize */
-  useEffect(() => {
-    const onResize = () => { if (window.innerWidth >= 1100) setShow(false); };
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
-
+  /*──── UI body ───────────────────────────────────────────*/
   const body = (
     <Panel>
       <Section>
@@ -90,7 +81,7 @@ export default function FiltersPanel({ tokens = [], filters, setFilters, renderT
           <label key={a}>
             <input type="checkbox"
               checked={filters.authors.has(a)}
-              onChange={() => toggleSetVal('authors', a)} />
+              onChange={() => { toggleSetVal('authors', a); closeIfMobile(); }} />
             {a}
           </label>
         ))}
@@ -102,7 +93,7 @@ export default function FiltersPanel({ tokens = [], filters, setFilters, renderT
           <label key={m}>
             <input type="checkbox"
               checked={filters.mime.has(m)}
-              onChange={() => toggleSetVal('mime', m)} />
+              onChange={() => { toggleSetVal('mime', m); closeIfMobile(); }} />
             {m}
           </label>
         ))}
@@ -114,7 +105,7 @@ export default function FiltersPanel({ tokens = [], filters, setFilters, renderT
           <label key={tg}>
             <input type="checkbox"
               checked={filters.tags.has(tg)}
-              onChange={() => toggleSetVal('tags', tg)} />
+              onChange={() => { toggleSetVal('tags', tg); closeIfMobile(); }} />
             {tg}
           </label>
         ))}
@@ -148,14 +139,13 @@ export default function FiltersPanel({ tokens = [], filters, setFilters, renderT
         <legend>Flashing</legend>
         {['include','exclude','only'].map((v)=>(
           <label key={v}>
-            <input type="radio" name="flashing"
+            <input type="radio" name="flash"
               checked={filters.flash===v}
               onChange={()=>onRadio('flash', v)} />
             {v}
           </label>
         ))}
       </Section>
-
     </Panel>
   );
 
@@ -165,14 +155,17 @@ export default function FiltersPanel({ tokens = [], filters, setFilters, renderT
       <Side>{body}</Side>
 
       {/* mobile toggle */}
-      {renderToggle
-        ? renderToggle(() => setShow(true))
-        : (
-          <PixelButton size="sm"
-            style={buttonStyle || { position:'fixed',bottom:10,right:10,zIndex:8 }}
-            onClick={()=>setShow(true)}
-          >FILTERS</PixelButton>
-        )}
+      {!isDesktop && (
+        renderToggle
+          ? renderToggle(() => setShow(true))
+          : (
+            <PixelButton
+              size="sm"
+              style={buttonStyle || { position:'fixed',bottom:10,right:10,zIndex:8 }}
+              onClick={() => setShow(true)}
+            >FILTERS</PixelButton>
+          )
+      )}
 
       {show && (
         <ModalWrap onClick={()=>setShow(false)}>

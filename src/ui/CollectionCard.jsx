@@ -1,9 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/CollectionCard.jsx
-  Rev :    r24   2025‑08‑26
-  Summary: restore working metadata query (content key),
-           guaranteed placeholder preview, authors/name back
+  Rev :    r25   2025‑09‑15
+  Summary: persistent scripts‑toggle + UI polish
 ──────────────────────────────────────────────────────────────*/
 import {
   useEffect, useState, useMemo,
@@ -22,6 +21,10 @@ import RenderMedia                from '../utils/RenderMedia.jsx';
 import PixelButton                from './PixelButton.jsx';
 import { jFetch }                 from '../core/net.js';
 import decodeHexFields            from '../utils/decodeHexFields.js';
+import {
+  EnableScriptsToggle,
+  EnableScriptsOverlay,
+} from './EnableScripts.jsx';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -95,14 +98,14 @@ export default function CollectionCard({ contract }) {
   const [live,  setLive]  = useState(null);
   const [thumbOk,setThumbOk]=useState(true);
 
-  const [allowNSFW,setAllowNSFW]=useConsent('nsfw',false);
-  const [allowFlash,setAllowFlash]=useConsent('flash',false);
-  const [allowScripts,setAllowScripts]=useConsent('scripts',false);
+  const [allowNSFW,setAllowNSFW]= useConsent('nsfw',false);
+  const [allowFlash,setAllowFlash]= useConsent('flash',false);
+  const [allowScripts,setAllowScripts]= useConsent('scripts',false);
 
   const net = process.env.NEXT_PUBLIC_NETWORK || 'ghostnet';
   const api = `https://api.${net}.tzkt.io/v1`;
 
-  /*── metadata – replicate original “content” key query ─────────────*/
+  /*── metadata – big‑map “content” key query ───────────────*/
   useEffect(()=>{let cancelled=false;
     (async()=>{
       let m = {};
@@ -139,7 +142,7 @@ export default function CollectionCard({ contract }) {
   const integrity = useMemo(()=>checkOnChainIntegrity(meta).status,[meta]);
   const { badge,label } = getIntegrityInfo(integrity);
 
-  /* derive preview + text */
+  /* preview + text */
   const preview = meta.imageUri ? ipfsToHttp(meta.imageUri) : PLACEHOLDER;
   const showPlaceholder = (!meta.imageUri || !thumbOk);
   const nameSafe = meta.name || shortKt(contract.address);
@@ -149,6 +152,15 @@ export default function CollectionCard({ contract }) {
       ? meta.authors.split(/[,;]\s*/)
       : [];
 
+  /* toggle handler */
+  const handleToggleScripts = () => {
+    if (allowScripts) {
+      setAllowScripts(false);
+    } else if (window.confirm('Enable executable scripts for this media?')) {
+      setAllowScripts(true);
+    }
+  };
+
   /*──────── render ─*/
   return (
     <a href={`/contracts/${contract.address}`} style={{textDecoration:'none'}}>
@@ -156,13 +168,22 @@ export default function CollectionCard({ contract }) {
         <ThumbWrap>
           <Badge title={label}>{badge}</Badge>
 
+          {scripts && (
+            <span style={{ position:'absolute', top:4, left:4, zIndex:11 }}>
+              <EnableScriptsToggle
+                enabled={allowScripts}
+                onToggle={handleToggleScripts}
+              />
+            </span>
+          )}
+
           {hide && (
             <Obf>
               <p>{nsfw&&'NSFW'}{nsfw&&flashing?' / ':''}{flashing&&'Flashing'}</p>
               <PixelButton size="sm" onClick={e=>{e.preventDefault();
                 if(nsfw)    setAllowNSFW(true);
                 if(flashing)setAllowFlash(true);
-              }}>Unhide</PixelButton>
+              }}>UNHIDE</PixelButton>
             </Obf>
           )}
 
@@ -181,10 +202,7 @@ export default function CollectionCard({ contract }) {
 
           {scripts && !allowScripts && !hide && (
             <Obf>
-              <p>Executable media</p>
-              <PixelButton size="sm" warning onClick={e=>{e.preventDefault();
-                if(window.confirm('Enable scripts for this media?')) setAllowScripts(true);
-              }}>Allow scripts</PixelButton>
+              <EnableScriptsOverlay onAccept={handleToggleScripts}/>
             </Obf>
           )}
         </ThumbWrap>
@@ -216,10 +234,4 @@ CollectionCard.propTypes = {
     address: PropTypes.string.isRequired,
   }).isRequired,
 };
-/* What changed & why (r24):
-   • Re‑implemented original big‑map “content” value query (worked in r19).
-   • decodeHexMetadata helper restored → proper JSON extraction.
-   • Placeholder sprite shows when no image or load‑error.
-   • Authors/name render from recovered metadata; counts untouched.
-   • Removes empty‑key path that broke earlier; cards no longer black.
-*/
+/* EOF */

@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
-  File:    src/pages/largeview/[addr]/[tokenId].jsx
-  Rev :    r2     2025‑08‑15 UTC
-  Summary: prepend ExploreNav for quick navigation
+  Developed by @jams2blues – ZeroContract Studio
+  File:    src/pages/tokens/[addr]/[tokenId].jsx
+  Rev :    r1    2025‑09‑14 UTC
+  Summary: new canonical token‑detail route (moved from /largeview)
 ──────────────────────────────────────────────────────────────*/
 import React, { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/router';
@@ -35,7 +35,7 @@ const Obf = styled.div`
 `;
 
 /*──────── component ────────────────────────────────────────*/
-export default function LargeView() {
+export default function TokenDetailPage() {
   const router = useRouter();
   const { addr, tokenId } = router.query;
 
@@ -73,9 +73,8 @@ export default function LargeView() {
   return (
     <Wrap>
       <ExploreNav />
-      <PixelButton size="sm" onClick={() => router.back()}>← Back</PixelButton>
+      <PixelButton size="sm" onClick={() => router.back()}>← Back</PixelButton>
       <MediaBox style={{ position:'relative', width:'100%' }}>
-        {/* hidden overlay */}
         {hidden && (
           <Obf>
             <p>{nsfw && 'NSFW'}{nsfw && flashing ? ' / ' : ''}{flashing && 'Flashing'}</p>
@@ -85,7 +84,7 @@ export default function LargeView() {
             }}>Unhide</PixelButton>
           </Obf>
         )}
-        {/* viewer */}
+
         {!hidden && (
           <RenderMedia
             uri={meta.artifactUri || meta.displayUri || meta.imageUri}
@@ -95,14 +94,14 @@ export default function LargeView() {
             style={{ maxWidth:'100%', maxHeight:'100%', imageRendering:'pixelated' }}
           />
         )}
-        {/* script gating */}
+
         {scripts && !allowScripts && !hidden && (
           <Obf>
             <p>This token executes scripts.</p>
             <PixelButton size="sm" warning onClick={() => {
               const ok = window.confirm('Enable scripting? Proceed only if you trust.');
               if (ok) setAllowScripts(true);
-            }}>Allow scripts</PixelButton>
+            }}>Allow scripts</PixelButton>
           </Obf>
         )}
       </MediaBox>
@@ -115,5 +114,4 @@ export default function LargeView() {
     </Wrap>
   );
 }
-/* What changed & why: sticky explore nav across viewer page; rev r2 */
 /* EOF */

@@ -1,24 +1,21 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/PixelConfirmDialog.jsx
-  Rev :    r660   2025-06-20
-  Summary: API v2 — backward-safe
-           • props: open, title, message (node)
-           • okLabel / cancelLabel text
-           • onOk  ← primary handler
-           • onConfirm alias → onOk
-           • dark-theme I00 palette + pixel font
+  Rev :    r663   2025‑09‑17
+  Summary: stop event‑bubble on confirm / cancel → prevents
+           underlying badge from re‑triggering post‑unmount
 ──────────────────────────────────────────────────────────────*/
-import React       from 'react';
-import styledPkg   from 'styled-components';
-import PixelButton from './PixelButton.jsx';
+import React, { useEffect }  from 'react';
+import { createPortal }      from 'react-dom';
+import styledPkg             from 'styled-components';
+import PixelButton           from './PixelButton.jsx';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
 /*──────── shells ─────*/
 const Back = styled.div`
   position:fixed;inset:0;display:flex;justify-content:center;align-items:center;
-  background:rgba(0,0,0,.86);z-index:2600;
+  background:rgba(0,0,0,.86);z-index:6500;
 `;
 const Panel = styled.div`
   width:90vw;max-width:360px;padding:2rem 2.1rem;
@@ -32,35 +29,64 @@ const Title = styled.h3`
 
 /*════════ component ════════════════════════════════════════*/
 export default function PixelConfirmDialog({
-  open       = false,
-  title      = '',
-  message    = '',
-  okLabel    = 'OK',
-  cancelLabel= 'Cancel',
-  onOk       = () => {},
-  onConfirm,              /* ← legacy alias */
-  onCancel   = () => {},
+  open = false,
+  title = '',
+  message = '',
+  confirmLabel,
+  okLabel = 'OK',
+  cancelLabel = 'Cancel',
+  confirmDisabled = false,
+  hideCancel = false,
+  onConfirm,
+  onOk,
+  onCancel = () => {},
 }) {
   if (!open) return null;
 
-  /* alias bridge */
-  const handleOk = () => {
-    (onOk || onConfirm || (() => {}))();
-  };
+  const handleConfirm = () => (onConfirm || onOk || (() => {}))();
 
-  return (
-    <Back>
-      <Panel>
+  /* escape‑key → cancel */
+  useEffect(() => {
+    const key = (e) => { if (e.key === 'Escape') onCancel(); };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, [onCancel]);
+
+  const body = (
+    <Back
+      role="dialog"
+      aria-modal="true"
+      onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
+    >
+      <Panel onClick={(e) => e.stopPropagation()}>
         {title && <Title>{title}</Title>}
-        <p style={{ margin: 0 }}>{message}</p>
+        {typeof message === 'string' ? <p style={{ margin:0 }}>{message}</p> : message}
+
         <div style={{
           display:'flex',gap:'1rem',justifyContent:'center',marginTop:'1.6rem',
+          flexDirection: hideCancel ? 'column' : 'row',
         }}>
-          <PixelButton onClick={handleOk}>{okLabel}</PixelButton>
-          <PixelButton onClick={onCancel}>{cancelLabel}</PixelButton>
+          <PixelButton
+            onClick={(e)=>{ e.stopPropagation(); handleConfirm(); }}
+            disabled={confirmDisabled}
+          >
+            {confirmLabel || okLabel}
+          </PixelButton>
+
+          {!hideCancel && (
+            <PixelButton
+              onClick={(e)=>{ e.stopPropagation(); onCancel(); }}
+            >
+              {cancelLabel}
+            </PixelButton>
+          )}
         </div>
       </Panel>
     </Back>
   );
+
+  return typeof document === 'undefined'
+    ? body
+    : createPortal(body, document.body);
 }
 /* EOF */

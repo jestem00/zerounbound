@@ -19,6 +19,8 @@
         "src/ui/ContractMetaPanelContracts.jsx",
         "src/ui/TokenIdSelect.jsx",
         "src/ui/TokenCard.jsx",
+        "src/ui/FullScreenModal.jsx",
+        "src/utils/pixelUpscale.js",
         "srce/ui/MakeOfferBtn.jsx",
         "src/ui/MakeOfferDialog.jsx",
         "src/ui/FiltersPanel.jsx",
@@ -27,6 +29,7 @@
         "src/utils/countOwners.js",
         "src/utils/formatAddress.js",
         "src/utils/hazards.js",
+        "src/ui/EnableScripts.jsx",
         "src/constants/mimeTypes.js",
         "src/utils/RenderMedia.jsx",
         "src/deployTarget.js",
@@ -35,7 +38,9 @@
         "src/utils/listLiveTokenIds.js",
         "src/config/**/*.js",
         "src/data/**/*.json",
-        "src/utils/countAmount.js"
+        "src/utils/countAmount.js",
+        "src/ui/layout.jsx",
+        "src/pages/_app.js"
       ]
     },
     
@@ -56,12 +61,15 @@
         "src/utils/decodeHexFields.js",
         "src/utils/formatAddress.js",
         "src/utils/hazards.js",
+        "src/ui/EnableScripts.jsx",
         "src/utils/listLiveTokenIds.js",
         "src/utils/onChainValidator.js",
         "src/utils/uriHelpers.js",
         "src/utils/countOwners.js",
         "src/utils/countTokens.js",
-        "src/utils/countAmount.js"
+        "src/utils/countAmount.js",
+        "src/utils/countAmount.js",
+        "src/utils/pixelUpscale.js"
       ]
     },
 

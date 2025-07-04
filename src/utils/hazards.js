@@ -1,8 +1,8 @@
-/*──────── src/utils/hazards.js ────────────────────────────────
+/*──────── src/utils/hazards.js ──────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/utils/hazards.js
-  Rev :    r7     2025‑09‑11
-  Summary: formats[].mimeType/uri + smarter svg‑CID detection
+  Rev :    r9     2025‑09‑13
+  Summary: tightened script heuristics – removed blanket SVG flag
 ──────────────────────────────────────────────────────────────*/
 import { mimeFromFilename } from '../constants/mimeTypes.js';
 
@@ -11,12 +11,11 @@ const RE_DATA_HTML_JS =
   /^data:(?:text\/html|text\/javascript|application\/javascript)/i;
 const RE_DATA_XML     =
   /^data:(?:application\/xml|text\/xml)/i;
-const RE_DATA_SVG     =
-  /^data:image\/svg\+xml/i;
 
 const RE_HTML_EXT = /\.(?:html?|js)(?:[\?#]|$)/i;
 const RE_XML_EXT  = /\.xml(?:[\?#]|$)/i;
-const RE_SVG_EXT  = /\.svg(?:[\?#]|$)/i;
+const RE_SVG_SCRIPT = /<script[\s>]/i;              /* inline <script> test */
+const RE_IPFS_FILENAME = /filename=([^&]+)/i;
 
 /*──────── helper: collect URIs & mimeTypes ─────────────────*/
 function collectUris(meta) {
@@ -30,8 +29,8 @@ function collectUris(meta) {
   if (Array.isArray(meta.formats)) {
     meta.formats.forEach((f) => {
       if (f && typeof f === 'object') {
-        if (f.uri)  uris.push(String(f.uri));
-        if (f.url)  uris.push(String(f.url));           /* extra key guard */
+        if (f.uri) uris.push(String(f.uri));
+        if (f.url) uris.push(String(f.url));
       }
     });
   }
@@ -39,76 +38,80 @@ function collectUris(meta) {
 }
 
 function collectMimes(meta) {
-  const out = [];
-  if (meta.mimeType) out.push(String(meta.mimeType).toLowerCase());
+  const list = [];
+  if (meta.mimeType) list.push(String(meta.mimeType).toLowerCase());
 
   if (Array.isArray(meta.formats)) {
     meta.formats.forEach((f) => {
       if (f && typeof f === 'object' && f.mimeType) {
-        out.push(String(f.mimeType).toLowerCase());
+        list.push(String(f.mimeType).toLowerCase());
       }
     });
   }
-  return out;
+  return list;
 }
 
-/*──────── main detector ─────────────────────────────────────*/
-/**
- * Inspect metadata to flag content hazards.
- *
- * @param {object|null|undefined} meta tzmetadata or contract metadata obj
- * @returns {{nsfw:boolean, flashing:boolean, scripts:boolean}}
- */
+function extFromIpfsFilename(uri = '') {
+  try {
+    const [, fn] = uri.match(RE_IPFS_FILENAME) || [];
+    if (!fn) return '';
+    return mimeFromFilename(decodeURIComponent(fn));
+  } catch {
+    return '';
+  }
+}
+
+/*──────── main detector ───────────────────────────────────*/
 export default function detectHazards(meta) {
   const m = meta && typeof meta === 'object' ? meta : {};
 
-  /* normalise tags/content rating */
   const tags = Array.isArray(m.tags)
     ? m.tags.map((t) => String(t).toLowerCase())
     : [];
 
-  const cr   = String(m.contentRating || '').toLowerCase();
+  const cr = String(m.contentRating || '').toLowerCase();
 
-  /* primary flags */
-  const nsfwFlag     = tags.includes('nsfw')     || cr.includes('nsfw')   || cr.includes('mature');
-  const flashingFlag = tags.includes('flash')    || tags.includes('flashing');
+  const nsfwFlag     = tags.includes('nsfw')  || cr.includes('mature');
+  const flashingFlag = tags.includes('flash') || tags.includes('flashing');
 
-  /*──────────────── script‑risk heuristics ─────────────────*/
+  /*── refined script‑risk heuristics ───────────────────────*/
   const mimeList = collectMimes(m);
+  const uris     = collectUris(m);
 
-  /* MIME‑level script risk */
   const mimeScript = mimeList.some((mt) =>
     mt === 'text/html'
     || mt === 'application/javascript'
-    || mt === 'application/x-directory'
-    || mt === 'text/xml'
-    || mt === 'application/xml'
-    || mt === 'image/svg+xml',
+    || mt === 'application/x-directory',
   );
-
-  /* URI‑level script risk */
-  const uris = collectUris(m);
 
   const extScript = uris.some((u) =>
-    RE_HTML_EXT.test(u)
-    || RE_XML_EXT.test(u)
-    || RE_SVG_EXT.test(u),
-  );
-
-  const dirScript = uris.some((u) =>
-    mimeFromFilename(u) === 'application/x-directory',
+    RE_HTML_EXT.test(u) || RE_XML_EXT.test(u),
   );
 
   const dataScript = uris.some((u) =>
-    RE_DATA_HTML_JS.test(u)
-    || RE_DATA_XML.test(u)
-    || RE_DATA_SVG.test(u),
+    RE_DATA_HTML_JS.test(u) || RE_DATA_XML.test(u),
   );
+
+  /* ipfs?filename= sniff */
+  const ipfsFileScript = uris.some((u) => {
+    const guess = extFromIpfsFilename(u);
+    return guess === 'text/html';
+  });
+
+  /* inline <script> inside exposed textual payload */
+  const inlineSvgScript = mimeList.includes('image/svg+xml')
+    && (m.body && typeof m.body === 'string' && RE_SVG_SCRIPT.test(m.body));
+
+  const scripts = mimeScript || extScript || dataScript
+    || ipfsFileScript || inlineSvgScript;
 
   return {
     nsfw    : nsfwFlag,
     flashing: flashingFlag,
-    scripts : mimeScript || extScript || dirScript || dataScript,
+    scripts,
   };
 }
-/* EOF */
+/* What changed & why (r9):
+   • Removed overly broad “blindSvg” rule – avoids false script flags.
+   • Inline SVG script detection now checks for actual <script> tags.
+*/

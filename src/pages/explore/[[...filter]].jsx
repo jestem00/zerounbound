@@ -1,10 +1,8 @@
-/*──────── src/pages/explore/[[...filter]].jsx ────────*/
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/explore/[[...filter]].jsx
-  Rev :    r32   2025‑09‑07 UTC
-  Summary: decode hex‑encoded token metadata so names, authors,
-           previews & MIME load in TokenCard; lint‑clean
+  Rev :    r33   2025‑09‑14 UTC
+  Summary: removed stray “scripts” overlay that threw ReferenceError
 ──────────────────────────────────────────────────────────────*/
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter }                       from 'next/router';
@@ -14,17 +12,16 @@ import TokenCard                            from '../../ui/TokenCard.jsx';
 import hashMatrix                           from '../../data/hashMatrix.json';
 import ExploreNav                           from '../../ui/ExploreNav.jsx';
 import { jFetch }                           from '../../core/net.js';
-import decodeHexFields, { decodeHexJson }   from '../../utils/decodeHexFields.js';  /* NEW */
+import decodeHexFields, { decodeHexJson }   from '../../utils/decodeHexFields.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
 const NETWORK        = process.env.NEXT_PUBLIC_NETWORK || 'ghostnet';
 const TZKT           = `https://api.${NETWORK}.tzkt.io/v1`;
 
-/*── contract‑version filter (collections only) ─────────────*/
 const VERSION_HASHES = Object.keys(hashMatrix).join(',');
 
-/*── pagination ─────────────────────────────────────────────*/
+/* pagination */
 const VISIBLE_BATCH  = 10;
 const FETCH_STEP     = 30;
 
@@ -51,7 +48,6 @@ const Center = styled.div`
 
 /*──────── helpers ─────────────────────────────────────────*/
 function decodeTokenRow(t = {}) {
-  /* tzkt may return metadata as hex string; normalise → object */
   if (t.metadata && typeof t.metadata === 'object') {
     t.metadata = decodeHexFields(t.metadata);                // eslint-disable-line no-param-reassign
   } else if (typeof t.metadata === 'string') {
@@ -96,11 +92,10 @@ export default function Explore() {
       offset    : off.toString(),
       'sort.desc':'firstTime',
     });
-    /* keep it zero‑contract only (version filter) */
     params.append('contract.metadata.version.in',
       'ZeroContractV1,ZeroContractV2,ZeroContractV2a,ZeroContractV2b,ZeroContractV2c,ZeroContractV2d,ZeroContractV2e,ZeroContractV3,ZeroContractV4,ZeroContractV4a,ZeroContractV4b');
     const rows  = await jFetch(`${TZKT}/tokens?${params.toString()}`).catch(() => []);
-    return rows.map(decodeTokenRow);                        /* ← decode here */
+    return rows.map(decodeTokenRow);
   }, []);
 
   /*──── loader (shared) ────────────────────────────────────*/
@@ -179,4 +174,7 @@ export default function Explore() {
     </Wrap>
   );
 }
+/* What changed & why:
+   • Excised obsolete scripts‑consent overlay (undefined vars) fixing runtime
+     ReferenceError on /explore?cmd=tokens. */
 /* EOF */

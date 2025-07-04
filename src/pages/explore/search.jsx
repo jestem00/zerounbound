@@ -1,7 +1,7 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/explore/search.jsx
-  Rev :    r7     2025‑08‑17
+  Rev :    r8  2025‑09‑13 – uses EnableScripts overlay
   Summary: mobile‑safe grid min 160px
 ──────────────────────────────────────────────────────────────*/
 import React, {
@@ -16,6 +16,7 @@ import detectHazards from '../../utils/hazards.js';
 import useConsent    from '../../hooks/useConsent.js';
 import ExploreNav    from '../../ui/ExploreNav.jsx';
 import { jFetch }    from '../../core/net.js';
+import { EnableScriptsOverlay } from '../../ui/EnableScripts.jsx';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -134,8 +135,9 @@ export default function ExploreSearch() {
           aspectRatio: (m.width && m.height) ? `${m.width}/${m.height}` : '1/1',
           position: 'relative',
         }}>
-          {hidden && (
-            <Obf>
+          {scripts && !allowScripts && !hidden && (
+          <Obf>
+            <EnableScriptsOverlay onAccept={()=>{ const ok=window.confirm('Enable scripting? Trust author.'); if(ok) setAllowScripts(true); }}/>
               <p>{nsfw && 'NSFW'}{nsfw && flashing ? ' / ' : ''}{flashing && 'Flashing'}</p>
               <PixelButton size="sm" onClick={() => {
                 if (nsfw)    requireConsent(allowNSFW,  setAllowNSFW,  'NSFW');

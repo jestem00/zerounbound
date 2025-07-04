@@ -33,7 +33,8 @@
         "src/utils/onChainValidator.js",
         "src/utils/listLiveTokenIds.js",
         "src/config/**/*.js",
-        "src/data/**/*.json"
+        "src/data/**/*.json",
+        "srce/ui/MakeOfferBtn.jsx"
       ]
     },
 

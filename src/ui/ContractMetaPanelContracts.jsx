@@ -2,8 +2,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/ContractMetaPanelContracts.jsx
-  Rev :    r2     2025‑08‑22
-  Summary: ipfs:// → https http gateway so preview renders
+  Rev :    r3     2025‑09‑05
+  Summary: fix placeholder logic when no preview URI
 ──────────────────────────────────────────────────────────────*/
 import React, { useMemo, useState } from 'react';
 import PropTypes                    from 'prop-types';
@@ -113,9 +113,9 @@ export default function ContractMetaPanelContracts({
 
   const [thumbOk, setThumbOk] = useState(true);
   const thumb = ipfsToHttp(
-    metaObj.imageUri || metaObj.thumbnailUri || metaObj.displayUri || PLACEHOLDER,
+    metaObj.imageUri || metaObj.thumbnailUri || metaObj.displayUri || ''
   );
-  const showPlaceholder = !thumbOk || thumb === PLACEHOLDER;
+  const showPlaceholder = !thumbOk || !thumb;
 
   return (
     <Card>
@@ -170,6 +170,6 @@ ContractMetaPanelContracts.propTypes = {
     sales  : PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
   }),
 };
-/* What changed & why (r2):
-   • Converts ipfs:// URIs → https://ipfs.io/ipfs/ ensuring preview
-     renders under RenderMedia (I41) without altering source meta. */
+/* What changed & why (r3):
+   • Placeholder now shows when preview URI missing; safer default.
+*/

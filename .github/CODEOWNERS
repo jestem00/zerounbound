@@ -1,0 +1,19 @@
+/*───────────────────────────────────────────────────────────────
+Developed by @jams2blues – ZeroContract Studio
+File:    .github/CODEOWNERS
+Rev :    r1    2025‑09‑05
+Summary: require one senior review on every PR
+───────────────────────────────────────────────────────────────*/
+# CODEOWNERS enforces review before merge
+# syntax: <pattern> <owner 1> <owner 2> …
+
+# Whole repo – at least one of these users must approve the PR
+*       @jams2blues  @zero‑core‑maintainers
+
+# Scripts & infra changes demand infra review
+/scripts/*           @zero‑infra
+
+# Michelson contracts demand protocol review
+/contracts/**.tz     @zero‑contracts
+
+/* What changed & why: initial CODEOWNERS to satisfy branch‑protection review */

@@ -128,6 +128,12 @@ export default function ContractPage() {
           });
         setTokens(decoded);
         setTokOpts(live);
+      } catch (err) {
+        console.error('Token fetch failed', err);
+        if (!cancel) {
+          setTokens([]);
+          setTokOpts([]);
+        }
       } finally { if (!cancel) setLoading(false); }
     })();
 

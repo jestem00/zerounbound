@@ -1,8 +1,10 @@
 /*──────── src/utils/hazards.js ──────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/utils/hazards.js
-  Rev :    r9     2025‑09‑13
-  Summary: tightened script heuristics – removed blanket SVG flag
+  Rev :    r10    2025‑09‑18
+  Summary: detects inline‑script SVG data URIs
+           • decodes data:image/svg+xml and scans for <script>
+           • restores script‑toggle on generative SVG tokens
 ──────────────────────────────────────────────────────────────*/
 import { mimeFromFilename } from '../constants/mimeTypes.js';
 
@@ -16,6 +18,18 @@ const RE_HTML_EXT = /\.(?:html?|js)(?:[\?#]|$)/i;
 const RE_XML_EXT  = /\.xml(?:[\?#]|$)/i;
 const RE_SVG_SCRIPT = /<script[\s>]/i;              /* inline <script> test */
 const RE_IPFS_FILENAME = /filename=([^&]+)/i;
+
+/* decode textual data:URIs (SVG focus) */
+function decodeDataUri(uri = '') {
+  if (!uri.startsWith('data:')) return '';
+  const [, meta = '', payload = ''] = uri.match(/^data:([^,]*),(.*)$/s) || [];
+  if (!/image\/svg\+xml/i.test(meta)) return '';
+  try {
+    return /;base64/i.test(meta) ? atob(payload) : decodeURIComponent(payload);
+  } catch {
+    return '';
+  }
+}
 
 /*──────── helper: collect URIs & mimeTypes ─────────────────*/
 function collectUris(meta) {
@@ -98,12 +112,24 @@ export default function detectHazards(meta) {
     return guess === 'text/html';
   });
 
-  /* inline <script> inside exposed textual payload */
+  /* inline SVG data‑URI script test */
+  let svgDataScript = false;
+  for (const u of uris) {
+    if (u.startsWith('data:image/svg+xml')) {
+      const txt = decodeDataUri(u);
+      if (txt && RE_SVG_SCRIPT.test(txt)) {
+        svgDataScript = true;
+        break;
+      }
+    }
+  }
+
+  /* inline <script> inside explicit body */
   const inlineSvgScript = mimeList.includes('image/svg+xml')
     && (m.body && typeof m.body === 'string' && RE_SVG_SCRIPT.test(m.body));
 
   const scripts = mimeScript || extScript || dataScript
-    || ipfsFileScript || inlineSvgScript;
+    || ipfsFileScript || inlineSvgScript || svgDataScript;
 
   return {
     nsfw    : nsfwFlag,
@@ -111,7 +137,8 @@ export default function detectHazards(meta) {
     scripts,
   };
 }
-/* What changed & why (r9):
-   • Removed overly broad “blindSvg” rule – avoids false script flags.
-   • Inline SVG script detection now checks for actual <script> tags.
-*/
+/* What changed & why (r10):
+   • Added `svgDataScript` detection — decodes data:image/svg+xml URIs
+     and flags when an inline <script> tag is found.
+   • Restores script‑toggle visibility on generative SVG assets while
+     keeping static SVGs script‑free. */

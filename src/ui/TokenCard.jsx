@@ -1,12 +1,10 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/TokenCard.jsx
-  Rev :    r31    2025‑09‑17
-  Summary: integrity‑dialog duplication fixed
-           • Badge now relies on <IntegrityBadge/>'s own dialog
-             (removed extra PixelConfirmDialog path)
-           • Cleans out redundant debounce logic
-           • Lint‑clean imports & state
+  Rev :    r32    2025‑09‑18
+  Summary: generative‑SVG support
+           • Fullscreen now prefers artifact‑SVG once scripts enabled
+           • no behavioural change for non‑SVG assets
 ──────────────────────────────────────────────────────────────*/
 import {
   useState, useMemo, useEffect,
@@ -118,7 +116,6 @@ export default function TokenCard({
 }) {
   const meta          = token.metadata || {};
   const integrity     = useMemo(() => checkOnChainIntegrity(meta), [meta]);
-  const intInfo       = useMemo(() => getIntegrityInfo(integrity.status), [integrity.status]);
 
   const { walletAddress } = useWalletContext() || {};
 
@@ -142,6 +139,11 @@ export default function TokenCard({
 
   /* UI states */
   const preview          = pickDataUri(meta);
+  const artifactSvg      = (typeof meta.artifactUri === 'string' && VALID_DATA.test(meta.artifactUri.trim()))
+    ? meta.artifactUri.trim()
+    : '';
+  const fsUri            = (scriptHaz && allowScr && artifactSvg) ? artifactSvg : preview;
+
   const [thumbOk, setThumbOk] = useState(true);
   const aspect           = (meta.width && meta.height) ? `${meta.width}/${meta.height}` : '';
   const [fs,    setFs]    = useState(false);
@@ -233,8 +235,8 @@ export default function TokenCard({
           </CenterWrap>
 
           <Row>
-            {/* Integrity badge — uses its own internal dialog, no extra wrapper */}
-            <span title={intInfo.label} style={{ cursor:'pointer', fontSize:'1.1rem' }}>
+            <span title={getIntegrityInfo(integrity.status).label}
+                  style={{ cursor:'pointer', fontSize:'1.1rem' }}>
               <IntegrityBadge status={integrity.status} />
             </span>
 
@@ -242,7 +244,6 @@ export default function TokenCard({
               <EnableScriptsToggle
                 enabled={allowScr}
                 onToggle={allowScr ? () => setAllowScr(false) : askEnableScripts}
-                title={allowScr ? 'Disable scripts' : 'Enable scripts'}
               />
             )}
           </Row>
@@ -287,7 +288,7 @@ export default function TokenCard({
       <FullscreenModal
         open={fs}
         onClose={() => setFs(false)}
-        uri={preview}
+        uri={fsUri}
         mime={meta.mimeType}
         allowScripts={scriptHaz && allowScr}
         scriptHazard={scriptHaz}
@@ -334,14 +335,8 @@ TokenCard.propTypes = {
   contractName   : PropTypes.string,
   contractAdmin  : PropTypes.string,
 };
-/* What changed & why (r31):
-   • Removed custom info‑dialog logic and wrapper PixelButton —
-     duplication was caused by both TokenCard *and* IntegrityBadge
-     spawning dialogs on a single click.
-   • Badge is now rendered bare, relying on <IntegrityBadge/>'s
-     internal click‑handler, identical to ContractMetaPanel behaviour.
-   • Skip‑click debounce & related refs removed as they’re no longer
-     necessary.
-   • Imports / state cleaned up; functional behaviour unchanged
-     outside of eliminating the duplicate overlay loop.
-*/
+/* What changed & why (r32):
+   • When scripts are allowed the fullscreen viewer now switches from
+     the PNG fallback (`displayUri`) to the SVG `artifactUri`, enabling
+     interactive generative pieces.
+   • No UX change for non‑SVG or script‑blocked states. */

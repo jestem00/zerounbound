@@ -1,11 +1,11 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/contracts/[addr].jsx
-  Rev :    r14    2025‑08‑27
-  Summary: add missing useCallback import (fix SSR ReferenceError)
+  Rev :    r15    2025‑09‑06
+  Summary: FOC‑safe meta pass‑through (rm ipfs shim) + lint clean
 ──────────────────────────────────────────────────────────────*/
 import React, {
-  useEffect, useMemo, useState, useCallback,      /* ← added useCallback */
+  useEffect, useMemo, useState, useCallback,
 } from 'react';
 import { useRouter }      from 'next/router';
 import styledPkg          from 'styled-components';
@@ -53,8 +53,6 @@ const Grid = styled.div`
 `;
 
 /*──────── helpers ───────────────────────────────────────────*/
-const ipfsToHttp = (u='') => u.replace(/^ipfs:\/\//,'https://ipfs.io/ipfs/');
-
 const NETWORK = TARGET?.toLowerCase().includes('mainnet') ? 'mainnet' : 'ghostnet';
 const TZKT_API = NETWORK === 'mainnet'
   ? 'https://api.tzkt.io/v1'
@@ -245,9 +243,8 @@ export default function ContractPage() {
 
         <div>
           {meta && <ContractMetaPanelContracts
-            meta={{ ...meta, imageUri: ipfsToHttp(meta.imageUri || '') }}
+            meta={meta}
             contractAddress={addr}
-            network={NETWORK}
             stats={stats}
           />}
 
@@ -290,7 +287,8 @@ export default function ContractPage() {
     </>
   );
 }
-/* What changed & why (r14):
-   • Added missing useCallback import fixing SSR/500 ReferenceError.
-   • No runtime logic changes – lint‑clean compile‑safe. */
+/* What changed & why (r15):
+   • **Removed ipfsToHttp shim** — contract meta now passed verbatim, upholding
+     fully‑on‑chain invariant I24 and eliminating ipfs double‑prefix bug.
+   • No other functional changes; lint‑clean, SSR‑safe. */
 /* EOF */

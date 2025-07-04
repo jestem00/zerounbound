@@ -1,8 +1,10 @@
+/*──────── src/pages/explore/[[...filter]].jsx ────────*/
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/explore/[[...filter]].jsx
-  Rev :    r31   2025‑08‑27 UTC
-  Summary: ?cmd=tokens mode → infinite‑scroll token gallery
+  Rev :    r32   2025‑09‑07 UTC
+  Summary: decode hex‑encoded token metadata so names, authors,
+           previews & MIME load in TokenCard; lint‑clean
 ──────────────────────────────────────────────────────────────*/
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter }                       from 'next/router';
@@ -12,6 +14,7 @@ import TokenCard                            from '../../ui/TokenCard.jsx';
 import hashMatrix                           from '../../data/hashMatrix.json';
 import ExploreNav                           from '../../ui/ExploreNav.jsx';
 import { jFetch }                           from '../../core/net.js';
+import decodeHexFields, { decodeHexJson }   from '../../utils/decodeHexFields.js';  /* NEW */
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -45,6 +48,18 @@ const Center = styled.div`
   text-align: center;
   margin: 2rem 0;
 `;
+
+/*──────── helpers ─────────────────────────────────────────*/
+function decodeTokenRow(t = {}) {
+  /* tzkt may return metadata as hex string; normalise → object */
+  if (t.metadata && typeof t.metadata === 'object') {
+    t.metadata = decodeHexFields(t.metadata);                // eslint-disable-line no-param-reassign
+  } else if (typeof t.metadata === 'string') {
+    const j = decodeHexJson(t.metadata);
+    if (j) t.metadata = decodeHexFields(j);                  // eslint-disable-line no-param-reassign
+  }
+  return t;
+}
 
 /*──────── component ─────────────────────────────────────────*/
 export default function Explore() {
@@ -84,7 +99,8 @@ export default function Explore() {
     /* keep it zero‑contract only (version filter) */
     params.append('contract.metadata.version.in',
       'ZeroContractV1,ZeroContractV2,ZeroContractV2a,ZeroContractV2b,ZeroContractV2c,ZeroContractV2d,ZeroContractV2e,ZeroContractV3,ZeroContractV4,ZeroContractV4a,ZeroContractV4b');
-    return jFetch(`${TZKT}/tokens?${params.toString()}`).catch(() => []);
+    const rows  = await jFetch(`${TZKT}/tokens?${params.toString()}`).catch(() => []);
+    return rows.map(decodeTokenRow);                        /* ← decode here */
   }, []);
 
   /*──── loader (shared) ────────────────────────────────────*/
@@ -163,8 +179,4 @@ export default function Explore() {
     </Wrap>
   );
 }
-/* What changed & why (r31):
-   • Detects “?cmd=tokens” query → switches to token‑gallery mode.
-   • Added TokenCard rendering with infinite‑scroll batch loader.
-   • Separate seen sets avoid duplicate fetches across modes.
-   • Offset resets when mode toggles ensuring fresh pagination. */
+/* EOF */

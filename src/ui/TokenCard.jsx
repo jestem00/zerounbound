@@ -1,8 +1,10 @@
+/*──────── src/ui/TokenCard.jsx ────────*/
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/TokenCard.jsx
-  Rev :    r9     2025‑09‑05
-  Summary: a11y – Card is now keyboard‑focusable button
+  Rev :    r10    2025‑09‑07
+  Summary: always show “Make Offer” button; price row renders even
+           when not listed; minor a11y + lint clean
 ──────────────────────────────────────────────────────────────*/
 import {
   useState, useMemo, useCallback,
@@ -16,7 +18,7 @@ import RenderMedia        from '../utils/RenderMedia.jsx';
 import { getIntegrityInfo } from '../constants/integrityBadges.js';
 import { checkOnChainIntegrity } from '../utils/onChainValidator.js';
 import PixelButton        from './PixelButton.jsx';
-import MakeOfferBtn       from './MakeOfferBtn.jsx';
+import MakeOfferBtn       from './MakeOfferBtn.jsx';           /* exists */
 import IntegrityBadge     from './IntegrityBadge.jsx';
 import { shortKt }        from '../utils/formatAddress.js';
 
@@ -64,7 +66,7 @@ const Meta = styled.section`
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-height: 72px;
+  min-height: 78px;
   border-top: 2px solid var(--zu-accent,#00c8ff);
 
   h4{margin:0;font-size:.82rem;line-height:1.15;font-family:'Pixeloid Sans',monospace;}
@@ -137,8 +139,6 @@ export default function TokenCard({
     e.preventDefault();
     window.location.href = `/contracts/${contractAddress}`;
   };
-
-
 
   const showPlaceholder = !thumbOk || !preview;
 
@@ -230,12 +230,10 @@ export default function TokenCard({
           <p>By {authorArr.join(', ')}</p>
         )}
 
-        {priceTez && (
-          <PriceRow>
-            <span>{priceTez} ꜩ</span>
-            <MakeOfferBtn contract={contractAddress} tokenId={token.tokenId} />
-          </PriceRow>
-        )}
+        <PriceRow>
+          {priceTez && <span>{priceTez} ꜩ</span>}
+          <MakeOfferBtn contract={contractAddress} tokenId={token.tokenId} />
+        </PriceRow>
 
         <StatRow>
           <Addr href={`/contracts/${contractAddress}`} onClick={openContract}>
@@ -257,7 +255,4 @@ TokenCard.propTypes = {
   contractAddress : PropTypes.string.isRequired,
   contractName    : PropTypes.string,
 };
-/* What changed & why (r8):
-   • Switch to <MakeOfferBtn/> stub pending marketplace wiring.
-   • Minor lint clean‑ups; unchanged UI.
-*/
+/* EOF */

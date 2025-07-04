@@ -12,6 +12,7 @@ import styledPkg                    from 'styled-components';
 import RenderMedia                  from '../utils/RenderMedia.jsx';
 import { checkOnChainIntegrity }    from '../utils/onChainValidator.js';
 import { getIntegrityInfo }         from '../constants/integrityBadges.js';
+import decodeHexFields, { decodeHexJson } from '../utils/decodeHexFields.js';
 import IntegrityBadge               from './IntegrityBadge.jsx';
 import PixelButton                  from './PixelButton.jsx';
 import { copyToClipboard }          from '../utils/formatAddress.js';
@@ -89,7 +90,17 @@ export default function ContractMetaPanelContracts({
 }) {
   const [copied, setCopied] = useState(false);
 
-  const integrity = useMemo(() => checkOnChainIntegrity(meta), [meta]);
+  const metaObj = useMemo(() => {
+    if (!meta) return {};
+    if (typeof meta === 'string') {
+      const parsed = decodeHexJson(meta);
+      if (parsed) return decodeHexFields(parsed);
+      try { return JSON.parse(meta); } catch { return {}; }
+    }
+    return decodeHexFields(meta);
+  }, [meta]);
+
+  const integrity = useMemo(() => checkOnChainIntegrity(metaObj), [metaObj]);
   const { label } = useMemo(
     () => getIntegrityInfo(integrity.status),
   [integrity.status]);
@@ -102,7 +113,7 @@ export default function ContractMetaPanelContracts({
 
   const [thumbOk, setThumbOk] = useState(true);
   const thumb = ipfsToHttp(
-    meta.imageUri || meta.thumbnailUri || meta.displayUri || PLACEHOLDER,
+    metaObj.imageUri || metaObj.thumbnailUri || metaObj.displayUri || PLACEHOLDER,
   );
   const showPlaceholder = !thumbOk || thumb === PLACEHOLDER;
 
@@ -114,7 +125,7 @@ export default function ContractMetaPanelContracts({
         ) : (
           <RenderMedia
             uri={thumb}
-            alt={meta.name}
+            alt={metaObj.name}
             onInvalid={() => setThumbOk(false)}
           />
         )}
@@ -122,7 +133,7 @@ export default function ContractMetaPanelContracts({
 
       <Body>
         <TitleRow>
-          <h2>{meta.name || 'Untitled Collection'}</h2>
+          <h2>{metaObj.name || 'Untitled Collection'}</h2>
           <span className="badge" title={label}>
             <IntegrityBadge status={integrity.status}/>
           </span>
@@ -135,8 +146,8 @@ export default function ContractMetaPanelContracts({
           </PixelButton>
         </AddrRow>
 
-        {meta.description && (
-          <Desc>{meta.description}</Desc>
+        {metaObj.description && (
+          <Desc>{metaObj.description}</Desc>
         )}
 
         <StatRow>
@@ -150,7 +161,7 @@ export default function ContractMetaPanelContracts({
 }
 
 ContractMetaPanelContracts.propTypes = {
-  meta: PropTypes.object,
+  meta: PropTypes.oneOfType([PropTypes.object, PropTypes.string]),
   contractAddress: PropTypes.string.isRequired,
   network: PropTypes.string,
   stats: PropTypes.shape({

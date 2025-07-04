@@ -1,16 +1,15 @@
-/*──────── src/ui/TokenCard.jsx ────────*/
-/*─────────────────────────────────────────────────────────────
+/*──────── src/ui/TokenCard.jsx ──────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/TokenCard.jsx
-  Rev :    r10    2025‑09‑07
-  Summary: always show “Make Offer” button; price row renders even
-           when not listed; minor a11y + lint clean
+  Rev :    r16    2025‑09‑09
+  Summary: unobtrusive “⚡ Enable‑scripts” button top‑left;
+           SVG previews now shown even when scripts disabled.
 ──────────────────────────────────────────────────────────────*/
 import {
   useState, useMemo, useCallback,
-}                         from 'react';
-import PropTypes          from 'prop-types';
-import styledPkg          from 'styled-components';
+} from 'react';
+import PropTypes      from 'prop-types';
+import styledPkg      from 'styled-components';
 
 import useConsent         from '../hooks/useConsent.js';
 import detectHazards      from '../utils/hazards.js';
@@ -18,15 +17,25 @@ import RenderMedia        from '../utils/RenderMedia.jsx';
 import { getIntegrityInfo } from '../constants/integrityBadges.js';
 import { checkOnChainIntegrity } from '../utils/onChainValidator.js';
 import PixelButton        from './PixelButton.jsx';
-import MakeOfferBtn       from './MakeOfferBtn.jsx';           /* exists */
+import MakeOfferBtn       from './MakeOfferBtn.jsx';
 import IntegrityBadge     from './IntegrityBadge.jsx';
 import { shortKt }        from '../utils/formatAddress.js';
+import countAmount        from '../utils/countAmount.js';
 
 const PLACEHOLDER = '/sprites/cover_default.svg';
+const VALID_DATA  = /^data:/i;
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
-/*──────── styled shells ─────────────────────────────────────*/
+/*── helpers ────────────────────────────────────────────────*/
+const pickDataUri = (m = {}) => [
+  m.displayUri,
+  m.imageUri,
+  m.thumbnailUri,
+  m.artifactUri,
+].find((u) => typeof u === 'string' && VALID_DATA.test(u.trim())) || '';
+
+/*── styled shells ─────────────────────────────────────────*/
 const Card = styled.article`
   position: relative;
   border: 2px solid var(--zu-accent,#00c8ff);
@@ -42,21 +51,22 @@ const Card = styled.article`
 `;
 
 const ThumbWrap = styled.div`
-  flex: 0 0 100%;
+  flex: 0 0 auto;
   position: relative;
   width: 100%;
   background: var(--zu-bg-dim,#111);
   display: flex;
   justify-content: center;
-  align-items: center;
-  aspect-ratio: ${({ $aspect }) => $aspect || '1/1'};
+  align-items: flex-start;
+  ${({ $aspect }) => $aspect ? `aspect-ratio:${$aspect};` : ''}
 `;
 
 const Obf = styled.div`
   position: absolute; inset: 0;
   background: rgba(0,0,0,.85);
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 10px; text-align: center; font-size: .75rem; z-index: 5;
+  gap: 10px; text-align: center; font-size: .75rem;
+  z-index: 9;
   p{margin:0;width:80%;}
 `;
 
@@ -87,9 +97,14 @@ const PriceRow = styled.div`
   span{white-space:nowrap;}
 `;
 
-/*──────── helpers ───────────────────────────────────────────*/
-const ipfsToHttp = (u='') => u.replace(/^ipfs:\/\//,'https://ipfs.io/ipfs/');
+/* compact Make‑Offer button */
+const OfferWrap = styled.div`
+  transform: scale(.60);
+  transform-origin: left center;
+  flex: 0 0 auto;
+`;
 
+/*──────── component ───────────────────────────────────────*/
 export default function TokenCard({
   token,
   contractAddress,
@@ -97,38 +112,32 @@ export default function TokenCard({
 }) {
   const meta = token.metadata || {};
 
-  const integrity = useMemo(() => checkOnChainIntegrity(meta), [meta]);
-  const { label } = useMemo(
-    () => getIntegrityInfo(integrity.status),
-  [integrity.status]);
+  const integrity  = useMemo(() => checkOnChainIntegrity(meta), [meta]);
+  const { label }  = useMemo(() => getIntegrityInfo(integrity.status), [integrity.status]);
 
+  /* consent */
   const [allowNSFW,    setAllowNSFW]    = useConsent('nsfw',    false);
   const [allowFlash,   setAllowFlash]   = useConsent('flash',   false);
   const [allowScripts, setAllowScripts] = useConsent('scripts', false);
 
   const { nsfw, flashing, scripts: scriptHaz } = detectHazards(meta);
-  const hidden = (nsfw && !allowNSFW) || (flashing && !allowFlash);
+  const hidden   = (nsfw && !allowNSFW) || (flashing && !allowFlash);
+  const isSvg    = (meta.mimeType || '').toLowerCase() === 'image/svg+xml';
 
-  /* pick best preview */
-  const previewSrc =
-    meta.displayUri   ||
-    meta.imageUri     ||
-    meta.thumbnailUri ||
-    meta.artifactUri  ||
-    '';
-  const preview = ipfsToHttp(previewSrc);
-
+  /* preview */
+  const preview       = pickDataUri(meta);
   const [thumbOk, setThumbOk] = useState(true);
-  const onInvalid = useCallback(() => setThumbOk(false), []);
+  const showPlaceholder = !thumbOk || !preview;
+  const onInvalid      = useCallback(() => setThumbOk(false), []);
 
-  const aspect =
-    meta.width && meta.height
-      ? `${meta.width}/${meta.height}`
-      : '1/1';
+  const aspect = (meta.width && meta.height) ? `${meta.width}/${meta.height}` : '';
 
+  /* price / editions */
   const priceMutez = token.price || null;
   const priceTez   = priceMutez ? (priceMutez / 1_000_000).toFixed(2) : null;
+  const editions   = countAmount(token);
 
+  /* nav helpers */
   const openLarge = (e) => {
     if (e.metaKey || e.ctrlKey) return;
     e.preventDefault();
@@ -140,14 +149,20 @@ export default function TokenCard({
     window.location.href = `/contracts/${contractAddress}`;
   };
 
-  const showPlaceholder = !thumbOk || !preview;
-
-  /* authors fallback chain: authors → artists → creators */
   const authorArr = meta.authors || meta.artists || meta.creators || [];
 
-  /* make Card keyboard‑accessible */
   const keyHandler = (e) => {
     if (e.key === 'Enter' || e.key === ' ') openLarge(e);
+  };
+
+  /* script‑consent prompt */
+  const requestScriptConsent = () => {
+    const ok = window.confirm(
+      'This token embeds executable HTML/JS.\n'
+      + 'Running scripts could be harmful. Proceed only if you fully trust the author.\n\n'
+      + 'By clicking “OK” you agree to the Terms of Service.',
+    );
+    if (ok) setAllowScripts(true);
   };
 
   return (
@@ -159,33 +174,84 @@ export default function TokenCard({
       aria-label={`Open token ${meta.name || token.tokenId}`}
     >
       <ThumbWrap $aspect={aspect}>
-        <span title={label}
-              style={{ position:'absolute', top:4, right:4, zIndex:6 }}>
+        {/* integrity badge */}
+        <span title={label} style={{ position: 'absolute', top: 4, right: 4, zIndex: 11 }}>
           <IntegrityBadge status={integrity.status} />
         </span>
 
+        {/* enable‑scripts button (always visible, unobtrusive) */}
+        {scriptHaz && !allowScripts && (
+          <PixelButton
+            size="xs"
+            warning
+            title="Enable scripts"
+            style={{ position: 'absolute', top: 4, left: 4, zIndex: 11 }}
+            onClick={(e) => { e.stopPropagation(); requestScriptConsent(); }}
+          >
+            ⚡
+          </PixelButton>
+        )}
+
+        {/* NSFW / flashing blocker */}
         {hidden && (
           <Obf onClick={openLarge}>
             <p>{nsfw && 'NSFW'}{nsfw && flashing ? ' / ' : ''}{flashing && 'Flashing'}</p>
-            <div style={{ display:'flex',gap:6 }}>
-              <PixelButton size="sm" onClick={(e)=>{e.stopPropagation();
-                if (nsfw)    setAllowNSFW(true);
-                if (flashing)setAllowFlash(true);
-              }}>Unhide</PixelButton>
-              <PixelButton size="sm" onClick={(e)=>{e.stopPropagation();openLarge(e);}}>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <PixelButton
+                size="sm"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (nsfw)    setAllowNSFW(true);
+                  if (flashing)setAllowFlash(true);
+                }}
+              >
+                Unhide
+              </PixelButton>
+              <PixelButton
+                size="sm"
+                onClick={(e) => { e.stopPropagation(); openLarge(e); }}
+              >
                 View
               </PixelButton>
             </div>
           </Obf>
         )}
 
+        {/* script‑blocking overlay for non‑SVG HTML/JS media */}
+        {scriptHaz && !allowScripts && !hidden && !isSvg && (
+          <Obf onClick={openLarge}>
+            <p>Executable media detected.</p>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <PixelButton
+                size="sm"
+                warning
+                onClick={(e) => { e.stopPropagation(); requestScriptConsent(); }}
+              >
+                Allow scripts
+              </PixelButton>
+              <PixelButton
+                size="sm"
+                onClick={(e) => { e.stopPropagation(); openLarge(e); }}
+              >
+                View
+              </PixelButton>
+            </div>
+          </Obf>
+        )}
+
+        {/* actual preview */}
         {!hidden && !showPlaceholder && (
           <RenderMedia
             uri={preview}
             mime={meta.mimeType}
             alt={meta.name}
             allowScripts={scriptHaz && allowScripts}
-            style={{ width:'100%', height:'100%', objectFit:'contain' }}
+            style={{
+              width: '100%',
+              height: 'auto',
+              objectFit: 'contain',
+              objectPosition: 'top center',
+            }}
             onInvalid={onInvalid}
           />
         )}
@@ -193,46 +259,29 @@ export default function TokenCard({
           <img
             src={PLACEHOLDER}
             alt=""
-            style={{ width:'60%', opacity:.45 }}
+            style={{ width: '60%', opacity: 0.45, alignSelf: 'flex-start' }}
           />
-        )}
-
-        {scriptHaz && !allowScripts && !hidden && (
-          <Obf onClick={openLarge}>
-            <p>Executable media detected.</p>
-            <div style={{ display:'flex',gap:6 }}>
-              <PixelButton size="sm" warning onClick={(e)=>{e.stopPropagation();
-                if (window.confirm(
-                  'This token embeds executable code (HTML/JS).\n'
-                  + 'Enable scripts ONLY if you fully trust the author.',
-                )) {
-                  setAllowScripts(true);
-                }
-              }}>Allow scripts</PixelButton>
-              <PixelButton size="sm" onClick={(e)=>{e.stopPropagation();openLarge(e);}}>
-                View
-              </PixelButton>
-            </div>
-          </Obf>
         )}
       </ThumbWrap>
 
       <Meta>
         <h4>
-          <a href={`/largeview/${contractAddress}/${token.tokenId}`}
-             onClick={openLarge}
-             style={{ color:'inherit', textDecoration:'none' }}>
+          <a
+            href={`/largeview/${contractAddress}/${token.tokenId}`}
+            onClick={openLarge}
+            style={{ color: 'inherit', textDecoration: 'none' }}
+          >
             {meta.name || `#${token.tokenId}`}
           </a>
         </h4>
 
-        {Array.isArray(authorArr) && authorArr.length > 0 && (
-          <p>By {authorArr.join(', ')}</p>
-        )}
+        {authorArr.length > 0 && <p>By {authorArr.join(', ')}</p>}
 
         <PriceRow>
           {priceTez && <span>{priceTez} ꜩ</span>}
-          <MakeOfferBtn contract={contractAddress} tokenId={token.tokenId} />
+          <OfferWrap>
+            <MakeOfferBtn contract={contractAddress} tokenId={token.tokenId} />
+          </OfferWrap>
         </PriceRow>
 
         <StatRow>
@@ -240,6 +289,7 @@ export default function TokenCard({
             {contractName || shortKt(contractAddress)}
           </Addr>
           <span>ID {token.tokenId}</span>
+          <span>×{editions}</span>
         </StatRow>
       </Meta>
     </Card>
@@ -247,12 +297,13 @@ export default function TokenCard({
 }
 
 TokenCard.propTypes = {
-  token           : PropTypes.shape({
-    tokenId : PropTypes.oneOfType([PropTypes.string,PropTypes.number]).isRequired,
-    metadata: PropTypes.object,
-    price   : PropTypes.number,
+  token: PropTypes.shape({
+    tokenId     : PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
+    metadata    : PropTypes.object,
+    price       : PropTypes.number,
+    totalSupply : PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
   }).isRequired,
-  contractAddress : PropTypes.string.isRequired,
-  contractName    : PropTypes.string,
+  contractAddress: PropTypes.string.isRequired,
+  contractName   : PropTypes.string,
 };
 /* EOF */

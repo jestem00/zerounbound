@@ -34,8 +34,34 @@
         "src/utils/onChainValidator.js",
         "src/utils/listLiveTokenIds.js",
         "src/config/**/*.js",
-        "src/data/**/*.json"
-        
+        "src/data/**/*.json",
+        "src/utils/countAmount.js"
+      ]
+    },
+    
+    {
+      "bundleName": "render_media_bundle",
+      "patterns": [
+        "src/constants/mimeTypes.js",
+        "src/utils/RenderMedia.jsx",
+        "src/utils/uriHelpers.js",
+        "src/ui/Entrypoints/MintUpload.jsx",
+        "src/ui/Entrypoints/MintPreview.jsx",
+        "src/ui/AdminTools.jsx",
+        "src/ui/CollectionCard.jsx",
+        "src/ui/ContractMetaPanel.jsx",
+        "src/ui/ContractMetaPanelContracts.jsx",
+        "src/ui/TokenCard.jsx",
+        "src/ui/TokenMetaPanel.jsx",
+        "src/utils/decodeHexFields.js",
+        "src/utils/formatAddress.js",
+        "src/utils/hazards.js",
+        "src/utils/listLiveTokenIds.js",
+        "src/utils/onChainValidator.js",
+        "src/utils/uriHelpers.js",
+        "src/utils/countOwners.js",
+        "src/utils/countTokens.js",
+        "src/utils/countAmount.js"
       ]
     },
 

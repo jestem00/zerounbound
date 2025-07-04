@@ -1,10 +1,10 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
-  File:    src/ui/ContractMetaPanelContracts.jsx
-  Rev :    r5      2025‑09‑06
-  Summary: ignore benign “sanitised” flag; smarter thumbnail fall‑through
-──────────────────────────────────────────────────────────────*/
-import React, { useMemo, useState, useCallback } from 'react';
+   Developed by @jams2blues – ZeroContract Studio
+   File:    src/ui/ContractMetaPanelContracts.jsx
+   Rev :    r4      2025‑09‑05
+   Summary: robust on‑chain meta decode + data‑URI‑only thumbnail
+ ──────────────────────────────────────────────────────────────*/
+import React, { useMemo, useState } from 'react';
 import PropTypes                    from 'prop-types';
 import styledPkg                    from 'styled-components';
 
@@ -19,28 +19,31 @@ import { copyToClipboard }          from '../utils/formatAddress.js';
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
 /*──────── helpers ───────────────────────────────────────────*/
+/* Fully‑on‑chain only → reject anything that isn’t a data‑URI */
 const VALID_DATA_URI_RE = /^data:/i;
 const PLACEHOLDER       = '/sprites/cover_default.svg';
 
+/** best‑effort meta decoding (hex → json → deep‑hex‑fields) */
 function toMetaObject(meta) {
   if (!meta) return {};
+  /* string input — may be plain JSON or hex‑wrapped JSON */
   if (typeof meta === 'string') {
-    try { return decodeHexFields(JSON.parse(meta)); } catch {}
+    /* 1. try JSON.parse straight away              */
+    try { return decodeHexFields(JSON.parse(meta)); } catch {/* ignore */}
+    /* 2. try “0x…” hex‑encoded JSON                */
     const parsed = decodeHexJson(meta);
     if (parsed) return decodeHexFields(parsed);
     return {};
   }
+  /* object input — still decode nested hex fields  */
   return decodeHexFields(meta);
 }
 
+/** pick the first data‑URI from the usual TZIP keys */
 function selectThumb(m = {}) {
-  const cand = [
-    m.imageUri,
-    m.thumbnailUri,
-    m.displayUri,
-    m.artifactUri,
-  ].find((u) => typeof u === 'string' && VALID_DATA_URI_RE.test(u.trim()));
-  return cand ? cand.trim() : '';
+  const uri = m.imageUri || m.thumbnailUri || m.displayUri || m.artifactUri;
+  return (typeof uri === 'string' && VALID_DATA_URI_RE.test(uri.trim()))
+    ? uri.trim() : '';
 }
 
 /*──────── styled shells ─────────────────────────────────────*/
@@ -55,18 +58,20 @@ const Thumb = styled.div`
   background:var(--zu-bg-dim);display:flex;align-items:center;justify-content:center;
   img,video,model-viewer,object{width:100%;height:100%;object-fit:contain;}
 `;
-const Body      = styled.div`flex:1 1 auto;display:flex;flex-direction:column;gap:6px;min-width:0;`;
-const TitleRow  = styled.div`
+const Body = styled.div`
+  flex:1 1 auto;display:flex;flex-direction:column;gap:6px;min-width:0;
+`;
+const TitleRow = styled.div`
   display:flex;flex-wrap:wrap;gap:6px;align-items:center;
   h2{margin:0;font-size:1rem;line-height:1.2;word-break:break-word;color:var(--zu-accent);}
   .badge{font-size:1.1rem;}
 `;
-const AddrRow   = styled.div`
+const AddrRow = styled.div`
   font-size:.75rem;opacity:.8;display:flex;align-items:center;gap:6px;
   code{word-break:break-all;}button{padding:0 4px;font-size:.65rem;line-height:1;}
 `;
-const Desc      = styled.p`margin:6px 0 0;font-size:.8rem;line-height:1.35;white-space:pre-wrap;`;
-const StatRow   = styled.div`
+const Desc   = styled.p`margin:6px 0 0;font-size:.8rem;line-height:1.35;white-space:pre-wrap;`;
+const StatRow= styled.div`
   display:flex;gap:10px;font-size:.8rem;flex-wrap:wrap;
   span{border:1px solid var(--zu-fg);padding:1px 6px;white-space:nowrap;}
 `;
@@ -80,20 +85,16 @@ export default function ContractMetaPanelContracts({
   const [copied, setCopied]   = useState(false);
   const [thumbOk, setThumbOk] = useState(true);
 
+  /* fully‑decoded, hex‑free meta object */
   const metaObj = useMemo(() => toMetaObject(meta), [meta]);
 
-  /* integrity badge */
+  /* badge & integrity calc */
   const integrity    = useMemo(() => checkOnChainIntegrity(metaObj), [metaObj]);
   const { label }    = useMemo(() => getIntegrityInfo(integrity.status), [integrity.status]);
 
-  /* thumbnail selection */
+  /* select thumbnail strictly from data: URIs */
   const thumb        = selectThumb(metaObj);
   const showFallback = !thumbOk || !thumb;
-
-  /* ignore “sanitised” warnings from RenderMedia – they’re benign */
-  const onInvalid = useCallback((reason) => {
-    if (reason !== 'sanitised') setThumbOk(false);
-  }, []);
 
   const onCopy = () => {
     copyToClipboard(contractAddress);
@@ -110,7 +111,7 @@ export default function ContractMetaPanelContracts({
           <RenderMedia
             uri={thumb}
             alt={metaObj.name}
-            onInvalid={onInvalid}
+            onInvalid={() => setThumbOk(false)}
           />
         )}
       </Thumb>
@@ -151,10 +152,9 @@ ContractMetaPanelContracts.propTypes = {
     sales  : PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
   }),
 };
-/* What changed & why (r5):
-   • **onInvalid filter** – benign “sanitised” trim no longer hides a valid
-     data‑URI, preventing false placeholder and black‑box preview.
-   • Thumbnail picker now scans all canonical URI keys in priority order;
-     still enforces data‑URI rule per invariant I24.
-   • No external shims, zero ipfs logic, keeps strict FOC compliance. */
-/* EOF */
+/* What changed & why (r4):
+   • Replaced legacy ipfs→http shim with strict data‑URI enforcement (I24). 
+   • Added toMetaObject() → resilient deep hex‑decode for all meta inputs. 
+   • selectThumb() picks first valid data‑URI; fallback placeholder otherwise.
+   • Ensures integrity badge & title render once on‑chain meta is decoded. 
+*/

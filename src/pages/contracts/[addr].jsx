@@ -1,8 +1,9 @@
+/*──────── src/pages/contracts/[addr].jsx ────────*/
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/contracts/[addr].jsx
-  Rev :    r15    2025‑09‑06
-  Summary: FOC‑safe meta pass‑through (rm ipfs shim) + lint clean
+  Rev :    r16    2025‑09‑08
+  Summary: edition‑filter now uses totalSupply instead of decimals
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useEffect, useMemo, useState, useCallback,
@@ -80,7 +81,7 @@ export default function ContractPage() {
     authors: new Set(),
     mime   : new Set(),
     tags   : new Set(),
-    type   : '',
+    type   : '',              /* '', 1of1, editions */
     mature : 'include',        /* include | exclude | only */
     flash  : 'include',
   });
@@ -161,9 +162,10 @@ export default function ContractPage() {
       const tagArr = m.tags || [];
       if (!tagArr.some((tg) => filters.tags.has(tg))) return false;
     }
-    /* type editions */
-    if (filters.type === '1of1' && +m.decimals !== 0) return false;
-    if (filters.type === 'editions' && +m.decimals === 0) return false;
+    /* 1/1 vs editions by totalSupply */
+    const supply = Number(t.totalSupply || m.totalSupply || m.amount || 0);
+    if (filters.type === '1of1'   && supply !== 1) return false;
+    if (filters.type === 'editions' && supply <= 1) return false;
     /* mature / flashing */
     const mature   = String(m.contentRating||'').toLowerCase().includes('mature');
     const flashing = String(m.accessibility||'').toLowerCase().includes('flash');
@@ -287,8 +289,7 @@ export default function ContractPage() {
     </>
   );
 }
-/* What changed & why (r15):
-   • **Removed ipfsToHttp shim** — contract meta now passed verbatim, upholding
-     fully‑on‑chain invariant I24 and eliminating ipfs double‑prefix bug.
-   • No other functional changes; lint‑clean, SSR‑safe. */
+/* What changed & why (r16):
+   • Edition filter now relies on `totalSupply` count ⇒ accurate 1/1 vs editions.
+   • No other logic touched; lint‑clean. */
 /* EOF */

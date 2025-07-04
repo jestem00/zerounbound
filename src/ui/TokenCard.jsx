@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/TokenCard.jsx
-  Rev :    r7     2025‑08‑26
-  Summary: “Make Offer” wired → zu:makeOffer event, dedupe imports
+  Rev :    r8     2025‑09‑05
+  Summary: replace makeOffer handler with stub <MakeOfferBtn/>
 ──────────────────────────────────────────────────────────────*/
 import {
   useState, useMemo, useCallback,
@@ -16,6 +16,7 @@ import RenderMedia        from '../utils/RenderMedia.jsx';
 import { getIntegrityInfo } from '../constants/integrityBadges.js';
 import { checkOnChainIntegrity } from '../utils/onChainValidator.js';
 import PixelButton        from './PixelButton.jsx';
+import MakeOfferBtn       from './MakeOfferBtn.jsx';
 import IntegrityBadge     from './IntegrityBadge.jsx';
 import { shortKt }        from '../utils/formatAddress.js';
 
@@ -137,13 +138,7 @@ export default function TokenCard({
     window.location.href = `/contracts/${contractAddress}`;
   };
 
-  /* marketplace integration – custom global handler opens entrypoint UI */
-  const makeOffer = (e) => {
-    e.stopPropagation();
-    window.dispatchEvent(new CustomEvent('zu:makeOffer', {
-      detail: { contract: contractAddress, tokenId: token.tokenId },
-    }));
-  };
+
 
   const showPlaceholder = !thumbOk || !preview;
 
@@ -227,9 +222,7 @@ export default function TokenCard({
         {priceTez && (
           <PriceRow>
             <span>{priceTez} ꜩ</span>
-            <PixelButton size="xs" warning onClick={makeOffer}>
-              Make Offer
-            </PixelButton>
+            <MakeOfferBtn contract={contractAddress} tokenId={token.tokenId} />
           </PriceRow>
         )}
 
@@ -253,7 +246,7 @@ TokenCard.propTypes = {
   contractAddress : PropTypes.string.isRequired,
   contractName    : PropTypes.string,
 };
-/* What changed & why (r7):
-   • Make Offer dispatches global zu:makeOffer event (marketplace hook).
+/* What changed & why (r8):
+   • Switch to <MakeOfferBtn/> stub pending marketplace wiring.
    • Minor lint clean‑ups; unchanged UI.
 */

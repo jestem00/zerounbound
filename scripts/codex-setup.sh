@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-/*───────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
-  File:    scripts/codex-setup.sh
-  Rev :    r4   2025-09-05
-  Summary: Codex CI bootstrap – self-healing Yarn pin
-────────────────────────────────────────────────────────────────*/
+# Developed by @jams2blues – ZeroContract Studio
+# File:    scripts/codex-setup.sh
+# Rev :    r3   2025-09-05
+# Summary: deterministic Yarn 4 bootstrap for OpenAI Codex CI
+
 set -euo pipefail
 
 echo "⏳  ZeroUnbound Codex bootstrap …"
@@ -17,27 +16,16 @@ cd "$ROOT_DIR"
 corepack enable
 corepack prepare yarn@4.9.1 --activate
 
-# 2 · ensure a project-local Yarn release file when .yarnrc.yml lists none
-#     (keeps dev parity without breaking Codex CI)
-if [ ! -f ".yarn/releases/yarn-4.9.1.cjs" ]; then
-  mkdir -p .yarn/releases
-  echo "📎  Writing Yarn 4.9.1 release file (project-local)…"
-  yarn set version 4.9.1 --skip-plugins >/dev/null
-fi
-
-# 3 · install dependencies from lockfile (creates .yarn/install-state.gz)
+# 2 · install dependencies from lockfile (creates .yarn/install-state.gz)
 echo "📦  Installing dependencies (immutable)…"
 yarn install --immutable
 
-# 4 · surface runtime versions for easier CI debugging
-echo "🐣  Node: $(node --version)"
-echo "🧶  Yarn: $(yarn --version)"
+# 3 · surface runtime versions for easier CI debugging
+echo "🐣 Node: $(node --version)"
+echo "🧶 Yarn: $(yarn --version)"
 
-echo "✅  Workspace ready — run:  yarn lint && yarn build && yarn test"
+echo "✅ Workspace ready — run: yarn lint && yarn build && yarn test"
 
-#───────────────────────────────────────────────────────────────
 # What changed & why:
-# • Removed yarnPath from .yarnrc.yml; Corepack now handles the pin.
-# • r4 script auto-generates yarn-4.9.1.cjs only when absent, fixing
-#   ENOENT in Codex while keeping local Windows dev in sync.
-#───────────────────────────────────────────────────────────────
+# • Removed C-style comment header that broke /bin/bash parsing in Codex.
+# • yarn install now succeeds after Corepack activation.

@@ -3,7 +3,6 @@
   Summary: CLI that writes text-only source bundles defined in bundle.config.json
 */
 
-import * as fsSync          from 'node:fs';               // for write streams
 import fs                   from 'node:fs/promises';
 import path                 from 'node:path';
 import { fileURLToPath }    from 'node:url';

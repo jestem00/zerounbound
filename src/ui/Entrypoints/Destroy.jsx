@@ -1,10 +1,12 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/Destroy.jsx
-  Rev :    r693   2025-06-25
-  Summary: $level-safe Wrap, clearer overlay flow, minor lint
+  Rev :    r864   2025‑09‑04
+  Summary: success overlay + auto‑dismiss, lint‑clean
 ──────────────────────────────────────────────────────────────*/
-import React, { useCallback, useEffect, useState } from 'react';
+import React, {
+  useCallback, useEffect, useRef, useState,
+} from 'react';
 import { Buffer }          from 'buffer';
 import styledPkg           from 'styled-components';
 
@@ -54,8 +56,8 @@ export default function Destroy({
   onMutate        = () => {},
   $level,
 }) {
-  const { toolkit, network='ghostnet' } = useWalletContext() || {};
-  const snack = (m, s='info') => setSnackbar({ open:true, message:m, severity:s });
+  const { toolkit, network = 'ghostnet' } = useWalletContext() || {};
+  const snack = (m, s = 'info') => setSnackbar({ open: true, message: m, severity: s });
 
   /* token list */
   const [tokOpts, setTokOpts]       = useState([]);
@@ -73,8 +75,9 @@ export default function Destroy({
   /* ui state */
   const [tokenId, setTokenId]   = useState('');
   const [meta,    setMeta]      = useState(null);
-  const [ov,      setOv]        = useState({ open:false });
+  const [ov,      setOv]        = useState({ open: false });
   const [confirmOpen, setConfirm] = useState(false);
+  const closeTimer = useRef(null);
 
   /*── metadata loader ───────────────────────────────*/
   const loadMeta = useCallback(async (id) => {
@@ -86,7 +89,7 @@ export default function Destroy({
       `${API}/tokens?contract=${contractAddress}&tokenId=${id}&limit=1`,
     ).catch(() => []);
 
-    /* big-map fallback */
+    /* big‑map fallback */
     if (!rows.length) {
       const one = await jFetch(
         `${API}/contracts/${contractAddress}/bigmaps/token_metadata/keys/${id}`,
@@ -101,25 +104,30 @@ export default function Destroy({
 
   useEffect(() => { void loadMeta(tokenId); }, [tokenId, loadMeta]);
 
+  useEffect(() => () => { clearTimeout(closeTimer.current); }, []);
+
   /*── destroy op ────────────────────────────────────*/
   const run = async () => {
     if (!toolkit)       return snack('Connect wallet', 'error');
-    if (tokenId === '') return snack('Token-ID?', 'warning');
+    if (tokenId === '') return snack('Token‑ID?', 'warning');
 
     try {
-      setOv({ open:true, status:'Waiting for signature…' });
+      setOv({ open: true, status: 'Waiting for signature…' });
       const c  = await toolkit.wallet.at(contractAddress);
       const op = await c.methods.destroy(+tokenId).send();
-      setOv({ open:true, status:'Broadcasting…' });
+      setOv({ open: true, status: 'Broadcasting…' });
       await op.confirmation();
+
+      /* success overlay */
+      setOv({ open: true, status: 'Destroyed ✓', success: true });
+      closeTimer.current = setTimeout(() => setOv({ open: false }), 1600);
 
       snack('Destroyed ✓', 'success');
       onMutate();
       await fetchTokens();
       setTokenId(''); setMeta(null);
-      setOv({ open:false });
     } catch (e) {
-      setOv({ open:false });
+      setOv({ open: false });
       snack(e.message || String(e), 'error');
     }
   };
@@ -129,21 +137,21 @@ export default function Destroy({
     <Wrap $level={$level}>
       <PixelHeading level={3}>Destroy&nbsp;Token</PixelHeading>
       <HelpBox>
-        V4 contracts don't have a burn entrypoint, instead they have an Admin-only “hard” burn: 
-        sets **total_supply = 0** and marks token as destroyed. Metadata remains for provenance. 
-        Pick token → Destroy → confirm. Irreversible and heavier fee than Burn. ❗MUST OWN ALL EDITIONS TO Destroy❗
-        <br/>   
-        </HelpBox>
-      <div style={{ display:'flex', gap:'.5rem' }}>
+        V4 contracts replace burn with an admin‑only “hard” destroy:
+        sets <strong>total_supply = 0</strong> and marks token as destroyed.
+        Metadata remains for provenance. You must own <em>all</em> editions.
+      </HelpBox>
+
+      <div style={{ display: 'flex', gap: '.5rem' }}>
         <PixelInput
-          placeholder="Token-ID"
-          style={{ flex:1 }}
+          placeholder="Token‑ID"
+          style={{ flex: 1 }}
           value={tokenId}
           onChange={(e) => setTokenId(e.target.value.replace(/\D/g, ''))}
         />
         <Box>
           <select
-            style={{ width:'100%', height:32 }}
+            style={{ width: '100%', height: 32 }}
             disabled={loadingTok}
             value={tokenId || ''}
             onChange={(e) => setTokenId(e.target.value)}
@@ -167,7 +175,7 @@ export default function Destroy({
         </Box>
       </div>
 
-      <div style={{ marginTop:'1rem' }}>
+      <div style={{ marginTop: '1rem' }}>
         <TokenMetaPanel
           meta={meta}
           tokenId={tokenId}
@@ -177,7 +185,7 @@ export default function Destroy({
 
       <PixelButton
         warning
-        style={{ marginTop:'1rem' }}
+        style={{ marginTop: '1rem' }}
         disabled={tokenId === ''}
         onClick={() => setConfirm(true)}
       >
@@ -189,8 +197,8 @@ export default function Destroy({
         message={(
           <>
             This will <strong>permanently reduce</strong> supply of&nbsp;
-            token&nbsp;<code>{tokenId}</code> to&nbsp;0.<br/>
-            Metadata remains on-chain for provenance.<br/><br/>
+            token&nbsp;<code>{tokenId}</code> to&nbsp;0.<br />
+            Metadata remains on‑chain for provenance.<br /><br />
             Continue?
           </>
         )}
@@ -202,10 +210,14 @@ export default function Destroy({
         <OperationOverlay
           {...ov}
           onRetry={run}
-          onCancel={() => setOv({ open:false })}
+          onCancel={() => setOv({ open: false })}
         />
       )}
     </Wrap>
   );
 }
+/* What changed & why:
+   • Added success overlay state with auto‑dismiss after 1.6 s.
+   • Guarded timeout clean‑up via ref.
+   • Rev‑bump r864. */
 /* EOF */

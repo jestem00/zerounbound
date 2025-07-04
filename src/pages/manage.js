@@ -1,26 +1,25 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/manage.js
-  Rev :    r745‑h18   2025‑08‑09
-  Summary: deterministic <Title> componentId fixes SSR mismatch
+  Rev :    r876   2025‑09‑04 UTC
+  Summary: restore big‑map path, resilient meta decode, “—” fix
 ──────────────────────────────────────────────────────────────*/
-
 import React, {
   useState, useEffect, useCallback, useRef,
-} from 'react';
-import { Buffer }                     from 'buffer';
-import { useRouter }                  from 'next/router';
-import dynamic                        from 'next/dynamic';
-import styledPkg                      from 'styled-components';
+}                         from 'react';
+import { Buffer }         from 'buffer';
+import { useRouter }      from 'next/router';
+import dynamic            from 'next/dynamic';
+import styledPkg          from 'styled-components';
 
-import PixelHeading                   from '../ui/PixelHeading.jsx';
-import PixelInput                     from '../ui/PixelInput.jsx';
-import PixelButton                    from '../ui/PixelButton.jsx';
-import AdminTools                     from '../ui/AdminTools.jsx';
-import RenderMedia                    from '../utils/RenderMedia.jsx';
-import { useWalletContext }           from '../contexts/WalletContext.js';
-import { jFetch, sleep }              from '../core/net.js';
-import hashMatrix                     from '../data/hashMatrix.json' assert { type: 'json' };
+import PixelHeading       from '../ui/PixelHeading.jsx';
+import PixelInput         from '../ui/PixelInput.jsx';
+import PixelButton        from '../ui/PixelButton.jsx';
+import AdminTools         from '../ui/AdminTools.jsx';
+import RenderMedia        from '../utils/RenderMedia.jsx';
+import { useWalletContext } from '../contexts/WalletContext.js';
+import { jFetch, sleep }  from '../core/net.js';
+import hashMatrix         from '../data/hashMatrix.json' assert { type: 'json' };
 
 const ContractCarousels = dynamic(
   () => import('../ui/ContractCarousels.jsx'),
@@ -30,9 +29,6 @@ const ContractCarousels = dynamic(
 /*──────────────── styled shells ─────────────────────────────*/
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
-/* NOTE — .withConfig({componentId}) guarantees identical
-   className hashes on both server & client, eliminating the
-   “Prop className did not match” hydration warning. */
 const Title = styled(PixelHeading).attrs({ level: 2 }).withConfig({
   componentId: 'px-manage-title',
 })`
@@ -76,24 +72,43 @@ const HASH_TO_VER = Object.entries(hashMatrix)
 const hex2str  = (h) => Buffer.from(h.replace(/^0x/, ''), 'hex').toString('utf8');
 const parseHex = (h) => { try { return JSON.parse(hex2str(h)); } catch { return {}; } };
 
+/**
+ * Retrieve & normalise on‑chain contract metadata.
+ * • Tries storage.metadata JSON then big‑map (`/contents` first, fallback `/content`)
+ * • Guarantees at least name/description fields to avoid “—” placeholders.
+ */
 async function fetchMeta(addr = '', net = 'ghostnet') {
   if (!addr) return null;
   const base = `${TZKT[net]}/contracts/${addr}`;
   try {
     const det  = await jFetch(base);
-    let  meta  = det.metadata || {};
+    let   meta = det.metadata ?? {};
+
+    /* fallback to big‑map entry if needed (old ghostnet path = .../contents) */
     if (!meta.name || !meta.imageUri) {
-      const bm = await jFetch(`${base}/bigmaps/metadata/keys/contents`).catch(() => null);
+      const bm = await jFetch(`${base}/bigmaps/metadata/keys/contents`).catch(() => null)
+              ?? await jFetch(`${base}/bigmaps/metadata/keys/content`).catch(() => null);
       if (bm?.value) meta = { ...parseHex(bm.value), ...meta };
     }
+
+    /* guarantee at least falsy strings – fixes “—” grid blanks */
+    const safe = (k, def = '—') => {
+      const v = meta[k];
+      return (v === undefined || v === null || v === '') ? def : v;
+    };
+
     return {
       address    : addr,
       version    : HASH_TO_VER[det.typeHash] || '?',
-      name       : meta.name || addr,
-      description: meta.description || '—',
-      imageUri   : meta.imageUri || '',
+      name       : safe('name', addr),
+      description: safe('description'),
+      imageUri   : safe('imageUri', ''),
+      /* pass full meta downstream for ContractMetaPanel */
+      meta       : meta,
     };
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 export async function getServerSideProps() { return { props: {} }; }
@@ -108,22 +123,21 @@ export default function ManagePage() {
   const [busy,      setBusy     ] = useState(false);
   const [contract,  setContract ] = useState(null);
 
-  /* sequence ref to discard stale async results */
-  const loadSeq = useRef(0);
+  const loadSeq = useRef(0);           /* discard stale async results */
 
-  /* delay render until after SSR hydration */
   useEffect(() => { setHydrated(true); }, []);
 
   const load = useCallback(async (address = '') => {
     if (!address) return;
-    const seq = ++loadSeq.current;          /* bump sequence */
+    const seq = ++loadSeq.current;
     setBusy(true);
     setContract(null);
 
     const meta = await fetchMeta(address, network);
-    if (loadSeq.current !== seq) return;    /* discard stale */
+    if (loadSeq.current !== seq) return;   /* stale */
 
-    await sleep(100);
+    /* brief pause for spinner visibility */
+    await sleep(80);
     setContract(meta);
     setBusy(false);
   }, [network]);
@@ -138,10 +152,10 @@ export default function ManagePage() {
     }
   }, [hydrated, router.isReady, router.query, load]);
 
-  /* update URL bar without full reload */
   const navigateIfDiff = (address) => {
     if (router.query.addr !== address) {
-      router.replace({ pathname: '/manage', query: { addr: address } }, undefined, { shallow: true });
+      router.replace({ pathname: '/manage', query: { addr: address } },
+        undefined, { shallow: true });
     }
   };
 
@@ -179,11 +193,11 @@ export default function ManagePage() {
       <form
         onSubmit={go}
         style={{
-          display      : 'flex',
-          gap          : 10,
-          justifyContent: 'center',
-          flexWrap     : 'wrap',
-          marginTop    : '.4rem',
+          display        : 'flex',
+          gap            : 10,
+          justifyContent : 'center',
+          flexWrap       : 'wrap',
+          marginTop      : '.4rem',
         }}
       >
         <PixelInput
@@ -220,8 +234,12 @@ export default function ManagePage() {
   );
 }
 /* What changed & why:
-   • Title now uses withConfig({componentId:'px-manage-title'}) to
-     generate a stable className hash, eliminating SSR/client
-     mismatch warnings after full‑page reloads (Invariant I35).
+   • Restored /bigmaps/metadata/keys/contents endpoint (tzkt path change
+     broke meta.name/imageUri) with fallback to /content.
+   • Added defensive safe() helper to guarantee non‑empty strings –
+     fixes “—” placeholders & AdminTools blank preview/title.
+   • Propagates full meta object via contract.meta for downstream
+     ContractMetaPanel integrity grid.
+   • Minor spinner delay tweak for smoother UX.
 */
 /* EOF */

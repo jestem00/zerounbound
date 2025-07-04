@@ -6,7 +6,6 @@
 
 import fs   from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 /*──────── read TARGET from deployTarget.js ───────*/
 const deployFile = path.resolve('src/config/deployTarget.js');

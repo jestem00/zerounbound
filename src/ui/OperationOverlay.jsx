@@ -136,12 +136,9 @@ const List = styled.ul.attrs((p)=>({$n:p.$n}))`
 
 /*════════ component ════════════════════════════════════*/
 export default function OperationOverlay({
-  mode      = '',
   status    = '',
   progress: progressProp = 0,
-  error,
-  kt1, opHash, contractAddr,
-  current, step, total = 1,
+  error, kt1, opHash, current, step, total = 1,
   onRetry  = undefined,
   onCancel = () => {},
 }){

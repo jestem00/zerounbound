@@ -416,7 +416,7 @@ const useHold = (api) => {
 
 /*──────── Rail component ───────────────────────────────────*/
 const Rail = React.memo(function Rail({
-  label, data, emblaRef, api, hidden,
+  label, data, emblaRef, hidden,
   toggleHidden, load, busy, holdPrev, holdNext,
 }) {
   return (

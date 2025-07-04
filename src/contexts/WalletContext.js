@@ -14,7 +14,6 @@ import { TezosToolkit } from '@taquito/taquito';
 import { BeaconWallet }  from '@taquito/beacon-wallet';
 import { BeaconEvent }   from '@airgap/beacon-sdk';
 import {
-  NETWORKS,
   DEFAULT_NETWORK,
   selectFastestRpc,
 } from '../config/networkConfig.js';

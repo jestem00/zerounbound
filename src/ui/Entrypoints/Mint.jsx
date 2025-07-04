@@ -1,9 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/Mint.jsx
-  Rev :    r868   2025‑08‑15
-  Summary: TagChip now uses --zu-btn-fg text colour for reliable
-           contrast on terminal‑dark & other palettes
+  Rev :    r870   2025‑09‑05
+  Summary: TagChip & checklist buttons get a11y roles/keys
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useRef, useState, useEffect, useMemo, useCallback,
@@ -86,14 +85,14 @@ const Row       = styled.div`
 `;
 const RoyalRow  = styled(Row)`grid-template-columns:1fr 90px auto;`;
 const TagArea   = styled.div`display:flex;flex-wrap:wrap;gap:.35rem;margin-top:.3rem;`;
-/*────────── modified styling ──────────*/
-const TagChip = styled.span`
+const TagChip = styled.span.attrs({ role: 'button', tabIndex: 0 })`
   background:var(--zu-accent-sec);
-  color:var(--zu-btn-fg);            /* ← ensures readable text */
+  color:var(--zu-btn-fg);
   padding:.12rem .45rem;
   font-size:.65rem;
   border-radius:.25rem;
   cursor:pointer;
+  &:focus{outline:2px solid var(--zu-accent);}
 `;
 
 const Note      = styled.p`
@@ -788,6 +787,9 @@ export default function Mint({
           <TagChip
             key={t}
             onClick={() => setTags((p) => p.filter((x) => x !== t))}
+            onKeyDown={(e)=>{ if(e.key==='Enter'||e.key===' '){
+              setTags((p)=>p.filter((x)=>x!==t)); } }}
+            aria-label={`Remove tag ${t}`}
           >
             {t} ✕
           </TagChip>

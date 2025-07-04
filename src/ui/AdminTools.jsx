@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/AdminTools.jsx
-  Rev :    r827   2025‑08‑15
-  Summary: remove obsolete append‑token‑metadata entrypoint
+  Rev :    r828   2025‑09‑04
+  Summary: robust meta‑decode → restore title/preview
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useCallback, useEffect, useMemo, useState,
@@ -17,6 +17,7 @@ import countTokens          from '../utils/countTokens.js';
 import { useWalletContext } from '../contexts/WalletContext.js';
 import { NETWORK_KEY }      from '../config/deployTarget.js';
 import { jFetch }           from '../core/net.js';
+import decodeHexFields      from '../utils/decodeHexFields.js';
 
 const styled =
   typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
@@ -42,6 +43,16 @@ async function tzktCounts(addr, net = 'ghostnet') {
     child : len(raw?.children),
     total : len(raw?.active_tokens) || Number(raw?.next_token_id || 0),
   };
+}
+
+/*──────── meta resolver ──────────────────────────*/
+function resolveMeta(raw = {}) {
+  /* contracts.bundle always passes `meta` as already‑parsed JSON
+     but storage rows may still contain hex‑encoded fields – guard both. */
+  const decoded = decodeHexFields(typeof raw === 'string'
+    ? (() => { try { return JSON.parse(raw); } catch { return {}; } })()
+    : raw);
+  return decoded && typeof decoded === 'object' ? decoded : {};
 }
 
 /*──────── styled shells ─────────────────────────*/
@@ -92,8 +103,7 @@ const ALIASES = {
   append_extra_uri      : 'append_extrauri',
 };
 
-/*──────── META ─────────────────────────────────────────────
-   Obsolete `append_token_metadata` entry removed            */
+/*──────── META ─────────────────────────────────────────────*/
 const META = {
   /* ─── Collaborators ───────────────────────────── */
   collab_edit               : { label:'Add / Remove Collaborator',    comp:'AddRemoveCollaborator',     group:'Collaborators' },
@@ -132,7 +142,7 @@ const META = {
 /* dedup helper */
 const uniq = (arr) => [...new Set(arr)];
 
-/*──────── token list sort helper (unchanged) ──────────────────*/
+/*──────── token list sort helper ───────────────────────────*/
 const TOKEN_ORDER = {
   mint        : 0,
   mint_v4a    : 0,
@@ -177,7 +187,9 @@ export default function AdminTools({ contract, onClose }) {
   const { network: walletNet } = useWalletContext() || {};
   const network = walletNet || NETWORK_KEY;
 
-  const meta     = contract.meta ?? contract;
+  /* meta decode fix */
+  const meta = useMemo(() => resolveMeta(contract.meta ?? contract), [contract.meta, contract]);
+
   const toolkit  = window.tezosToolkit;
   const snackbar = window.globalSnackbar ?? (() => {});
 
@@ -240,14 +252,14 @@ export default function AdminTools({ contract, onClose }) {
     if (vLow.startsWith('v4a')) {
       rawSet = rawSet
         .map((k) => (k === 'mint' ? 'mint_v4a' : k))
-        .filter((k) => k !== 'burn')        /* v4a has native burn */
+        .filter((k) => k !== 'burn')
         .concat('repair_uri_v4a');
-    } else if (vLow.startsWith('v4c')) {     /* NEW – v4c path */
+    } else if (vLow.startsWith('v4c')) {
       rawSet = rawSet
         .map((k) => (k === 'mint' ? 'mint_v4a' : k))
         .concat('repair_uri_v4a');
     } else if (vLow.startsWith('v4')) {
-      rawSet = rawSet.filter((k) => k !== 'burn').concat('burn_v4','repair_uri');
+      rawSet = rawSet.filter((k) => k !== 'burn').concat('burn_v4', 'repair_uri');
     }
 
     const raw = uniq(rawSet)
@@ -256,6 +268,11 @@ export default function AdminTools({ contract, onClose }) {
   }, [contract.version]);
 
   /*──────── render ───────────────────────────────────────────*/
+  const previewUri =
+    meta.imageUri || meta.logo || meta.artifactUri || meta.thumbnailUri;
+
+  const displayName = meta.name || meta.symbol || contract.address;
+
   return (
     <>
       <Overlay>
@@ -263,25 +280,26 @@ export default function AdminTools({ contract, onClose }) {
           <CloseBtn size="xs" onClick={onClose}>×</CloseBtn>
 
           <Preview>
-            <RenderMedia
-              uri={meta.imageUri}
-              alt={meta.name}
-              style={{
-                width:'clamp(55px,12vw,75px)',height:'clamp(55px,12vw,75px)',
-                objectFit:'contain',border:'2px solid var(--zu-fg)',
-              }}
-            />
+            {previewUri && (
+              <RenderMedia
+                uri={previewUri}
+                alt={displayName}
+                style={{
+                  width:'clamp(55px,12vw,75px)',height:'clamp(55px,12vw,75px)',
+                  objectFit:'contain',border:'2px solid var(--zu-fg)',
+                }}
+              />
+            )}
             <div style={{ maxWidth:'min(84vw,640px)',textAlign:'center' }}>
               <PixelHeading level={3}
                 style={{ margin:'.22rem 0 0',fontSize:'clamp(.8rem,2.4vw,1rem)' }}>
-                {meta.name}
+                {displayName}
               </PixelHeading>
               <p>{meta.description || '—'}</p>
               <p>{contract.version} • {contract.address}</p>
             </div>
           </Preview>
 
-          {/* v4a / v4c warning banner */}
           {(contract.version?.toLowerCase().startsWith('v4a')
             || contract.version?.toLowerCase().startsWith('v4c')) && (
             <p style={{
@@ -361,10 +379,8 @@ export default function AdminTools({ contract, onClose }) {
   );
 }
 /* What changed & why:
-   • Added v4c handling:
-     – resolveEp() skips collaborator manager for v4c.
-     – grouped builder maps mint→mint_v4a, keeps burn,
-       adds repair_uri_v4a for v4c.
-   • Experimental warning banner now covers v4c.
-   • Rev‑bump r826. */
+   • meta now decoded via resolveMeta() → restores title/description/preview
+   • previewUri fallback sequence adds logo/artifactUri/thumbnailUri
+   • displayName defaults to symbol or address when name absent
+   • Rev‑bump r828 */
 /* EOF */

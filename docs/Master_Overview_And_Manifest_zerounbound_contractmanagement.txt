@@ -285,7 +285,8 @@ I109 [F,E] **Live on‑chain stats** — token & owner counts shown in
 I110 [F] **Integrity badge standardisation** — every component that
       presents token or collection media **must** render an
       `<IntegrityBadge status=…/>`; the adjacent tooltip / title
-      conveys the long‑form label from `constants/integrityBadges.js`.  
+      conveys the long‑form label from `constants/integrityBadges.js`.
+I111 [F,C,E,I] Don't use "global" in any comments or line summaries, it messes with yarn lint and throws false warnings  
 
 /──────────────────────────────────────────────────────────────────────────────
 3 · reserved for future research notes

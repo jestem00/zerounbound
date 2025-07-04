@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/TokenCard.jsx
-  Rev :    r8     2025‑09‑05
-  Summary: replace makeOffer handler with stub <MakeOfferBtn/>
+  Rev :    r9     2025‑09‑05
+  Summary: a11y – Card is now keyboard‑focusable button
 ──────────────────────────────────────────────────────────────*/
 import {
   useState, useMemo, useCallback,
@@ -24,7 +24,7 @@ const PLACEHOLDER = '/sprites/cover_default.svg';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
-/*──────── styled shells (unchanged) ──────────────────────────*/
+/*──────── styled shells ─────────────────────────────────────*/
 const Card = styled.article`
   position: relative;
   border: 2px solid var(--zu-accent,#00c8ff);
@@ -36,6 +36,7 @@ const Card = styled.article`
   flex-direction: column;
   transition: box-shadow .15s;
   &:hover { box-shadow: 0 0 6px var(--zu-accent-sec,#ff0); }
+  &:focus { outline: 2px solid var(--zu-accent-sec,#ff0); }
 `;
 
 const ThumbWrap = styled.div`
@@ -87,7 +88,6 @@ const PriceRow = styled.div`
 /*──────── helpers ───────────────────────────────────────────*/
 const ipfsToHttp = (u='') => u.replace(/^ipfs:\/\//,'https://ipfs.io/ipfs/');
 
-/*──────── component ─────────────────────────────────────────*/
 export default function TokenCard({
   token,
   contractAddress,
@@ -145,8 +145,19 @@ export default function TokenCard({
   /* authors fallback chain: authors → artists → creators */
   const authorArr = meta.authors || meta.artists || meta.creators || [];
 
+  /* make Card keyboard‑accessible */
+  const keyHandler = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') openLarge(e);
+  };
+
   return (
-    <Card onClick={openLarge}>
+    <Card
+      role="button"
+      tabIndex={0}
+      onClick={openLarge}
+      onKeyDown={keyHandler}
+      aria-label={`Open token ${meta.name || token.tokenId}`}
+    >
       <ThumbWrap $aspect={aspect}>
         <span title={label}
               style={{ position:'absolute', top:4, right:4, zIndex:6 }}>

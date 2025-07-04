@@ -109,7 +109,7 @@ export function checkOnChainIntegrity(meta = {}) {
   }
 
   /*── 3 · printable‑JSON guard ───────────────────────────*/
-  const { body, ...metaSansBody } = meta;
+  const {...metaSansBody } = meta;
   if (!asciiPrintable(JSON.stringify(metaSansBody))) {
     reasons.add('metadata non‑printable chars');
   }

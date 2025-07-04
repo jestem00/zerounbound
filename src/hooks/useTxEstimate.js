@@ -92,7 +92,7 @@ export default function useTxEstimate(toolkit, params) {
         setState(fallbackCosts(0));
         return;
       }
-      if (Date.now() < g.__ZU_RPC_SKIP_TS) {          /* global cooldown */
+      if (Date.now() < g.__ZU_RPC_SKIP_TS) {          /* cooldown */
         setState(fallbackCosts(params.length));
         return;
       }

@@ -48,7 +48,6 @@ export default async function listLiveTokenIds(
 
   /*── ids‑only cache (creator‑agnostic) ─────────────────────*/
   const key     = `${net}_${contract}`;
-  const keyFull = `${key}_${creatorAddr}`;
   if (!withNames && !creatorAddr) {
     const hit = MEM.get(key);
     if (hit && Date.now() - hit.ts < TTL_MS) return hit.ids;

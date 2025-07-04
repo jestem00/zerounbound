@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/ContractMetaPanel.jsx
-  Rev :    r813     2025‑07‑29
-  Summary: fix undefined var, hook IntegrityBadge, enable click
+  Rev :    r814   2025‑09‑04
+  Summary: meta decode + previewUri fallback + displayName fix
 ──────────────────────────────────────────────────────────────*/
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import styledPkg                       from 'styled-components';
@@ -11,6 +11,7 @@ import { jFetch }                      from '../core/net.js';
 import { checkOnChainIntegrity }       from '../utils/onChainValidator.js';
 import { getIntegrityInfo }            from '../constants/integrityBadges.js';
 import IntegrityBadge                  from './IntegrityBadge.jsx';
+import decodeHexFields                 from '../utils/decodeHexFields.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -23,25 +24,27 @@ const sz = (v) =>
     : v && typeof v.int === 'string'   ? parseInt(v.int, 10)
     : 0;
 
+/*──────── meta resolver ─────────────────────────────────────*/
+function resolveMeta(raw = {}) {
+  const decoded = decodeHexFields(typeof raw === 'string'
+    ? (() => { try { return JSON.parse(raw); } catch { return {}; } })()
+    : raw);
+  return decoded && typeof decoded === 'object' ? decoded : {};
+}
+
 /*──────── styled shells ─────────────────────────────────────*/
-/* room for IntegrityChip on narrow screens */
 const Card = styled.div`
-  --zu-chip-h: 34px;              /* badge height inc. gap */
+  --zu-chip-h: 34px;
   border:2px solid var(--zu-accent,#00c8ff);
   background:var(--zu-bg,#000);
   color:var(--zu-fg,#f0f0f0);
-  padding:clamp(var(--zu-chip-h), 10px, var(--zu-chip-h)) 10px 10px;
+  padding:clamp(var(--zu-chip-h),10px,var(--zu-chip-h)) 10px 10px;
   font-size:.75rem;line-height:1.25;
-  overflow:visible;
-  position:relative;
+  position:relative;overflow:visible;
 
-  @media(min-width:480px){
-    /* label disappears → shrink header gap */
-    padding-top:10px;
-  }
+  @media(min-width:480px){ padding-top:10px; }
 `;
 
-/* single chip – allows wrapping & preserves pointer events */
 const IntegrityChip = styled.span`
   position:absolute;top:4px;right:4px;z-index:4;
   display:flex;align-items:center;gap:4px;flex-wrap:wrap;
@@ -61,8 +64,7 @@ const Title = styled.h3`
   color:var(--zu-accent);word-break:break-word;
 `;
 const StatRow = styled.p`
-  margin:.25rem 0;font-size:.75rem;
-  display:flex;justify-content:center;gap:6px;
+  margin:.25rem 0;font-size:.75rem;display:flex;justify-content:center;gap:6px;
   span{display:inline-block;padding:1px 6px;border:1px solid var(--zu-fg);}
 `;
 const MetaGrid = styled.dl`
@@ -78,6 +80,9 @@ export default function ContractMetaPanel({
 }) {
   const [counts, setCounts] = useState({ coll:0,parent:0,child:0,total:0 });
   const cancelled = useRef(false);
+
+  /* decode meta early */
+  const m = useMemo(() => resolveMeta(meta), [meta]);
 
   /* live chain counts */
   useEffect(() => {
@@ -107,15 +112,20 @@ export default function ContractMetaPanel({
     'homepage','authoraddress','creators','type','interfaces',
   ];
   const kv = useMemo(() =>
-    ORDER.filter(k => meta[k] !== undefined)
-         .map(k => [k, Array.isArray(meta[k]) ? meta[k].join(', ') : String(meta[k])]),
-  [meta]);
+    ORDER.filter((k) => m[k] !== undefined)
+         .map((k) => [k, Array.isArray(m[k]) ? m[k].join(', ') : String(m[k])]),
+  [m]);
 
   /* integrity calc */
-  const integrity = useMemo(() => checkOnChainIntegrity(meta), [meta]);
-  const { badge, label } = useMemo(
+  const integrity = useMemo(() => checkOnChainIntegrity(m), [m]);
+  const { label } = useMemo(
     () => getIntegrityInfo(integrity.status),
   [integrity.status]);
+
+  const previewUri =
+    m.imageUri || m.logo || m.artifactUri || m.thumbnailUri;
+
+  const displayName = m.name || m.symbol || contractAddress || '—';
 
   return (
     <Card>
@@ -129,10 +139,10 @@ export default function ContractMetaPanel({
         </IntegrityChip>
       )}
 
-      {meta.imageUri && (
+      {previewUri && (
         <RenderMedia
-          uri={meta.imageUri}
-          alt={meta.name}
+          uri={previewUri}
+          alt={displayName}
           style={{
             width:120,height:120,margin:'0 auto 6px',display:'block',
             objectFit:'contain',border:'2px solid var(--zu-fg)',
@@ -140,7 +150,7 @@ export default function ContractMetaPanel({
         />
       )}
 
-      <Title>{meta.name || '—'}</Title>
+      <Title>{displayName}</Title>
 
       <StatRow>
         <span>P {counts.parent}</span>
@@ -160,9 +170,8 @@ export default function ContractMetaPanel({
   );
 }
 /* What changed & why:
-   • Replaced undefined `contract` var with on‑the‑fly integrity
-     analysis via checkOnChainIntegrity(meta).
-   • Swapped raw emoji for interactive <IntegrityBadge/>.
-   • Restored pointer events on IntegrityChip for click support.
-   • Removed unused checkOnChainIntegrity import warning. */
+   • meta decoded via resolveMeta() – fixes missing keys/“—”
+   • previewUri fallback chain restores media
+   • displayName chooses name→symbol→address
+   • Rev‑bump r814 */
 /* EOF */

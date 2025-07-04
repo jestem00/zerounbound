@@ -15,23 +15,13 @@ const USE_RANDOM_HUE      = true;
 /*────────────────────────────*/
 
 import { useEffect, useRef } from 'react';
-import styled, { keyframes, css } from 'styled-components';
+import { keyframes } from 'styled-components';
 
 /* simple fade/scale wrapper — internal SVG runs its own 6‑frame loop */
 const boom = keyframes`
   0%   { transform:scale(.4) translateZ(0); opacity:1 }
   90%  { transform:scale(1)   translateZ(0); opacity:1 }
   100% { transform:scale(1.05)translateZ(0); opacity:0 }
-`;
-
-const Burst = styled.img.attrs({ src: '/sprites/Burst.svg', alt: '' })`
-  position:absolute;pointer-events:none;
-  will-change:transform,opacity;transform:translateZ(0);
-  ${({$x,$y,$s,$h})=>css`
-    left:${$x}px; top:${$y}px; width:${$s}px; height:${$s}px;
-    filter:${USE_RANDOM_HUE?`hue-rotate(${$h}deg)`:'none'};
-    animation:${boom} ${LIFE_MS}ms linear forwards;
-  `}
 `;
 
 export default function CanvasFireworks({ active }){

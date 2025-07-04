@@ -49,9 +49,7 @@ const Hint        = styled.p`font-size:.7rem;margin:.4rem 0 .3rem;opacity:.8;`;
 const Spinner     = styled(LoadingSpinner).attrs({ size:16 })`
   position:absolute;top:8px;right:8px;
 `;
-const HelpBox = styled.p`
-  font-size:.75rem;line-height:1.25;margin:.5rem 0 .9rem;
-`;
+
 /*──────── helpers ─────*/
 const API     = `${TZKT_API}/v1`;
 const hex2str = (h) => Buffer.from(h.replace(/^0x/, ''), 'hex').toString('utf8');

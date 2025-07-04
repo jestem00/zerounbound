@@ -85,10 +85,6 @@ const Card = styled.div`
   }
 `;
 
-const Title = styled.h4`
-  margin:0 0 2px;font-size:.8rem;text-align:center;
-  color:var(--zu-accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-`;
 const AddrRow = styled.div`
   font-size:.65rem;text-align:center;
   display:flex;justify-content:center;align-items:center;gap:4px;
@@ -165,7 +161,7 @@ export default function TokenMetaPanel({
   }, []);
   const dismissWarn = () => { if (warn) supRef.current.add(warn); setWarn(''); };
 
-  /* global AdminTools opener */
+  /*AdminTools opener */
   const openTool = useCallback((key) => {
     if (typeof window === 'undefined') return;
     window.dispatchEvent(new CustomEvent('zu:openAdminTool', {

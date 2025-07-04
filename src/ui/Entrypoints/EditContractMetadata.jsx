@@ -126,7 +126,7 @@ export default function EditContractMetadata({
       if (row?.extras) m = { ...m, ...row.extras };
       if (!Object.keys(m).length) {
         const bm = await jFetch(
-          `${BASE}/contracts/${contractAddress}/bigmaps/metadata/keys/contents`,
+          `${BASE}/contracts/${contractAddress}/bigmaps/metadata/keys/content`,
         ).catch(() => null);
         if (bm?.value)
           m = JSON.parse(Buffer.from(bm.value.replace(/^0x/i, ''), 'hex').toString('utf8'));

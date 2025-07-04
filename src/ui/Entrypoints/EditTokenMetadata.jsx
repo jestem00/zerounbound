@@ -188,7 +188,6 @@ export default function EditTokenMetadata({
   const [tags,  setTags ]  = useState([]);
   const [attrs, setAttrs]  = useState([{ name:'', value:'' }]);
   const [roys,  setRoys ]  = useState([{ address:'', sharePct:'' }]);
-  const [tagInput, setTagInput] = useState('');
 
   useEffect(() => { if (!meta) return;
     const licMatch = matchLicence(meta.license);
@@ -233,13 +232,6 @@ export default function EditTokenMetadata({
     if (tags.includes(t))           return;
     if (tags.length >= MAX_TAGS)    return snack('Max 10 tags', 'error');
     setTags((p) => [...p, t]);
-  };
-  const handleTagInput = (val) => {
-    if (/[,;\n]/.test(val)) {
-      const parts = val.split(/[,;\n]/);
-      parts.slice(0, -1).forEach(pushTag);
-      setTagInput(parts.at(-1) || '');
-    } else setTagInput(val);
   };
 
   /*──────── attribute helpers ───────────────────*/

@@ -11,7 +11,6 @@ import React, {
   useCallback, useEffect, useState, useMemo,
 } from 'react';
 import styledPkg           from 'styled-components';
-import { Buffer }          from 'buffer';
 import { char2Bytes }      from '@taquito/utils';
 
 import PixelHeading        from '../PixelHeading.jsx';

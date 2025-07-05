@@ -1,4 +1,4 @@
-TZIP_Compliance_Invariants_ZeroContract_V4.txt
+TZIP_Compliance_Invariants_ZeroContract_V4.md
 ==============================================
 
 Purpose
@@ -106,5 +106,5 @@ token_metadata       big_map(nat, pair(token_id nat, token_info map(string, byte
 total_supply         big_map(nat, nat)
 
 ──────────────────────────────────────────────────────────────────────────────
-END OF TZIP_Compliance_Invariants_ZeroContract_V4.txt
+END OF TZIP_Compliance_Invariants_ZeroContract_V4.md
 ──────────────────────────────────────────────────────────────────────────────

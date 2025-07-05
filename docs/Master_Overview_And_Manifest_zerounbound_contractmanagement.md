@@ -1,6 +1,6 @@
 /*─────────────────────────────────────────────────────────────────
 Developed by @jams2blues – ZeroContract Studio
-File:    docs/Master_Overview_And_Manifest_zerounbound_contractmanagement.txt
+File:    docs/Master_Overview_And_Manifest_zerounbound_contractmanagement.md
 Rev :    r863   2025‑09‑04 UTC
 Summary: add scripts/codex-setup.sh path + CI note (§4 · §6)
 ──────────────────────────────────────────────────────────────────*/
@@ -43,7 +43,7 @@ TABLE OF CONTENTS (How to read) — skim → locate → jump
 • `docs/` mirrors this master—update both.
 
 Important Meta‑document that extend this manifest's invariants for TZIP compliance: 
-• docs/TZIP_Compliance_Invariants_ZeroContract_V4.txt (contract‑layer rules)
+• docs/TZIP_Compliance_Invariants_ZeroContract_V4.md (contract‑layer rules)
 
 /*───────────────────────────────────────────────────────────────
 1 · HIGH‑LEVEL ARCHITECTURE & DATA‑FLOW (How to read) — 30 s elevator view
@@ -308,11 +308,15 @@ zerounbound/.eslintrc.cjs                       – ESLint ruleset; Imports: esl
 zerounbound/.gitignore                          – git ignore list; Imports:· Exports:·
 zerounbound/.prettierrc                         – Prettier config; Imports:· Exports: module.exports
 zerounbound/.yarnrc.yml                         – Yarn 4 settings; Imports:· Exports:·
+zerounbound/.github/CODEOWNERS                 – repo ownership map; Imports:· Exports:·
+zerounbound/.github/PULL_REQUEST_TEMPLATE.md   – PR template; Imports:· Exports:·
+zerounbound/.github/ci.yml                     – CI workflow; Imports:· Exports:·
 zerounbound/next-env.d.ts                       – Next.js TS globals; Imports:· Exports:·
 zerounbound/bundle.config.json                  – bundle glob map (I14); Imports:· Exports:·
 zerounbound/LICENSE                             – MIT licence text; Imports:· Exports:·
 zerounbound/README_contract_management.md       – project overview; Imports:· Exports:·
 zerounbound/next.config.js                      – Next.js config; Imports: next-mdx,@next/font; Exports: module.exports
+zerounbound/jest.config.cjs                    – Jest config; Imports:· Exports: module.exports
 zerounbound/package.json                        – NPM manifest; Imports:· Exports: scripts,dependencies
 zerounbound/tsconfig.json                       – TS path hints for IDE; Imports:· Exports: compilerOptions
 zerounbound/yarn.lock                           – Yarn lockfile; Imports:· Exports:·
@@ -443,6 +447,7 @@ zerounbound/src/ui/Entrypoints/AppendArtifactUri.jsx          – slice uploader
 zerounbound/src/ui/Entrypoints/AppendExtraUri.jsx             – extra media uploader; Imports: batch,sliceCache,useTxEstimate; Exports: AppendExtraUri
 zerounbound/src/ui/Entrypoints/BalanceOf.jsx                  – balance viewer; Imports: react; Exports: BalanceOf
 zerounbound/src/ui/Entrypoints/Burn.jsx                       – burn token; Imports: react,OperationConfirmDialog; Exports: Burn
+zerounbound/src/ui/Entrypoints/BurnV4.jsx                    – burn token v4a-safe; Imports: react,OperationConfirmDialog; Exports: BurnV4
 zerounbound/src/ui/Entrypoints/ClearUri.jsx                   – clear artifactUri; Imports: react; Exports: ClearUri
 zerounbound/src/ui/Entrypoints/Destroy.jsx                    – destroy contract; Imports: react; Exports: Destroy
 zerounbound/src/ui/Entrypoints/EditContractMetadata.jsx       – contract meta editor (stub); Imports: react,TokenMetaPanel; Exports: EditContractMetadata
@@ -454,12 +459,14 @@ zerounbound/src/ui/Entrypoints/MintV4a.jsx                    – v4a mint UI; I
 zerounbound/src/ui/Entrypoints/MintPreview.jsx                – pre‑mint gallery; Imports: react,RenderMedia; Exports: MintPreview
 zerounbound/src/ui/Entrypoints/MintUpload.jsx                 – drag/upload step; Imports: react,PixelButton,mimeTypes.js,PixelConfirmDialog.jsx,onChainValidator.js; Exports: MintUpload
 zerounbound/src/ui/Entrypoints/RepairUri.jsx                  – diff repair (I60); Imports: batch,sliceCache,useTxEstimate; Exports: RepairUri
+zerounbound/src/ui/Entrypoints/RepairUriV4a.jsx               – v4a diff repair; Imports: batchV4a.js,sliceCacheV4a.js,useTxEstimate; Exports: RepairUriV4a
 zerounbound/src/ui/Entrypoints/Transfer.jsx                   – FA2 transfer; Imports: react; Exports: Transfer
 zerounbound/src/ui/Entrypoints/UpdateOperators.jsx            – operator set; Imports: react; Exports: UpdateOperators
 zerounbound/src/ui/Entrypoints/AddRemoveCollaboratorsv4a.jsx  – v4a bulk collab; Imports: react; Exports: AddRemoveCollaboratorsv4a
 zerounbound/src/ui/Entrypoints/ManageCollaboratorsv4a.jsx     – v4a collab GUI; Imports: react; Exports: ManageCollaboratorsv4a
 zerounbound/src/ui/Entrypoints/UpdateContractMetadatav4a.jsx  – v4a contract meta editor; Imports: react; Exports: UpdateContractMetadatav4a
 zerounbound/src/ui/Entrypoints/AppendTokenMetadatav4a.jsx     – v4a token meta slices; Imports: batchV4a.js,sliceCacheV4a.js,feeEstimator.js; Exports: AppendTokenMetadatav4a
+zerounbound/src/ui/Entrypoints/UpdateTokenMetadatav4a.jsx     – v4a token meta editor; Imports: react; Exports: UpdateTokenMetadatav4a
 
 ╭── src/utils ───────────────────────────────────────────────────────────────╮
 zerounbound/src/utils/countAmount.js            - count editions in tokens(exclude burned tokens); Imports:· Exports: countAmount
@@ -517,7 +524,7 @@ corepack prepare yarn@4.9.1 --activate
 yarn install --immutable --inline-builds
 The same script creates a .yarn_state marker so subsequent
 yarn lint / build / test stages find the workspace ready.
-
+```
 ### Vercel
 
 | Project     | Build Command                         | Domains                 |
@@ -531,6 +538,8 @@ No environment variables; `scripts/setTarget.js` rewrites `deployTarget.js`.
 7 · APPENDICES (How to read) — machine‑readables live in code
 ───────────────────────────────────────────────────────────────*/
 A. hashMatrix.json, contains all the typeHashes' generated by tzkt used in filtering and labeling contract versions and more:
+
+```json
 {
   "-543526052":  "v1",
   "-1889653220": "v2a",
@@ -544,8 +553,10 @@ A. hashMatrix.json, contains all the typeHashes' generated by tzkt used in filte
   "617511430":   "v4b",
   "-1275828732": "v4c"
 }
+```
 
 B. entrypointRegistry.json, contains all Entrypoints used across our supported v1-v4c contracts:
+```json
 {
   "common": [
     "transfer",
@@ -627,8 +638,10 @@ B. entrypointRegistry.json, contains all Entrypoints used across our supported v
     "update_contract_metadata": false
   }
 }
+```
 
-D. Marketplace contract Entrypoints (ZeroSum.tz):  
+D. Marketplace contract Entrypoints (ZeroSum.tz):
+```text  
 Contract entrypoints
 0.
 accept_offer(nat amount, address nft_contract, address offeror, nat token_id)
@@ -764,7 +777,7 @@ Json schema:
 }
 Michelson type:
 (pair %withdraw_offer (address %nft_contract) (nat %token_id))
-
+```
 
 /* EOF */
 

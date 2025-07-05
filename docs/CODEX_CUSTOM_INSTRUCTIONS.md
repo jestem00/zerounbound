@@ -1,6 +1,6 @@
 /*───────────────────────────────────────────────────────────────
 Developed by @jams2blues – ZeroContract Studio
-File:    docs/CODEX_CUSTOM_INSTRUCTIONS.txt
+File:    docs/CODEX_CUSTOM_INSTRUCTIONS.md
 Rev :    r1    2025‑09‑05
 Summary: minimal 2‑KB prompt for Codex “Custom instructions” UI
 ───────────────────────────────────────────────────────────────*/

@@ -13,7 +13,7 @@ Summary: first Codex‑aware contributor guide
 | Frontend   | React 18 / Next 15.3.4       | `src/pages/_app.js`                |
 | Engine     | Node 22 + Taquito 21         | `src/core/*`                       |
 | Contracts  | Michelson v4 / v4a           | `contracts/Zero_Contract_V4.tz`    |
-| Manifest   | Single‑source‑of‑truth       | `docs/Master_Overview_And_Manifest_zerounbound_contractmanagement.txt` |
+| Manifest   | Single‑source‑of‑truth       | `docs/Master_Overview_And_Manifest_zerounbound_contractmanagement.md` |
 
 > **Always reload the Manifest & Invariants (`I00–I110`) before you code.**
 

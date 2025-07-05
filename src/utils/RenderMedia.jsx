@@ -1,10 +1,8 @@
-/*──────── src/utils/RenderMedia.jsx ────────*/
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/utils/RenderMedia.jsx
-  Rev :    r740   2025‑09‑12
-  Summary: developer‑facing console warnings reinstated for
-           sandboxed SVG/HTML; no runtime side‑effects.
+  Rev :    r741   2025‑09‑20
+  Summary: exposes onLoad / onLoadedMetadata passthrough
 ──────────────────────────────────────────────────────────────*/
 import * as React from 'react';
 import {
@@ -12,7 +10,12 @@ import {
   isMimeWhitelisted,
 } from '../constants/mimeTypes.js';
 
-const { useEffect, useMemo, useState } = React;
+const {
+  useEffect,
+  useMemo,
+  useState,
+  forwardRef,
+} = React;
 
 /*──────── helpers ───────────────────────────────────────────*/
 const mimeFromDataUri = (u = '') =>
@@ -49,12 +52,9 @@ function useModelViewerOnce() {
 
 /**
  * Universal, sandbox‑aware media renderer.
- *
- * By default SVGs are served through <img>, which completely disables any
- * embedded scripts. When `allowScripts` is true, they are rendered inside
- * an <object> tag so the caller can opt‑in to executable SVG.
+ * Accepts `onLoad` / `onLoadedMetadata` to bubble natural‑size signals
  */
-export default function RenderMedia({
+function RenderMediaRaw({
   uri = '',
   mime = '',
   alt = '',
@@ -62,7 +62,9 @@ export default function RenderMedia({
   className = '',
   allowScripts = false,
   onInvalid = () => {},
-}) {
+  onLoad = () => {},
+  onLoadedMetadata = () => {},
+}, ref) {
   useModelViewerOnce();
 
   const { uri: safeUri, trimmed } = sanitizeUri(uri);
@@ -112,6 +114,8 @@ export default function RenderMedia({
   const commonImgProps = {
     style,
     className,
+    ref,
+    onLoad,
     onError: () => {
       if (!errored) {
         setErrored(true);
@@ -136,6 +140,7 @@ export default function RenderMedia({
           type="image/svg+xml"
           style={svgStyle}
           className={className}
+          onLoad={onLoad}
         >
           <img src={safeUri} alt={alt} loading="lazy" {...commonImgProps} />
         </object>
@@ -156,24 +161,37 @@ export default function RenderMedia({
     );
   }
   if (type.startsWith('video/')) {
-    return <video src={safeUri} controls preload="metadata" {...commonImgProps} />;
+    return (
+      <video
+        src={safeUri}
+        controls
+        preload="metadata"
+        style={style}
+        className={className}
+        ref={ref}
+        onLoadedMetadata={onLoadedMetadata}
+      />
+    );
   }
   if (type.startsWith('audio/')) {
-    return <audio src={safeUri} controls {...commonImgProps} />;
+    return <audio src={safeUri} controls className={className} ref={ref} />;
   }
   if (type.startsWith('model/')) {
     return (
+      /* eslint-disable react/no-unknown-property */
       <model-viewer
         src={safeUri}
         camera-controls
         auto-rotate
         style={{ width: '100%', height: '100%', ...style }}
         class={className}
+        ref={ref}
+        onLoad={onLoad}
       />
+      /* eslint-enable react/no-unknown-property */
     );
   }
   if (type === 'application/pdf' || type === 'text/html' || type === 'text/plain') {
-    /* toggle allowScripts — off by default for safety */
     const sandboxBase = 'allow-same-origin allow-popups allow-forms';
     const sandbox     = allowScripts ? `${sandboxBase} allow-scripts` : sandboxBase;
     return (
@@ -183,6 +201,8 @@ export default function RenderMedia({
         sandbox={sandbox}
         style={{ border: 'none', width: '100%', height: '100%', ...style }}
         className={className}
+        ref={ref}
+        onLoad={onLoad}
       />
     );
   }
@@ -208,4 +228,12 @@ export default function RenderMedia({
     </a>
   );
 }
+
+const RenderMedia = forwardRef(RenderMediaRaw);
+export default RenderMedia;
+
+/* What changed & why:
+   • onLoad / onLoadedMetadata props forwarded for size detection
+   • ref forwarding via forwardRef keeps parent‑side measurement simple
+   • common hook order maintained; lint‑clean                              */
 /* EOF */

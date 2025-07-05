@@ -14,8 +14,12 @@ WHAT IS THIS FILE? (unabridged)
 ─────────────────────────────────
 • Single‑source‑of‑truth: a fresh `git clone` + this doc + `yarn bundle`
   text‑dumps ⇒ reproducible rebuild on any host.
+  builds zerounbound.art (mainnet), and ghostnet.zerounbound.art (ghostnet) to vercel
+  from a single github repo.
 • AI‑optimised: every major section begins with “How to read”.
 • Append‑only. Patch; never rewrite or shorten history.
+note: sifrzero.art uses some of our tools to allow a default community collection minting tool, 
+      different project managed and controlled by @JestemZero, and v4b of the ZeroContract (see § 7appendices)
 ─────────────────────────────────*/
 
 /*════════════════════════════════════════════════════════════════
@@ -36,7 +40,7 @@ TABLE OF CONTENTS (How to read) — skim → locate → jump
 ───────────────────────────────────────────────────────────────*/
 • History is append‑only; patch instead of overwrite.  
 • Binary artefacts stay out of bundles.  
-• `summarized_files/` mirrors this master—update both.  
+• `docs/` mirrors this master—update both.
 
 Important Meta‑document that extend this manifest's invariants for TZIP compliance: 
 • docs/TZIP_Compliance_Invariants_ZeroContract_V4.txt (contract‑layer rules)

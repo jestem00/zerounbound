@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/FullscreenModal.jsx
-  Rev :    r13    2025‑09‑24
-  Summary: fluid‑media fix → correct “FIT ON SCREEN” for SVG/HTML
+  Rev :    r14    2025‑09‑24
+  Summary: SVG‑aware natural‑size probe + width/height override
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useCallback, useEffect, useLayoutEffect, useRef, useState,
@@ -63,6 +63,35 @@ const VRange = styled.input.attrs({ type: 'range' })`
 
 /*──────── helpers ───────────────────────────────────────────*/
 const PAD = 32;                                            /* px */
+function svgNaturalDims(objEl) {
+  try {
+    const root = objEl?.contentDocument?.documentElement;
+    if (!root) return { w: 0, h: 0 };
+    const vb   = root.viewBox?.baseVal;
+    if (vb?.width && vb?.height) return { w: vb.width, h: vb.height };
+    const wAtt = parseFloat(root.getAttribute('width'));
+    const hAtt = parseFloat(root.getAttribute('height'));
+    if (!Number.isNaN(wAtt) && !Number.isNaN(hAtt)) return { w: wAtt, h: hAtt };
+  } catch { /* cross‑origin or absent */ }
+  return { w: 0, h: 0 };
+}
+
+function measureNatural(el) {
+  if (!el) return { w: 0, h: 0 };
+
+  /* image / video */
+  const w = el.naturalWidth  || el.videoWidth  || 0;
+  const h = el.naturalHeight || el.videoHeight || 0;
+  if (w && h) return { w, h };
+
+  /* <object type="image/svg+xml"> */
+  if (el.tagName === 'OBJECT') return svgNaturalDims(el);
+
+  /* fallback – bounding rect */
+  const rect = el.getBoundingClientRect();
+  return { w: rect.width, h: rect.height };
+}
+
 const fitScale = (natW, natH) => {
   if (!natW || !natH) return 1;
   const vw = window.innerWidth  - PAD;
@@ -79,30 +108,20 @@ export default function FullscreenModal({
   allowScripts = false,
   scriptHazard = false,
 }) {
-  /* is the media self‑scaling (SVG, HTML, etc.)? */
-  const isFluid = /^image\/svg\+xml$|^text\/html$/.test(mime);
-
-  /* natural px dims (not used for fluid media) */
   const [nat, setNat]          = useState({ w: 0, h: 0 });
-  /* scale applied via CSS – 1 == natural px / fluid baseline */
   const [scale, setScale]      = useState(1);
-  /* baseline “fit” scale – slider 100 % */
   const [base,  setBase]       = useState(1);
-  /* custom / original / fit */
   const [mode,  setMode]       = useState('fit');
 
   const ref = useRef(null);
 
-  /*──── initial & reopen reset ────────────────────────────*/
+  /*──── reset on open ─────────────────────────────────────*/
   useEffect(() => {
     if (!open) return;
-    setNat({ w: 0, h: 0 });
-    setScale(1);
-    setBase(1);
-    setMode('fit');
+    setNat({ w: 0, h: 0 }); setScale(1); setBase(1); setMode('fit');
   }, [open]);
 
-  /*──── ESC key exits ─────────────────────────────────────*/
+  /*──── ESC quits ────────────────────────────────────────*/
   useEffect(() => {
     if (!open) return;
     const esc = (e) => e.key === 'Escape' && onClose();
@@ -110,33 +129,33 @@ export default function FullscreenModal({
     return () => window.removeEventListener('keydown', esc);
   }, [open, onClose]);
 
-  /*──── detect natural size once media ready ─────────────*/
+  /*──── natural‑size detection ───────────────────────────*/
   const handleLoaded = useCallback(() => {
-    if (isFluid || !ref.current) return;
-    const w = ref.current.naturalWidth  || ref.current.videoWidth  || 0;
-    const h = ref.current.naturalHeight || ref.current.videoHeight || 0;
-    if (w && h) setNat({ w, h });
-  }, [isFluid]);
+    if (!ref.current) return;
+    const dim = measureNatural(ref.current);
+    if (dim.w && dim.h) setNat(dim);
+  }, []);
 
-  /*──── recompute baseline on nat / resize ───────────────*/
+  /*──── compute baseline “fit” scale ─────────────────────*/
   useLayoutEffect(() => {
+    if (!nat.w) return;
     const compute = () => {
-      const fit = isFluid ? 1 : fitScale(nat.w, nat.h);
+      const fit = fitScale(nat.w, nat.h);
       setBase(fit);
       if (mode === 'fit') setScale(fit);
     };
     compute();
     window.addEventListener('resize', compute);
     return () => window.removeEventListener('resize', compute);
-  }, [nat, mode, isFluid]);
+  }, [nat, mode]);
 
-  /*──── mode switches ─────────────────────────────────────*/
+  /*──── mode switches ────────────────────────────────────*/
   const toFit      = () => { setScale(base); setMode('fit'); };
   const toOriginal = () => { setScale(1);   setMode('original'); };
 
-  /*──── slider interaction → custom mode ─────────────────*/
+  /*──── slider → custom scale ────────────────────────────*/
   const onSlide = (e) => {
-    const pct = Number(e.target.value) || 1;          /* (1‑800) */
+    const pct = Number(e.target.value) || 1;
     setScale((pct / 100) * base);
     setMode('custom');
   };
@@ -144,9 +163,15 @@ export default function FullscreenModal({
   /*──── guard (hooks must run) ───────────────────────────*/
   if (!open || (scriptHazard && !allowScripts)) return null;
 
-  /* slider marks (1 → 800 %) relative to baseline */
-  const pct      = Math.round((scale / base) * 100);
+  const pct       = Math.round((scale / base) * 100);
   const sliderMax = Math.max(pct, 800);
+
+  /* width / height override = intrinsic dims (fixes SVG “100%”) */
+  const mediaStyle = {
+    ...pixelUpscaleStyle(scale, mime),
+    width : nat.w ? `${nat.w}px` : undefined,
+    height: nat.h ? `${nat.h}px` : undefined,
+  };
 
   /*──────── render ───────────────────────────────────────*/
   return (
@@ -157,7 +182,7 @@ export default function FullscreenModal({
           uri={uri}
           mime={mime}
           allowScripts={allowScripts}
-          style={pixelUpscaleStyle(scale, mime)}
+          style={mediaStyle}
           onLoad={handleLoaded}
           onLoadedMetadata={handleLoaded}
         />
@@ -181,8 +206,7 @@ export default function FullscreenModal({
           userSelect: 'none',
         }}
         >
-          {pct}
-          %
+          {pct}%
         </span>
       </Rail>
     </Back>
@@ -199,10 +223,10 @@ FullscreenModal.propTypes = {
 };
 
 /* What changed & why:
-   • Added `isFluid` detection (SVG/HTML) — these assets already
-     scale to their container, so baseline “fit” is always 1.
-   • Baseline & natural‑size computation now bypassed for fluid
-     media; prevents runaway upscale shown in SVG edge‑cases.
-   • `pixelUpscaleStyle` now receives `mime` so it can suppress
-     `image‑rendering: pixelated` for vector content.                        */
+   • `measureNatural` now extracts SVG viewBox/width/height for true
+     intrinsic dimensions, preventing bogus 100 % reports.
+   • Inline `mediaStyle` overrides `width/height` with intrinsic px,
+     neutralising the earlier double‑scaling of SVGs.
+   • `pixelUpscaleStyle` now receives `mime` to drop pixelation on
+     vector or non‑image types.                                               */
 /* EOF */

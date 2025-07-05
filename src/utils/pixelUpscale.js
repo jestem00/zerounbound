@@ -3,34 +3,31 @@
   Developed by @jams2blues – ZeroContract Studio
   File:    src/utils/pixelUpscale.js
   Rev :    r4     2025‑09‑24
-  Summary: vector‑aware; skips pixelation for SVG/HTML
+  Summary: mime‑aware pixelation toggle
 ──────────────────────────────────────────────────────────────*/
 /**
- * Produce inline style for crisp nearest‑neighbour scaling on
- * raster media, while leaving vector / HTML content untouched.
+ * Produce inline style for crisp nearest‑neighbour scaling.
  *
  * @param {number} factor – scale multiplier (≥ 0.01)
- * @param {string} mime   – MIME type hint
+ * @param {string} mime   – optional mime‑type
  * @returns {object}
  */
 export function pixelUpscaleStyle(factor = 1, mime = '') {
   const f = Math.max(0.01, Number(factor));
-
   const style = {
     transform       : `scale(${f})`,
     transformOrigin : 'center center',
-    backfaceVisibility : 'hidden',
+    backfaceVisibility: 'hidden',
   };
 
-  /* Only raster formats benefit from `pixelated`. */
-  const isVectorish = /^image\/svg\+xml$|^text\/html$/.test(mime);
-  if (!isVectorish) {
+  /* pixelation only for raster images */
+  if (mime.startsWith('image/') && mime !== 'image/svg+xml') {
     style.imageRendering = 'pixelated';
   }
+
   return style;
 }
 /* What changed & why:
-   • Accepts optional `mime`; omits `image-rendering: pixelated`
-     for SVG / HTML to avoid unwanted smoothing artefacts.
-   • Rev bumped to r4. */
+   • Accepts optional `mime`; omits `imageRendering: pixelated`
+     for SVG, HTML, audio, etc.                                              */
 /* EOF */

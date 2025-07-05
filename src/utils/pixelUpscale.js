@@ -1,39 +1,36 @@
+/*──────── src/utils/pixelUpscale.js ────────*/
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/utils/pixelUpscale.js
   Rev :    r4     2025‑09‑24
-  Summary: MIME‑aware scaling; skip pixelation for non‑raster
+  Summary: vector‑aware; skips pixelation for SVG/HTML
 ──────────────────────────────────────────────────────────────*/
 /**
- * Produce inline style for crisp (nearest‑neighbour) scaling.
- * Pixel‑doubling is applied **only** when it makes visual sense
- * (raster images).  Vector / HTML / audio, etc. are left intact.
+ * Produce inline style for crisp nearest‑neighbour scaling on
+ * raster media, while leaving vector / HTML content untouched.
  *
- * @param {number} factor – scale multiplier (≥ 0.01)
- * @param {string} mime   – detected MIME (optional)
+ * @param {number} factor – scale multiplier (≥ 0.01)
+ * @param {string} mime   – MIME type hint
  * @returns {object}
  */
 export function pixelUpscaleStyle(factor = 1, mime = '') {
   const f = Math.max(0.01, Number(factor));
 
-  /* base transform */
   const style = {
-    transform           : `scale(${f})`,
-    transformOrigin     : 'center center',
-    backfaceVisibility  : 'hidden',
+    transform       : `scale(${f})`,
+    transformOrigin : 'center center',
+    backfaceVisibility : 'hidden',
   };
 
-  /* raster‑only pixelation & only when actually enlarged   */
-  const isRaster = mime.startsWith('image/')
-                 && mime !== 'image/svg+xml'
-                 && mime !== 'image/apng';
-  if (isRaster && f > 1.01) style.imageRendering = 'pixelated';
-
+  /* Only raster formats benefit from `pixelated`. */
+  const isVectorish = /^image\/svg\+xml$|^text\/html$/.test(mime);
+  if (!isVectorish) {
+    style.imageRendering = 'pixelated';
+  }
   return style;
 }
 /* What changed & why:
-   • Added optional `mime` param → enables MIME‑aware styling.
-   • Pixel‑doubling (image‑rendering: pixelated) now applies
-     **only** to enlarged raster images.
-   • Vector formats & unscaled content stay fidelity‑perfect. */
+   • Accepts optional `mime`; omits `image-rendering: pixelated`
+     for SVG / HTML to avoid unwanted smoothing artefacts.
+   • Rev bumped to r4. */
 /* EOF */

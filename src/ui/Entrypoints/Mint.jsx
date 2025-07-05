@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/Mint.jsx
-  Rev :    r870   2025‑09‑05
-  Summary: TagChip & checklist buttons get a11y roles/keys
+  Rev :    r871   2025‑09‑05
+  Summary: lock recipient to wallet for oversize / >30 kB meta
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useRef, useState, useEffect, useMemo, useCallback,
@@ -26,7 +26,7 @@ import {
   asciiPrintable,
   MAX_ATTR, MAX_ATTR_N, MAX_ATTR_V,
   MAX_TAGS, MAX_TAG_LEN,
-  MAX_ROY_PCT, MAX_EDITIONS, MAX_META_BYTES,
+  MAX_ROY_PCT, MAX_EDITIONS, MAX_META_BYTES, LOCK_SELF_BYTES,
   isTezosAddress, royaltyUnder25, validAttributes,
 } from '../../core/validator.js';
 import { ROOT_URL }                   from '../../config/deployTarget.js';
@@ -55,6 +55,10 @@ const isSim500 = (e) => {
 const META_PAD_BYTES = 1_000;                  /* estimator head‑room  */
 const HEADROOM_BYTES = 1_024;                  /* slice‑0 buffer       */
 const SAFE_BYTES_0   = SLICE_SAFE_BYTES - HEADROOM_BYTES;
+
+/* enforce self‑recipient for these */
+const requiresSelfRecipient = (oversize, metaBytes) =>
+  oversize || metaBytes > LOCK_SELF_BYTES;
 
 const MAX_ROY_ENTRIES = 10;
 const OVERHEAD        = 360;                   /* token‑info frame     */
@@ -325,31 +329,46 @@ export default function Mint({
 
   const metaBytes = useMemo(() => mapSize(metaMap), [metaMap]);
 
+  const forceSelf = requiresSelfRecipient(oversize, metaBytes);
+
+  /* auto‑lock recipient when required */
+  useEffect(() => {
+    if (forceSelf && wallet && f.toAddress !== wallet) {
+      setF((p) => ({ ...p, toAddress: wallet }));
+    }
+  }, [forceSelf, wallet]);          /* eslint-disable-line react-hooks/exhaustive-deps */
+
   const totalPct = useMemo(
     () => Object.values(shares).reduce((t, n) => t + n, 0) / 100,
     [shares],
   );
 
   /*──────── validation helpers ─────────────────────*/
-  const baseChecks = useMemo(() => ({
-    title:         !!f.name.trim(),
-    titleAscii:    (() => { try { if (!f.name.trim()) return false; asciiPrintable(f.name); return true; } catch { return false; } })(),
-    artifact:      !!url && !!file,
-    recipient:     isTezosAddress(f.toAddress),
-    creators:      (() => {
-      const arr = f.creators.split(',').map((x) => x.trim()).filter(Boolean);
-      return !!arr.length && arr.every(isTezosAddress);
-    })(),
-    royalty:       royaltyUnder25(shares),
-    editions:      (() => {
-      if (contractVersion === 'v1') return true;
-      const n = parseInt(f.amount || '', 10);
-      return !Number.isNaN(n) && n >= 1 && n <= MAX_EDITIONS;
-    })(),
-    attrs:         validAttributes(attrs.filter((a) => a.name && a.value)),
-    metadataBytes: oversize || metaBytes <= MAX_META_BYTES,
-    agreed:        f.agree,
-  }), [f, url, file, shares, contractVersion, metaBytes, oversize, attrs]);
+  const baseChecks = useMemo(() => {
+    const recipientOk = forceSelf
+      ? wallet && f.toAddress === wallet
+      : isTezosAddress(f.toAddress);
+
+    return ({
+      title:         !!f.name.trim(),
+      titleAscii:    (() => { try { if (!f.name.trim()) return false; asciiPrintable(f.name); return true; } catch { return false; } })(),
+      artifact:      !!url && !!file,
+      recipient:     recipientOk,
+      creators:      (() => {
+        const arr = f.creators.split(',').map((x) => x.trim()).filter(Boolean);
+        return !!arr.length && arr.every(isTezosAddress);
+      })(),
+      royalty:       royaltyUnder25(shares),
+      editions:      (() => {
+        if (contractVersion === 'v1') return true;
+        const n = parseInt(f.amount || '', 10);
+        return !Number.isNaN(n) && n >= 1 && n <= MAX_EDITIONS;
+      })(),
+      attrs:         validAttributes(attrs.filter((a) => a.name && a.value)),
+      metadataBytes: oversize || metaBytes <= MAX_META_BYTES,
+      agreed:        f.agree,
+    });
+  }, [f, url, file, shares, contractVersion, metaBytes, oversize, attrs, forceSelf, wallet]);
 
   /* map checklist item → state (ok | bad | warn) */
   const getState = (key) => {
@@ -364,7 +383,7 @@ export default function Mint({
     { key: 'title',         label: 'Title set' },
     { key: 'titleAscii',    label: 'Title ASCII‑clean' },
     { key: 'artifact',      label: 'Media uploaded' },
-    { key: 'recipient',     label: 'Recipient address valid' },
+    { key: 'recipient',     label: forceSelf ? 'Recipient = wallet' : 'Recipient address valid' },
     { key: 'creators',      label: 'Creators valid' },
     { key: 'royalty',       label: `Royalties ≤ ${MAX_ROY_PCT}%` },
     { key: 'editions',      label: `Editions 1‑${MAX_EDITIONS}` },
@@ -423,7 +442,7 @@ export default function Mint({
       kind: OpKind.TRANSACTION,
       ...(await buildMintCall(
         c, contractVersion, f.amount, metaMap, f.toAddress,
-      ).toTransferParams()),
+      ).toTransferParams() ),
     };
 
     const out = [[mintParams]];                     /* batch‑0 = mint */
@@ -581,9 +600,13 @@ export default function Mint({
       <PixelHeading level={3}>Mint NFT</PixelHeading>
       <HelpBox>
         Creates new NFT(s). Fill title, upload media, royalties ≤ 
-        {MAX_ROY_PCT}% then<strong> Mint NFT</strong>. Large files are chunked
-        automatically; interrupted uploads resume exactly where they stopped.
-        Estimated fees appear before signing.<br />
+        {MAX_ROY_PCT}% then<strong> Mint NFT</strong>. Only <strong>one</strong> wallet
+        address can receive the newly minted edition(s). Large files or metadata
+        &gt; 30 kB will be <em>locked</em> to your connected wallet to ensure the
+        append&nbsp;pipeline can complete safely; you can disperse editions
+        afterwards via bulk‑transfer.<br />
+        Large files are chunked automatically; interrupted uploads resume
+        exactly where they stopped. Estimated fees appear before signing.<br />
         <strong>Contract v4 forbids removing “mature” or “flashing” flags after
         mint</strong> – choose wisely.
       </HelpBox>
@@ -648,6 +671,11 @@ export default function Mint({
       <Note>Recipient *</Note>
       <PixelInput
         value={f.toAddress}
+        disabled={forceSelf}
+        readOnly={forceSelf}
+        title={forceSelf
+          ? 'Locked to your wallet for large uploads'
+          : 'Wallet that receives the mint'}
         onChange={(e) => setF({ ...f, toAddress: e.target.value })}
       />
 
@@ -871,8 +899,10 @@ export default function Mint({
 }
 
 /* What changed & why:
-   • Explicit `color: var(--zu-btn-fg)` added to TagChip so text
-     contrasts against light accent backgrounds (terminal‑dark fix).
-   • Rev bump r868.
+   • Added LOCK_SELF_BYTES rule (imported) + helper requiresSelfRecipient().
+   • Auto‑locks recipient to connected wallet when oversize file or meta >30 kB.
+   • Disabled Recipient input in locked mode with tooltip; updated help‑copy.
+   • Validation & checklist reflect new self‑recipient constraint.
+   • Rev bump r871.
 */
 /* EOF */

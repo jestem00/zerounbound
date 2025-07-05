@@ -1,9 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/FullscreenModal.jsx
-  Rev :    r12    2025‑09‑24
-  Summary: reliable “Original” mode + fresh Fit computation;
-           MIME‑aware pixelUpscale; live slider %
+  Rev :    r13    2025‑09‑24
+  Summary: fluid‑media fix → correct “FIT ON SCREEN” for SVG/HTML
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useCallback, useEffect, useLayoutEffect, useRef, useState,
@@ -31,9 +30,10 @@ const Pane = styled.div`
   padding: 1rem;
 `;
 
-/* control rail – vertical stack, top‑right */
+/* control rail – vertical stack, top‑right */
 const Rail = styled.div`
-  position: fixed; top: .75rem; right: .75rem;
+  position: fixed;
+  top: .75rem; right: .75rem;
   display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
   z-index: 6501;
   opacity: .85; transition: opacity .15s;
@@ -48,6 +48,7 @@ const VRange = styled.input.attrs({ type: 'range' })`
   -webkit-appearance: none;
   background: transparent;
   cursor: pointer;
+
   &::-webkit-slider-thumb{
     -webkit-appearance:none;
     width:14px;height:14px;border-radius:50%;
@@ -61,20 +62,12 @@ const VRange = styled.input.attrs({ type: 'range' })`
 `;
 
 /*──────── helpers ───────────────────────────────────────────*/
-const PAD = 32;                                            /* px padding */
+const PAD = 32;                                            /* px */
 const fitScale = (natW, natH) => {
   if (!natW || !natH) return 1;
   const vw = window.innerWidth  - PAD;
   const vh = window.innerHeight - PAD;
   return Math.min(vw / natW, vh / natH);
-};
-const measureNatural = (el) => {
-  if (!el) return { w: 0, h: 0 };
-  const w = el.naturalWidth  || el.videoWidth  || 0;
-  const h = el.naturalHeight || el.videoHeight || 0;
-  if (w && h) return { w, h };
-  const r = el.getBoundingClientRect();
-  return { w: r.width, h: r.height };
 };
 
 /*──────── component ───────────────────────────────────────*/
@@ -86,27 +79,30 @@ export default function FullscreenModal({
   allowScripts = false,
   scriptHazard = false,
 }) {
-  /* natural dimensions */
-  const [nat, setNat]      = useState({ w: 0, h: 0 });
-  /* baseline fit‑on‑screen scale (slider 100 %) */
-  const [base, setBase]    = useState(1);
-  /* active transform scale */
-  const [scale, setScale]  = useState(1);
-  /* original | fit | custom */
-  const [mode, setMode]    = useState('original');
+  /* is the media self‑scaling (SVG, HTML, etc.)? */
+  const isFluid = /^image\/svg\+xml$|^text\/html$/.test(mime);
+
+  /* natural px dims (not used for fluid media) */
+  const [nat, setNat]          = useState({ w: 0, h: 0 });
+  /* scale applied via CSS – 1 == natural px / fluid baseline */
+  const [scale, setScale]      = useState(1);
+  /* baseline “fit” scale – slider 100 % */
+  const [base,  setBase]       = useState(1);
+  /* custom / original / fit */
+  const [mode,  setMode]       = useState('fit');
 
   const ref = useRef(null);
 
-  /*── initialise on open ───────────────────────────────────*/
+  /*──── initial & reopen reset ────────────────────────────*/
   useEffect(() => {
     if (!open) return;
     setNat({ w: 0, h: 0 });
-    setMode('original');
     setScale(1);
     setBase(1);
+    setMode('fit');
   }, [open]);
 
-  /*── ESC exits ────────────────────────────────────────────*/
+  /*──── ESC key exits ─────────────────────────────────────*/
   useEffect(() => {
     if (!open) return;
     const esc = (e) => e.key === 'Escape' && onClose();
@@ -114,61 +110,45 @@ export default function FullscreenModal({
     return () => window.removeEventListener('keydown', esc);
   }, [open, onClose]);
 
-  /*── natural‑size probe ──────────────────────────────────*/
-  const probe = useCallback(() => {
-    if (!ref.current) return;
-    const d = measureNatural(ref.current);
-    if (d.w && d.h) setNat(d);
-  }, []);
-  const handleLoaded = probe;
+  /*──── detect natural size once media ready ─────────────*/
+  const handleLoaded = useCallback(() => {
+    if (isFluid || !ref.current) return;
+    const w = ref.current.naturalWidth  || ref.current.videoWidth  || 0;
+    const h = ref.current.naturalHeight || ref.current.videoHeight || 0;
+    if (w && h) setNat({ w, h });
+  }, [isFluid]);
 
-  /*── recompute baseline on nat / resize ──────────────────*/
+  /*──── recompute baseline on nat / resize ───────────────*/
   useLayoutEffect(() => {
-    if (!nat.w) return;
     const compute = () => {
-      const f = fitScale(nat.w, nat.h);
-      setBase(f);
-      if (mode === 'fit') setScale(f);
+      const fit = isFluid ? 1 : fitScale(nat.w, nat.h);
+      setBase(fit);
+      if (mode === 'fit') setScale(fit);
     };
     compute();
     window.addEventListener('resize', compute);
     return () => window.removeEventListener('resize', compute);
-  }, [nat, mode]);
+  }, [nat, mode, isFluid]);
 
-  /*── mode switches ───────────────────────────────────────*/
-  const toOriginal = () => { setScale(1); setMode('original'); };
-  const toFit      = () => {
-    if (!nat.w) return;
-    const f = fitScale(nat.w, nat.h);
-    setBase(f);
-    setScale(f);
-    setMode('fit');
-  };
+  /*──── mode switches ─────────────────────────────────────*/
+  const toFit      = () => { setScale(base); setMode('fit'); };
+  const toOriginal = () => { setScale(1);   setMode('original'); };
 
-  /*── slider → custom mode (percentage of base) ───────────*/
+  /*──── slider interaction → custom mode ─────────────────*/
   const onSlide = (e) => {
-    const pct = Number(e.target.value) || 1;
+    const pct = Number(e.target.value) || 1;          /* (1‑800) */
     setScale((pct / 100) * base);
     setMode('custom');
   };
 
-  /*── early guard (hooks executed) ────────────────────────*/
+  /*──── guard (hooks must run) ───────────────────────────*/
   if (!open || (scriptHazard && !allowScripts)) return null;
 
-  /*── compute media style ─────────────────────────────────*/
-  let mediaStyle = {};
-  if (!(mode === 'original' && scale === 1)) {
-    mediaStyle = pixelUpscaleStyle(scale, mime);
-  } else if (mime.startsWith('image/') && mime !== 'image/svg+xml') {
-    /* override default pixelation inside RenderMedia */
-    mediaStyle.imageRendering = 'auto';
-  }
-
-  /*── slider presentation values ─────────────────────────*/
-  const pct = Math.round((scale / base) * 100);
+  /* slider marks (1 → 800 %) relative to baseline */
+  const pct      = Math.round((scale / base) * 100);
   const sliderMax = Math.max(pct, 800);
 
-  /*── render ─────────────────────────────────────────────*/
+  /*──────── render ───────────────────────────────────────*/
   return (
     <Back onClick={onClose}>
       <Pane onClick={(e) => e.stopPropagation()}>
@@ -177,7 +157,7 @@ export default function FullscreenModal({
           uri={uri}
           mime={mime}
           allowScripts={allowScripts}
-          style={mediaStyle}
+          style={pixelUpscaleStyle(scale, mime)}
           onLoad={handleLoaded}
           onLoadedMetadata={handleLoaded}
         />
@@ -188,7 +168,12 @@ export default function FullscreenModal({
         <PixelButton size="xs" onClick={toOriginal}>ORIGINAL</PixelButton>
         <PixelButton size="xs" onClick={toFit}>FIT ON SCREEN</PixelButton>
 
-        <VRange min="1" max={sliderMax} value={pct} onChange={onSlide} />
+        <VRange
+          min="1"
+          max={sliderMax}
+          value={pct}
+          onChange={onSlide}
+        />
         <span style={{
           font: '700 .7rem/1 PixeloidSans,monospace',
           color: 'var(--zu-fg)',
@@ -212,12 +197,12 @@ FullscreenModal.propTypes = {
   allowScripts : PropTypes.bool,
   scriptHazard : PropTypes.bool,
 };
+
 /* What changed & why:
-   • Default mode = “original” (true natural pixels, no transform).
-   • `pixelUpscaleStyle(mime)` now MIME‑aware; raster‑only pixelation.
-   • `toFit()` recomputes fresh baseline → never mis‑scales.
-   • Slider 100 % = baseline; range auto‑extends up to 800 %.
-   • Vector / HTML / audio bypass pixelation entirely.
-   • RenderMedia override (`imageRendering:auto`) prevents
-     un‑wanted pixel blur in original mode. */
+   • Added `isFluid` detection (SVG/HTML) — these assets already
+     scale to their container, so baseline “fit” is always 1.
+   • Baseline & natural‑size computation now bypassed for fluid
+     media; prevents runaway upscale shown in SVG edge‑cases.
+   • `pixelUpscaleStyle` now receives `mime` so it can suppress
+     `image‑rendering: pixelated` for vector content.                        */
 /* EOF */

@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/core/validator.js
-  Rev :    r911   2025‑08‑12
-  Summary: edit‑contract byte‑budget uses full 32 768 B cap
+  Rev :    r912   2025‑09‑05
+  Summary: forceSelfRecipient rule for >32 kB meta or oversize
 ──────────────────────────────────────────────────────────────*/
 import { Buffer } from 'buffer';
 
@@ -13,6 +13,7 @@ const RE_CTRL_C1 = /[\u0080-\u009F]/;            // C1 block
 /*──────── protocol limits ──*/
 export const OVERHEAD_BYTES = 12_522 + 51;        // 12 573 B fudge
 export const MAX_META_BYTES = 32_768;             // Tezos hard‑cap
+export const LOCK_SELF_BYTES = 30_000;            // guard‑rail threshold
 
 /*──────── shared length caps ──*/
 export const MAX_ATTR        = 10;
@@ -88,40 +89,59 @@ export function validateMintFields ({
   metaBytes     = 0,
   oversize      = false,
 }) {
+  const forceSelf = oversize || metaBytes > LOCK_SELF_BYTES;
+
   const checklist = [];
   const add = (test, okMsg, errMsg) => {
     checklist.push({ ok: !!test, msg: test ? okMsg : errMsg });
     return test;
   };
 
+  /* prerequisite – wallet always needed when forceSelf */
   add(!!wallet,               'Wallet connected',                'Wallet not connected');
+
   add(f.name && asciiPrintable(f.name),
                                'Name valid',                     'Name required / invalid');
+
   add(!f.description || asciiPrintableLn(f.description),
                                'Description valid',              'Description control chars');
+
   add(fileSelected && fileUrl, 'Artifact uploaded',               'Artifact required');
-  add(isTezosAddress(f.toAddress),
-                               'Recipient address ok',            'Recipient invalid');
+
+  add(
+    forceSelf ? (f.toAddress === wallet && !!wallet) : isTezosAddress(f.toAddress),
+    forceSelf ? 'Recipient = wallet' : 'Recipient address ok',
+    forceSelf ? 'Recipient must equal wallet' : 'Recipient invalid',
+  );
+
   const creatorArr = f.creators.split(',').map(x=>x.trim()).filter(Boolean);
   add(creatorArr.length && creatorArr.every(isTezosAddress),
                                'Creators ok',                     'Creator list invalid');
+
   add(royaltyUnder25(shares),  'Royalties within cap',            `Royalties > ${MAX_ROY_PCT}%`);
+
   const amt = parseInt(f.amount || '', 10);
   const editionOk = contractVer === 'v1' ||
     (Number.isInteger(amt) && amt >= 1 && amt <= MAX_EDITIONS);
   add(editionOk,               'Editions in range',               `Editions 1–${MAX_EDITIONS}`);
+
   add(validAttributes(attrs.filter(a => a.name && a.value)),
                                'Attributes valid',                'Attributes invalid');
+
   add(f.license && (f.license !== 'Custom' || f.customLicense.trim()),
                                'License set',                     'License required');
+
   add(f.agree,                 'Terms accepted',                  'Agree to terms');
+
   add(oversize || metaBytes <= MAX_META_BYTES,
                                'Metadata size ok',                `Metadata > ${MAX_META_BYTES} B`);
+
   add(tags.length <= MAX_TAGS,
                                'Tag count ok',                    `> ${MAX_TAGS} tags`);
 
   return { errors: checklist.filter(c => !c.ok).map(c => c.msg), checklist };
 }
+
 
 /*──────── central deploy‑form validator ──────────────────────*/
 /**

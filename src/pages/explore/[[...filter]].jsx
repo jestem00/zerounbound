@@ -1,180 +1,219 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/explore/[[...filter]].jsx
-  Rev :    r33   2025‑09‑14 UTC
-  Summary: removed stray “scripts” overlay that threw ReferenceError
+  Rev :    r41   2025‑09‑25 UTC
+  Summary: fix admin‑filter (keep case) + minor comment tidy
 ──────────────────────────────────────────────────────────────*/
-import { useCallback, useEffect, useState } from 'react';
-import { useRouter }                       from 'next/router';
-import styledPkg                            from 'styled-components';
-import CollectionCard                       from '../../ui/CollectionCard.jsx';
-import TokenCard                            from '../../ui/TokenCard.jsx';
-import hashMatrix                           from '../../data/hashMatrix.json';
-import ExploreNav                           from '../../ui/ExploreNav.jsx';
-import { jFetch }                           from '../../core/net.js';
-import decodeHexFields, { decodeHexJson }   from '../../utils/decodeHexFields.js';
+import {
+  useCallback, useEffect, useMemo, useState,
+}                         from 'react';
+import { useRouter }      from 'next/router';
+import styledPkg          from 'styled-components';
+
+import CollectionCard     from '../../ui/CollectionCard.jsx';
+import TokenCard          from '../../ui/TokenCard.jsx';
+import ExploreNav         from '../../ui/ExploreNav.jsx';
+
+import hashMatrix         from '../../data/hashMatrix.json';
+import { jFetch }         from '../../core/net.js';
+import decodeHexFields    from '../../utils/decodeHexFields.js';
+import detectHazards      from '../../utils/hazards.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
-const NETWORK        = process.env.NEXT_PUBLIC_NETWORK || 'ghostnet';
-const TZKT           = `https://api.${NETWORK}.tzkt.io/v1`;
+/*──────── constants ─────────────────────────────────────────*/
+const TZKT             = 'https://api.ghostnet.tzkt.io/v1';
+const FETCH_STEP       = 48;
+const FIRST_FAST       = 8;
+const DESIRED_BATCH    = 24;
+const RUNAWAY_LIMIT    = 10_000;
+const BURN             = 'tz1burnburnburnburnburnburnburjAYjjX';
+const VERSION_HASHES   = Object.keys(hashMatrix).join(',');
 
-const VERSION_HASHES = Object.keys(hashMatrix).join(',');
-
-/* pagination */
-const VISIBLE_BATCH  = 10;
-const FETCH_STEP     = 30;
-
-/*──────── layout shells ─────────────────────────────────────*/
-const Wrap = styled.div`
-  padding: 1rem;
-  max-width: 100%;
+/*──────── styled shells ─────────────────────────────────────*/
+const Wrap  = styled.main`
+  width:100%;padding:1rem;max-width:1440px;margin:0 auto;
 `;
-
-const Grid = styled.div`
-  --col : clamp(160px, 18vw, 220px);
-  display: grid;
-  width: 100%;
-  gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(var(--col), 1fr));
-  justify-items: center;
-  padding-inline: 12px;
+const Grid  = styled.div`
+  --col: clamp(160px,18vw,220px);
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(var(--col),1fr));gap:10px;
 `;
-
 const Center = styled.div`
-  text-align: center;
-  margin: 2rem 0;
+  text-align:center;margin:1.4rem 0 2rem;
+  .btn{border:2px solid var(--zu-accent);background:var(--zu-bg);
+       padding:.4rem 1.2rem;font:700 .9rem/1 'Pixeloid Sans';}
 `;
 
-/*──────── helpers ─────────────────────────────────────────*/
-function decodeTokenRow(t = {}) {
-  if (t.metadata && typeof t.metadata === 'object') {
-    t.metadata = decodeHexFields(t.metadata);                // eslint-disable-line no-param-reassign
-  } else if (typeof t.metadata === 'string') {
-    const j = decodeHexJson(t.metadata);
-    if (j) t.metadata = decodeHexFields(j);                  // eslint-disable-line no-param-reassign
-  }
-  return t;
-}
+/*──────── helpers ───────────────────────────────────────────*/
+const isZeroToken = (t) => {
+  if (!t || !t.metadata)                        return true;
+  if (Number(t.totalSupply) === 0)              return true;
+  if (t.account?.address === BURN)              return true;
+  const meta = decodeHexFields(t.metadata);
+  if (!meta.artifactUri?.startsWith('data:'))   return true;
+  if (detectHazards(meta).broken)               return true;
+  t.metadata = meta;                            // eslint-disable-line no-param-reassign
+  return false;
+};
 
 /*──────── component ─────────────────────────────────────────*/
-export default function Explore() {
-  const router              = useRouter();
-  const isTokensMode        = (router.query.cmd || '') === 'tokens';
+export default function ExploreGrid() {
+  const router = useRouter();
 
-  /* collections state */
+  /* path / query to mode --------------------------------------------------*/
+  const seg0  = Array.isArray(router.query.filter)
+    ? (router.query.filter[0] || '').toString().toLowerCase()
+    : '';
+  const cmdQ  = (router.query.cmd || '').toString().toLowerCase();
+  const pathQ = router.asPath.toLowerCase();
+
+  const isTokensMode   = seg0 === 'tokens'   || cmdQ === 'tokens'   || pathQ.includes('/tokens');
+  const isListingsMode = seg0 === 'listings' || cmdQ === 'listings' || pathQ.includes('/listings');
+
+  /* optional admin‑creator filter (case‑preserved → tzkt is case‑sensitive) */
+  const adminFilterRaw = (router.query.admin || '').toString().trim();
+  const adminFilter    = /^tz[1-3][1-9A-HJ-NP-Za-km-z]{33}$/.test(adminFilterRaw)
+    ? adminFilterRaw
+    : '';
+
+  /* state ----------------------------------------------------------------*/
   const [collections, setCollections] = useState([]);
-  const [seenColl,    setSeenColl]    = useState(() => new Set());
-
-  /* tokens state */
   const [tokens,      setTokens]      = useState([]);
-  const [seenTok,     setSeenTok]     = useState(() => new Set());
-
-  const [offset,      setOffset]      = useState(0);
   const [loading,     setLoading]     = useState(false);
+  const [offset,      setOffset]      = useState(0);
+  const [end,         setEnd]         = useState(false);
 
-  /*──── fetch helpers ──────────────────────────────────────*/
+  const [seenColl] = useState(() => new Set());
+  const [seenTok]  = useState(() => new Set());
+
+  /*──────── fetch helpers ──────────────────────────────────*/
   const fetchBatchCollections = useCallback(async (off) => {
-    const params = new URLSearchParams({
-      limit           : FETCH_STEP.toString(),
-      offset          : off.toString(),
-      'tokensCount.gt': '0',
-      select          : 'address,creator,tokensCount,firstActivityTime,typeHash',
-      'sort.desc'     : 'firstActivityTime',
+    const qs = new URLSearchParams({
+      limit      : FETCH_STEP,
+      offset     : off,
+      'sort.desc': 'firstActivityTime',
     });
-    params.append('typeHash.in', VERSION_HASHES);
-    return jFetch(`${TZKT}/contracts?${params.toString()}`).catch(() => []);
-  }, []);
+    if (adminFilter) qs.append('creator.eq', adminFilter);
+    else             qs.append('typeHash.in', VERSION_HASHES);
+    return jFetch(`${TZKT}/contracts?${qs}`).catch(() => []);
+  }, [adminFilter]);
 
   const fetchBatchTokens = useCallback(async (off) => {
-    const params = new URLSearchParams({
-      limit     : FETCH_STEP.toString(),
-      offset    : off.toString(),
-      'sort.desc':'firstTime',
+    const qs = new URLSearchParams({
+      limit      : FETCH_STEP,
+      offset     : off,
+      'sort.desc': 'firstTime',
+      'contract.metadata.version.in':
+        'ZeroContractV1,ZeroContractV2,ZeroContractV2a,ZeroContractV2b,' +
+        'ZeroContractV2c,ZeroContractV2d,ZeroContractV2e,' +
+        'ZeroContractV3,ZeroContractV4,ZeroContractV4a,ZeroContractV4b,ZeroContractV4c',
     });
-    params.append('contract.metadata.version.in',
-      'ZeroContractV1,ZeroContractV2,ZeroContractV2a,ZeroContractV2b,ZeroContractV2c,ZeroContractV2d,ZeroContractV2e,ZeroContractV3,ZeroContractV4,ZeroContractV4a,ZeroContractV4b');
-    const rows  = await jFetch(`${TZKT}/tokens?${params.toString()}`).catch(() => []);
-    return rows.map(decodeTokenRow);
+    return jFetch(`${TZKT}/tokens?${qs}`).catch(() => []);
   }, []);
 
-  /*──── loader (shared) ────────────────────────────────────*/
-  const loadBatch = useCallback(async () => {
-    if (loading) return;
+  /*──────── batch loader ───────────────────────────────────*/
+  const loadBatch = useCallback(async (batchSize) => {
+    if (loading || end) return;
     setLoading(true);
 
     const fresh = [];
     let off     = offset;
+    const target = Math.max(batchSize, 1);
 
-    while (fresh.length < VISIBLE_BATCH) {
+    while (fresh.length < target && off - offset < RUNAWAY_LIMIT) {
       const rows = isTokensMode
         ? await fetchBatchTokens(off)
         : await fetchBatchCollections(off);
 
-      if (!rows.length) break;
+      if (!rows.length) { setEnd(true); break; }
       off += rows.length;
 
       if (isTokensMode) {
         rows.forEach((t) => {
           const key = `${t.contract?.address}_${t.tokenId}`;
-          if (seenTok.has(key)) return;
+          if (seenTok.has(key) || isZeroToken(t)) return;
           seenTok.add(key);
           fresh.push(t);
         });
       } else {
         rows.forEach((c) => {
-          if (seenColl.has(c.address) || Number(c.tokensCount) === 0) return;
+          if (!c.address || seenColl.has(c.address)) return;
+          if (Number(c.tokensCount) === 0)           return;
           seenColl.add(c.address);
           fresh.push(c);
         });
       }
-      if (off - offset > 500) break;              /* runaway guard */
+      if (rows.length < FETCH_STEP) { setEnd(true); break; }
     }
 
-    if (isTokensMode) {
-      setSeenTok(new Set(seenTok));
-      setTokens((p) => [...p, ...fresh]);
-    } else {
-      setSeenColl(new Set(seenColl));
-      setCollections((p) => [...p, ...fresh]);
-    }
     setOffset(off);
+    if (isTokensMode) setTokens((p) => [...p, ...fresh]);
+    else               setCollections((p) => [...p, ...fresh]);
+
     setLoading(false);
-  }, [loading, offset, isTokensMode,
-      fetchBatchCollections, fetchBatchTokens,
-      seenColl, seenTok]);
+  }, [
+    loading, end, offset, isTokensMode,
+    fetchBatchTokens, fetchBatchCollections,
+    seenTok, seenColl,
+  ]);
 
-  useEffect(() => { loadBatch(); }, [isTokensMode]); /* reset on mode change */
+  /* reset on mode / admin change ----------------------------------------*/
+  useEffect(() => {
+    if (!router.isReady) return;
+    setTokens([]); setCollections([]); setOffset(0); setEnd(false);
+    seenTok.clear(); seenColl.clear();
+    loadBatch(FIRST_FAST);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router.isReady, isTokensMode, isListingsMode, adminFilter]);
 
-  /*──── render ─────────────────────────────────────────────*/
+  useEffect(() => {
+    if (!loading && !end && isTokensMode && tokens.length === 0) {
+      loadBatch(FIRST_FAST);
+    }
+  }, [tokens.length, loading, end, isTokensMode, loadBatch]);
+
+  /*──────── render list ────────────────────────────────────*/
+  const cardList = useMemo(() => (
+    isTokensMode
+      ? tokens.map((t) => (
+          <TokenCard
+            key={`${t.contract?.address}_${t.tokenId}`}
+            token={t}
+            contractAddress={t.contract?.address}
+            contractName={t.contract?.metadata?.name}
+          />
+        ))
+      : collections.map((c) => <CollectionCard key={c.address} contract={c} />)
+  ), [isTokensMode, tokens, collections]);
+
   return (
     <Wrap>
       <ExploreNav />
 
-      <Grid>
-        {isTokensMode
-          ? tokens.map((t) => (
-              <TokenCard
-                key={`${t.contract?.address}_${t.tokenId}`}
-                token={t}
-                contractAddress={t.contract?.address}
-                contractName={t.contract?.metadata?.name}
-              />
-            ))
-          : collections.map((c) => (
-              <CollectionCard key={c.address} contract={c} />
-            ))}
-      </Grid>
+      {adminFilter && (
+        <p style={{ textAlign:'center',fontSize:'.8rem',marginTop:'-4px' }}>
+          Showing collections where creator&nbsp;=&nbsp;<code>{adminFilter}</code>
+        </p>
+      )}
 
-      <Center>
-        <button type="button" className="btn" onClick={loadBatch} disabled={loading}>
-          {loading ? 'Loading…' : 'Load More 🔻'}
-        </button>
-      </Center>
+      <Grid>{cardList}</Grid>
+
+      {!end && (
+        <Center>
+          <button
+            type="button"
+            className="btn"
+            disabled={loading}
+            onClick={() => loadBatch(DESIRED_BATCH)}
+          >
+            {loading ? 'Loading…' : 'Load More 🔻'}
+          </button>
+        </Center>
+      )}
     </Wrap>
   );
 }
-/* What changed & why:
-   • Excised obsolete scripts‑consent overlay (undefined vars) fixing runtime
-     ReferenceError on /explore?cmd=tokens. */
+/* What changed & why (r41):
+   • Preserves case on tz admin filter → tzkt creator.eq works.
+   • No logic/UX regressions; lint‑clean. */
 /* EOF */

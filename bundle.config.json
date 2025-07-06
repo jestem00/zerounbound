@@ -40,7 +40,12 @@
         "src/data/**/*.json",
         "src/utils/countAmount.js",
         "src/ui/layout.jsx",
-        "src/pages/_app.js"
+        "src/pages/_app.js",
+        "src/ui/BuyDialog.jsx",
+        "src/ui/ListTokenDialog.jsx",
+        "src/ui/MarketplaceBar.jsx",
+        "src/core/marketplace.js",
+        "src/ui/GlobalSnackbar.jsx"
       ]
     },
     

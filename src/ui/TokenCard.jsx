@@ -1,10 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/TokenCard.jsx
-  Rev :    r32    2025‑09‑18
-  Summary: generative‑SVG support
-           • Fullscreen now prefers artifact‑SVG once scripts enabled
-           • no behavioural change for non‑SVG assets
+  Rev :    r33   2025‑09‑22 UTC
+  Summary: authorArray hardens against non‑array inputs
 ──────────────────────────────────────────────────────────────*/
 import {
   useState, useMemo, useEffect,
@@ -38,8 +36,20 @@ const pickDataUri = (m = {}) => (
     .find((u) => typeof u === 'string' && VALID_DATA.test(u.trim())) || ''
 );
 
-const authorArray = (m = {}) =>
-  m.authors || m.artists || m.creators || [];
+/* robust author extractor */
+const authorArray = (m = {}) => {
+  const src = m.authors ?? m.artists ?? m.creators ?? [];
+  if (Array.isArray(src)) return src;
+  if (typeof src === 'string') {
+    try {
+      const parsed = JSON.parse(src);
+      if (Array.isArray(parsed)) return parsed;
+      return [src];
+    } catch { return [src]; }
+  }
+  if (src && typeof src === 'object') return Object.values(src);
+  return [];
+};
 
 const isCreator = (meta = {}, addr = '') =>
   !!addr && authorArray(meta).some((a) => String(a).toLowerCase() === addr.toLowerCase());
@@ -251,7 +261,7 @@ export default function TokenCard({
           <h4>{meta.name || `#${token.tokenId}`}</h4>
 
           {authorArray(meta).length > 0 && (
-            <p>By {authorArray(meta).join(', ')}</p>
+            <p>By&nbsp;{authorArray(meta).join(', ')}</p>
           )}
 
           {meta.mimeType && (
@@ -263,10 +273,10 @@ export default function TokenCard({
             </p>
           )}
 
-          <Stat>Token‑ID {token.tokenId}</Stat>
-          <Stat>Amount ×{editions}</Stat>
-          <Stat>Owners {owners}</Stat>
-          {priceTez && <Stat>Price {priceTez} ꜩ</Stat>}
+          <Stat>Token‑ID&nbsp;{token.tokenId}</Stat>
+          <Stat>Amount&nbsp;×{editions}</Stat>
+          <Stat>Owners&nbsp;{owners}</Stat>
+          {priceTez && <Stat>Price&nbsp;{priceTez}&nbsp;ꜩ</Stat>}
 
           <div style={{ marginTop:'6px' }}>
             <MakeOfferBtn contract={contractAddress} tokenId={token.tokenId} label="MAKE OFFER" />
@@ -335,8 +345,7 @@ TokenCard.propTypes = {
   contractName   : PropTypes.string,
   contractAdmin  : PropTypes.string,
 };
-/* What changed & why (r32):
-   • When scripts are allowed the fullscreen viewer now switches from
-     the PNG fallback (`displayUri`) to the SVG `artifactUri`, enabling
-     interactive generative pieces.
-   • No UX change for non‑SVG or script‑blocked states. */
+/* What changed & why (r33):
+   • authorArray now coerces string / object inputs → array, preventing .join type errors.
+   • No functional change beyond safer meta parsing. */
+/* EOF */

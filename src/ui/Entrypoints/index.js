@@ -10,7 +10,6 @@ export { default as Destroy }                     from './Destroy.jsx';
 export { default as ManageCollaborators }         from './ManageCollaborators.jsx';
 export { default as ManageCollaboratorsv4a }      from './ManageCollaboratorsv4a.jsx';
 export { default as ManageParentChild }           from './ManageParentChild.jsx';
-export { default as Transfer }                    from './Transfer.jsx';
 export { default as Mint }                        from './Mint.jsx';
 export { default as MintV4a }                     from './MintV4a.jsx';
 export { default as MintPreview }                 from './MintPreview.jsx';
@@ -31,4 +30,10 @@ export { default as AddRemoveCollaboratorsv4a }   from './AddRemoveCollaborators
 export { default as UpdateContractMetadatav4a }   from './UpdateContractMetadatav4a.jsx';
 export { default as UpdateTokenMetadatav4a }      from './UpdateTokenMetadatav4a.jsx';
 export { default as RepairUriV4a }                from './RepairUriV4a.jsx';
+
+/* batch transfer elemeents */
+export { default as TokenPreviewWindow }          from './TokenPreviewWindow.jsx';
+export { default as TransferRow}                  from './TransferRow.jsx';
+export { default as Transfer }                    from './Transfer.jsx';
+
 /* EOF */

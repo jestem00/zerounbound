@@ -1,11 +1,11 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/Transfer.jsx
-  Rev :    r907   2025‑10‑02
-  Summary: multi‑Token‑ID batch transfer + robust parsing
+  Rev :    r910   2025‑10‑04
+  Summary: preview‑button next to Token‑ID; hidden scrollbar
 ──────────────────────────────────────────────────────────────*/
 import React, {
-  useCallback, useEffect, useMemo, useState,
+  useCallback, useEffect, useState,
 }                             from 'react';
 import styledPkg              from 'styled-components';
 
@@ -13,61 +13,47 @@ import PixelHeading           from '../PixelHeading.jsx';
 import PixelInput             from '../PixelInput.jsx';
 import PixelButton            from '../PixelButton.jsx';
 import LoadingSpinner         from '../LoadingSpinner.jsx';
-import TokenMetaPanel         from '../TokenMetaPanel.jsx';
+import TokenPreviewWindow     from './TokenPreviewWindow.jsx';
 
 import listLiveTokenIds       from '../../utils/listLiveTokenIds.js';
 import { useWalletContext }   from '../../contexts/WalletContext.js';
 import { jFetch }             from '../../core/net.js';
-import { TZKT_API }           from '../../config/deployTarget.js';
 
-/*──────────────── helpers ─────────────────*/
-const styled   = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
-const isTzAddr = (s='') => /^(tz1|tz2|tz3|KT1)[1-9A-HJ-NP-Za-km-z]{33}$/.test(s.trim());
-const splitVal = (r='') => r.split(/[\s,]+/).map((t) => t.trim()).filter(Boolean);
+const styled      = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
+const isTzAddress = (s='') => /^(tz1|tz2|tz3|KT1)[1-9A-HJ-NP-Za-km-z]{33}$/.test(s.trim());
+const splitList   = (r='') => r.split(/[\s,]+/).map((t) => t.trim()).filter(Boolean);
 
-/* parse space/comma‑list into unique positive ints */
-function parseIds(str='') {
-  const out = new Set();
-  splitVal(str).forEach((tok) => {
-    const n = Number(tok);
-    if (Number.isInteger(n) && n >= 0) out.add(n);
-  });
-  return [...out];
-}
-
-const Wrap = styled('section').withConfig({ shouldForwardProp: (p) => p !== '$level' })`
+/*──────── styled shells ───────*/
+const Wrap   = styled('section').withConfig({ shouldForwardProp: (p) => p !== '$level' })`
   margin-top:1.5rem;position:relative;z-index:${(p) => p.$level ?? 'auto'};
 `;
-const Field   = styled.div`display:flex;flex-direction:column;gap:.5rem;flex:1;`;
-const Picker  = styled.div`display:flex;gap:.6rem;`;
-const Box     = styled.div`position:relative;flex:1;`;
-const Spin    = styled(LoadingSpinner).attrs({ size:16 })`
-  position:absolute;top:8px;right:8px;
-`;
-const HelpBox = styled.p`
-  font-size:.75rem;line-height:1.25;margin:.5rem 0 .9rem;
+const Help   = styled.p`font-size:.75rem;line-height:1.25;margin:.5rem 0 .9rem;`;
+const Row    = styled.div`display:flex;gap:.6rem;align-items:flex-end;margin-bottom:.8rem;`;
+const Field  = styled.div`display:flex;flex-direction:column;gap:.45rem;`;
+const Picker = styled.div`position:relative;`;
+const Spin   = styled(LoadingSpinner).attrs({ size:16 })`
+  position:absolute;top:7px;right:8px;
 `;
 
-/*──────────────── component ───────────────*/
+/*──────── component ──────────*/
 export default function Transfer({
   contractAddress = '',
   setSnackbar     = () => {},
   onMutate        = () => {},
   $level,
 }) {
-  /*──────── context ───────────────────────*/
+  /*──── context ────*/
   const {
     address : walletAddress,
     toolkit,
     network = 'ghostnet',
   } = useWalletContext() || {};
   const kit   = toolkit || window.tezosToolkit;
-  const snack = (m, s='warning') => setSnackbar({ open:true, message:m, severity:s });
+  const toast = (m, s='warning') => setSnackbar({ open:true, message:m, severity:s });
 
-  /*──────── token list for dropdown ───────*/
+  /*──── token‑list dropdown ────*/
   const [tokOpts, setTokOpts]       = useState([]);
   const [loadingTok, setLoadingTok] = useState(false);
-
   const fetchTokens = useCallback(async () => {
     if (!contractAddress) return;
     setLoadingTok(true);
@@ -75,213 +61,239 @@ export default function Transfer({
       const live = await listLiveTokenIds(contractAddress, network, true);
       const ids  = live.map((t) => (typeof t === 'object' ? t.id : t)).slice(0, 100);
       const fromLive = new Map(live.map((t) => [t.id, t.name || '']));
-
       const base = network === 'mainnet'
         ? 'https://api.tzkt.io/v1'
         : 'https://api.ghostnet.tzkt.io/v1';
-
       const rows = await jFetch(
-        `${base}/tokens`
-          + `?contract=${contractAddress}`
-          + `&tokenId.in=${ids.join(',')}`
-          + `&select=tokenId,metadata.name`
-          + `&limit=${ids.length}`,
+        `${base}/tokens?contract=${contractAddress}`
+        + `&tokenId.in=${ids.join(',')}`
+        + '&select=tokenId,metadata.name'
+        + `&limit=${ids.length}`,
       ).catch(() => []);
-
-      const fromApi = new Map(
-        rows.map((r) => [Number(r.tokenId),
-          (r['metadata.name'] ?? r?.metadata?.name ?? r.name ?? '').trim() ]),
-      );
-
-      setTokOpts(
-        ids.map((id) => ({ id, name: fromApi.get(id) || fromLive.get(id) || '' })),
-      );
+      const fromApi = new Map(rows.map((r) => [
+        Number(r.tokenId),
+        (r['metadata.name'] ?? r?.metadata?.name ?? r.name ?? '').trim()]));
+      setTokOpts(ids.map((id) => ({ id, name: fromApi.get(id) || fromLive.get(id) || '' })));
     } finally { setLoadingTok(false); }
   }, [contractAddress, network]);
-
   useEffect(() => { void fetchTokens(); }, [fetchTokens]);
 
-  /*──────── local state ───────────────────*/
-  const [from,      setFrom]      = useState(walletAddress || '');
-  const [tokenIds,  setTokenIds]  = useState('');      /* multi id list input */
-  const [amount,    setAmount]    = useState('1');
-  const [recipsRaw, setRecipsRaw] = useState('');
-  const [busy,      setBusy]      = useState(false);
+  /*──── local state ────*/
+  const [sender,       setSender]       = useState(walletAddress || '');
+  const [rows,         setRows]         = useState([{ id:'', amount:'1', recips:'' }]);
+  const [sameRecips,   setSameRecips]   = useState(true);
+  const [globalRecips, setGlobalRecips] = useState('');
+  const [busy,         setBusy]         = useState(false);
+  const [previews,     setPreviews]     = useState([]);        // open preview tokenIds
 
-  /* preview meta – show when exactly 1 id chosen */
-  const firstId = useMemo(() => parseIds(tokenIds)[0] ?? '', [tokenIds]);
-  const [meta, setMeta] = useState(null);
-  const API = `${TZKT_API}/v1`;
-  const loadMeta = useCallback(async (id) => {
-    setMeta(null);
-    if (!contractAddress || id === '') return;
-    const [row] = await jFetch(
-      `${API}/tokens?contract=${contractAddress}&tokenId=${id}&limit=1`,
-    ).catch(() => []);
-    setMeta(row?.metadata || {});
-  }, [contractAddress]);
-  useEffect(() => { void loadMeta(firstId); }, [firstId, loadMeta]);
+  /*──── helpers ────*/
+  const addRow    = () => setRows((r) => [...r, { id:'', amount:'1', recips:'' }]);
+  const delRow    = (i) => setRows((r) => r.length === 1 ? r : r.filter((_,idx)=>idx!==i));
+  const openPrev  = (id) => setPreviews((p) => (p.includes(id) ? p : [...p, id]));
+  const closePrev = (id) => setPreviews((p) => p.filter((x) => x !== id));
 
-  /*──────── send TX ───────────────────────*/
+  /*──── validation + send ────*/
   const send = async () => {
-    /* validate sender + recipients */
-    if (!isTzAddr(from))                 return snack('Invalid sender');
-    const recips = splitVal(recipsRaw);
-    if (!recips.length)                  return snack('Add recipient(s)');
-    if (recips.some((a) => !isTzAddr(a)))return snack('Bad recipient address');
+    if (!isTzAddress(sender)) return toast('Invalid sender');
 
-    /* validate token‑ids & amount */
-    const ids = parseIds(tokenIds);
-    if (!ids.length)                     return snack('Add token‑ID(s)');
-    const amt   = Number(amount);
-    if (!Number.isInteger(amt) || amt <= 0) return snack('Bad amount');
+    const recipientsByRow = sameRecips
+      ? rows.map(() => globalRecips)
+      : rows.map((r) => r.recips);
 
-    if (!kit?.wallet)                    return snack('Connect wallet first','error');
+    if (recipientsByRow.some((r) => !splitList(r).length)) return toast('Add recipient(s)');
+    if (recipientsByRow.some((r) => splitList(r).some((a) => !isTzAddress(a))))
+      return toast('Bad recipient address');
+
+    for (const { id, amount } of rows) {
+      const nId = Number(id);
+      const nAm = Number(amount);
+      if (!Number.isInteger(nId) || nId < 0)  return toast(`Bad Token‑ID “${id}”`);
+      if (!Number.isInteger(nAm) || nAm <= 0) return toast(`Bad amount “${amount}”`);
+    }
+
+    if (!kit?.wallet) return toast('Connect wallet first', 'error');
 
     try {
       setBusy(true);
-
-      /* build txs: for each recipient × each id */
       const txs = [];
-      recips.forEach((to_) => {
-        ids.forEach((id) => txs.push({ to_, token_id:id, amount:amt }));
+      rows.forEach(({ id, amount }, idx) => {
+        splitList(recipientsByRow[idx])
+          .forEach((to_) => txs.push({ to_, token_id:Number(id), amount:Number(amount) }));
       });
-
       const c  = await kit.wallet.at(contractAddress);
-      const op = await c.methods.transfer([{ from_: from, txs }]).send();
-      snack('Transfer pending …','info');
+      const op = await c.methods.transfer([{ from_: sender, txs }]).send();
+      toast('Transfer pending …', 'info');
       await op.confirmation();
-      snack('Batch sent ✔','success');
-      setRecipsRaw(''); setTokenIds('');
+      toast('Batch sent ✔', 'success');
+      setRows([{ id:'', amount:'1', recips:'' }]);
+      setGlobalRecips('');
       onMutate();
-    } catch (e) {
-      snack(e?.message || 'Transaction failed','error');
-    } finally { setBusy(false); }
+    } catch (e) { toast(e?.message || 'Transaction failed', 'error'); }
+    finally    { setBusy(false); }
   };
 
-  /*──────── render UI ─────────────────────*/
+  /*──── UI ────*/
   return (
     <Wrap $level={$level}>
       <PixelHeading level={3}>Batch Transfer</PixelHeading>
-      <HelpBox>
-        Send <em>multiple Token‑IDs</em> or editions to any number of recipients
-        in a single FA‑2 call. List token‑IDs separated by commas / spaces, set
-        a per‑ID amount, paste recipient&nbsp;addresses — then&nbsp;
-        <strong>Send Batch</strong>.
-      </HelpBox>
+      <Help>
+        Add one row per Token‑ID/edition, choose amount, set recipients, then&nbsp;
+        <strong>Send Batch</strong>. Click&nbsp;<b>🔍</b>&nbsp;to preview metadata. All
+        rows share recipients by default.
+      </Help>
 
-      {/* sender */}
-      <Field>
+      {/* Sender */}
+      <Field style={{ maxWidth:'100%' }}>
         <label htmlFor="fromAddr">Sender address *</label>
         <PixelInput
           id="fromAddr"
           placeholder="tz1…"
-          value={from}
-          onChange={(e) => setFrom(e.target.value.trim())}
+          value={sender}
+          onChange={(e) => setSender(e.target.value.trim())}
         />
       </Field>
 
-      {/* token‑IDs + picker */}
-      <Picker style={{ marginTop: '.8rem' }}>
-        <Field>
-          <label htmlFor="tokIds">Token‑IDs *</label>
+      {/* Dynamic rows */}
+      <div style={{ marginTop:'.9rem' }}>
+        {rows.map((row, idx) => (
+          <Row key={`row-${idx}`}>
+            {/* Token‑ID & preview */}
+            <Field style={{ maxWidth:120 }}>
+              <label>Token‑ID *</label>
+              <div style={{ display:'flex', gap:'.4rem' }}>
+                <PixelInput
+                  placeholder="42"
+                  value={row.id}
+                  onChange={(e)=>{
+                    const v=e.target.value.replace(/\D/g,'');
+                    setRows((r)=>r.map((o,i)=>i===idx?{...o,id:v}:o));
+                  }}
+                  style={{ flex:1 }}
+                />
+                <PixelButton
+                  title="Preview metadata"
+                  disabled={!row.id}
+                  onClick={()=>openPrev(Number(row.id))}
+                  style={{ width:32 }}
+                >🔍</PixelButton>
+              </div>
+            </Field>
+
+            {/* Owned tokens dropdown */}
+            <Field style={{ maxWidth:180 }}>
+              <label>Owned Tokens</label>
+              <Picker>
+                <select
+                  style={{ width:'100%',height:32 }}
+                  disabled={loadingTok}
+                  onChange={(e)=>{
+                    const v=e.target.value;
+                    setRows((r)=>r.map((o,i)=>i===idx?{...o,id:v}:o));
+                  }}
+                  value={row.id}
+                >
+                  <option value="">
+                    {loadingTok ? 'Loading…' : tokOpts.length ? 'Select' : '— none —'}
+                  </option>
+                  {tokOpts.map(({ id, name })=>(
+                    <option key={id} value={id}>{name ? `${id} — ${name}` : id}</option>
+                  ))}
+                </select>
+                {loadingTok && <Spin />}
+              </Picker>
+            </Field>
+
+            {/* Amount */}
+            <Field style={{ maxWidth:100 }}>
+              <label>Amount *</label>
+              <PixelInput
+                type="number"
+                min="1"
+                value={row.amount}
+                onChange={(e)=>{
+                  const v=e.target.value.replace(/\D/g,'');
+                  setRows((r)=>r.map((o,i)=>i===idx?{...o,amount:v}:o));
+                }}
+              />
+            </Field>
+
+            {/* Per‑row recipients when not global */}
+            {!sameRecips && (
+              <Field style={{ flex:1 }}>
+                <label>Recipients *</label>
+                <PixelInput
+                  as="textarea"
+                  rows={1}
+                  placeholder="tz1… tz1…"
+                  value={row.recips}
+                  onChange={(e)=>{
+                    setRows((r)=>r.map((o,i)=>i===idx?{...o,recips:e.target.value}:o));
+                  }}
+                  /* hide scrollbar until needed */
+                  style={{ overflowY:'hidden' }}
+                  onFocus={(e)=>{ e.target.style.overflowY='auto'; }}
+                  onBlur ={(e)=>{ e.target.style.overflowY='hidden'; }}
+                />
+              </Field>
+            )}
+
+            {/* Remove row */}
+            <PixelButton
+              title="Remove row"
+              disabled={rows.length===1}
+              onClick={()=>delRow(idx)}
+              style={{ height:32 }}
+            >✖</PixelButton>
+          </Row>
+        ))}
+
+        {/* add row */}
+        <PixelButton onClick={addRow}>＋ Add Row</PixelButton>
+      </div>
+
+      {/* Global recipients */}
+      <div style={{ marginTop:'.9rem' }}>
+        <label style={{ display:'flex',alignItems:'center',gap:'.45rem' }}>
+          <input
+            type="checkbox"
+            checked={sameRecips}
+            onChange={(e) => setSameRecips(e.target.checked)}
+          />
+          Same recipients for all tokens
+        </label>
+        {sameRecips && (
           <PixelInput
-            id="tokIds"
-            placeholder="e.g. 1 2 42 100"
-            value={tokenIds}
-            onChange={(e) => setTokenIds(e.target.value)}
+            as="textarea"
+            rows={2}
+            placeholder="tz1… tz1… tz1…"
+            value={globalRecips}
+            onChange={(e)=>setGlobalRecips(e.target.value)}
+            style={{ marginTop:'.5rem', overflowY:'hidden' }}
+            onFocus={(e)=>{ e.target.style.overflowY='auto'; }}
+            onBlur ={(e)=>{ e.target.style.overflowY='hidden'; }}
           />
-        </Field>
-
-        <Field>
-          <label htmlFor="tokSelect">Owned Tokens</label>
-          <Box>
-            <select
-              id="tokSelect"
-              style={{ width:'100%',height:32 }}
-              disabled={loadingTok}
-              onChange={(e) => {
-                const v = e.target.value;
-                if (!v) return;
-                setTokenIds((prev) => {
-                  const set = new Set(parseIds(prev));
-                  set.add(Number(v));
-                  return [...set].join(' ');
-                });
-              }}
-            >
-              <option value="">
-                {loadingTok
-                  ? 'Loading…'
-                  : tokOpts.length ? 'Add token' : '— none —'}
-              </option>
-              {tokOpts.map(({ id, name }) => (
-                <option key={id} value={id}>
-                  {name ? `${id} — ${name}` : id}
-                </option>
-              ))}
-            </select>
-            {loadingTok && <Spin />}
-          </Box>
-        </Field>
-      </Picker>
-
-      {/* amount */}
-      <Field style={{ marginTop: '.8rem' }}>
-        <label htmlFor="amt">Amount each *</label>
-        <PixelInput
-          id="amt"
-          type="number"
-          min="1"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value.replace(/\D+/g, ''))}
-        />
-      </Field>
-
-      {/* recipients */}
-      <Field style={{ marginTop: '.8rem' }}>
-        <label htmlFor="recips">Recipients *</label>
-        <PixelInput
-          id="recips"
-          as="textarea"
-          rows={3}
-          placeholder="tz1… tz1… tz1…"
-          value={recipsRaw}
-          onChange={(e) => setRecipsRaw(e.target.value)}
-        />
-      </Field>
-
-      {/* preview (only when single id) */}
-      {firstId !== '' && (
-        <div style={{ marginTop: '1rem' }}>
-          <TokenMetaPanel
-            meta={meta}
-            tokenId={firstId}
-            contractAddress={contractAddress}
-          />
-        </div>
-      )}
+        )}
+      </div>
 
       {/* CTA */}
       <PixelButton
         disabled={busy}
-        style={{ marginTop: '1.2rem' }}
+        style={{ marginTop:'1.2rem' }}
         onClick={send}
       >
         {busy ? 'Sending…' : 'Send Batch'}
       </PixelButton>
+
+      {/* Preview windows */}
+      {previews.map((id)=>(
+        <TokenPreviewWindow
+          key={`prev-${id}`}
+          tokenId={id}
+          contractAddress={contractAddress}
+          onClose={()=>closePrev(id)}
+        />
+      ))}
     </Wrap>
   );
 }
-
-/* What changed & why (r907):
-   • **Multi‑Token‑ID support** – users can now input space/comma‑separated
-     lists; UI dropdown appends to list (no overwrite).  
-   • `parseIds()` ensures sanitised, unique positive ints.  
-   • Transfer builder generates one `txs` entry per (recipient × tokenId), fully
-     FA‑2‑compliant.  
-   • HelpBox, labels and validation updated; preview limited to first‑ID when
-     single‑selection for performance.  
-   • All lint warnings resolved; invariant I58/I60 untouched.
-*/
 /* EOF */

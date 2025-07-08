@@ -308,13 +308,14 @@ zerounbound/.eslintrc.cjs                       – ESLint ruleset; Imports: esl
 zerounbound/.gitignore                          – git ignore list; Imports:· Exports:·
 zerounbound/.prettierrc                         – Prettier config; Imports:· Exports: module.exports
 zerounbound/.yarnrc.yml                         – Yarn 4 settings; Imports:· Exports:·
+zerounbound/.yarn/install-state.gz              – Yarn install marker; Imports:· Exports:·
 zerounbound/.github/CODEOWNERS                 – repo ownership map; Imports:· Exports:·
 zerounbound/.github/PULL_REQUEST_TEMPLATE.md   – PR template; Imports:· Exports:·
 zerounbound/.github/ci.yml                     – CI workflow; Imports:· Exports:·
 zerounbound/next-env.d.ts                       – Next.js TS globals; Imports:· Exports:·
 zerounbound/bundle.config.json                  – bundle glob map (I14); Imports:· Exports:·
 zerounbound/LICENSE                             – MIT licence text; Imports:· Exports:·
-zerounbound/README_contract_management.md       – project overview; Imports:· Exports:·
+zerounbound/README_contract_management.md (retired 512c275)       – former overview; Imports:· Exports:·
 zerounbound/next.config.js                      – Next.js config; Imports: next-mdx,@next/font; Exports: module.exports
 zerounbound/jest.config.cjs                    – Jest config; Imports:· Exports: module.exports
 zerounbound/package.json                        – NPM manifest; Imports:· Exports: scripts,dependencies

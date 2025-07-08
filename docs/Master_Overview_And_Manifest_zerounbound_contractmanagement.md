@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────────
 Developed by @jams2blues – ZeroContract Studio
 File:    docs/Master_Overview_And_Manifest_zerounbound_contractmanagement.md
-Rev :    r863   2025‑09‑04 UTC
-Summary: add scripts/codex-setup.sh path + CI note (§4 · §6)
+Rev :    r864   2025‑09‑05 UTC
+Summary: add marketplace UI paths + invariant
 ──────────────────────────────────────────────────────────────────*/
 
 /*════════════════════════════════════════════════════════════════
@@ -63,11 +63,13 @@ ZeroEngine API (Node 22 + Taquito) → ZeroContracts v4 / v4a + Zer
 • src/pages/explore/[[...filter]].jsx … marketplace grid loader  
 • src/hooks/useConsent.js … persistent NSFW / flash / script flags  
 • src/utils/hazards.js … MIME‑level risk detection  
-• src/utils/decodeHexFields.js … deep hex‑field UTF‑8 repair (I107) 
-• src/ui/TokenIdSelect.jsx … live token‑id dropdown filter (I108) 
-• src/core/batch.js … size guards, sliceHex, resumable checkpoint helpers (I60)  
-• src/core/feeEstimator.js … shared RPC‑safe estimator (I85)  
-• src/contexts/WalletContext.js … silent restore + explicit reveal (I58‑I59)  
+• src/utils/decodeHexFields.js … deep hex‑field UTF‑8 repair (I107)
+• src/ui/TokenIdSelect.jsx … live token‑id dropdown filter (I108)
+• src/ui/MarketplaceBar.jsx … token-detail action bar
+• src/core/batch.js … size guards, sliceHex, resumable checkpoint helpers (I60)
+• src/core/feeEstimator.js … shared RPC‑safe estimator (I85)
+• src/core/marketplace.js … ZeroSum contract utils
+• src/contexts/WalletContext.js … silent restore + explicit reveal (I58‑I59)
 • src/hooks/useViewportUnit.js … dynamic `--vh` var for mobile fit  
 • src/hooks/useHeaderHeight.js … live header height calc  
 • src/ui/Entrypoints/AppendArtifactUri.jsx … resumable multi‑slice uploader  
@@ -290,7 +292,8 @@ I110 [F] **Integrity badge standardisation** — every component that
       presents token or collection media **must** render an
       `<IntegrityBadge status=…/>`; the adjacent tooltip / title
       conveys the long‑form label from `constants/integrityBadges.js`.
-I111 [F,C,E,I] Don't use "global" in any comments or line summaries, it messes with yarn lint and throws false warnings  
+I111 [F,C,E,I] Don't use "global" in any comments or line summaries, it messes with yarn lint and throws false warnings
+I112 [F,E] Marketplace dialogs (buy/list/offer) must call `feeEstimator.js` and display `<OperationOverlay/>` before dispatching any transaction.
 
 /──────────────────────────────────────────────────────────────────────────────
 3 · reserved for future research notes
@@ -378,6 +381,7 @@ zerounbound/src/contexts/WalletContext.js       – Beacon wallet ctx; Imports: 
 zerounbound/src/core/batch.js                   – batch ops (v1‑v4); Imports: @taquito/utils,net.js; Exports: forgeBatch,sendBatch,buildAppendTokenMetaCalls,sliceHex,splitPacked
 zerounbound/src/core/batchV4a.js                – v4a‑specific batch ops; Imports: @taquito/taquito; Exports: SLICE_SAFE_BYTES,sliceHex,buildAppendTokenMetaCalls
 zerounbound/src/core/feeEstimator.js            – chunk‑safe fee/burn estimator; Imports: @taquito/taquito; Exports: estimateChunked,calcStorageMutez,toTez
+zerounbound/src/core/marketplace.js             – ZeroSum helpers; Imports: net.js,@taquito/taquito; Exports: buildBuyParams,buildListParams,buildOfferParams
 zerounbound/src/core/net.js                     – jFetch with retry (I40); Imports: axios; Exports: jFetch
 zerounbound/src/core/validator.js               – JSON‑schema helpers; Imports: ajv; Exports: validateContract,validateToken
 
@@ -394,7 +398,7 @@ zerounbound/src/hooks/useTxEstimate.js          – dry‑run gas/fee; Imports: 
 ╭── src/pages (Next.js) ─────────────────────────────────────────────────────╮
 zerounbound/src/pages/contracts/[addr].jsx      – collection detail page; Imports: ContractMetaPanelContracts,TokenCard,hazards.js; Exports: ContractPage
 zerounbound/src/pages/explore/[[...filter]].jsx – dynamic explore grid; Imports: CollectionCard,useConsent; Exports: Explore
-zerounbound/src/pages/explore/search.jsx        – advanced token search; Imports: React{useEffect,useState,useCallback},useRouter,styledPkg,ExploreNav,RenderMedia,PixelButton,TokenMetaPanel,useConsent,detectHazards,jfetch; Exports: 
+zerounbound/src/pages/explore/search.jsx (retired 10d92ac)        – former advanced token search; Imports:· Exports:·
 zerounbound/src/pages/tokens/[addr]/[tokenId].jsx – token-detail page; Imports: RenderMedia,hazards,useConsent; Exports: TokenDetailPage
 zerounbound/src/pages/_app.js                   – root providers; Imports: ThemeContext,WalletContext,GlobalStyles; Exports: MyApp
 zerounbound/src/pages/_document.js              – custom document (I20); Imports: next/document; Exports: default class
@@ -411,6 +415,7 @@ zerounbound/src/styles/palettes.json            – theme palettes; Imports:· E
 zerounbound/src/ui/CollectionCard.jsx           – responsive 8‑bit contract card; Imports: React,hazards,useConsent,RenderMedia; Exports: CollectionCard
 zerounbound/src/ui/CRTFrame.jsx                 – CRT screen border; Imports: react; Exports: CRTFrame
 zerounbound/src/ui/ExploreNav.jsx               – sticky explore nav bar; Imports: PixelButton; Exports: ExploreNav
+zerounbound/src/ui/FiltersPanel.jsx             – explore filters sidebar; Imports: React; Exports: FiltersPanel
 zerounbound/src/ui/Header.jsx                   – top nav + network switch; Imports: react,useWallet,useTheme; Exports: Header
 zerounbound/src/ui/Layout.jsx                   – app shell & scroll‑lock; Imports: Header,useViewportUnit,useHeaderHeight; Exports: Layout
 zerounbound/src/ui/LoadingSpinner.jsx           – 8‑bit spinner; Imports: react; Exports: LoadingSpinner
@@ -432,6 +437,10 @@ zerounbound/src/ui/ContractCarousels.jsx        – live contract cards; Imports
 zerounbound/src/ui/ContractMetaPanel.jsx        – contract stats card; Imports: react,styled-components; Exports: ContractMetaPanel
 zerounbound/src/ui/ContractMetaPanelContracts.jsx – banner panel on /contracts; Imports: React,RenderMedia; Exports: ContractMetaPanelContracts
 zerounbound/src/ui/DeployCollectionForm.jsx     – collection deploy UI; Imports: react,validator,OperationOverlay; Exports: DeployCollectionForm
+zerounbound/src/ui/BuyDialog.jsx                – buy confirmation dialog; Imports: React,OperationConfirmDialog,feeEstimator.js; Exports: BuyDialog
+zerounbound/src/ui/ListTokenDialog.jsx          – listing dialog; Imports: React,OperationOverlay,PixelInput; Exports: ListTokenDialog
+zerounbound/src/ui/MarketplaceBar.jsx           – token action bar; Imports: React,PixelButton; Exports: MarketplaceBar
+zerounbound/src/ui/GlobalSnackbar.jsx           – global toast host; Imports: React; Exports: GlobalSnackbar
 zerounbound/src/ui/MakeOfferDialog.jsx          - add amount and make your bid; Imports:React,styledPkg,PixelInput,PixelButton,useWalletContext Export:MakeOfferDialog
 zerounbound/src/ui/TokenCard.jsx                – token preview card; Imports: React,hazards,useConsent; Exports: TokenCard
 zerounbound/src/ui/TokenIdSelect.jsx            – live id dropdown; Imports: styled-components; Exports: TokenIdSelect

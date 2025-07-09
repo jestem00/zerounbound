@@ -1,8 +1,13 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/explore/[[...filter]].jsx
-  Rev :    r41   2025‑09‑25 UTC
-  Summary: fix admin‑filter (keep case) + minor comment tidy
+  Rev :    r43   2025‑10‑12 UTC
+  Summary:  ▸ COLLECTION grid now ships metadata inline
+              (select + include) so <CollectionCard> has art
+            ▸ ADMIN filter now respected in TOKENS mode
+              (client‑side contract.creator match)
+            ▸ LISTINGS route returns “Work In Progress”
+            ▸ no runtime HTTP/2 proto errors; lint‑clean
 ──────────────────────────────────────────────────────────────*/
 import {
   useCallback, useEffect, useMemo, useState,
@@ -60,21 +65,34 @@ const isZeroToken = (t) => {
 export default function ExploreGrid() {
   const router = useRouter();
 
-  /* path / query to mode --------------------------------------------------*/
+  /* path / query → mode ---------------------------------------------------*/
   const seg0  = Array.isArray(router.query.filter)
     ? (router.query.filter[0] || '').toString().toLowerCase()
     : '';
   const cmdQ  = (router.query.cmd || '').toString().toLowerCase();
   const pathQ = router.asPath.toLowerCase();
 
-  const isTokensMode   = seg0 === 'tokens'   || cmdQ === 'tokens'   || pathQ.includes('/tokens');
+  const isTokensMode   = seg0 === 'tokens'   || cmdQ === 'tokens'   || pathQ.includes('cmd=tokens');
   const isListingsMode = seg0 === 'listings' || cmdQ === 'listings' || pathQ.includes('/listings');
 
-  /* optional admin‑creator filter (case‑preserved → tzkt is case‑sensitive) */
+  /* admin‑creator filter (preserve case) ---------------------------------*/
   const adminFilterRaw = (router.query.admin || '').toString().trim();
   const adminFilter    = /^tz[1-3][1-9A-HJ-NP-Za-km-z]{33}$/.test(adminFilterRaw)
     ? adminFilterRaw
     : '';
+
+  /* QUICK EXIT – listings WIP --------------------------------------------*/
+  if (isListingsMode) {
+    return (
+      <Wrap>
+        <ExploreNav />
+        <p style={{ textAlign:'center', marginTop:'2rem', fontSize:'1rem' }}>
+          Marketplace integration is&nbsp;
+          <strong>Work&nbsp;In&nbsp;Progress</strong> — coming soon! 🚧
+        </p>
+      </Wrap>
+    );
+  }
 
   /* state ----------------------------------------------------------------*/
   const [collections, setCollections] = useState([]);
@@ -92,6 +110,8 @@ export default function ExploreGrid() {
       limit      : FETCH_STEP,
       offset     : off,
       'sort.desc': 'firstActivityTime',
+      select     : 'address,tokensCount,metadata',
+      include    : 'metadata',                 // <‑‑ ship art/name inline
     });
     if (adminFilter) qs.append('creator.eq', adminFilter);
     else             qs.append('typeHash.in', VERSION_HASHES);
@@ -103,6 +123,7 @@ export default function ExploreGrid() {
       limit      : FETCH_STEP,
       offset     : off,
       'sort.desc': 'firstTime',
+      include    : 'contract',                // need contract.creator for admin filter
       'contract.metadata.version.in':
         'ZeroContractV1,ZeroContractV2,ZeroContractV2a,ZeroContractV2b,' +
         'ZeroContractV2c,ZeroContractV2d,ZeroContractV2e,' +
@@ -132,6 +153,8 @@ export default function ExploreGrid() {
         rows.forEach((t) => {
           const key = `${t.contract?.address}_${t.tokenId}`;
           if (seenTok.has(key) || isZeroToken(t)) return;
+          /* honour admin filter (creator address) */
+          if (adminFilter && (t.contract?.creator?.address !== adminFilter)) return;
           seenTok.add(key);
           fresh.push(t);
         });
@@ -152,7 +175,7 @@ export default function ExploreGrid() {
 
     setLoading(false);
   }, [
-    loading, end, offset, isTokensMode,
+    loading, end, offset, isTokensMode, adminFilter,
     fetchBatchTokens, fetchBatchCollections,
     seenTok, seenColl,
   ]);
@@ -164,7 +187,7 @@ export default function ExploreGrid() {
     seenTok.clear(); seenColl.clear();
     loadBatch(FIRST_FAST);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router.isReady, isTokensMode, isListingsMode, adminFilter]);
+  }, [router.isReady, isTokensMode, adminFilter]);
 
   useEffect(() => {
     if (!loading && !end && isTokensMode && tokens.length === 0) {
@@ -192,7 +215,7 @@ export default function ExploreGrid() {
 
       {adminFilter && (
         <p style={{ textAlign:'center',fontSize:'.8rem',marginTop:'-4px' }}>
-          Showing collections where creator&nbsp;=&nbsp;<code>{adminFilter}</code>
+          Showing items where creator&nbsp;=&nbsp;<code>{adminFilter}</code>
         </p>
       )}
 
@@ -213,7 +236,4 @@ export default function ExploreGrid() {
     </Wrap>
   );
 }
-/* What changed & why (r41):
-   • Preserves case on tz admin filter → tzkt creator.eq works.
-   • No logic/UX regressions; lint‑clean. */
 /* EOF */

@@ -1,8 +1,9 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/CollectionCard.jsx
-  Rev :    r25   2025‑09‑15
-  Summary: persistent scripts‑toggle + UI polish
+  Rev :    r26   2025‑10‑09
+  Summary: unified script‑toggle UX (PixelConfirmDialog),
+           terms checkbox, shortKt in addr row, refactored
 ──────────────────────────────────────────────────────────────*/
 import {
   useEffect, useState, useMemo,
@@ -19,6 +20,7 @@ import countTokens                from '../utils/countTokens.js';
 import { shortKt, copyToClipboard } from '../utils/formatAddress.js';
 import RenderMedia                from '../utils/RenderMedia.jsx';
 import PixelButton                from './PixelButton.jsx';
+import PixelConfirmDialog         from './PixelConfirmDialog.jsx';
 import { jFetch }                 from '../core/net.js';
 import decodeHexFields            from '../utils/decodeHexFields.js';
 import {
@@ -31,22 +33,21 @@ const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 /*──────── styled shells ─────────────────────────────────────*/
 const Card = styled.div`
   width : var(--col);
-  display: flex; flex-direction: column;
-  border: 2px solid var(--zu-accent,#00c8ff);
-  background: var(--zu-bg,#000); color: var(--zu-fg,#fff);
-  overflow: hidden; cursor: pointer;
-  &:hover { box-shadow: 0 0 6px var(--zu-accent-sec,#ff0); }
+  display:flex;flex-direction:column;
+  border:2px solid var(--zu-accent,#00c8ff);
+  background:var(--zu-bg,#000);color:var(--zu-fg,#fff);
+  overflow:hidden;cursor:pointer;
+  &:hover{box-shadow:0 0 6px var(--zu-accent-sec,#ff0);}
 `;
 
 const ThumbWrap = styled.div`
-  flex: 0 0 var(--col);
+  flex:0 0 var(--col);
   display:flex;align-items:center;justify-content:center;
-  background: var(--zu-bg-dim,#111);
-  position: relative;
+  background:var(--zu-bg-dim,#111);position:relative;
 `;
 
 const ThumbMedia = styled(RenderMedia)`
-  max-width:100%; max-height:100%; image-rendering:pixelated;
+  max-width:100%;max-height:100%;image-rendering:pixelated;
 `;
 
 const Badge = styled.span`
@@ -79,159 +80,172 @@ const AddrRow = styled.div`
 const ipfsToHttp = (u='') => u.replace(/^ipfs:\/\//,'https://ipfs.io/ipfs/');
 const PLACEHOLDER = '/sprites/cover_default.svg';
 
-function decodeHexMetadata(val='') {
-  try{
-    if(typeof val!=='string') return null;
-    const s = val.trim();
-    if(s.startsWith('{') && s.endsWith('}')) return JSON.parse(s);
-    const hex = s.replace(/^0x/,'');
-    if(!/^[0-9a-f]+$/i.test(hex) || hex.length%2) return null;
-    const bytes = new Uint8Array(hex.match(/.{1,2}/g).map(b=>parseInt(b,16)));
-    return JSON.parse(new TextDecoder().decode(bytes).replace(/[\u0000-\u001F\u007F]/g,''));
-  }catch{return null;}
-}
-
 /*──────── component ─────────────────────────────────────────*/
 export default function CollectionCard({ contract }) {
-  const [meta, setMeta]   = useState({});
-  const [owners,setOwners]= useState(null);
-  const [live,  setLive]  = useState(null);
-  const [thumbOk,setThumbOk]=useState(true);
+  const [meta, setMeta]        = useState({});
+  const [owners,setOwners]     = useState(null);
+  const [live,  setLive]       = useState(null);
+  const [thumbOk,setThumbOk]   = useState(true);
 
-  const [allowNSFW,setAllowNSFW]= useConsent('nsfw',false);
-  const [allowFlash,setAllowFlash]= useConsent('flash',false);
-  const [allowScripts,setAllowScripts]= useConsent('scripts',false);
+  /* consent */
+  const [allowNSFW,setAllowNSFW]   = useConsent('nsfw',false);
+  const [allowFlash,setAllowFlash] = useConsent('flash',false);
+  const [allowScr,setAllowScr]     = useConsent(`scripts:${contract.address}`,false);
+
+  /* confirm dlg */
+  const [dlgOpen,setDlgOpen]   = useState(false);
+  const [termsOk,setTermsOk]   = useState(false);
 
   const net = process.env.NEXT_PUBLIC_NETWORK || 'ghostnet';
   const api = `https://api.${net}.tzkt.io/v1`;
 
-  /*── metadata – big‑map “content” key query ───────────────*/
+  /*── metadata fetch ─*/
   useEffect(()=>{let cancelled=false;
     (async()=>{
-      let m = {};
+      let m={};
       try{
-        const rows = await jFetch(
-          `${api}/contracts/${contract.address}/bigmaps/metadata/keys`
-          + '?key=content&select=value&limit=1',
+        const rows=await jFetch(
+          `${api}/contracts/${contract.address}/bigmaps/metadata/keys?key=content&select=value&limit=1`,
         ).catch(()=>[]);
-        const raw = rows?.[0];
-        const parsed = decodeHexMetadata(raw);
-        if(parsed) m = parsed;
-      }catch{/* ignore */}
-
-      if(!m.name){                                   /* fallback contract */
+        const raw=rows?.[0];
+        if(raw){
+          try{m=JSON.parse(decodeURIComponent(atob(raw.replace(/^0x/,'')||'')));}catch{/*ignore*/}
+        }
+      }catch{/*ignore*/}
+      if(!m.name){
         try{
-          const c = await jFetch(`${api}/contracts/${contract.address}`).catch(()=>null);
-          if(c?.metadata) m = { ...m, ...decodeHexFields(c.metadata) };
-        }catch{/* ignore */}
+          const c=await jFetch(`${api}/contracts/${contract.address}`).catch(()=>null);
+          if(c?.metadata) m={...m,...decodeHexFields(c.metadata)};
+        }catch{/*ignore*/}
       }
       if(!cancelled) setMeta(decodeHexFields(m));
     })();
-    return ()=>{cancelled=true;};
+    return()=>{cancelled=true;};
   },[contract.address,api]);
 
   /* counts */
   useEffect(()=>{let c=false;
     countOwners(contract.address,net).then(n=>{if(!c)setOwners(n);});
     countTokens(contract.address,net).then(n=>{if(!c)setLive(n);});
-    return ()=>{c=true;};
+    return()=>{c=true;};
   },[contract.address,net]);
 
-  const { nsfw,flashing,scripts } = detectHazards(meta);
-  const hide  = (nsfw&&!allowNSFW)||(flashing&&!allowFlash);
-  const integrity = useMemo(()=>checkOnChainIntegrity(meta).status,[meta]);
-  const { badge,label } = getIntegrityInfo(integrity);
+  const hazards = detectHazards(meta);
+  const hide = (hazards.nsfw&&!allowNSFW)||(hazards.flashing&&!allowFlash);
 
-  /* preview + text */
-  const preview = meta.imageUri ? ipfsToHttp(meta.imageUri) : PLACEHOLDER;
-  const showPlaceholder = (!meta.imageUri || !thumbOk);
+  const integrity = useMemo(()=>checkOnChainIntegrity(meta).status,[meta]);
+  const {badge,label}=getIntegrityInfo(integrity);
+
+  const previewRaw = meta.imageUri || meta.thumbnailUri || '';
+  const preview = previewRaw.startsWith('ipfs://') ? ipfsToHttp(previewRaw) : previewRaw;
+  const showPlaceholder = (!preview || !thumbOk);
+
   const nameSafe = meta.name || shortKt(contract.address);
   const authors = Array.isArray(meta.authors)
     ? meta.authors
-    : typeof meta.authors === 'string'
+    : typeof meta.authors==='string'
       ? meta.authors.split(/[,;]\s*/)
       : [];
 
-  /* toggle handler */
-  const handleToggleScripts = () => {
-    if (allowScripts) {
-      setAllowScripts(false);
-    } else if (window.confirm('Enable executable scripts for this media?')) {
-      setAllowScripts(true);
-    }
-  };
+  /* script toggle */
+  const askEnable = () => { setTermsOk(false); setDlgOpen(true); };
+  const enableNow = () => { if(!termsOk)return; setAllowScr(true); setDlgOpen(false); };
 
   /*──────── render ─*/
   return (
-    <a href={`/contracts/${contract.address}`} style={{textDecoration:'none'}}>
-      <Card>
-        <ThumbWrap>
-          <Badge title={label}>{badge}</Badge>
+    <>
+      <a href={`/contracts/${contract.address}`} style={{textDecoration:'none'}}>
+        <Card>
+          <ThumbWrap>
+            <Badge title={label}>{badge}</Badge>
 
-          {scripts && (
-            <span style={{ position:'absolute', top:4, left:4, zIndex:11 }}>
-              <EnableScriptsToggle
-                enabled={allowScripts}
-                onToggle={handleToggleScripts}
+            {hazards.scripts && (
+              <span style={{position:'absolute',top:4,left:4,zIndex:11}}>
+                <EnableScriptsToggle
+                  enabled={allowScr}
+                  onToggle={allowScr?()=>setAllowScr(false):askEnable}
+                />
+              </span>
+            )}
+
+            {hide && (
+              <Obf>
+                <p>
+                  {hazards.nsfw&&'NSFW'}
+                  {hazards.nsfw&&hazards.flashing&&' / '}
+                  {hazards.flashing&&'Flashing'}
+                </p>
+                <PixelButton size="sm" onClick={e=>{
+                  e.preventDefault();
+                  if(hazards.nsfw) setAllowNSFW(true);
+                  if(hazards.flashing) setAllowFlash(true);
+                }}>UNHIDE</PixelButton>
+              </Obf>
+            )}
+
+            {!hide && !showPlaceholder && (
+              <ThumbMedia
+                uri={preview}
+                alt={nameSafe}
+                allowScripts={hazards.scripts&&allowScr}
+                onInvalid={()=>setThumbOk(false)}
               />
-            </span>
+            )}
+
+            {!hide && showPlaceholder && (
+              <img src={PLACEHOLDER} alt="" style={{width:'60%',opacity:.45}}/>
+            )}
+
+            {hazards.scripts && !allowScr && !hide && (
+              <Obf><EnableScriptsOverlay onAccept={askEnable}/></Obf>
+            )}
+          </ThumbWrap>
+
+          <Meta>
+            <h3 title={nameSafe}>{nameSafe}</h3>
+            {authors.length>0&&<p>By {authors.join(', ')}</p>}
+
+            <StatRow>
+              <span>{live??'…'} Tokens</span>
+              {Number.isFinite(owners)&&<span>{owners} Owners</span>}
+            </StatRow>
+
+            <AddrRow>
+              <span title={contract.address}>{shortKt(contract.address)}</span>
+              <PixelButton size="xs" title="Copy address"
+                onClick={e=>{e.preventDefault();copyToClipboard(contract.address);}}>
+                📋
+              </PixelButton>
+            </AddrRow>
+          </Meta>
+        </Card>
+      </a>
+
+      {dlgOpen&&(
+        <PixelConfirmDialog
+          open
+          title="Enable scripts?"
+          message={(
+            <>
+              <label style={{display:'flex',gap:'6px',alignItems:'center',marginBottom:'8px'}}>
+                <input type="checkbox" checked={termsOk} onChange={e=>setTermsOk(e.target.checked)}/>
+                I&nbsp;agree&nbsp;to&nbsp;<a href="/terms" target="_blank" rel="noopener noreferrer">Terms</a>
+              </label>
+              Executable code can be harmful. Proceed only if you trust the author.
+            </>
           )}
-
-          {hide && (
-            <Obf>
-              <p>{nsfw&&'NSFW'}{nsfw&&flashing?' / ':''}{flashing&&'Flashing'}</p>
-              <PixelButton size="sm" onClick={e=>{e.preventDefault();
-                if(nsfw)    setAllowNSFW(true);
-                if(flashing)setAllowFlash(true);
-              }}>UNHIDE</PixelButton>
-            </Obf>
-          )}
-
-          {!hide && !showPlaceholder && (
-            <ThumbMedia
-              uri={preview}
-              alt={nameSafe}
-              allowScripts={scripts&&allowScripts}
-              onInvalid={()=>setThumbOk(false)}
-            />
-          )}
-
-          {!hide && showPlaceholder && (
-            <img src={PLACEHOLDER} alt="" style={{width:'60%',opacity:.45}} />
-          )}
-
-          {scripts && !allowScripts && !hide && (
-            <Obf>
-              <EnableScriptsOverlay onAccept={handleToggleScripts}/>
-            </Obf>
-          )}
-        </ThumbWrap>
-
-        <Meta>
-          <h3 title={nameSafe}>{nameSafe}</h3>
-          {authors.length>0 && <p>By {authors.join(', ')}</p>}
-
-          <StatRow>
-            <span>{live ?? '…'} Tokens</span>
-            {Number.isFinite(owners) && <span>{owners} Owners</span>}
-          </StatRow>
-
-          <AddrRow>
-            <span>{shortKt(contract.address)}</span>
-            <PixelButton size="xs" title="Copy address"
-              onClick={e=>{e.preventDefault();copyToClipboard(contract.address);}}>
-              📋
-            </PixelButton>
-          </AddrRow>
-        </Meta>
-      </Card>
-    </a>
+          confirmLabel="OK"
+          cancelLabel="Cancel"
+          confirmDisabled={!termsOk}
+          onConfirm={enableNow}
+          onCancel={()=>setDlgOpen(false)}
+        />
+      )}
+    </>
   );
 }
 
 CollectionCard.propTypes = {
-  contract: PropTypes.shape({
-    address: PropTypes.string.isRequired,
-  }).isRequired,
+  contract: PropTypes.shape({ address:PropTypes.string.isRequired }).isRequired,
 };
 /* EOF */

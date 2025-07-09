@@ -45,7 +45,8 @@
         "src/ui/ListTokenDialog.jsx",
         "src/ui/MarketplaceBar.jsx",
         "src/core/marketplace.js",
-        "src/ui/GlobalSnackbar.jsx"
+        "src/ui/GlobalSnackbar.jsx",
+        "src/ui/MAINTokenMetaPanel.jsx"
       ]
     },
     

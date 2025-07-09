@@ -1,117 +1,203 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/tokens/[addr]/[tokenId].jsx
-  Rev :    r1    2025‑09‑14 UTC
-  Summary: new canonical token‑detail route (moved from /largeview)
+  Rev :    r866   2025‑10‑09
+  Summary: standalone, lint‑clean token detail page
+           (no changes to legacy TokenMetaPanel.jsx)
 ──────────────────────────────────────────────────────────────*/
-import React, { useEffect, useState, useCallback } from 'react';
-import { useRouter } from 'next/router';
-import styledPkg     from 'styled-components';
-import ExploreNav    from '../../../ui/ExploreNav.jsx';
-import RenderMedia    from '../../../utils/RenderMedia.jsx';
-import PixelButton    from '../../../ui/PixelButton.jsx';
-import TokenMetaPanel from '../../../ui/TokenMetaPanel.jsx';
-import useConsent     from '../../../hooks/useConsent.js';
-import detectHazards  from '../../../utils/hazards.js';
-import { jFetch }     from '../../../core/net.js';
+import React, {
+  useEffect, useState, useCallback, useMemo,
+}                           from 'react';
+import { useRouter }        from 'next/router';
+import styledPkg            from 'styled-components';
+
+import ExploreNav           from '../../../ui/ExploreNav.jsx';
+import PixelButton          from '../../../ui/PixelButton.jsx';
+import RenderMedia          from '../../../utils/RenderMedia.jsx';
+import FullscreenModal      from '../../../ui/FullscreenModal.jsx';
+import MAINTokenMetaPanel   from '../../../ui/MAINTokenMetaPanel.jsx';
+import detectHazards        from '../../../utils/hazards.js';
+import useConsent           from '../../../hooks/useConsent.js';
+import { useWalletContext } from '../../../contexts/WalletContext.js';
+import { jFetch }           from '../../../core/net.js';
+import { TZKT_API }         from '../../../config/deployTarget.js';
+import decodeHexFields, {
+  decodeHexJson,
+}                           from '../../../utils/decodeHexFields.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
-/*──────── styled shells ─────────────────────────────────────*/
-const Wrap = styled.div`
-  position:fixed;inset:0;background:var(--zu-bg,#000);color:var(--zu-fg,#fff);
-  display:flex;flex-direction:column;align-items:center;justify-content:center;
-  gap:1rem;overflow:auto;padding:1rem;
+/*──────── layout shells ─────────────────────────────────────*/
+const Page = styled.div`
+  display:flex;flex-direction:column;width:100%;
+  min-height:calc(var(--vh) - var(--hdr));
 `;
-const MediaBox = styled.div`
-  max-width:calc(100vw - 2rem);max-height:70vh;
-  display:flex;align-items:center;justify-content:center;
+
+const Grid = styled.main`
+  flex:1;display:grid;gap:1.5rem;
+  padding:1.5rem clamp(1rem,4vw,2rem);
+  max-width:1920px;margin:0 auto;width:100%;
+  grid-template-columns:1fr;
+
+  @media(min-width:1024px){ grid-template-columns:minmax(0,1fr) 420px; }
+  @media(min-width:1440px){ grid-template-columns:minmax(0,1fr) 480px; }
 `;
-const Obf = styled.div`
-  position:absolute;inset:0;background:rgba(0,0,0,.85);
+
+const MediaWrap = styled.div`
+  position:relative;display:flex;align-items:center;justify-content:center;
+  max-height:80vh;width:100%;
+`;
+
+const Obscure = styled.div`
+  position:absolute;inset:0;background:rgba(0,0,0,.88);
   display:flex;flex-direction:column;align-items:center;justify-content:center;
-  text-align:center;font-size:.85rem;gap:12px;z-index:3;
+  gap:12px;text-align:center;font-size:.85rem;z-index:4;
   p{margin:0;width:80%;}
 `;
 
-/*──────── component ────────────────────────────────────────*/
+const FSBtn = styled(PixelButton)`
+  position:absolute;bottom:8px;right:8px;opacity:.65;z-index:5;
+  &:hover{opacity:1;}
+`;
+
+/*──────── helpers ───────────────────────────────────────────*/
+const apiBase = TZKT_API.includes('ghostnet')
+  ? 'https://api.ghostnet.tzkt.io/v1'
+  : 'https://api.tzkt.io/v1';
+
+/*──────── component ─────────────────────────────────────────*/
 export default function TokenDetailPage() {
   const router = useRouter();
   const { addr, tokenId } = router.query;
+  const { address: walletAddr } = useWalletContext() || {};
 
-  const [token, setToken] = useState(null);
+  const [token,      setToken]      = useState(null);
+  const [collection, setCollection] = useState(null);
+  const [loading,    setLoading]    = useState(true);
+  const [fsOpen,     setFsOpen]     = useState(false);
 
-  const [allowNSFW,    setAllowNSFW]    = useConsent('nsfw', false);
-  const [allowFlash,   setAllowFlash]   = useConsent('flash', false);
-  const [allowScripts, setAllowScripts] = useConsent('scripts', false);
+  const [allowNSFW,  setAllowNSFW ] = useConsent('nsfw',  false);
+  const [allowFlash, setAllowFlash] = useConsent('flash', false);
+  const scriptKey    = useMemo(() => `scripts:${addr}:${tokenId}`, [addr, tokenId]);
+  const [allowJs,    setAllowJs  ] = useConsent(scriptKey, false);
 
-  useEffect(() => { let cancel = false;
+  /*──── data fetch ────*/
+  useEffect(() => {
+    let cancelled = false;
     if (!addr || tokenId === undefined) return;
-    const base = 'https://api.ghostnet.tzkt.io/v1';
+
     (async () => {
+      setLoading(true);
       try {
-        const rows = await jFetch(
-          `${base}/tokens?contract=${addr}&tokenId=${tokenId}&limit=1`,
-        );
-        if (!cancel) setToken(rows[0] || null);
-      } catch {}
+        const [[tokRow], collRow] = await Promise.all([
+          jFetch(`${apiBase}/tokens?contract=${addr}&tokenId=${tokenId}&limit=1`)
+            .catch(() => []),
+          jFetch(`${apiBase}/contracts/${addr}`).catch(() => null),
+        ]);
+
+        if (cancelled) return;
+
+        if (tokRow) {
+          const meta = typeof tokRow.metadata === 'string'
+            ? decodeHexFields(decodeHexJson(tokRow.metadata) || {})
+            : decodeHexFields(tokRow.metadata || {});
+          setToken({ ...tokRow, metadata: meta });
+        }
+
+        if (collRow) {
+          /* ensure collection metadata has readable fields */
+          const collMeta = decodeHexFields(collRow.metadata || {});
+          setCollection({ ...collRow, metadata: collMeta });
+        }
+      } finally { if (!cancelled) setLoading(false); }
     })();
-    return () => { cancel = true; };
+
+    return () => { cancelled = true; };
   }, [addr, tokenId]);
 
-  const onConsent = useCallback((label, setter) => {
-    const ok = window.confirm(`Content flagged ${label}. Show anyway?`);
-    if (ok) setter(true);
+  const meta = token?.metadata || {};
+  const hazards = detectHazards(meta);
+  const hidden  = (hazards.nsfw     && !allowNSFW)
+               || (hazards.flashing && !allowFlash);
+
+  const mediaUri = meta.artifactUri
+    || meta.displayUri || meta.imageUri || '';
+
+  const confirmReveal = useCallback((flag, setter) => {
+    // eslint-disable-next-line no-alert
+    if (window.confirm(`Content flagged ${flag}. Reveal anyway?`)) setter(true);
   }, []);
 
-  if (!token) return <p style={{ textAlign:'center', marginTop:'4rem' }}>Loading…</p>;
-
-  const meta = token.metadata || {};
-  const { nsfw, flashing, scripts } = detectHazards(meta);
-  const hidden = (nsfw && !allowNSFW) || (flashing && !allowFlash);
+  if (loading) return <p style={{ textAlign:'center', marginTop:'4rem' }}>Loading…</p>;
+  if (!token || !collection) return <p style={{ textAlign:'center', marginTop:'4rem' }}>Token not found.</p>;
 
   return (
-    <Wrap>
+    <Page>
       <ExploreNav />
-      <PixelButton size="sm" onClick={() => router.back()}>← Back</PixelButton>
-      <MediaBox style={{ position:'relative', width:'100%' }}>
-        {hidden && (
-          <Obf>
-            <p>{nsfw && 'NSFW'}{nsfw && flashing ? ' / ' : ''}{flashing && 'Flashing'}</p>
-            <PixelButton size="sm" onClick={() => {
-              if (nsfw)    onConsent('NSFW',    setAllowNSFW);
-              if (flashing)onConsent('flashing',setAllowFlash);
-            }}>Unhide</PixelButton>
-          </Obf>
-        )}
+      <Grid>
+        {/*──────── media preview ────────*/}
+        <MediaWrap>
+          {!hidden && (
+            <RenderMedia
+              uri={mediaUri}
+              mime={meta.mimeType}
+              alt={meta.name || `Token #${tokenId}`}
+              allowScripts={hazards.scripts && allowJs}
+              style={{ maxWidth:'100%', maxHeight:'100%', objectFit:'contain' }}
+            />
+          )}
 
-        {!hidden && (
-          <RenderMedia
-            uri={meta.artifactUri || meta.displayUri || meta.imageUri}
-            mime={meta.mimeType}
-            alt={meta.name}
-            allowScripts={scripts && allowScripts}
-            style={{ maxWidth:'100%', maxHeight:'100%', imageRendering:'pixelated' }}
-          />
-        )}
+          {/* obscured overlays */}
+          {hidden && (
+            <Obscure>
+              <p>
+                {hazards.nsfw && 'NSFW'}
+                {hazards.nsfw && hazards.flashing && ' / '}
+                {hazards.flashing && 'Flashing content'}
+              </p>
+              <PixelButton size="sm" onClick={() => {
+                if (hazards.nsfw)     confirmReveal('NSFW',     setAllowNSFW);
+                if (hazards.flashing) confirmReveal('flashing', setAllowFlash);
+              }}>UNHIDE</PixelButton>
+            </Obscure>
+          )}
 
-        {scripts && !allowScripts && !hidden && (
-          <Obf>
-            <p>This token executes scripts.</p>
-            <PixelButton size="sm" warning onClick={() => {
-              const ok = window.confirm('Enable scripting? Proceed only if you trust.');
-              if (ok) setAllowScripts(true);
-            }}>Allow scripts</PixelButton>
-          </Obf>
-        )}
-      </MediaBox>
+          {hazards.scripts && !allowJs && !hidden && (
+            <Obscure>
+              <p>This media executes scripts.</p>
+              <PixelButton size="sm" warning onClick={() => confirmReveal('scripts', setAllowJs)}>
+                ALLOW SCRIPTS
+              </PixelButton>
+            </Obscure>
+          )}
 
-      <TokenMetaPanel
-        meta={meta}
-        tokenId={tokenId}
-        contractAddress={addr}
+          {/* fullscreen btn */}
+          <FSBtn
+            size="xs"
+            disabled={hazards.scripts && !allowJs}
+            onClick={() => setFsOpen(true)}
+            title="Fullscreen"
+          >⛶</FSBtn>
+        </MediaWrap>
+
+        {/*──────── meta panel ───────────*/}
+        <MAINTokenMetaPanel
+          token={token}
+          collection={collection}
+          walletAddress={walletAddr}
+        />
+      </Grid>
+
+      {/*──────── fullscreen modal ──────*/}
+      <FullscreenModal
+        open={fsOpen}
+        onClose={() => setFsOpen(false)}
+        uri={mediaUri}
+        mime={meta.mimeType}
+        allowScripts={hazards.scripts && allowJs}
+        scriptHazard={hazards.scripts}
       />
-    </Wrap>
+    </Page>
   );
 }
 /* EOF */

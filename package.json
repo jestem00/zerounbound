@@ -29,6 +29,7 @@
     "@walletconnect/jsonrpc-ws-connection": "^1.0.16",
     "@walletconnect/keyvaluestorage": "^1.1.1",
     "clsx": "^1.2.1",
+    "date-fns": "^4.1.0",
     "embla-carousel-react": "^8.6.0",
     "eslint": "^9.30.1",
     "next": "^15.3.5",

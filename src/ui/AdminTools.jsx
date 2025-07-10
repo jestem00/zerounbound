@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/AdminTools.jsx
-  Rev :    r828   2025‑09‑04
-  Summary: robust meta‑decode → restore title/preview
+  Rev :    r829   2025‑10‑20
+  Summary: dynamic Modal width — Repair URI now 96 vw (8 K‑safe)
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useCallback, useEffect, useMemo, useState,
@@ -47,8 +47,6 @@ async function tzktCounts(addr, net = 'ghostnet') {
 
 /*──────── meta resolver ──────────────────────────*/
 function resolveMeta(raw = {}) {
-  /* contracts.bundle always passes `meta` as already‑parsed JSON
-     but storage rows may still contain hex‑encoded fields – guard both. */
   const decoded = decodeHexFields(typeof raw === 'string'
     ? (() => { try { return JSON.parse(raw); } catch { return {}; } })()
     : raw);
@@ -105,17 +103,17 @@ const ALIASES = {
 
 /*──────── META ─────────────────────────────────────────────*/
 const META = {
-  /* ─── Collaborators ───────────────────────────── */
+  /* Collaborators */
   collab_edit               : { label:'Add / Remove Collaborator',    comp:'AddRemoveCollaborator',     group:'Collaborators' },
   collab_edit_v4a           : { label:'Add / Remove Collaborators',   comp:'AddRemoveCollaboratorsv4a', group:'Collaborators' },
   manage_collaborators      : { label:'Manage Collaborators',         comp:'ManageCollaborators',       group:'Collaborators' },
   manage_collaborators_v4a  : { label:'Manage Collaborators',         comp:'ManageCollaboratorsv4a',    group:'Collaborators' },
 
-  /* ─── Parent / Child ──────────────────────────── */
+  /* Parent / Child */
   parentchild_edit          : { label:'Add / Remove Parent/Child',    comp:'AddRemoveParentChild',      group:'Parent / Child' },
   manage_parent_child       : { label:'Manage Parent/Child',          comp:'ManageParentChild',         group:'Parent / Child' },
 
-  /* ─── Token Actions ───────────────────────────── */
+  /* Token Actions */
   transfer     : { label:'Transfer Tokens', comp:'Transfer',   group:'Token Actions' },
   balance_of   : { label:'Check Balance',   comp:'BalanceOf',  group:'Token Actions' },
   mint         : { label:'Mint',            comp:'Mint',       group:'Token Actions' },
@@ -124,10 +122,10 @@ const META = {
   burn_v4      : { label:'Burn',            comp:'BurnV4',     group:'Token Actions' },
   destroy      : { label:'Destroy',         comp:'Destroy',    group:'Token Actions' },
 
-  /* ─── Operators ───────────────────────────────── */
+  /* Operators */
   update_operators          : { label:'Update Operators',             comp:'UpdateOperators',           group:'Operators' },
 
-  /* ─── Metadata Ops ────────────────────────────── */
+  /* Metadata Ops */
   append_artifact_uri       : { label:'Append Artifact URI',          comp:'AppendArtifactUri',         group:'Metadata Ops' },
   append_extrauri           : { label:'Append Extra URI',             comp:'AppendExtraUri',            group:'Metadata Ops' },
   clear_uri                 : { label:'Clear URI',                    comp:'ClearUri',                  group:'Metadata Ops' },
@@ -139,10 +137,10 @@ const META = {
   repair_uri_v4a            : { label:'Repair URI',                   comp:'RepairUriV4a',              group:'Metadata Ops' },
 };
 
-/* dedup helper */
+/*──── util helpers ────*/
 const uniq = (arr) => [...new Set(arr)];
 
-/*──────── token list sort helper ───────────────────────────*/
+/*──────── token list sort helper ─────────*/
 const TOKEN_ORDER = {
   mint        : 0,
   mint_v4a    : 0,
@@ -187,7 +185,6 @@ export default function AdminTools({ contract, onClose }) {
   const { network: walletNet } = useWalletContext() || {};
   const network = walletNet || NETWORK_KEY;
 
-  /* meta decode fix */
   const meta = useMemo(() => resolveMeta(contract.meta ?? contract), [contract.meta, contract]);
 
   const toolkit  = window.tezosToolkit;
@@ -242,7 +239,7 @@ export default function AdminTools({ contract, onClose }) {
   useEffect(() => { void refreshCounts(); }, [refreshCounts]);
   useEffect(() => { if (!formKey) void refreshCounts(); }, [formKey, refreshCounts]);
 
-  /* ─── resolve entry‑points for grid ───────────────────*/
+  /* resolve entry‑points for grid */
   const grouped = useMemo(() => {
     let rawSet = resolveEp(contract.version)
       .map((k) => ALIASES[k] || k);
@@ -267,12 +264,23 @@ export default function AdminTools({ contract, onClose }) {
     return raw.reduce((o, k) => { (o[META[k].group] ??= []).push(k); return o; }, {});
   }, [contract.version]);
 
-  /*──────── render ───────────────────────────────────────────*/
   const previewUri =
     meta.imageUri || meta.logo || meta.artifactUri || meta.thumbnailUri;
-
   const displayName = meta.name || meta.symbol || contract.address;
 
+  /*──────── modal style helper ────────*/
+  const modalStyleFor = (key) => {
+    if (key === 'edit_contract_metadata') {
+      return { width:'clamp(640px,90vw,1400px)', maxWidth:'1400px' };
+    }
+    if (key === 'repair_uri' || key === 'repair_uri_v4a') {
+      /* 96 vw un‑capped – honours I102 + future‑proof 8 K */
+      return { width:'96vw', maxWidth:'96vw' };
+    }
+    return { maxWidth:700 };
+  };
+
+  /*──────── render ─────────────────────────────────────────*/
   return (
     <>
       <Overlay>
@@ -359,11 +367,7 @@ export default function AdminTools({ contract, onClose }) {
 
       {formKey && META[formKey] && (
         <Overlay>
-          <Modal
-            style={formKey === 'edit_contract_metadata'
-              ? { width:'clamp(640px,90vw,1400px)',maxWidth:'1400px' }
-              : { maxWidth:700 }}
-          >
+          <Modal style={modalStyleFor(formKey)}>
             <CloseBtn size="xs" onClick={() => setFormKey(null)}>×</CloseBtn>
             {React.createElement(EP[META[formKey].comp], {
               contractAddress: contract.address,
@@ -379,8 +383,8 @@ export default function AdminTools({ contract, onClose }) {
   );
 }
 /* What changed & why:
-   • meta now decoded via resolveMeta() → restores title/description/preview
-   • previewUri fallback sequence adds logo/artifactUri/thumbnailUri
-   • displayName defaults to symbol or address when name absent
-   • Rev‑bump r828 */
+   • modalStyleFor(): specialised 96 vw style for Repair URI entry‑point,
+     removing previous 880 px cap and matching I102 grid blueprint.
+   • Rev‑bump r829 – AdminTools modal now scales up to any monitor size.
+*/
 /* EOF */

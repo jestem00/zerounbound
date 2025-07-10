@@ -1,10 +1,10 @@
-/*──────── src/utils/hazards.js ──────────────────────────────
+/*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/utils/hazards.js
-  Rev :    r10    2025‑09‑18
-  Summary: detects inline‑script SVG data URIs
-           • decodes data:image/svg+xml and scans for <script>
-           • restores script‑toggle on generative SVG tokens
+  Rev :    r11    2025‑10‑16
+  Summary: accessibility.hazards & rating parsing
+           • detects flashing / mature flags inside nested JSON
+           • expands NSFW & flashing heuristics
 ──────────────────────────────────────────────────────────────*/
 import { mimeFromFilename } from '../constants/mimeTypes.js';
 
@@ -16,7 +16,7 @@ const RE_DATA_XML     =
 
 const RE_HTML_EXT = /\.(?:html?|js)(?:[\?#]|$)/i;
 const RE_XML_EXT  = /\.xml(?:[\?#]|$)/i;
-const RE_SVG_SCRIPT = /<script[\s>]/i;              /* inline <script> test */
+const RE_SVG_SCRIPT = /<script[\s>]/i;            /* inline <script> test */
 const RE_IPFS_FILENAME = /filename=([^&]+)/i;
 
 /* decode textual data:URIs (SVG focus) */
@@ -75,6 +75,30 @@ function extFromIpfsFilename(uri = '') {
   }
 }
 
+/*──────── accessibility helpers ────────────────────────────*/
+function parseAccessibilityFlags(acc) {
+  /* Normalise any structure into lowercase tokens array */
+  if (!acc) return [];
+  if (typeof acc === 'string') return [acc.toLowerCase()];
+  if (Array.isArray(acc))      return acc.map((s) => String(s).toLowerCase());
+
+  if (typeof acc === 'object') {
+    const out = [];
+    if (Array.isArray(acc.hazards)) {
+      out.push(...acc.hazards.map((h) => String(h).toLowerCase()));
+    }
+    if (acc.rating) {
+      out.push(String(acc.rating).toLowerCase());
+    }
+    /* free‑text support */
+    if (acc.description) {
+      out.push(String(acc.description).toLowerCase());
+    }
+    return out;
+  }
+  return [];
+}
+
 /*──────── main detector ───────────────────────────────────*/
 export default function detectHazards(meta) {
   const m = meta && typeof meta === 'object' ? meta : {};
@@ -84,9 +108,20 @@ export default function detectHazards(meta) {
     : [];
 
   const cr = String(m.contentRating || '').toLowerCase();
+  const accTokens = parseAccessibilityFlags(m.accessibility);
 
-  const nsfwFlag     = tags.includes('nsfw')  || cr.includes('mature');
-  const flashingFlag = tags.includes('flash') || tags.includes('flashing');
+  const nsfwFlag =
+    tags.includes('nsfw')
+    || cr.includes('mature')
+    || accTokens.includes('mature')
+    || accTokens.includes('nsfw');
+
+  const flashingFlag =
+    tags.includes('flash')
+    || tags.includes('flashing')
+    || accTokens.includes('flash')
+    || accTokens.includes('flashing')
+    || accTokens.includes('epilepsy');
 
   /*── refined script‑risk heuristics ───────────────────────*/
   const mimeList = collectMimes(m);
@@ -125,7 +160,8 @@ export default function detectHazards(meta) {
   }
 
   /* inline <script> inside explicit body */
-  const inlineSvgScript = mimeList.includes('image/svg+xml')
+  const inlineSvgScript =
+    mimeList.includes('image/svg+xml')
     && (m.body && typeof m.body === 'string' && RE_SVG_SCRIPT.test(m.body));
 
   const scripts = mimeScript || extScript || dataScript
@@ -137,8 +173,11 @@ export default function detectHazards(meta) {
     scripts,
   };
 }
-/* What changed & why (r10):
-   • Added `svgDataScript` detection — decodes data:image/svg+xml URIs
-     and flags when an inline <script> tag is found.
-   • Restores script‑toggle visibility on generative SVG assets while
-     keeping static SVGs script‑free. */
+/* What changed & why (r11):
+   • Added `parseAccessibilityFlags()` to handle structured
+     `accessibility` objects with `hazards` arrays & ratings.
+   • NSFW / flashing flags now include tokens derived from
+     `accessibility.hazards` + `accessibility.rating`.
+   • Keeps previous heuristics intact; no behavioural regressions.
+*/
+/* EOF */

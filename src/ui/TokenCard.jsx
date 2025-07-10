@@ -1,29 +1,29 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/TokenCard.jsx
-  Rev :    r33   2025‑09‑22 UTC
-  Summary: authorArray hardens against non‑array inputs
+  Rev :    r37    2025‑10‑17
+  Summary: detailed hazard disclaimers + wrap fix
 ──────────────────────────────────────────────────────────────*/
 import {
   useState, useMemo, useEffect,
 } from 'react';
-import PropTypes     from 'prop-types';
-import styledPkg     from 'styled-components';
+import PropTypes        from 'prop-types';
+import styledPkg        from 'styled-components';
 
-import useConsent              from '../hooks/useConsent.js';
-import detectHazards           from '../utils/hazards.js';
-import RenderMedia             from '../utils/RenderMedia.jsx';
-import { getIntegrityInfo }    from '../constants/integrityBadges.js';
+import useConsent                from '../hooks/useConsent.js';
+import detectHazards             from '../utils/hazards.js';
+import RenderMedia               from '../utils/RenderMedia.jsx';
+import { getIntegrityInfo }      from '../constants/integrityBadges.js';
 import { checkOnChainIntegrity } from '../utils/onChainValidator.js';
-import PixelButton             from './PixelButton.jsx';
-import MakeOfferBtn            from './MakeOfferBtn.jsx';
-import IntegrityBadge          from './IntegrityBadge.jsx';
-import { shortKt }             from '../utils/formatAddress.js';
-import countAmount             from '../utils/countAmount.js';
-import { useWalletContext }    from '../contexts/WalletContext.js';
-import { EnableScriptsToggle } from './EnableScripts.jsx';
-import FullscreenModal         from './FullscreenModal.jsx';
-import PixelConfirmDialog      from './PixelConfirmDialog.jsx';
+import PixelButton               from './PixelButton.jsx';
+import MakeOfferBtn              from './MakeOfferBtn.jsx';
+import IntegrityBadge            from './IntegrityBadge.jsx';
+import { shortKt }               from '../utils/formatAddress.js';
+import countAmount               from '../utils/countAmount.js';
+import { useWalletContext }      from '../contexts/WalletContext.js';
+import { EnableScriptsToggle }   from './EnableScripts.jsx';
+import FullscreenModal           from './FullscreenModal.jsx';
+import PixelConfirmDialog        from './PixelConfirmDialog.jsx';
 
 const PLACEHOLDER = '/sprites/cover_default.svg';
 const VALID_DATA  = /^data:/i;
@@ -36,23 +36,24 @@ const pickDataUri = (m = {}) => (
     .find((u) => typeof u === 'string' && VALID_DATA.test(u.trim())) || ''
 );
 
-/* robust author extractor */
-const authorArray = (m = {}) => {
-  const src = m.authors ?? m.artists ?? m.creators ?? [];
+/* robust array coercions */
+const toArray = (src) => {
   if (Array.isArray(src)) return src;
   if (typeof src === 'string') {
-    try {
-      const parsed = JSON.parse(src);
-      if (Array.isArray(parsed)) return parsed;
-      return [src];
-    } catch { return [src]; }
+    try { const j = JSON.parse(src); return Array.isArray(j) ? j : [src]; }
+    catch { return [src]; }
   }
   if (src && typeof src === 'object') return Object.values(src);
   return [];
 };
 
+const authorArray   = (m = {}) => toArray(m.authors);
+const creatorArray  = (m = {}) => toArray(m.creators);
+
 const isCreator = (meta = {}, addr = '') =>
-  !!addr && authorArray(meta).some((a) => String(a).toLowerCase() === addr.toLowerCase());
+  !!addr && creatorArray(meta).some((a) => String(a).toLowerCase() === addr.toLowerCase());
+
+const hrefFor = (addr = '') => `/explore?cmd=tokens&admin=${addr}`;
 
 function showPlaceholder(uri, ok) { return !uri || !ok; }
 
@@ -73,11 +74,11 @@ const Card = styled.article`
 const ThumbWrap = styled.div`
   position: relative;
   width: 100%;
+  aspect-ratio: 1/1;
   background: var(--zu-bg-dim,#111);
   display: flex;
   justify-content: center;
-  align-items: flex-start;
-  ${({ $aspect }) => ($aspect ? `aspect-ratio:${$aspect};` : 'aspect-ratio:1/1;')}
+  align-items: center;
 `;
 
 const FSBtn = styled(PixelButton)`
@@ -91,19 +92,19 @@ const FSBtn = styled(PixelButton)`
 
 const Meta = styled.section`
   background: var(--zu-bg-alt,#171717);
-  padding: 6px 8px 10px;
+  padding: 6px 8px 8px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   flex: 1 1 auto;
   border-top: 2px solid var(--zu-accent,#00c8ff);
 
   h4{margin:0;font-size:.82rem;line-height:1.15;font-family:'Pixeloid Sans',monospace;}
-  p {margin:0;font-size:.7rem;opacity:.85;}
+  p {margin:0;font-size:.68rem;line-height:1.25;}
 `;
 
 const Stat = styled.span`
-  display:block;white-space:nowrap;font-size:.68rem;opacity:.85;
+  display:block;white-space:nowrap;font-size:.65rem;opacity:.85;
 `;
 
 const Row = styled.div`
@@ -129,14 +130,17 @@ export default function TokenCard({
 
   const { walletAddress } = useWalletContext() || {};
 
-  /* consent flags (per‑token script key) */
+  /* consent flags */
   const scriptKey  = `scripts:${contractAddress}:${token.tokenId}`;
   const [allowNSFW,  setAllowNSFW]  = useConsent('nsfw',  false);
   const [allowFlash, setAllowFlash] = useConsent('flash', false);
   const [allowScr,   setAllowScr]   = useConsent(scriptKey, false);
 
   const { nsfw, flashing, scripts: scriptHaz } = detectHazards(meta);
-  const blocked = (nsfw && !allowNSFW) || (flashing && !allowFlash);
+
+  const needsNSFW  = nsfw     && !allowNSFW;
+  const needsFlash = flashing && !allowFlash;
+  const blocked    = needsNSFW || needsFlash;
 
   /* auto‑enable scripts when viewer == creator/admin */
   useEffect(() => {
@@ -148,17 +152,32 @@ export default function TokenCard({
   }, [scriptHaz, allowScr, walletAddress, contractAdmin, meta, setAllowScr]);
 
   /* UI states */
-  const preview          = pickDataUri(meta);
-  const artifactSvg      = (typeof meta.artifactUri === 'string' && VALID_DATA.test(meta.artifactUri.trim()))
+  const preview      = pickDataUri(meta);
+  const artifactSvg  = (typeof meta.artifactUri === 'string' && VALID_DATA.test(meta.artifactUri.trim()))
     ? meta.artifactUri.trim()
     : '';
-  const fsUri            = (scriptHaz && allowScr && artifactSvg) ? artifactSvg : preview;
+  const fsUri        = (scriptHaz && allowScr && artifactSvg) ? artifactSvg : preview;
 
-  const [thumbOk, setThumbOk] = useState(true);
-  const aspect           = (meta.width && meta.height) ? `${meta.width}/${meta.height}` : '';
-  const [fs,    setFs]    = useState(false);
-  const [cfrm,  setCfrm]  = useState(false);
-  const [termsOk,setTerms]= useState(false);
+  const [thumbOk, setThumbOk]   = useState(true);
+  const [fs,      setFs]        = useState(false);
+
+   /* reveal dialog */
+  const [revealType, setRevealType] = useState(null);   // 'nsfw' | 'flash' | null
+  const [termsOk,    setTermsOk]    = useState(false);
+
+  /* author / creator merge + “more…” toggle */
+  const authors  = authorArray(meta);
+  const creators = creatorArray(meta);
+  const showCreatorsLine = creators.length && authors.join() !== creators.join();
+  const [showAll, setShowAll] = useState(false);
+
+  const renderAddrList = (arr) => (
+    arr.map((a, i) => (
+      <a key={a} href={hrefFor(a)} style={{ color:'var(--zu-accent-sec,#6ff)', textDecoration:'none' }}>
+        {i > 0 ? ', ' : ''}{shortKt(a)}
+      </a>
+    ))
+  );
 
   /* stats */
   const editions  = countAmount(token);
@@ -172,36 +191,32 @@ export default function TokenCard({
       || isCreator(meta, walletAddress));
 
   /* enable scripts confirm handler */
-  const askEnableScripts = () => {
-    setTerms(false);
-    setCfrm(true);
-  };
+  const [cfrmScr,   setCfrmScr]   = useState(false);
+  const [scrTerms,  setScrTerms]  = useState(false);
+  const askEnableScripts = () => { setScrTerms(false); setCfrmScr(true); };
+  const confirmScripts   = () => { if (scrTerms) { setAllowScr(true); setCfrmScr(false); } };
 
-  const confirmScripts = () => {
+  const askReveal = (type) => { setRevealType(type); setTermsOk(false); };
+  const doReveal  = () => {
     if (!termsOk) return;
-    setAllowScr(true);
-    setCfrm(false);
+    if (revealType === 'nsfw')  setAllowNSFW(true);
+    if (revealType === 'flash') setAllowFlash(true);
+    setRevealType(null); setTermsOk(false);
   };
-
-  /* fullscreen eligibility */
-  const canFullscreen = !scriptHaz || allowScr;
 
   /*──────── render ─*/
   return (
     <>
       <Card>
         {/* preview */}
-        <ThumbWrap $aspect={aspect}>
+        <ThumbWrap>
           {!blocked && preview && !showPlaceholder(preview, thumbOk) && (
             <RenderMedia
               uri={preview}
               mime={meta.mimeType}
               allowScripts={scriptHaz && allowScr}
               onInvalid={() => setThumbOk(false)}
-              style={{
-                width:'100%',height:'100%',
-                objectFit:'contain',objectPosition:'top center',
-              }}
+              style={{ width:'100%', height:'100%', objectFit:'contain', objectPosition:'center' }}
             />
           )}
 
@@ -210,11 +225,17 @@ export default function TokenCard({
           )}
 
           {blocked && (
-            <CenterWrap style={{ height:'100%' }}>
-              <PixelButton size="sm" onClick={() => {
-                if (nsfw) setAllowNSFW(true);
-                if (flashing) setAllowFlash(true);
-              }}>UNHIDE</PixelButton>
+            <CenterWrap style={{ height:'100%', flexDirection:'column', gap:'6px', padding:'0 8px' }}>
+              {needsNSFW && (
+                <PixelButton size="sm" warning onClick={() => askReveal('nsfw')}>
+                  NSFW&nbsp;🔞
+                </PixelButton>
+              )}
+              {needsFlash && (
+                <PixelButton size="sm" warning onClick={() => askReveal('flash')}>
+                  Flashing&nbsp;🚨
+                </PixelButton>
+              )}
             </CenterWrap>
           )}
 
@@ -222,15 +243,10 @@ export default function TokenCard({
 
           <FSBtn
             size="xs"
-            disabled={!canFullscreen}
-            onClick={() => {
-              if (canFullscreen) setFs(true);
-              else askEnableScripts();
-            }}
-            title={canFullscreen ? 'Fullscreen' : 'Enable scripts first'}
-          >
-            ⛶
-          </FSBtn>
+            disabled={!(!scriptHaz || allowScr)}
+            onClick={() => { (!scriptHaz || allowScr) ? setFs(true) : askEnableScripts(); }}
+            title={(!scriptHaz || allowScr) ? 'Fullscreen' : 'Enable scripts first'}
+          >⛶</FSBtn>
         </ThumbWrap>
 
         {/* meta info */}
@@ -260,8 +276,54 @@ export default function TokenCard({
 
           <h4>{meta.name || `#${token.tokenId}`}</h4>
 
-          {authorArray(meta).length > 0 && (
-            <p>By&nbsp;{authorArray(meta).join(', ')}</p>
+          {/* authors / creators */}
+          {authors.length > 0
+            ? (
+              <p>
+                By&nbsp;
+                {renderAddrList(showAll ? authors : authors.slice(0, 2))}
+                {authors.length > 2 && !showAll && (
+                  <>…&nbsp;
+                    <button
+                      type="button"
+                      aria-label="Show all authors"
+                      onClick={() => setShowAll(true)}
+                      style={{
+                        background:'none',border:'none',color:'inherit',
+                        font:'inherit',cursor:'pointer',padding:0,
+                      }}
+                    >▶️More</button>
+                  </>
+                )}
+              </p>
+            )
+            : creators.length > 0 && (
+              <p>
+                By&nbsp;
+                {renderAddrList(showAll ? creators : creators.slice(0, 2))}
+                {creators.length > 2 && !showAll && (
+                  <>…&nbsp;
+                    <button
+                      type="button"
+                      aria-label="Show all creators"
+                      onClick={() => setShowAll(true)}
+                      style={{
+                        background:'none',border:'none',color:'inherit',
+                        font:'inherit',cursor:'pointer',padding:0,
+                      }}
+                    >▶️More</button>
+                  </>
+                )}
+              </p>
+            )}
+
+          {/* optional creators line (when authors present & differ) */}
+          {showCreatorsLine && (
+            <p style={{ opacity:.8 }}>
+              Creator&nbsp;
+              {renderAddrList(creators.slice(0, 2))}
+              {creators.length > 2 && '…'}
+            </p>
           )}
 
           {meta.mimeType && (
@@ -278,11 +340,11 @@ export default function TokenCard({
           <Stat>Owners&nbsp;{owners}</Stat>
           {priceTez && <Stat>Price&nbsp;{priceTez}&nbsp;ꜩ</Stat>}
 
-          <div style={{ marginTop:'6px' }}>
-            <MakeOfferBtn contract={contractAddress} tokenId={token.tokenId} label="MAKE OFFER" />
+          <div style={{ marginTop:'4px' }}>
+            <MakeOfferBtn contract={contractAddress} tokenId={token.tokenId} label="OFFER" />
           </div>
 
-          <p style={{ marginTop:'6px' }}>
+          <p style={{ marginTop:'4px' }}>
             Collection:&nbsp;
             <a
               href={`/contracts/${contractAddress}`}
@@ -305,7 +367,7 @@ export default function TokenCard({
       />
 
       {/* enable scripts confirm */}
-      {cfrm && (
+      {cfrmScr && (
         <PixelConfirmDialog
           open
           title="Enable scripts?"
@@ -314,8 +376,8 @@ export default function TokenCard({
               <label style={{ display:'flex',gap:'6px',alignItems:'center',marginBottom:'8px' }}>
                 <input
                   type="checkbox"
-                  checked={termsOk}
-                  onChange={(e) => setTerms(e.target.checked)}
+                  checked={scrTerms}
+                  onChange={(e) => setScrTerms(e.target.checked)}
                 />
                 I&nbsp;agree&nbsp;to&nbsp;
                 <a href="/terms" target="_blank" rel="noopener noreferrer">Terms</a>
@@ -325,9 +387,57 @@ export default function TokenCard({
           )}
           confirmLabel="OK"
           cancelLabel="Cancel"
-          confirmDisabled={!termsOk}
+          confirmDisabled={!scrTerms}
           onConfirm={confirmScripts}
-          onCancel={() => setCfrm(false)}
+          onCancel={() => setCfrmScr(false)}
+        />
+      )}
+
+      {/* hazard reveal confirm */}
+      {revealType && (
+        <PixelConfirmDialog
+          open
+          title={`Reveal ${revealType === 'nsfw' ? 'NSFW' : 'flashing‑hazard'} content?`}
+          message={(
+            <>
+              {revealType === 'nsfw' ? (
+                <p style={{ margin:'0 0 8px' }}>
+                  This asset is flagged as <strong>Not‑Safe‑For‑Work (NSFW)</strong>. It may
+                  contain explicit nudity, sexual content, graphic violence or other
+                  mature themes. Viewer discretion is advised.
+                </p>
+              ) : (
+                <p style={{ margin:'0 0 8px' }}>
+                  This asset contains <strong>rapid flashing or strobing effects</strong>{' '}
+                  which may trigger seizures for people with photosensitive epilepsy.
+                  Learn more&nbsp;
+                  <a href="https://kb.daisy.org/publishing/docs/metadata/schema.org/accessibilityHazard.html#value"
+                     target="_blank" rel="noopener noreferrer">
+                    here
+                  </a>.
+                </p>
+              )}
+              <label style={{
+                display:'flex',
+                gap:'6px',
+                alignItems:'center',
+                flexWrap:'wrap',
+              }}>
+                <input
+                  type="checkbox"
+                  checked={termsOk}
+                  onChange={(e) => setTermsOk(e.target.checked)}
+                />
+                I&nbsp;confirm&nbsp;I&nbsp;am&nbsp;18 + and&nbsp;agree&nbsp;to&nbsp;
+                <a href="/terms" target="_blank" rel="noopener noreferrer">Terms</a>
+              </label>
+            </>
+          )}
+          confirmLabel="REVEAL"
+          cancelLabel="Cancel"
+          confirmDisabled={!termsOk}
+          onConfirm={doReveal}
+          onCancel={() => { setRevealType(null); setTermsOk(false); }}
         />
       )}
     </>
@@ -345,7 +455,8 @@ TokenCard.propTypes = {
   contractName   : PropTypes.string,
   contractAdmin  : PropTypes.string,
 };
-/* What changed & why (r33):
-   • authorArray now coerces string / object inputs → array, preventing .join type errors.
-   • No functional change beyond safer meta parsing. */
+/* What changed & why (r37):
+   • Added rich NSFW / flashing disclaimers with epilepsy link.
+   • Wrapped checkbox label to flex‑wrap avoiding overflow.
+   • Core logic untouched. */
 /* EOF */

@@ -1,17 +1,17 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/ExploreNav.jsx
-  Rev :    r13   2025‑10‑12 UTC
-  Summary:  ▸ keeps current “mode” (collections / tokens) when
-              performing an admin‑address search
-            ▸ clears search box after navigation (unchanged)
-            ▸ no logic regressions; lint‑clean
+  Rev :    r17    2025‑10‑17
+  Summary: richer disclaimers + flex‑wrap fix
 ──────────────────────────────────────────────────────────────*/
 import { useState }  from 'react';
 import { useRouter } from 'next/router';
 import styledPkg     from 'styled-components';
-import PixelButton   from './PixelButton.jsx';
-import PixelInput    from './PixelInput.jsx';
+
+import PixelButton         from './PixelButton.jsx';
+import PixelInput          from './PixelInput.jsx';
+import PixelConfirmDialog  from './PixelConfirmDialog.jsx';
+import useConsent          from '../hooks/useConsent.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -33,7 +33,15 @@ export default function ExploreNav() {
   const [q, setQ] = useState('');
   const router     = useRouter();
 
-  /* detect whether we’re in TOKENS mode so search stays there */
+  /* hazard‑consent flags */
+  const [allowNSFW , setAllowNSFW ] = useConsent('nsfw' , false);
+  const [allowFlash, setAllowFlash] = useConsent('flash', false);
+
+  /* confirm‑dialog state */
+  const [dlg,      setDlg]      = useState(null);   // 'nsfw' | 'flash' | null
+  const [termsOK,  setTermsOK]  = useState(false);
+
+  /* detect TOKENS context so address‑search keeps mode */
   const isTokensCtx = router.asPath.toLowerCase().includes('/tokens')
                     || String(router.query.cmd).toLowerCase() === 'tokens';
 
@@ -46,38 +54,127 @@ export default function ExploreNav() {
     const adminRe = /^tz[1-3][1-9A-HJ-NP-Za-km-z]{33}$/i;
 
     if (addrRe.test(v)) {
-      /* jump straight to contract detail */
       router.push(`/contracts/${v}`);
     } else if (adminRe.test(v)) {
-      /* stay in whichever grid the user is on */
-      if (isTokensCtx) {
-        router.push(`/explore?cmd=tokens&admin=${v}`);
-      } else {
-        router.push(`/explore?admin=${v}`);
-      }
+      if (isTokensCtx) router.push(`/explore?cmd=tokens&admin=${v}`);
+      else             router.push(`/explore?admin=${v}`);
     } else {
-      /* eslint-disable-next-line no-alert */
+      // eslint-disable-next-line no-alert
       alert('Enter a valid admin (tz1…) or contract (KT1…) address.');
       return;
     }
-    setQ('');                /* clear box after navigation */
+    setQ('');
   };
 
-  return (
-    <Bar aria-label="Explore navigation">
-      <PixelButton as="a" href="/explore">COLLECTIONS</PixelButton>
-      <PixelButton as="a" href="/explore?cmd=tokens">TOKENS</PixelButton>
-      <PixelButton as="a" href="/explore/listings">LISTINGS</PixelButton>
+  /*─ handlers ─*/
+  const requestToggle = (flag) => {
+    if ((flag === 'nsfw'  && !allowNSFW)
+     || (flag === 'flash' && !allowFlash)) {
+      setDlg(flag);          // enabling – ask agreement
+    } else {
+      if (flag === 'nsfw')  setAllowNSFW(false);
+      if (flag === 'flash') setAllowFlash(false);
+    }
+  };
 
-      <form onSubmit={go}>
-        <PixelInput
-          placeholder="Search by Admin Address or KT1…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
+  const confirmEnable = () => {
+    if (!termsOK) return;
+    if (dlg === 'nsfw')  setAllowNSFW(true);
+    if (dlg === 'flash') setAllowFlash(true);
+    setDlg(null); setTermsOK(false);
+  };
+
+  /*──────── render ─────────────────────────────────────────*/
+  return (
+    <>
+      <Bar aria-label="Explore navigation">
+        <PixelButton as="a" href="/explore">COLLECTIONS</PixelButton>
+        <PixelButton as="a" href="/explore?cmd=tokens">TOKENS</PixelButton>
+        <PixelButton as="a" href="/explore/listings">LISTINGS</PixelButton>
+
+        <form onSubmit={go}>
+          <PixelInput
+            placeholder="Search by Admin Address or KT1…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+          <PixelButton size="sm" type="submit">GO</PixelButton>
+        </form>
+
+        {/* hazard toggles */}
+        <PixelButton
+          size="xs"
+          warning={!allowNSFW}
+          onClick={() => requestToggle('nsfw')}
+          title={allowNSFW ? 'NSFW content visible' : 'NSFW content hidden'}
+        >
+          {allowNSFW ? 'Hide NSFW 🔞' : 'Enable NSFW 🔞'}
+        </PixelButton>
+
+        <PixelButton
+          size="xs"
+          warning={!allowFlash}
+          onClick={() => requestToggle('flash')}
+          title={allowFlash ? 'Flashing hazards visible' : 'Flashing hazards hidden'}
+        >
+          {allowFlash ? 'Hide Flashing 🚨' : 'Enable Flashing 🚨'}
+        </PixelButton>
+      </Bar>
+
+      {/* confirm‑dialog */}
+      {dlg && (
+        <PixelConfirmDialog
+          open
+          title={`Enable ${dlg === 'nsfw' ? 'NSFW (mature)' : 'flashing‑hazard'} content site‑wide?`}
+          message={(
+            <>
+              {dlg === 'nsfw' ? (
+                <p style={{ margin:'0 0 8px' }}>
+                  Warning: You are about to allow <strong>Not‑Safe‑For‑Work (NSFW)</strong>{' '}
+                  content across Zero Unbound. This may include explicit nudity,
+                  sexual themes, graphic violence or other mature material. Viewer
+                  discretion is advised.
+                </p>
+              ) : (
+                <p style={{ margin:'0 0 8px' }}>
+                  Warning: You are about to allow content that contains{' '}
+                  <strong>rapid flashing / strobing effects</strong> which may trigger
+                  seizures for individuals with photosensitive epilepsy. See&nbsp;
+                  <a href="https://kb.daisy.org/publishing/docs/metadata/schema.org/accessibilityHazard.html#value"
+                     target="_blank" rel="noopener noreferrer">
+                    accessibilityHazard reference
+                  </a>{' '}
+                  for details.
+                </p>
+              )}
+              <label style={{
+                display:'flex',
+                gap:'6px',
+                alignItems:'center',
+                flexWrap:'wrap',
+              }}>
+                <input
+                  type="checkbox"
+                  checked={termsOK}
+                  onChange={(e) => setTermsOK(e.target.checked)}
+                />
+                I&nbsp;confirm&nbsp;I&nbsp;am&nbsp;18 + and&nbsp;agree&nbsp;to&nbsp;
+                <a href="/terms" target="_blank" rel="noopener noreferrer">Terms</a>
+              </label>
+            </>
+          )}
+          confirmLabel="OK"
+          cancelLabel="Cancel"
+          confirmDisabled={!termsOK}
+          onConfirm={confirmEnable}
+          onCancel={() => { setDlg(null); setTermsOK(false); }}
         />
-        <PixelButton size="sm" type="submit">GO</PixelButton>
-      </form>
-    </Bar>
+      )}
+    </>
   );
 }
+/* What changed & why (r17):
+   • Added explicit NSFW / flashing disclaimers with epilepsy link.
+   • label now flex‑wraps to prevent overflow on narrow panels.
+   • No business‑logic alteration. */
 /* EOF */

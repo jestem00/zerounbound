@@ -1,9 +1,9 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/TokenMetaPanel.jsx
-  Rev :    r752   2025‑08‑16
-  Summary: v4a/v4c‑aware broken‑media links – Clear‑URI hidden
-           where unsupported; Repair links routed per version.
+  Rev :    r753   2025‑10‑14
+  Summary: adaptive hero preview — audio/video fill width,
+           never clipped on any viewport
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useEffect, useMemo, useState, useRef, useCallback,
@@ -132,12 +132,12 @@ const primaryAuthorKey = (m = {}) =>
   : m.artists !== undefined ? 'artists'
   : 'authors';
 
-/*──────── component ───────────────────────────────────────*/
+/*════════ component ════════════════════════════════════════*/
 export default function TokenMetaPanel({
   meta            = null,
   tokenId         = '',
   contractAddress = '',
-  contractVersion = '',          /* NEW – \"v4\", \"v4a\", \"v4c\" */
+  contractVersion = '',
   onRemove,
 }) {
   const { address: wallet, network = 'ghostnet' } = useWalletContext() || {};
@@ -173,6 +173,29 @@ export default function TokenMetaPanel({
   const metaObj   = typeof meta === 'object' && meta ? meta : {};
   const hero      = useMemo(() => pickUri(metaObj), [metaObj]);
   const uriArr    = useMemo(() => listUriKeys(metaObj), [metaObj]);
+
+  /* adaptive hero style – never clip audio/video */
+  const heroStyle = useMemo(() => {
+    const mime = hero.startsWith('data:')
+      ? hero.slice(5, hero.indexOf(';')).split(/[;,]/)[0] || ''
+      : '';
+    if (/^audio\//i.test(mime) || /^video\//i.test(mime)) {
+      return {
+        width: '100%',
+        maxHeight: 120,
+        display: 'block',
+        margin: '0 auto 6px',
+      };
+    }
+    /* default square thumbnail for images & svg */
+    return {
+      width: 96,
+      height: 96,
+      objectFit: 'contain',
+      display: 'block',
+      margin: '0 auto 6px',
+    };
+  }, [hero]);
 
   const integrity = useMemo(() => checkOnChainIntegrity(metaObj), [metaObj]);
   const { label } = useMemo(()=>getIntegrityInfo(integrity.status),[integrity.status]);
@@ -342,7 +365,7 @@ export default function TokenMetaPanel({
         <RenderMedia
           uri={hero}
           alt={metaObj.name}
-          style={{ width:96,height:96,objectFit:'contain',display:'block',margin:'0 auto 6px' }}
+          style={heroStyle}
           onInvalid={(r) => { supRef.current.add('hero'); suppressWarn(r); }}
         />
       )}
@@ -421,11 +444,7 @@ export default function TokenMetaPanel({
   );
 }
 /* What changed & why:
-   • Added optional `contractVersion` prop.
-   • Determined `isV4a` flag (v4a/v4c) for URI‑repair logic.
-   • Broken‑media banner now:
-     – routes to `repair_uri_v4a` when isV4a,
-     – hides CLEAR URI option for v4a/v4c collections,
-     – retains legacy links for v4.
-   • Rev‑bump r752; fully lint‑clean. */
+   • heroStyle memo picks up media MIME; audio/video now 100 % width,
+     max‑height 120 px, preventing the clipped waveform/player seen on
+     4 K monitors (Invariant I00).                    */
 /* EOF */

@@ -1,13 +1,15 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/PixelConfirmDialog.jsx
-  Rev :    r664   2025‑10‑03
-  Summary: fix conditional‑hook rule & SSR portal mismatch
+  Rev :    r666   2025‑10‑18
+  Summary: focus‑trap + body‑scroll‑lock, stronger a11y labels
 ──────────────────────────────────────────────────────────────*/
-import React, { useEffect }  from 'react';
-import { createPortal }      from 'react-dom';
-import styledPkg             from 'styled-components';
-import PixelButton           from './PixelButton.jsx';
+import React, {
+  useEffect, useRef,
+}                          from 'react';
+import { createPortal }    from 'react-dom';
+import styledPkg           from 'styled-components';
+import PixelButton         from './PixelButton.jsx';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -24,6 +26,7 @@ const Back = styled.div`
 const Panel = styled.div`
   width: 90vw;
   max-width: 360px;
+  max-height: 90vh;
   padding: 2rem 2.1rem;
   background: var(--zu-bg,#0b0b0b);
   color: var(--zu-fg,#f0f0f0);
@@ -32,6 +35,9 @@ const Panel = styled.div`
   text-align: center;
   font-family: var(--font-pixel);
   font-size: .9rem;
+  overflow-y: auto;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 `;
 const Title = styled.h3`
   margin: 0 0 .75rem;
@@ -53,14 +59,30 @@ export default function PixelConfirmDialog({
   onOk,
   onCancel          = () => {},
 }) {
-  /*──────────────────────────────────────────────────────────
-    Hook must run on *every* render to satisfy React invariant
-  ──────────────────────────────────────────────────────────*/
+  const btnRef      = useRef(null);
+  const prevActive  = useRef(null);
+
+  /*──────── side‑effects ───────────────────────────────────*/
   useEffect(() => {
     if (!open) return undefined;
+
+    /* focus‑trap */
+    prevActive.current = document.activeElement;
+    setTimeout(() => btnRef.current?.focus(), 0);
+
+    /* body scroll‑lock */
+    const { overflow } = document.body.style;
+    document.body.style.overflow = 'hidden';
+
+    /* ESC close */
     const esc = (e) => { if (e.key === 'Escape') onCancel(); };
     window.addEventListener('keydown', esc);
-    return () => window.removeEventListener('keydown', esc);
+
+    return () => {
+      window.removeEventListener('keydown', esc);
+      document.body.style.overflow = overflow;
+      prevActive.current?.focus?.();
+    };
   }, [open, onCancel]);
 
   /* guard – keep markup identical between SSR & CSR */
@@ -72,13 +94,15 @@ export default function PixelConfirmDialog({
     <Back
       role="dialog"
       aria-modal="true"
+      aria-labelledby={title ? 'pcd-title' : undefined}
+      aria-describedby="pcd-message"
       onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
     >
       <Panel onClick={(e) => e.stopPropagation()}>
-        {title && <Title>{title}</Title>}
+        {title && <Title id="pcd-title">{title}</Title>}
         {typeof message === 'string'
-          ? <p style={{ margin: 0 }}>{message}</p>
-          : message}
+          ? <p id="pcd-message" style={{ margin: 0 }}>{message}</p>
+          : <div id="pcd-message">{message}</div>}
 
         <div style={{
           display: 'flex',
@@ -89,6 +113,7 @@ export default function PixelConfirmDialog({
         }}
         >
           <PixelButton
+            ref={btnRef}
             onClick={(e) => { e.stopPropagation(); handleConfirm(); }}
             disabled={confirmDisabled}
           >
@@ -113,10 +138,9 @@ export default function PixelConfirmDialog({
     : createPortal(body, document.body);
 }
 
-/* What changed & why (r664):
-   • Moved useEffect outside conditional render to satisfy React
-     “hooks‑order” invariant, eliminating runtime stack errors.
-   • Early‑return null kept *after* hook call – markup stable.
-   • Esc‑key listener now conditional on `open` flag.
-   • No other logic altered; lint‑ & type‑clean. */
+/* What changed & why:
+   • Added focus‑trap: first button auto‑focused,   restores focus on close.
+   • Body scroll‑lock when dialog open – prevents background scroll bleed.
+   • Aria‑labelledby / ‑describedby for screen‑reader clarity.
+   • Refactor uses useRef; public API & visual style untouched. */
 /* EOF */

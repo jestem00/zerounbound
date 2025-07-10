@@ -1,13 +1,11 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/explore/[[...filter]].jsx
-  Rev :    r43   2025‑10‑12 UTC
-  Summary:  ▸ COLLECTION grid now ships metadata inline
-              (select + include) so <CollectionCard> has art
-            ▸ ADMIN filter now respected in TOKENS mode
-              (client‑side contract.creator match)
-            ▸ LISTINGS route returns “Work In Progress”
-            ▸ no runtime HTTP/2 proto errors; lint‑clean
+  Rev :    r42   2025‑10‑12 UTC
+  Summary: TOKEN admin‑filter fixed
+           • fetch query adds `contract.creator.eq`
+           • client‑side `tokenMatchesAdmin()` hard‑filters rows
+           • dynamic header text now mode‑aware
 ──────────────────────────────────────────────────────────────*/
 import {
   useCallback, useEffect, useMemo, useState,
@@ -50,6 +48,25 @@ const Center = styled.div`
 `;
 
 /*──────── helpers ───────────────────────────────────────────*/
+const authorArray = (m={}) => {
+  const src = m.creators ?? m.authors ?? m.artists ?? [];
+  if (Array.isArray(src)) return src;
+  if (typeof src==='string'){
+    try{ const j=JSON.parse(src); return Array.isArray(j)?j:[src]; }
+    catch{ return [src]; }
+  }
+  if(src&&typeof src==='object') return Object.values(src);
+  return [];
+};
+
+const tokenMatchesAdmin = (t, admin) => {
+  if(!admin) return true;
+  if (t.contract?.creator?.address === admin) return true;
+  const meta = decodeHexFields(t.metadata||{});
+  return authorArray(meta)
+    .some((a)=>String(a).toLowerCase()===admin.toLowerCase());
+};
+
 const isZeroToken = (t) => {
   if (!t || !t.metadata)                        return true;
   if (Number(t.totalSupply) === 0)              return true;
@@ -65,23 +82,23 @@ const isZeroToken = (t) => {
 export default function ExploreGrid() {
   const router = useRouter();
 
-  /* path / query → mode ---------------------------------------------------*/
+  /* path / query to mode --------------------------------------------------*/
   const seg0  = Array.isArray(router.query.filter)
     ? (router.query.filter[0] || '').toString().toLowerCase()
     : '';
   const cmdQ  = (router.query.cmd || '').toString().toLowerCase();
   const pathQ = router.asPath.toLowerCase();
 
-  const isTokensMode   = seg0 === 'tokens'   || cmdQ === 'tokens'   || pathQ.includes('cmd=tokens');
+  const isTokensMode   = seg0 === 'tokens'   || cmdQ === 'tokens'   || pathQ.includes('/tokens');
   const isListingsMode = seg0 === 'listings' || cmdQ === 'listings' || pathQ.includes('/listings');
 
-  /* admin‑creator filter (preserve case) ---------------------------------*/
+  /* optional admin‑creator filter (case‑preserved) ------------------------*/
   const adminFilterRaw = (router.query.admin || '').toString().trim();
   const adminFilter    = /^tz[1-3][1-9A-HJ-NP-Za-km-z]{33}$/.test(adminFilterRaw)
     ? adminFilterRaw
     : '';
 
-  /* QUICK EXIT – listings WIP --------------------------------------------*/
+  /* quick exit – listings WIP --------------------------------------------*/
   if (isListingsMode) {
     return (
       <Wrap>
@@ -110,8 +127,6 @@ export default function ExploreGrid() {
       limit      : FETCH_STEP,
       offset     : off,
       'sort.desc': 'firstActivityTime',
-      select     : 'address,tokensCount,metadata',
-      include    : 'metadata',                 // <‑‑ ship art/name inline
     });
     if (adminFilter) qs.append('creator.eq', adminFilter);
     else             qs.append('typeHash.in', VERSION_HASHES);
@@ -123,14 +138,14 @@ export default function ExploreGrid() {
       limit      : FETCH_STEP,
       offset     : off,
       'sort.desc': 'firstTime',
-      include    : 'contract',                // need contract.creator for admin filter
       'contract.metadata.version.in':
         'ZeroContractV1,ZeroContractV2,ZeroContractV2a,ZeroContractV2b,' +
         'ZeroContractV2c,ZeroContractV2d,ZeroContractV2e,' +
         'ZeroContractV3,ZeroContractV4,ZeroContractV4a,ZeroContractV4b,ZeroContractV4c',
     });
+    if (adminFilter) qs.append('contract.creator.eq', adminFilter);
     return jFetch(`${TZKT}/tokens?${qs}`).catch(() => []);
-  }, []);
+  }, [adminFilter]);
 
   /*──────── batch loader ───────────────────────────────────*/
   const loadBatch = useCallback(async (batchSize) => {
@@ -139,7 +154,7 @@ export default function ExploreGrid() {
 
     const fresh = [];
     let off     = offset;
-    const target = Math.max(batchSize, 1);
+    const target= Math.max(batchSize, 1);
 
     while (fresh.length < target && off - offset < RUNAWAY_LIMIT) {
       const rows = isTokensMode
@@ -153,8 +168,7 @@ export default function ExploreGrid() {
         rows.forEach((t) => {
           const key = `${t.contract?.address}_${t.tokenId}`;
           if (seenTok.has(key) || isZeroToken(t)) return;
-          /* honour admin filter (creator address) */
-          if (adminFilter && (t.contract?.creator?.address !== adminFilter)) return;
+          if (!tokenMatchesAdmin(t, adminFilter)) return;
           seenTok.add(key);
           fresh.push(t);
         });
@@ -175,9 +189,9 @@ export default function ExploreGrid() {
 
     setLoading(false);
   }, [
-    loading, end, offset, isTokensMode, adminFilter,
+    loading, end, offset, isTokensMode,
     fetchBatchTokens, fetchBatchCollections,
-    seenTok, seenColl,
+    seenTok, seenColl, adminFilter,
   ]);
 
   /* reset on mode / admin change ----------------------------------------*/
@@ -209,13 +223,28 @@ export default function ExploreGrid() {
       : collections.map((c) => <CollectionCard key={c.address} contract={c} />)
   ), [isTokensMode, tokens, collections]);
 
+  const bannerTxt = isTokensMode ? 'tokens' : 'collections';
+
   return (
     <Wrap>
       <ExploreNav />
 
       {adminFilter && (
-        <p style={{ textAlign:'center',fontSize:'.8rem',marginTop:'-4px' }}>
-          Showing items where creator&nbsp;=&nbsp;<code>{adminFilter}</code>
+        <p style={{
+          textAlign:'center',fontSize:'.8rem',margin:'6px 0 0',
+          display:'flex',justifyContent:'center',alignItems:'center',gap:'6px',
+        }}>
+          Showing {bannerTxt} where creator&nbsp;=&nbsp;
+          <code style={{ fontSize:'.8rem' }}>{adminFilter}</code>
+          <button
+            type="button"
+            aria-label="Clear filter"
+            onClick={() => router.replace(isTokensMode ? '/explore?cmd=tokens' : '/explore')}
+            style={{
+              background:'none',border:'none',fontSize:'1rem',
+              cursor:'pointer',lineHeight:1,marginTop:'-2px',
+            }}
+          >❌</button>
         </p>
       )}
 

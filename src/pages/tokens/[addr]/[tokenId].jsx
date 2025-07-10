@@ -1,9 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/tokens/[addr]/[tokenId].jsx
-  Rev :    r866   2025‑10‑09
-  Summary: standalone, lint‑clean token detail page
-           (no changes to legacy TokenMetaPanel.jsx)
+  Rev :    r868   2025‑10‑17
+  Summary: separate buttons for NSFW / Flashing in detail view
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useEffect, useState, useCallback, useMemo,
@@ -51,7 +50,7 @@ const MediaWrap = styled.div`
 const Obscure = styled.div`
   position:absolute;inset:0;background:rgba(0,0,0,.88);
   display:flex;flex-direction:column;align-items:center;justify-content:center;
-  gap:12px;text-align:center;font-size:.85rem;z-index:4;
+  gap:8px;text-align:center;font-size:.9rem;z-index:4;
   p{margin:0;width:80%;}
 `;
 
@@ -117,8 +116,10 @@ export default function TokenDetailPage() {
 
   const meta = token?.metadata || {};
   const hazards = detectHazards(meta);
-  const hidden  = (hazards.nsfw     && !allowNSFW)
-               || (hazards.flashing && !allowFlash);
+
+  const needsNSFW  = hazards.nsfw     && !allowNSFW;
+  const needsFlash = hazards.flashing && !allowFlash;
+  const hidden     = needsNSFW || needsFlash;
 
   const mediaUri = meta.artifactUri
     || meta.displayUri || meta.imageUri || '';
@@ -150,15 +151,16 @@ export default function TokenDetailPage() {
           {/* obscured overlays */}
           {hidden && (
             <Obscure>
-              <p>
-                {hazards.nsfw && 'NSFW'}
-                {hazards.nsfw && hazards.flashing && ' / '}
-                {hazards.flashing && 'Flashing content'}
-              </p>
-              <PixelButton size="sm" onClick={() => {
-                if (hazards.nsfw)     confirmReveal('NSFW',     setAllowNSFW);
-                if (hazards.flashing) confirmReveal('flashing', setAllowFlash);
-              }}>UNHIDE</PixelButton>
+              {needsNSFW && (
+                <PixelButton size="sm" warning onClick={() => confirmReveal('NSFW', setAllowNSFW)}>
+                  NSFW 🔞
+                </PixelButton>
+              )}
+              {needsFlash && (
+                <PixelButton size="sm" warning onClick={() => confirmReveal('flashing', setAllowFlash)}>
+                  Flashing 🚨
+                </PixelButton>
+              )}
             </Obscure>
           )}
 

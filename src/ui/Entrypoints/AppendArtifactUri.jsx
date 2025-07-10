@@ -318,7 +318,7 @@ export default function AppendArtifactUri({
         </PixelButton>
         {isEstim && <Spinner style={{ position: 'static' }} />}
         {oversize && !batches && <span style={{ fontSize: '.7rem', opacity: .8 }}>
-          Large file – estimation may take ≈10 s</span>}
+          Large files - estimation takes longer the larger the file, files over 1Mb take several minutes</span>}
       </div>
 
       {/* dialogs */}

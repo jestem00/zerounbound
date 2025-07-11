@@ -1,7 +1,9 @@
-/*Developed by @jams2blues with love for the Tezos community
+/*─────────────────────────────────────────────────────────────
+  Developed by @jams2blues with love for the Tezos community
   File:    src/constants/mimeTypes.js
-  Rev :    r3   2025‑07‑24
-  Summary: added web‑font types + helpers */
+  Rev :    r4   2025-07-10
+  Summary: added preferredExt helper + audio/mp3 alias
+ */
   
 // NOTE: Keep alphabetical inside category blocks for merge hygiene.
 // Update DeployCollectionForm.jsx validation + RenderMedia.jsx
@@ -32,6 +34,7 @@ export const MIME_TYPES = [
   /* audio */
   'audio/flac',
   'audio/midi',           // .mid / .midi files
+  'audio/mp3',
   'audio/mpeg',
   'audio/ogg',
   'audio/vnd.wave',
@@ -82,7 +85,7 @@ const EXT_LOOKUP = {
   flac: 'audio/flac',
   mid : 'audio/midi',
   midi: 'audio/midi',
-  mp3 : 'audio/mpeg',
+  mp3 : 'audio/mp3',
   mpeg: 'audio/mpeg',
   wav : 'audio/wav',
   wave: 'audio/wav',
@@ -102,6 +105,11 @@ const EXT_LOOKUP = {
   zip : 'application/zip',
 };
 
+const PREFERRED_EXT = {
+  'audio/mpeg': 'mp3',
+  'audio/mp3': 'mp3',
+};
+
 /**
  * Infer MIME from filename (extension).
  * Returns empty string on failure.
@@ -115,12 +123,20 @@ export function mimeFromFilename(uri = '') {
   }
 }
 
+/**
+ * Preferred file extension for a given MIME type.
+ * Falls back to subtype if no preference set.
+ */
+export function preferredExt(mime = '') {
+  return PREFERRED_EXT[mime.toLowerCase()] || mime.split('/')[1] || 'bin';
+}
+
 export function isMimeWhitelisted(mime) {
   return MIME_TYPES.includes(mime);
 }
 
 /* What changed & why:
-   • Added WOFF/WOFF2/TTF to whitelist + ext map (false‑positive fix for
-     inline fonts).
-   • Rev bumped to r3. */
+   • Added audio/mp3 alias to MIME_TYPES + EXT_LOOKUP for browser variance.
+   • Added PREFERRED_EXT map + preferredExt() for .mp3 over .mpeg in downloads.
+   • Rev bumped to r4. */
 /* EOF */

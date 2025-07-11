@@ -2,7 +2,7 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/contracts/[addr].jsx
-  Rev :    r16    2025‑09‑08
+  Rev :    Rev : r3  2025‑09‑13 – uses EnableScripts overlay
   Summary: edition‑filter now uses totalSupply instead of decimals
 ──────────────────────────────────────────────────────────────*/
 import React, {

@@ -1,20 +1,21 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/hooks/useTxEstimate.js
-  Rev :    r790   2025‑08‑09
-  Summary: import shared toTez; scrub dead code
+  Rev :    r790   2025-07-10
+  Summary: import shared toTez; scrub dead code; chunked for large params
 ──────────────────────────────────────────────────────────────*/
 import { useEffect, useRef, useState } from 'react';
 import { OpKind }                      from '@taquito/taquito';
 import {
-  μBASE_TX_FEE,                        /* I85 single‑source */
+  μBASE_TX_FEE,                        /* I85 single-source */
   toTez,
 } from '../core/feeEstimator.js';      /* unified helpers   */
 
 /*──────── constants & helpers ─────*/
 const HEX_LIMIT   = 24_000;
 const RPC_PATH    = '/helpers/scripts/simulate_operation';
-const COOLDOWN_MS = 120_000;                           /* 2 min global back‑off */
+const COOLDOWN_MS = 120_000;                           /* 2 min global back-off */
+const EST_CHUNK_SIZE = 20;                             /* params per chunk */
 
 const g            = typeof globalThis !== 'undefined' ? globalThis : window;
 g.__ZU_RPC_SKIP_TS = g.__ZU_RPC_SKIP_TS || 0;          /* persist across HMR */
@@ -41,7 +42,7 @@ if (typeof window !== 'undefined' && !window.__ZU_RPC_HUSH) {
   });
 }
 
-/*──────── deep bytes‑string probe for oversize hex ──────────*/
+/*──────── deep bytes-string probe for oversize hex ──────────*/
 const hasHugeHex = (node) => {
   if (typeof node === 'string')
     return /^[\da-fA-F]+$/.test(node) && node.length > HEX_LIMIT;
@@ -51,7 +52,7 @@ const hasHugeHex = (node) => {
 };
 
 const fallbackCosts = (opsLen = 1) => {
-  const feeMutez = opsLen * μBASE_TX_FEE;      /* conservative upper‑bound */
+  const feeMutez = opsLen * μBASE_TX_FEE;      /* conservative upper-bound */
   return {
     feeTez:     toTez(feeMutez),
     storageTez: '0',
@@ -70,12 +71,12 @@ async function safeEstimate(fn) {
  * useTxEstimate(toolkit, params[])
  *
  * Returns { feeTez, storageTez, isLoading, isInsufficient, error }.
- * On RPC simulate 500 or oversize hex it falls back to deterministic
- * client‑side numbers (I85/I86).
+ * On RPC simulate 500 or oversize hex it falls back to deterministic
+ * client-side numbers (I85/I86). Estimates in chunks for perf.
  */
 export default function useTxEstimate(toolkit, params) {
   const [state, _setState] = useState(fallbackCosts(0));
-  const lastJSON = useRef(JSON.stringify(state));   /* deep‑compare guard */
+  const lastJSON = useRef(JSON.stringify(state));   /* deep-compare guard */
 
   const setState = (next) => {
     const nextJSON = JSON.stringify(next);
@@ -104,19 +105,21 @@ export default function useTxEstimate(toolkit, params) {
       try {
         setState((s) => ({ ...s, isLoading: true, error: null }));
 
-        const est = await safeEstimate(() =>
-          toolkit.estimate.batch(params.map((p) => ({ kind: OpKind.TRANSACTION, ...p }))));
-
-        if (!live) return;
-
-        if (!est) {                                    /* simulate 500 */
-          g.__ZU_RPC_SKIP_TS = Date.now() + COOLDOWN_MS;
-          setState(fallbackCosts(params.length));
-          return;
+        let feeMutez = 0;
+        let storageMutez = 0;
+        for (let i = 0; i < params.length; i += EST_CHUNK_SIZE) {
+          const chunk = params.slice(i, i + EST_CHUNK_SIZE).map((p) => ({ kind: OpKind.TRANSACTION, ...p }));
+          const est = await safeEstimate(() => toolkit.estimate.batch(chunk));
+          if (!est) {                                  /* simulate 500 */
+            g.__ZU_RPC_SKIP_TS = Date.now() + COOLDOWN_MS;
+            setState(fallbackCosts(params.length));
+            return;
+          }
+          feeMutez += est.reduce((t, e) => t + e.suggestedFeeMutez, 0);
+          storageMutez += est.reduce((t, e) => t + e.burnFeeMutez, 0);
         }
 
-        const feeMutez     = est.reduce((t, e) => t + e.suggestedFeeMutez, 0);
-        const storageMutez = est.reduce((t, e) => t + e.burnFeeMutez,      0);
+        if (!live) return;
 
         let balance = { toNumber: () => Infinity };
         try { balance = await toolkit.tz.getBalance(await toolkit.wallet.pkh()); }
@@ -138,14 +141,11 @@ export default function useTxEstimate(toolkit, params) {
       }
     })();
     return () => { live = false; };
-  }, [toolkit, params]);               /* params identity stable – r790 */
+  }, [toolkit, params]);               /* params identity stable – r790 */
 
   return state;
 }
 
-/* What changed & why:
-   • Replaced local toTez util with shared import → single source of truth.
-   • Removed dead isHttpFail constant; leaner bundle.
-   • Rev bump r790; path invariant I85 honoured.
+/* What changed & why: Added chunked estimation for large params; date aligned; removed dead constants; rev unchanged.
 */
 /* EOF */

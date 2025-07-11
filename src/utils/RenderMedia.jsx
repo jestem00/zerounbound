@@ -1,14 +1,15 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/utils/RenderMedia.jsx
-  Rev :    r741   2025‑09‑20
-  Summary: exposes onLoad / onLoadedMetadata passthrough
+  Rev :    r742   2025-07-10
+  Summary: use mimeFromDataUri from uriHelpers
 ──────────────────────────────────────────────────────────────*/
 import * as React from 'react';
 import {
   mimeFromFilename,
   isMimeWhitelisted,
 } from '../constants/mimeTypes.js';
+import { mimeFromDataUri } from './uriHelpers.js';
 
 const {
   useEffect,
@@ -18,9 +19,6 @@ const {
 } = React;
 
 /*──────── helpers ───────────────────────────────────────────*/
-const mimeFromDataUri = (u = '') =>
-  u.startsWith('data:') ? (u.slice(5).split(/[;,]/)[0] || '') : '';
-
 function sanitizeUri(u = '') {
   if (!u) return { uri: '', trimmed: false };
   let s = String(u).replace(/\s+/g, '');
@@ -51,8 +49,8 @@ function useModelViewerOnce() {
 }
 
 /**
- * Universal, sandbox‑aware media renderer.
- * Accepts `onLoad` / `onLoadedMetadata` to bubble natural‑size signals
+ * Universal, sandbox-aware media renderer.
+ * Accepts `onLoad` / `onLoadedMetadata` to bubble natural-size signals
  */
 function RenderMediaRaw({
   uri = '',
@@ -124,7 +122,7 @@ function RenderMediaRaw({
     },
   };
 
-  /* SVG special‑case — safe by default, opt‑in scripts */
+  /* SVG special-case — safe by default, opt-in scripts */
   if (type === 'image/svg+xml') {
     const svgStyle = {
       imageRendering: 'pixelated',
@@ -232,8 +230,6 @@ function RenderMediaRaw({
 const RenderMedia = forwardRef(RenderMediaRaw);
 export default RenderMedia;
 
-/* What changed & why:
-   • onLoad / onLoadedMetadata props forwarded for size detection
-   • ref forwarding via forwardRef keeps parent‑side measurement simple
-   • common hook order maintained; lint‑clean                              */
+/* What changed & why: Date aligned; minor doc polish; no functional change.
+*/
 /* EOF */

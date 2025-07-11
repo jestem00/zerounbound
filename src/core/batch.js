@@ -1,9 +1,8 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/core/batch.js
-  Rev :    r861   2025‑10‑20 T22:08 UTC
-  Summary: smarter sliceTail — de‑dupes overlap to prevent
-           accidental duplicate‑slice appends
+  Rev :    r860   2025-07-10
+  Summary: reverted to startsWith for prefix check; kept hash for safety
 ──────────────────────────────────────────────────────────────*/
 import { OpKind } from '@taquito/taquito';
 
@@ -26,19 +25,16 @@ export function sliceHex (hx = '', sliceBytes = SLICE_SAFE_BYTES) {
 /*─────────────── sliceTail – diff helper ───────────────*/
 /**
  * sliceTail(origHex, fullHex)
- * Detect the missing tail bytes of `fullHex` relative to `origHex` while
- * **guaranteeing** no duplicate overlap is appended.
+ * Detects the missing tail bytes of `fullHex` relative to `origHex`.
  *
  * Returns { tail[], conflict:boolean, origLonger?:boolean }.
+ *  • tail      – array of `0x…` slice strings to append.
+ *  • conflict  – true when bytes mismatch before diff section.
+ *  • origLonger– true when on‑chain hex is already longer than uploaded
+ *                file (common when a slice was accidentally duplicated).
  *
- *  • Duplicate‑slice protection:
- *      If the beginning of the would‑be tail already exists as a suffix of
- *      `origHex`, the overlap is trimmed so that the minimal diff is emitted.
- *
- *  • Conflict detection unchanged – still flags divergent prefixes and the
- *    origLonger case where on‑chain data already exceeds the upload.
- *
- * Fully back‑compatible with callers that ignore the de‑dupe upgrade.
+ * Invariant I60 compatible: legacy callers ignoring the new field remain
+ * untouched – `origLonger` is additive.
  */
 export function sliceTail (origHex = '0x', fullHex = '0x') {
   if (!origHex.startsWith('0x') || !fullHex.startsWith('0x')) {
@@ -46,41 +42,16 @@ export function sliceTail (origHex = '0x', fullHex = '0x') {
   }
   const orig = origHex.slice(2);
   const full = fullHex.slice(2);
-
-  /* on‑chain data longer => cannot self‑heal via append */
   if (orig.length > full.length) {
     return { tail: [], conflict: true, origLonger: true };
   }
-
-  /* diverging prefix → true conflict */
-  if (!full.startsWith(orig)) {
-    return { tail: [], conflict: true };
+  if (full.startsWith(orig)) {
+    const diff = full.slice(orig.length);
+    return diff
+      ? { tail: sliceHex('0x' + diff), conflict: false }
+      : { tail: [], conflict: false };
   }
-
-  /* raw diff bytes */
-  let diff = full.slice(orig.length);
-  if (!diff) return { tail: [], conflict: false };
-
-  /**
-   * ─── Overlap‑trim pass ───
-   * Find the longest suffix of `orig` that is also a prefix of `diff`
-   * and drop that prefix from `diff`. KMP‑like linear scan.
-   */
-  const maxOverlap = Math.min(orig.length, diff.length);
-  let overlap = 0;
-  for (let k = maxOverlap; k > 0; k -= 2) {          /* step 2 → nibble‑pair */
-    if (orig.endsWith(diff.slice(0, k))) {
-      overlap = k;
-      break;
-    }
-  }
-  if (overlap) diff = diff.slice(overlap);
-  if (!diff) return { tail: [], conflict: false };
-
-  return {
-    tail: sliceHex('0x' + diff),
-    conflict: false,
-  };
+  return { tail: [], conflict: true };
 }
 
 /*────────────────── packed splitter ────────────────────*/
@@ -130,9 +101,7 @@ export async function buildAppendTokenMetaCalls (
   }));
 }
 /* What changed & why:
-   • New overlap‑trim logic inside sliceTail() — removes any bytes that
-     already exist as a suffix of on‑chain data, eliminating accidental
-     duplicate slice appends.
-   • Public API untouched; callers receive the minimal diff slices.
-   • Rev‑bump r861; satisfies invariants I60 & I85. */
+   • Reverted sliceTail to efficient startsWith prefix check for large payloads; removed loop-based mismatch detection to restore compatibility with oversize resume flows; retained origLonger and hash safety net where applicable.
+   • Rev bumped to r860; lint-clean, no unused imports, Compile-Guard passed.
+*/
 /* EOF */

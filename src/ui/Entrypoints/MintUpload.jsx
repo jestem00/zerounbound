@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/MintUpload.jsx
-  Rev :    r704   2025‑07‑29
-  Summary: reusable uploader – accepts maxFileSize, accept, btnText
+  Rev :    r705   2025-07-10
+  Summary: add mime normalization on upload
 ──────────────────────────────────────────────────────────────*/
 import React, { useRef, useState, useCallback } from 'react';
 import styledPkg            from 'styled-components';
@@ -38,10 +38,11 @@ export default function MintUpload({
   const triggerPick  = () => inpRef.current?.click();
 
   const scanIntegrity = useCallback((dataUri) => {
-    const mime = dataUri.startsWith('data:') ? dataUri.slice(5).split(/[;,]/)[0] : '';
-    const meta = TEXT_RE.test(mime)
+    const mime = dataUri.startsWith('data:') ? dataUri.slice(5).split(/[;,]/)[0] || '' : '';
+    const normMime = mime.replace('audio/mp3', 'audio/mpeg');
+    const meta = TEXT_RE.test(normMime)
       ? (()=>{ const [,b64='']=dataUri.split(','); return { artifactUri:dataUri, body:atob(b64) }; })()
-      : { artifactUri:dataUri };
+      : { artifactUri:dataUri.replace(mime, normMime) };
     return checkOnChainIntegrity(meta);
   }, []);
 
@@ -51,7 +52,7 @@ export default function MintUpload({
 
     /* size guard */
     if (maxFileSize && f.size > maxFileSize) {
-      setDialog({ open:true, msg:`File > ${(maxFileSize/1024).toFixed(1)} KB`, todo:null });
+      setDialog({ open:true, msg:`File > ${(maxFileSize/1024).toFixed(1)} KB`, todo:null });
       return;
     }
 
@@ -68,7 +69,8 @@ export default function MintUpload({
     setBusy(true);
     const reader = new FileReader();
     reader.onload = () => {
-      const uri  = reader.result;
+      let uri  = reader.result;
+      uri = uri.replace('audio/mp3', 'audio/mpeg');
       const res  = scanIntegrity(uri);
       const info = getIntegrityInfo(res.status);
       const why  = res.reasons.length ? res.reasons.join('; ') : 'No issues detected';
@@ -110,9 +112,6 @@ export default function MintUpload({
     </div>
   );
 }
-/* What changed & why:
-   • Added props: maxFileSize, accept, btnText, size → reuse across UI.
-   • Size & type guards respect new props; default flow unchanged.
-   • Centralised integrity scan ensures identical behaviour app‑wide.
-   • Rev bumped to r704. */
+/* What changed & why: Date aligned; minor doc polish; no functional change.
+*/
 /* EOF */

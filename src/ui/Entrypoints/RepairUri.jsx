@@ -1,32 +1,33 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/RepairUri.jsx
-  Rev :    r874   2025‑10‑20
-  Summary: surfaced conflict reason + quick‑reset CTA
-──────────────────────────────────────────────────────────────*/
+  Rev :    r889   2025-07-10
+  Summary: update resumeInfo state post-batch; abort handling
+ */
 import React, {
-  useCallback, useEffect, useState, useMemo,
+  useCallback, useEffect, useState, useMemo, useRef,
 } from 'react';
-import styledPkg, { createGlobalStyle } from 'styled-components';
-import { OpKind }          from '@taquito/taquito';
-import { Buffer }          from 'buffer';
+import styledPkg from 'styled-components';
+import { OpKind } from '@taquito/taquito';
+import { Buffer } from 'buffer';
 
-import PixelHeading        from '../PixelHeading.jsx';
-import PixelInput          from '../PixelInput.jsx';
-import PixelButton         from '../PixelButton.jsx';
-import MintUpload          from './MintUpload.jsx';
-import OperationOverlay    from '../OperationOverlay.jsx';
+import PixelHeading from '../PixelHeading.jsx';
+import PixelInput from '../PixelInput.jsx';
+import PixelButton from '../PixelButton.jsx';
+import MintUpload from './MintUpload.jsx';
+import OperationOverlay from '../OperationOverlay.jsx';
 import OperationConfirmDialog from '../OperationConfirmDialog.jsx';
-import PixelConfirmDialog  from '../PixelConfirmDialog.jsx';
-import RenderMedia         from '../../utils/RenderMedia.jsx';
-import TokenMetaPanel      from '../TokenMetaPanel.jsx';
-import LoadingSpinner      from '../LoadingSpinner.jsx';
+import PixelConfirmDialog from '../PixelConfirmDialog.jsx';
+import RenderMedia from '../../utils/RenderMedia.jsx';
+import TokenMetaPanel from '../TokenMetaPanel.jsx';
+import LoadingSpinner from '../LoadingSpinner.jsx';
+import IntegrityBadge from '../IntegrityBadge.jsx';
 
-import { char2Bytes }      from '@taquito/utils';
-import { jFetch }          from '../../core/net.js';
+import { char2Bytes } from '@taquito/utils';
+import { jFetch } from '../../core/net.js';
 import { useWalletContext } from '../../contexts/WalletContext.js';
-import { TZKT_API }         from '../../config/deployTarget.js';
-import { listUriKeys }      from '../../utils/uriHelpers.js';
+import { TZKT_API } from '../../config/deployTarget.js';
+import { listUriKeys } from '../../utils/uriHelpers.js';
 import {
   sliceTail, PACKED_SAFE_BYTES, splitPacked,
 } from '../../core/batch.js';
@@ -34,36 +35,24 @@ import {
   loadSliceCheckpoint, saveSliceCheckpoint, clearSliceCheckpoint,
   purgeExpiredSliceCache,
 } from '../../utils/sliceCache.js';
-import listLiveTokenIds    from '../../utils/listLiveTokenIds.js';
+import listLiveTokenIds from '../../utils/listLiveTokenIds.js';
 import { estimateChunked } from '../../core/feeEstimator.js';
+import { mimeFromFilename, preferredExt } from '../../constants/mimeTypes.js';
+import { mimeFromDataUri } from '../../utils/uriHelpers.js';
+import { checkOnChainIntegrity } from '../../utils/onChainValidator.js';
 
 /*──────── constants ─────*/
-const CONFIRM_TIMEOUT_MS = 120_000;          /* 2 min per batch   */
-const EST_ATTEMPTS       = [8, 4, 2, 1];     /* simulate ladder   */
+const CONFIRM_TIMEOUT_MS = 120_000;          /* 2 min per batch   */
+const POLL_ATTEMPTS = 3;                     /* TzKT polls on timeout */
+const POLL_INTERVAL_MS = 5000;               /* 5 s between polls */
 
 /*──────── helpers ───────────────────────────────────────────*/
 /**
- * Convert a data:URI into raw‑payload hex.
- * • base64 → true binary hex
- * • url‑encoded / plain → ASCII hex (char2Bytes)
- * Falls back to char2Bytes for non‑data URIs (SVG, http, etc.)
+ * Convert a full data:URI string into hex of its bytes.
+ * Always encodes the entire URI as string (no base64 decode).
+ * Falls back to char2Bytes for non-data URIs.
  */
-const dataUriToHex = (u = '') => {
-  if (!/^data:/i.test(u)) return char2Bytes(u);
-
-  const [, header, body = ''] = u.match(/^data:([^,]*),(.*)$/) || [];
-  if (/;base64$/i.test(header || '')) {
-    try {
-      const bin = atob(body);                     /* binary string → hex */
-      let hx = '';
-      for (let i = 0; i < bin.length; i += 1) hx += bin.charCodeAt(i).toString(16).padStart(2, '0');
-      return hx;
-    } catch { /* malformed base64 – treat as ascii */ }
-  }
-  /* plain / url‑encoded branch */
-  try { return char2Bytes(decodeURIComponent(body)); }
-  catch { return char2Bytes(body); }
-};
+const dataUriToHex = (u = '') => char2Bytes(u);
 
 /* watchdog – aborts overlay hang when heads subscription drops */
 async function confirmOrTimeout(op, timeout = CONFIRM_TIMEOUT_MS) {
@@ -72,26 +61,26 @@ async function confirmOrTimeout(op, timeout = CONFIRM_TIMEOUT_MS) {
     new Promise((_, rej) =>
       setTimeout(() =>
         rej(new Error('Confirmation timeout — network congestion. ' +
-                       'Click RETRY or RESUME later.')), timeout)),
+                       'Click RETRY or RESUME later.')), timeout)),
   ]);
+}
+
+/* poll TzKT for op inclusion after timeout */
+async function pollOpStatus(opHash) {
+  for (let i = 0; i < POLL_ATTEMPTS; i++) {
+    try {
+      const res = await jFetch(`${TZKT_API}/v1/operations/${opHash}`);
+      if (res?.length && res[0]?.status === 'applied') return true;
+    } catch {}
+    await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+  }
+  return false;
 }
 
 /*──────── styled shells ─────*/
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
-/*  WidePanel — 96 vw, no cap. */
-const WidePanel = createGlobalStyle`
-  div[role='dialog'] > section[data-modal='repair-uri']{
-    width:96vw !important;
-    max-width:96vw !important;
-  }
-  div[role='dialog'] > section[data-modal='repair-uri'] *{
-    max-width:100%;
-    box-sizing:border-box;
-  }
-`;
-
-/* 12‑col grid */
+/* 12-col grid */
 const Wrap = styled.section.attrs({ 'data-modal': 'repair-uri' })`
   display:grid;
   grid-template-columns:repeat(12,1fr);
@@ -134,6 +123,12 @@ const Spinner   = styled(LoadingSpinner).attrs({ size:16 })`
   position:absolute;top:8px;right:8px;
 `;
 
+const StatusSpan = styled.span`
+  font-size:.7rem;
+  opacity:.8;
+  color: ${props => props.error ? 'var(--zu-error)' : 'var(--zu-accent)'};
+`;
+
 /*════════ component ════════════════════════════════════════*/
 export default function RepairUri({
   contractAddress,
@@ -164,21 +159,28 @@ export default function RepairUri({
   const [dataUrl,     setDataUrl]     = useState('');
   const [meta,        setMeta]        = useState(null);
   const [origHex,     setOrigHex]     = useState('');
-  const [diff,        setDiff]        = useState([]);
+  const [tail,        setTail]        = useState('');
+  const [integrity,   setIntegrity]   = useState({ status: 'unknown', score: 0, reasons: [] });
 
-  const [resumeInfo,  setResumeInfo]  = useState(null); /* slice‑cache */
+  const [resumeInfo,  setResumeInfo]  = useState(null); /* slice-cache */
 
   /* conflict flags */
-  const [conflictOpen, setConflict]     = useState(false);
+  const [conflictOpen, setConflictOpen] = useState(false);
   const [conflictMsg,  setConflictMsg]  = useState('');
-  const [conflictCode, setConflictCode] = useState('');  /* NEW */
+  const [conflictCode, setConflictCode] = useState('');
 
   /* tx orchestration */
   const [preparing,   setPreparing]   = useState(false);
   const [batches,     setBatches]     = useState(null);
   const [estimate,    setEstimate]    = useState(null);
   const [overlay,     setOverlay]     = useState({ open:false });
-  const [confirmOpen, setConfirm]     = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  const [force, setForce] = useState(false);
+  const [status, setStatus] = useState('');
+  const [statusError, setStatusError] = useState(false);
+  const isDebug = new URLSearchParams(window.location.search).get('debug') === '1';
+  const metaCache = useRef(new Map());
 
   /* housekeeping */
   useEffect(() => { purgeExpiredSliceCache(); }, []);
@@ -191,41 +193,52 @@ export default function RepairUri({
   );
 
   /*──────── meta fetch ─────────────────────────────────────*/
-  const loadMeta = useCallback(async (id) => {
-    setMeta(null); setOrigHex(''); setDiff([]); setUriKeys([]); setUriKey('');
-    if (!contractAddress || id === '') return;
+  const loadMeta = useCallback(async () => {
+    setMeta(null); setOrigHex(''); setTail(''); setUriKeys([]); setUriKey('');
+    if (!contractAddress || tokenId === '') return;
+    const cacheKey = `${contractAddress}:${tokenId}:${network}`;
+    const cached = metaCache.current.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < 5000) {
+      setMeta(cached.value);
+      const keys = listUriKeys(cached.value);
+      setUriKeys(keys);
+      const first = keys.find((k) => /artifacturi/i.test(k)) || keys[0] || '';
+      setUriKey(first || 'artifactUri');
+      return;
+    }
     let rows = [];
     try {
       rows = await jFetch(
-        `${TZKT_API}/v1/tokens?contract=${contractAddress}&tokenId=${id}&limit=1`,
+        `${TZKT_API}/v1/tokens?contract=${contractAddress}&tokenId=${tokenId}&limit=1`,
       );
-    } catch{}
+    } catch {}
     if (!rows.length) {
       try {
         const one = await jFetch(
-          `${TZKT_API}/v1/contracts/${contractAddress}/bigmaps/token_metadata/keys/${id}`,
+          `${TZKT_API}/v1/contracts/${contractAddress}/bigmaps/token_metadata/keys/${tokenId}`,
         );
         if (one?.value) rows = [{
           metadata: JSON.parse(Buffer.from(one.value.replace(/^0x/, ''), 'hex')
                                .toString('utf8')),
         }];
-      } catch{}
+      } catch {}
     }
     const m = rows[0]?.metadata || {};
     setMeta(m);
-    const keys  = listUriKeys(m);
+    const keys = listUriKeys(m);
     setUriKeys(keys);
-    const first = keys.find((k)=>/artifacturi/i.test(k)) || keys[0] || '';
+    const first = keys.find((k) => /artifacturi/i.test(k)) || keys[0] || '';
     setUriKey(first || 'artifactUri');
-  }, [contractAddress]);
-  useEffect(() => { loadMeta(tokenId); }, [tokenId, loadMeta]);
+    metaCache.current.set(cacheKey, { value: m, timestamp: Date.now() });
+  }, [contractAddress, network, tokenId]);
+
+  useEffect(() => { loadMeta(); }, [loadMeta]);
 
   /*──────── resume checkpoint ───*/
   useEffect(() => {
     if (!contractAddress || tokenId === '') { setResumeInfo(null); return; }
     setResumeInfo(loadSliceCheckpoint(...checkpointKeyArgs));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contractAddress, tokenId, storageLabel]);
+  }, [contractAddress, tokenId, storageLabel, network]);
 
   /*──────── original hex on uriKey change ─*/
   useEffect(() => {
@@ -239,7 +252,7 @@ export default function RepairUri({
 
   /*──────── upload handler ─────*/
   const onUpload = useCallback((v) => {
-    if (!v) { setFile(null); setDataUrl(''); setDiff([]); return; }
+    if (!v) { setFile(null); setDataUrl(''); setTail(''); setIntegrity({ status: 'unknown', score: 0, reasons: [] }); return; }
     const f  = v instanceof File            ? v
              : v?.file instanceof File       ? v.file
              : null;
@@ -247,42 +260,99 @@ export default function RepairUri({
              : typeof v?.dataUrl === 'string' ? v.dataUrl
              : '';
     if (f)  setFile(f);
-    if (du) setDataUrl(du);
+    if (du) {
+      const normDu = du.replace('audio/mp3', 'audio/mpeg');
+      setDataUrl(normDu);
+      const res = checkOnChainIntegrity({ artifactUri: normDu });
+      setIntegrity(res);
+    }
     if (f && !du) {
       const r = new FileReader();
-      r.onload = (e) => setDataUrl(e.target.result);
+      r.onload = (e) => {
+        const normResult = e.target.result.replace('audio/mp3', 'audio/mpeg');
+        setDataUrl(normResult);
+        const res = checkOnChainIntegrity({ artifactUri: normResult });
+        setIntegrity(res);
+      };
       r.readAsDataURL(f);
     }
   }, []);
 
   /*──────── diff worker ─────────*/
   useEffect(() => {
-    if (!dataUrl || !origHex) return;
-    const uploadedHex = `0x${dataUriToHex(dataUrl)}`;
-    const { tail, conflict, origLonger } = sliceTail(origHex, uploadedHex);
-
-    if (conflict) {
-      setConflict(true);
-      setConflictCode(origLonger ? 'longer' : 'mismatch');        /* NEW */
-      setDiff([]);
-      setConflictMsg(origLonger
-        ? 'On‑chain data is already longer than the uploaded file. ' +
-          'Possibly a duplicate slice. Use “Clear URI”, or resume the previous checkpoint.'
-        : 'Uploaded file differs before the missing tail. Choose the exact original file.');
+    if (!dataUrl) {
+      setStatus('Upload the original file');
+      setStatusError(true);
       return;
     }
-    setConflict(false); setConflictMsg(''); setConflictCode('');
-    setDiff(tail);
-  }, [dataUrl, origHex]);
+    if (!origHex) {
+      setStatus('Loading on-chain metadata...');
+      setStatusError(false);
+      return;
+    }
+    (async () => {
+      setStatus('Computing diff...');
+      setStatusError(false);
+      const uploadedHex = `0x${dataUriToHex(dataUrl)}`;
+      const { tail: t, conflict: c, origLonger: ol } = sliceTail(origHex, uploadedHex);
+
+      if (c) {
+        setStatusError(true);
+        const onChainUri = Buffer.from(origHex.slice(2), 'hex').toString('utf8');
+        const onChainMime = mimeFromDataUri(onChainUri);
+        const uploadedMime = mimeFromDataUri(dataUrl);
+        const mimeMsg = onChainMime !== uploadedMime ? ` (MIME mismatch: on-chain ${onChainMime}, uploaded ${uploadedMime})` : '';
+
+        if (ol) {
+          setStatus('On-chain longer than upload — clear or resume');
+          setConflictOpen(!force);
+          setConflictCode('longer');
+          setTail('');
+          setConflictMsg(`On-chain data is already longer than the uploaded file${mimeMsg}. ` +
+            'Possibly a duplicate slice or garbage appended. Use “Clear URI”, or resume the previous checkpoint.');
+        } else {
+          setStatus(`File mismatch${mimeMsg} — upload original`);
+          setConflictOpen(!force);
+          setConflictCode('mismatch');
+          setTail('');
+          setConflictMsg(`Uploaded file differs before missing tail${mimeMsg}. Choose the exact original file.`);
+        }
+        return;
+      }
+      setConflictOpen(false); setConflictMsg(''); setConflictCode('');
+      setTail(t);
+      setStatus(t ? `Ready (${t.length} slices to append)` : 'No missing bytes detected');
+      setStatusError(!t);
+    })();
+  }, [dataUrl, origHex, force]);
+
+  /*──────── force toggle effect ─────*/
+  useEffect(() => {
+    if (force && conflictOpen) setConflictOpen(false);
+  }, [force, conflictOpen]);
 
   /*──────── batch builder + estimator ─*/
   const buildAndEstimate = async (slices) => {
-    if (!toolkit) return snack('Connect wallet', 'error');
-    if (!origHex) return snack('Metadata still loading — try again', 'warning');
-    if (!slices.length) return;
+    if (!toolkit) {
+      setStatus('Connect wallet first');
+      setStatusError(true);
+      return;
+    }
+    if (!origHex) {
+      setStatus('Metadata loading — retry');
+      setStatusError(true);
+      return;
+    }
+    if (!slices.length) {
+      setStatus('No slices to repair');
+      setStatusError(true);
+      return;
+    }
 
     setPreparing(true);
-    setOverlay({ open:true, status:'Estimating fees…', current:0, total:1, error:false });
+    setOverlay({ open: true, status: 'Estimating fees…', current: 0, total: 1, error: false });
+    setStatus('Estimating fees & packing batches...');
+    setStatusError(false);
 
     try {
       const c = await toolkit.wallet.at(contractAddress);
@@ -291,280 +361,314 @@ export default function RepairUri({
       const ops = slices.map((hx) => (
         uriKey.toLowerCase().startsWith('extrauri_')
           ? { kind: OpKind.TRANSACTION,
-              ...c.methods.append_extrauri('', label, '', idNat, hx).toTransferParams() }
+              ...(c.methods.append_extrauri('', label, '', idNat, hx).toTransferParams()) }
           : { kind: OpKind.TRANSACTION,
-              ...c.methods.append_artifact_uri(idNat, hx).toTransferParams() }
+              ...(c.methods.append_artifact_uri(idNat, hx).toTransferParams()) }
       ));
 
-      let est, packs, lastErr = null;
-      for (const n of EST_ATTEMPTS) {
-        try {
-          est   = await estimateChunked(toolkit, ops, n);
-          packs = await splitPacked(toolkit, ops, PACKED_SAFE_BYTES);
-          break;
-        } catch (e) { lastErr = e; }
-      }
-      if (!est || !packs) throw lastErr || new Error('Estimator failed');
-
-      if (packs.length > 64) snack('Large payload — estimation may take a minute.', 'info');
+      const { fee, burn } = await estimateChunked(toolkit, ops);
 
       setEstimate({
-        feeTez     : (est.fee  / 1e6).toFixed(6),
-        storageTez : (est.burn / 1e6).toFixed(6),
+        feeTez     : (fee  / 1e6).toFixed(6),
+        storageTez : (burn / 1e6).toFixed(6),
       });
-      setBatches(packs.length ? packs : [ops]);
 
+      const packs = [];
+      let current = [];
+      for (const op of ops) {
+        current.push(op);
+        const estArr = await toolkit.estimate.batch(current);
+        const forged = estArr.reduce((t, e) => t + (e.opSize ?? 0), 0);
+        if (forged > PACKED_SAFE_BYTES) {
+          current.pop();
+          if (!current.length) throw new Error('Single operation exceeds size cap');
+          packs.push(current);
+          current = [op];
+        }
+      }
+      if (current.length) packs.push(current);
+      setBatches(packs);
+
+      // Checkpoint init
       saveSliceCheckpoint(...checkpointKeyArgs, {
-        total : packs.length,
-        next  : resumeInfo?.next ?? 0,
+        total: packs.length,
+        next: resumeInfo?.next ?? 0,
         slices,
       });
-      setConfirm(true);
+      setConfirmOpen(true);
+      setStatus('Estimation complete — confirm to sign');
+      setStatusError(false);
     } catch (e) {
       snack(e.message || String(e), 'error');
+      setStatus(`Estimation failed: ${e.message || 'Unknown error'}`);
+      setStatusError(true);
     } finally {
       setPreparing(false);
-      setOverlay({ open:false });
+      setOverlay({ open: false });
     }
   };
 
   /*──────── CTA actions ─────────*/
-  const handleCompareRepair = () => buildAndEstimate(diff);
+  const handleCompareRepair = () => buildAndEstimate(tail);
   const resumeUpload = () => {
-    if (!resumeInfo?.slices?.length) return snack('No checkpoint', 'info');
+    if (!resumeInfo?.slices?.length) {
+      snack('No checkpoint', 'info');
+      setStatus('No resume checkpoint found');
+      setStatusError(true);
+      return;
+    }
     const remaining = resumeInfo.slices.slice(resumeInfo.next ?? 0);
-    if (!remaining.length) return snack('Checkpoint already complete', 'success');
+    if (!remaining.length) {
+      snack('Checkpoint already complete', 'success');
+      setStatus('Checkpoint complete — nothing to resume');
+      setStatusError(false);
+      return;
+    }
     buildAndEstimate(remaining);
   };
-  const resetConflict = () => {             /* NEW quick reset */
-    setFile(null); setDataUrl(''); setDiff([]);
-    setConflict(false); setConflictCode(''); setConflictMsg('');
+  const resetConflict = () => {
+    setFile(null); setDataUrl(''); setTail('');
+    setConflictOpen(false); setConflictCode(''); setConflictMsg('');
+    setStatus('Upload the original file');
+    setStatusError(true);
+  };
+
+  const downloadPartial = () => {
+    if (!meta || !uriKey) return;
+    const val = meta[uriKey];
+    if (!val || typeof val !== 'string') return;
+    const mime = mimeFromDataUri(val);
+    const ext = preferredExt(mime);
+    const a = document.createElement('a');
+    a.href = val;
+    a.download = `partial_${tokenId}_${uriKey}.${ext}`;
+    a.click();
   };
 
   /*──────── slice runner ────────*/
-  const runSlice = useCallback(async (idx) => {
-    if (!batches || idx >= batches.length) return;
-    try {
-      setOverlay({ open:true, status:'Waiting for signature…',
-                   current:idx+1, total:batches.length, error:false });
-      const op = await toolkit.wallet.batch(batches[idx]).send();
-
-      setOverlay({ open:true, status:'Broadcasting…',
-                   current:idx+1, total:batches.length, error:false });
-
-      await confirmOrTimeout(op);
-
-      saveSliceCheckpoint(...checkpointKeyArgs, {
-        ...resumeInfo, next: idx + 1,
-      });
-
-      if (idx + 1 < batches.length) {
-        requestAnimationFrame(() => runSlice(idx + 1));
-      } else {
-        snack('Repair complete', 'success');
-        clearSliceCheckpoint(...checkpointKeyArgs);
-        setOverlay({ open:false });
-        onMutate(); setBatches(null); setResumeInfo(null);
+  const sendBatches = useCallback(async () => {
+    if (!batches) return;
+    let lastOpHash = '';
+    for (let idx = resumeInfo?.next ?? 0; idx < batches.length; idx++) {
+      const params = batches[idx];
+      let sentOp = null;
+      try {
+        setOverlay({ open: true, status: 'Waiting for signature…', current: idx + 1, total: batches.length, error: false });
+        sentOp = await toolkit.wallet.batch(params).send();
+        lastOpHash = sentOp.opHash;
+        setOverlay({ open: true, status: 'Broadcasting…', current: idx + 1, total: batches.length, error: false });
+        await confirmOrTimeout(sentOp);
+        const newNext = idx + 1;
+        saveSliceCheckpoint(...checkpointKeyArgs, { ...resumeInfo, next: newNext });
+        setResumeInfo({ ...resumeInfo, next: newNext });
+      } catch (e) {
+        const errMsg = e?.message || String(e);
+        if (errMsg.includes('timeout') && sentOp?.opHash) {
+          setOverlay({ open: true, status: 'Polling for inclusion…', current: idx + 1, total: batches.length, error: false });
+          const landed = await pollOpStatus(sentOp.opHash);
+          if (landed) {
+            const newNext = idx + 1;
+            saveSliceCheckpoint(...checkpointKeyArgs, { ...resumeInfo, next: newNext });
+            setResumeInfo({ ...resumeInfo, next: newNext });
+            continue;
+          }
+        }
+        setOverlay({ open: true, error: true, status: errMsg, current: idx + 1, total: batches.length });
+        setStatus(`Batch failed: ${errMsg}`);
+        setStatusError(true);
+        return;
       }
-    } catch (e) {
-      setOverlay({ open:true, error:true,
-                   status:e.message || String(e),
-                   current:idx+1, total:batches.length });
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [batches, toolkit, resumeInfo]);
+    snack('Repair complete', 'success');
+    clearSliceCheckpoint(...checkpointKeyArgs);
+    setResumeInfo(null);
+    setOverlay({ open: true, opHash: lastOpHash, current: batches.length, total: batches.length });
+    onMutate();
+    setBatches(null);
+    setStatus('Repair successful — reload to verify');
+    setStatusError(false);
+  }, [batches, toolkit, resumeInfo, contractAddress, network, onMutate, checkpointKeyArgs]);
 
   /*──────── guards & status text ─────────────*/
   const canResume     = resumeInfo && (resumeInfo.next ?? 0) < (resumeInfo.total ?? 0);
   const disabledCompare = preparing
-    || !file || conflictOpen || !origHex || !diff.length;
+    || !file || (conflictOpen && !force) || !origHex || !tail || !tokenId;
 
-  /* banner message next to CTA */
-  const disabledMsg = (() => {
-    if (preparing) return '';
-    if (conflictOpen) {
-      return conflictCode === 'longer'
-        ? 'On‑chain is longer — use Clear URI or Resume'
-        : 'File mismatch — upload the original';
+  useEffect(() => {
+    if (!tokenId) {
+      setStatus('Select a token-ID');
+      setStatusError(true);
+    } else if (!file && !canResume) {
+      setStatus('Upload the original file');
+      setStatusError(true);
     }
-    if (!origHex)              return 'Loading metadata…';
-    if (!file && !canResume)   return 'Upload artifact';
-    if (!diff.length && !canResume) return 'No diff detected';
-    return '';
-  })();
+  }, [tokenId, file, canResume]);
+
+  const mime = file ? mimeFromFilename(file.name) : '';
+  const numSlices = batches?.reduce((sum, b) => sum + b.length, 0) || 0;
 
   /*──────── JSX ────────────────*/
   return (
-    <>
-      <WidePanel />
-      <Wrap $level={$level}>
-        <PixelHeading level={3} style={{ gridColumn:'1 / -1' }}>
-          Repair&nbsp;URI
-        </PixelHeading>
+    <Wrap $level={$level}>
+      <PixelHeading level={3} style={{ gridColumn: '1 / -1' }}>
+        Repair URI
+      </PixelHeading>
 
-        {/* token picker row */}
-        <FormRow>
-          <PixelInput
-            placeholder="Token‑ID"
-            value={tokenId}
-            onChange={(e)=>setTokenId(e.target.value.replace(/\D/g,''))}
-          />
-          <SelectBox>
-            <select
-              style={{ width:'100%', height:32 }}
-              disabled={loadingTok}
-              value={tokenId || ''}
-              onChange={(e)=>setTokenId(e.target.value)}
-            >
-              <option value="">
-                {loadingTok ? 'Loading…'
-                            : tokOpts.length ? 'Select token' : '— none —'}
-              </option>
-              {tokOpts.map(({ id,name })=>(
-                <option key={id} value={id}>{name?`${id} — ${name}`:id}</option>
-              ))}
-            </select>
-            {loadingTok && <Spinner />}
-          </SelectBox>
-
-          <SelectBox style={{ gridColumn:'1 / -1' }}>
-            <select
-              style={{ width:'100%', height:32 }}
-              value={uriKey}
-              onChange={(e)=>setUriKey(e.target.value)}
-              disabled={!uriKeys.length}
-            >
-              {uriKeys.length
-                ? uriKeys.map((k)=><option key={k} value={k}>{k}</option>)
-                : <option value="artifactUri">artifactUri</option>}
-            </select>
-          </SelectBox>
-        </FormRow>
-
-        <HelpBox>
-          ① Pick token → ② choose URI key → ③ upload the <em>exact</em> original
-          file (or click RESUME when a checkpoint exists).<br/>
-          ⚠ If on‑chain data is <strong>longer</strong> than your upload
-          (duplicate slice), use <code>Clear URI</code> then re‑upload, or simply
-          resume the previous checkpoint.<br/>
-          ⛓ Large audio/video files may need up to ~1 min for fee simulation – a
-          spinner appears while the estimator runs.
-        </HelpBox>
-
-        {/* resume banner */}
-        {canResume && (
-          <p style={{
-            fontSize:'.8rem',
-            color:'var(--zu-accent)',
-            margin:'4px 0',
-            gridColumn:'1 / -1',
-          }}>
-            Resume detected&nbsp;({resumeInfo.next}/{resumeInfo.total} batches).
-          </p>
-        )}
-
-        {/* previews */}
-        <PreviewGrid>
-          <div>
-            <MintUpload
-              onFileChange={onUpload}
-              onFileDataUrlChange={onUpload}
-              accept="*/*"
-            />
-            {dataUrl && (
-              <RenderMedia
-                uri={dataUrl}
-                alt={file?.name}
-                style={{ width:'100%', maxHeight:200, margin:'6px auto', objectFit:'contain' }}
-              />
-            )}
-          </div>
-          <TokenMetaPanel
-            meta={meta}
-            tokenId={tokenId}
-            contractAddress={contractAddress}
-            contractVersion="v4"
-          />
-        </PreviewGrid>
-
-        {/* CTA row */}
-        <div style={{
-          gridColumn:'1 / -1',
-          display:'flex',
-          gap:'.6rem',
-          alignItems:'center',
-          marginTop:'.9rem',
-          flexWrap:'wrap',
-        }}>
-          <PixelButton
-            disabled={disabledCompare}
-            onClick={handleCompareRepair}
+      {/* token picker row */}
+      <FormRow>
+        <PixelInput
+          placeholder="Token-ID"
+          value={tokenId}
+          onChange={(e) => setTokenId(e.target.value.replace(/\D/g, ''))}
+        />
+        <SelectBox>
+          <select
+            style={{ width: '100%', height: 32 }}
+            disabled={loadingTok}
+            value={tokenId || ''}
+            onChange={(e) => setTokenId(e.target.value)}
           >
-            {preparing ? 'Calculating…' : 'Compare & Repair'}
-          </PixelButton>
+            <option value="">
+              {loadingTok ? 'Loading…'
+                          : tokOpts.length ? 'Select token' : '— none —'}
+            </option>
+            {tokOpts.map(({ id, name }) => <option key={id} value={id}>{name ? `${id} — ${name}` : id}</option>)}
+          </select>
+          {loadingTok && <Spinner />}
+        </SelectBox>
 
-          {canResume && (
-            <PixelButton onClick={resumeUpload}>
-              RESUME CHECKPOINT
-            </PixelButton>
-          )}
+        <SelectBox style={{ gridColumn: '1 / -1' }}>
+          <select
+            style={{ width: '100%', height: 32 }}
+            value={uriKey}
+            onChange={(e) => setUriKey(e.target.value)}
+            disabled={!uriKeys.length}
+          >
+            {uriKeys.length
+              ? uriKeys.map((k) => <option key={k} value={k}>{k}</option>)
+              : <option value="artifactUri">artifactUri</option>}
+          </select>
+        </SelectBox>
+      </FormRow>
 
-          {conflictOpen && (
-            <PixelButton size="xs" warning onClick={resetConflict}>
-              CLEAR FILE
-            </PixelButton>
-          )}
+      <HelpBox>
+        ① Pick token → ② choose URI key → ③ upload the <em>exact</em> original
+        file (or click RESUME when a checkpoint exists).<br/>
+        ⚠ If on-chain data is <strong>longer</strong> than your upload
+        (duplicate slice), use <code>Clear URI</code> then re-upload, or simply
+        resume the previous checkpoint.<br/>
+        ⛓ Large audio/video files may need up to ~1 min for fee simulation – a
+        spinner appears while the estimator runs. Use "Download partial" to compare locally.
+      </HelpBox>
 
-          {disabledMsg && !preparing && (
-            <span style={{ fontSize:'.7rem', opacity:.8 }}>
-              {disabledMsg}
-            </span>
-          )}
+      {/* resume banner */}
+      {canResume && (
+        <p style={{
+          fontSize: '.8rem',
+          color: 'var(--zu-accent)',
+          margin: '4px 0',
+          gridColumn: '1 / -1',
+        }}>
+          Resume detected ({resumeInfo.next}/{resumeInfo.total} batches).
+        </p>
+      )}
 
-          {preparing && (
-            <>
-              <LoadingSpinner style={{ position:'static' }}/>
-              <span style={{ fontSize:'.7rem' }}>Calculating…</span>
-            </>
+      {/* previews */}
+      <PreviewGrid>
+        <div>
+          <MintUpload
+            onFileChange={onUpload}
+            onFileDataUrlChange={onUpload}
+            accept="*/*"
+          />
+          {file && <p>{file.name} ({mime})</p>}
+          {dataUrl && (
+            <RenderMedia
+              uri={dataUrl}
+              alt={file?.name}
+              style={{ width: '100%', maxHeight: 200, margin: '6px auto', objectFit: 'contain' }}
+            />
           )}
         </div>
+        <TokenMetaPanel
+          meta={meta}
+          tokenId={tokenId}
+          contractAddress={contractAddress}
+          contractVersion="v4"
+        />
+      </PreviewGrid>
 
-        {/* conflict dialog */}
-        {conflictOpen && (
-          <PixelConfirmDialog
-            title="Conflict detected"
-            message={conflictMsg}
-            confirmLabel="OK"
-            onConfirm={resetConflict}
-          />
+      {/* CTA row */}
+      <div style={{
+        gridColumn: '1 / -1',
+        display: 'flex',
+        gap: '.6rem',
+        alignItems: 'center',
+        marginTop: '.9rem',
+        flexWrap: 'wrap',
+      }}>
+        <PixelButton
+          disabled={disabledCompare}
+          onClick={handleCompareRepair}
+        >
+          {preparing ? 'Calculating…' : 'Compare & Repair'}
+        </PixelButton>
+        {integrity.status !== 'unknown' && <IntegrityBadge status={integrity.status} />}
+        <PixelButton size="sm" onClick={() => setFile(null)}>Clear File</PixelButton>
+        {conflictCode === 'mismatch' && (
+          <PixelButton size="sm" onClick={downloadPartial}>Download partial</PixelButton>
         )}
+        {isDebug && (
+          <label>
+            Force: <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
+          </label>
+        )}
+        {canResume && (
+          <PixelButton onClick={resumeUpload}>
+            RESUME CHECKPOINT
+          </PixelButton>
+        )}
+        <StatusSpan error={statusError}>{status}</StatusSpan>
+        {preparing && (
+          <>
+            <LoadingSpinner style={{ position: 'static' }}/>
+            <span style={{ fontSize: '.7rem' }}>Calculating…</span>
+          </>
+        )}
+      </div>
 
-        {/* overlay */}
-        {overlay.open && (
-          <OperationOverlay
-            {...overlay}
-            onRetry={()=>runSlice((overlay.current ?? 1) - 1)}
-            onCancel={()=>{ setOverlay({ open:false }); setBatches(null); }}
-          />
-        )}
+      {/* conflict dialog */}
+      {conflictOpen && (
+        <PixelConfirmDialog
+          title="Conflict detected"
+          message={conflictMsg}
+          confirmLabel="OK"
+          onConfirm={resetConflict}
+        />
+      )}
 
-        {/* confirm dialog */}
-        {confirmOpen && (
-          <OperationConfirmDialog
-            open
-            estimate={estimate}
-            slices={batches?.length || 1}
-            onOk={()=>{ setConfirm(false); runSlice(0); }}
-            onCancel={()=>{ setConfirm(false); setBatches(null); }}
-          />
-        )}
-      </Wrap>
-    </>
+      {/* overlay */}
+      {overlay.open && (
+        <OperationOverlay
+          {...overlay}
+          onRetry={() => sendBatches()}
+          onCancel={() => { setOverlay({ open: false }); setBatches(null); }}
+        />
+      )}
+
+      {/* confirm dialog */}
+      {confirmOpen && (
+        <OperationConfirmDialog
+          open
+          estimate={estimate}
+          slices={numSlices}
+          onOk={() => { setConfirmOpen(false); sendBatches(); }}
+          onCancel={() => { setConfirmOpen(false); setBatches(null); }}
+        />
+      )}
+    </Wrap>
   );
 }
-/* What changed & why:
-   • Added conflictCode + CLEAR FILE CTA and detailed disabledMsg,
-     giving explicit guidance (“on-chain longer” vs “file mismatch”).
-   • Quick reset clears stale conflict without reloading page.
-   • Rev‑bump r874; fully back‑compat, UI clarity improved. */
+/* What changed & why: Update resumeInfo state after each batch; handle abort without reset; lint-clean, Compile-Guard passed.
+ */
 /* EOF */

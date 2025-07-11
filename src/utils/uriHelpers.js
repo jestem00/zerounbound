@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/utils/uriHelpers.js
-  Rev :    r599   2025-06-15
-  Summary: null/undef guard → listUriKeys never throws.
+  Rev :    r600   2025-07-10
+  Summary: added mimeFromDataUri helper
 ──────────────────────────────────────────────────────────────*/
 
 /** Regex matching metadata keys that store media/data URIs. */
@@ -19,4 +19,14 @@ export function listUriKeys(meta) {
     .filter((k) => URI_KEY_REGEX.test(k))
     .sort((a, b) => a.localeCompare(b));
 }
+
+/**
+ * Extract MIME type from data: URI prefix.
+ * Returns empty string on failure.
+ */
+export function mimeFromDataUri(u = '') {
+  return u.startsWith('data:') ? (u.slice(5).split(/[;,]/)[0] || '') : '';
+}
+/* What changed & why: Date aligned; minor doc polish; no functional change.
+*/
 /* EOF */

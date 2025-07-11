@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/Mint.jsx
-  Rev :    r871   2025‑09‑05
-  Summary: lock recipient to wallet for oversize / >30 kB meta
+  Rev :    r872   2025-07-10
+  Summary: add mime normalization for mp3/mpeg
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useRef, useState, useEffect, useMemo, useCallback,
@@ -38,6 +38,7 @@ import {
 import {
   estimateChunked, calcStorageMutez, μBASE_TX_FEE, toTez,
 } from '../../core/feeEstimator.js';
+import { mimeFromFilename } from '../../constants/mimeTypes.js';
 
 /* polyfill for node envs / SSR */
 if (typeof window !== 'undefined' && !window.Buffer) window.Buffer = Buffer;
@@ -322,8 +323,9 @@ export default function Mint({
   /* metadata & bytes */
   const metaMap = useMemo(() => {
     const clean = attrs.filter((a) => a.name && a.value);
+    const mimeNorm = mimeFromFilename(file?.name || '').replace('audio/mp3', 'audio/mpeg');
     return buildMeta({
-      f, attrs: clean, tags, dataUrl: slice0DataUri, mime: file?.type, shares,
+      f, attrs: clean, tags, dataUrl: slice0DataUri, mime: mimeNorm, shares,
     });
   }, [f, attrs, tags, slice0DataUri, file, shares]);
 
@@ -475,6 +477,7 @@ export default function Mint({
           total: appendSlices.length + 1,
           next: startSlice,
           hash: cp.hash || `sha256:${digest}`,
+          updated: Date.now(),
         });
       }
     }
@@ -832,16 +835,16 @@ export default function Mint({
           onChange={(e) => setF({ ...f, agree: e.target.checked })}
         />
         {' '}
-        I agree to the&nbsp;
+        I agree to the 
         <a href="/terms" target="_blank" rel="noopener noreferrer">
-          terms &amp; conditions
+          terms & conditions
         </a>
         .
       </label>
 
       {/* Summary & CTA */}
       <Note>
-        Metadata size:&nbsp;
+        Metadata size: 
         {metaBytes.toLocaleString()}
         {' '}
         /
@@ -899,10 +902,8 @@ export default function Mint({
 }
 
 /* What changed & why:
-   • Added LOCK_SELF_BYTES rule (imported) + helper requiresSelfRecipient().
-   • Auto‑locks recipient to connected wallet when oversize file or meta >30 kB.
-   • Disabled Recipient input in locked mode with tooltip; updated help‑copy.
-   • Validation & checklist reflect new self‑recipient constraint.
-   • Rev bump r871.
+   • Normalized mime in buildMeta to map audio/mp3 → audio/mpeg for consistency.
+   • Added checkpoint updated timestamp for better expiry handling.
+   • Rev bump r872.
 */
 /* EOF */

@@ -64,6 +64,8 @@
         "src/ui/ContractMetaPanelContracts.jsx",
         "src/ui/TokenCard.jsx",
         "src/ui/TokenMetaPanel.jsx",
+        "src/ui/MAINTokenMetaPanel.jsx",
+        "src/ui/TokenIdSelect.jsx",
         "src/utils/decodeHexFields.js",
         "src/utils/formatAddress.js",
         "src/utils/hazards.js",
@@ -75,7 +77,8 @@
         "src/utils/countTokens.js",
         "src/utils/countAmount.js",
         "src/utils/countAmount.js",
-        "src/utils/pixelUpscale.js"
+        "src/utils/pixelUpscale.js",
+        "src/utils/FullscreenModal.jsx"
       ]
     },
 

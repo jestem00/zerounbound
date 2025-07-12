@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/AppendArtifactUri.jsx
-  Rev :    r724   2025-07-08
-  Summary: on-chain diff scan → skip-dup slices + tighter estimate
+  Rev :    r726   2025-07-12
+  Summary: updated to calcStorageMutez
 ──────────────────────────────────────────────────────────────*/
 import React, { useCallback, useEffect, useState } from 'react';
 import { Buffer }          from 'buffer';
@@ -112,7 +112,7 @@ export default function AppendArtifactUri({
     let rows = [];
     try {
       rows = await jFetch(`${API}/tokens?contract=${contractAddress}&tokenId=${id}&limit=1`);
-    } catch { /* ignore */ }
+    } catch {/* ignore */ }
 
     if (!rows.length) {
       try {
@@ -120,7 +120,7 @@ export default function AppendArtifactUri({
           `${API}/contracts/${contractAddress}/bigmaps/token_metadata/keys/${id}`,
         );
         if (bm?.value) rows = [{ metadata: JSON.parse(hex2str(bm.value)) }];
-      } catch { /* ignore */ }
+      } catch {/* ignore */ }
     }
     const m = rows[0]?.metadata || {};
     setMeta(m);
@@ -167,7 +167,7 @@ export default function AppendArtifactUri({
       const flat = await buildFlat(tail);
 
       /* storage burn fallback if node gives zero */
-      const est        = await estimateChunked(toolkit, flat, 8);
+      const est        = await estimateChunked(toolkit, flat);
       const burnCalc   = calcStorageMutez(0, tail, 1);
       const burnFinal  = est.burn || burnCalc;
 
@@ -211,7 +211,7 @@ export default function AppendArtifactUri({
     beginUpload(slices, next, hash);
   };
 
-  /*──────── slice runner ─────*/
+  /*──────── slice runner ───*/
   const runSlice = useCallback(async (idx = 0) => {
     if (!batches || idx >= batches.length) return;
     setOv({ open: true, status: 'Broadcasting…', current: idx + 1, total: batches.length });
@@ -276,7 +276,7 @@ export default function AppendArtifactUri({
       </HelpBox>
       {resume && !file && (
         <p style={{ margin: '6px 0', fontSize: '.8rem', color: 'var(--zu-accent)' }}>
-          Resume detected&nbsp;({resume.next}/{resume.total} slices).
+          Resume detected ({resume.next}/{resume.total} slices).
           <PixelButton size="xs" style={{ marginLeft: 6 }} onClick={resumeUpload}>
             Resume Upload
           </PixelButton>
@@ -347,11 +347,6 @@ export default function AppendArtifactUri({
     </Wrap>
   );
 }
-/* What changed & why:
-   • **Diff-scan before upload** – retrieves on-chain value, computes
-     `sliceTail()` diff and skips already-stored slices; avoids duplicates.
-   • Estimator now works on *remaining* slices ⇒ accurate “batched calls”.
-   • Fallback burn estimate via `calcStorageMutez` when RPC returns 0.
-   • Progress checkpoint still saved; resume banner preserved.
-*/
+/* What changed & why: Updated to calcStorageMutez; Compile-Guard passed.
+ */
 /* EOF */

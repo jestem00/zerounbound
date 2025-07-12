@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/core/batch.js
-  Rev :    r860   2025-07-10
-  Summary: reverted to startsWith for prefix check; kept hash for safety
+  Rev :    r861   2025-07-10
+  Summary: added try-catch in splitPacked for gas_exhausted; treat as exceed & split
 ──────────────────────────────────────────────────────────────*/
 import { OpKind } from '@taquito/taquito';
 
@@ -60,10 +60,26 @@ export async function splitPacked (toolkit, flat, limit = PACKED_SAFE_BYTES) {
   let current   = [];
   for (const p of flat) {
     current.push(p);
-    const estArr = await toolkit.estimate.batch(
-      current.map((q) => ({ kind: OpKind.TRANSACTION, ...q })),
-    );
-    const forged = estArr.reduce((t, e) => t + (e.opSize ?? 0), 0);
+    let forged = 0;
+    try {
+      const estArr = await toolkit.estimate.batch(
+        current.map((q) => ({ kind: OpKind.TRANSACTION, ...q })),
+      );
+      forged = estArr.reduce((t, e) => t + (e.opSize ?? 0), 0);
+    } catch (e) {
+      if (String(e).includes('gas_exhausted')) {
+        current.pop();
+        if (!current.length) {
+          batches.push([p]); // add single even if estimation fails
+          current = [];
+          continue;
+        }
+        batches.push(current);
+        current = [p];
+        continue;
+      }
+      throw e;
+    }
     if (forged > limit) {
       current.pop();
       if (!current.length) throw new Error('Single operation exceeds size cap');
@@ -100,8 +116,4 @@ export async function buildAppendTokenMetaCalls (
     ).toTransferParams()),
   }));
 }
-/* What changed & why:
-   • Reverted sliceTail to efficient startsWith prefix check for large payloads; removed loop-based mismatch detection to restore compatibility with oversize resume flows; retained origLonger and hash safety net where applicable.
-   • Rev bumped to r860; lint-clean, no unused imports, Compile-Guard passed.
-*/
 /* EOF */

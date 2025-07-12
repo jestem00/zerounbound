@@ -6,7 +6,21 @@
       "bundleName": "contracts_bundle",
       "patterns": ["contracts/**/*.tz", "contracts/**/*.json"]
     },
-    
+    {
+      "bundleName": "repairuri_bundle",
+      "patterns": [
+        "src/ui/Entrypoints/RepairUri.jsx",
+        "src/core/batch.js",
+        "src/utils/sliceCache.js",
+        "src/hooks/useTxEstimate.js",
+        "src/core/feeEstimator.js",
+        "src/utils/uriHelpers.js",
+        "src/core/net.js",
+        "src/ui/OperationOverlay.jsx",
+        "src/ui/GlobalSnackbar.jsx"
+      ]
+    },
+
     {
       "bundleName": "explore_bundle",
       "patterns": [

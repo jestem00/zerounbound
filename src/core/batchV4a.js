@@ -1,9 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/core/batchV4a.js
-  Rev :    r860   2025‑08‑16 UTC
-  Summary: parity with v4 slice utilities – adds diff helpers,
-           packed splitter, PACKED_SAFE_BYTES, origLonger flag.
+  Rev :    r861   2025-08-16 UTC
+  Summary: added try-catch in splitPacked for gas_exhausted; treat as exceed & split
 ──────────────────────────────────────────────────────────────*/
 import { OpKind } from '@taquito/taquito';
 
@@ -60,10 +59,26 @@ export async function splitPacked (toolkit, flat, limit = PACKED_SAFE_BYTES) {
   let current   = [];
   for (const p of flat) {
     current.push(p);
-    const estArr = await toolkit.estimate.batch(
-      current.map((q) => ({ kind: OpKind.TRANSACTION, ...q })),
-    );
-    const forged = estArr.reduce((t, e) => t + (e.opSize ?? 0), 0);
+    let forged = 0;
+    try {
+      const estArr = await toolkit.estimate.batch(
+        current.map((q) => ({ kind: OpKind.TRANSACTION, ...q })),
+      );
+      forged = estArr.reduce((t, e) => t + (e.opSize ?? 0), 0);
+    } catch (e) {
+      if (String(e).includes('gas_exhausted')) {
+        current.pop();
+        if (!current.length) {
+          batches.push([p]);
+          current = [];
+          continue;
+        }
+        batches.push(current);
+        current = [p];
+        continue;
+      }
+      throw e;
+    }
     if (forged > limit) {
       current.pop();
       if (!current.length) throw new Error('Single operation exceeds size cap');

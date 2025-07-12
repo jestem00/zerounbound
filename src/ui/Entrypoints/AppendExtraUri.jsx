@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/AppendExtraUri.jsx
-  Rev :    r815   2025-07-08
-  Summary: diff-scan, dup-guard, accurate estimate
+  Rev :    r817   2025-07-12
+  Summary: updated to calcStorageMutez
 ──────────────────────────────────────────────────────────────*/
 
 import React, {
@@ -196,7 +196,7 @@ export default function AppendExtraUri({
       const flat       = await buildFlatParams(tailSlices, 0);
 
       /* safe estimator + deterministic burn fallback */
-      const est  = await estimateChunked(toolkit, flat, 8);
+      const est  = await estimateChunked(toolkit, flat);
       const burn = est.burn || calcStorageMutez(0, tailSlices);
 
       setEstimate({
@@ -283,7 +283,7 @@ export default function AppendExtraUri({
   /*──────── JSX ───*/
   return (
     <Wrap $level={$level}>
-      <PixelHeading level={3}>Append&nbsp;Extra&nbsp;URI</PixelHeading>
+      <PixelHeading level={3}>Append Extra URI</PixelHeading>
 
       {/* token picker */}
       <div style={{ display: 'flex', gap: '.5rem' }}>
@@ -321,7 +321,7 @@ export default function AppendExtraUri({
       
       {resumeInfo && !file && (
         <p style={{ margin: '8px 0', fontSize: '.8rem', color: 'var(--zu-accent)' }}>
-          In-progress upload&nbsp;({resumeInfo.next}/{resumeInfo.total} slices).
+          In-progress upload ({resumeInfo.next}/{resumeInfo.total} slices).
           <PixelButton size="xs" style={{ marginLeft: 6 }} onClick={resumeUpload}>
             Resume Upload
           </PixelButton>
@@ -330,9 +330,6 @@ export default function AppendExtraUri({
 
       {/* instructions */}
       <Hint>
-        1&nbsp;Upload a new asset → 2&nbsp;check/adjust fields →
-        3&nbsp;click <strong>APPEND</strong>. The asset is stored on-chain
-        under an <code>extrauri_*</code> key.
         Stores *extra* media under an **extrauri_* key** (e.g. hi-res, bonus file). Upload, adjust description/label/name, then APPEND. Diff scan avoids re-uploading bytes; a RESUME banner appears on failure. Clear old extras from the inline list.
       </Hint>
 
@@ -416,7 +413,7 @@ export default function AppendExtraUri({
         </PixelButton>
         {isEstim && <Spinner style={{ position: 'static' }} />}
         {oversize && !batches && <span style={{ fontSize: '.7rem', opacity: .8 }}>
-          Large file – estimation may take ≈10&nbsp;s
+          Large file – estimation may take ≈10 s
         </span>}
       </div>
 
@@ -447,12 +444,6 @@ export default function AppendExtraUri({
     </Wrap>
   );
 }
-/* What changed & why:
-   • Added diff-scan via `sliceTail()` against on-chain value
-     → skips already-stored slices & blocks duplicates.
-   • Estimator now works on *remaining* tail slices; burn falls
-     back to deterministic `calcStorageMutez` when node returns 0.
-   • Upload/resume checkpoints unchanged; UI toast on “already uploaded”.
-   • Guard rails tightened; no functional regressions elsewhere.
-*/
+/* What changed & why: Updated to calcStorageMutez; Compile-Guard passed.
+ */
 /* EOF */

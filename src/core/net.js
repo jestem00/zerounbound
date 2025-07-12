@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/core/net.js
-  Rev :    r909   2025-07-10
-  Summary: resilient jFetch – retry + timeout + 429-aware queue
+  Rev :    r910   2025-07-11
+  Summary: added retry on ERR_CONNECTION_RESET; increased tries to 5
 ──────────────────────────────────────────────────────────────*/
 const LIMIT = 4;                         // parallel fetch cap
 let   active = 0;                        // in-flight counter
@@ -24,14 +24,14 @@ async function exec(task) {
  * Safe JSON fetch with:
  * • global concurrency throttle (LIMIT)
  * • 429 exponential back-off
- * • network error retries (connection reset, CORS, timeout)
+ * • network error retries (connection reset, CORS, timeout, ERR_CONNECTION_RESET)
  * • hard 45 s request timeout
  *
  * @param   {string} url     fully-qualified URL
- * @param   {number} tries   max attempts (default 3)
+ * @param   {number} tries   max attempts (default 5)
  * @returns {Promise<any>}   parsed JSON
  */
-export function jFetch(url, tries = 3) {
+export function jFetch(url, tries = 5) {
   return new Promise((resolve, reject) => {
     const run = () => exec(async () => {
       for (let i = 0; i < tries; i += 1) {
@@ -50,6 +50,11 @@ export function jFetch(url, tries = 3) {
           return resolve(await res.json());
         } catch (e) {                          // network / parse error
           clearTimeout(timer);
+          const errStr = String(e);
+          if (errStr.includes('ERR_CONNECTION_RESET') || errStr.includes('ECONNRESET')) {
+            await sleep(1200 * (i + 1));      // longer back-off for reset
+            continue;
+          }
           if (i === tries - 1) return reject(e);
           await sleep(600 * (i + 1));          // progressive back-off
         }
@@ -60,6 +65,6 @@ export function jFetch(url, tries = 3) {
   });
 }
 
-/* What changed & why: Date aligned; minor doc polish; no functional change.
+/* What changed & why: Increased tries to 5; added explicit retry on ERR_CONNECTION_RESET/ECONNRESET with longer sleep; improves resilience to network flakes in dev; Compile-Guard passed.
 */
 /* EOF */

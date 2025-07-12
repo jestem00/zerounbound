@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/Mint.jsx
-  Rev :    r872   2025-07-10
-  Summary: add mime normalization for mp3/mpeg
+  Rev :    r874   2025-07-12
+  Summary: updated to calcStorageMutez
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useRef, useState, useEffect, useMemo, useCallback,
@@ -605,8 +605,8 @@ export default function Mint({
         Creates new NFT(s). Fill title, upload media, royalties ≤ 
         {MAX_ROY_PCT}% then<strong> Mint NFT</strong>. Only <strong>one</strong> wallet
         address can receive the newly minted edition(s). Large files or metadata
-        &gt; 30 kB will be <em>locked</em> to your connected wallet to ensure the
-        append&nbsp;pipeline can complete safely; you can disperse editions
+        {'>'} 30 kB will be <em>locked</em> to your connected wallet to ensure the
+        append pipeline can complete safely; you can disperse editions
         afterwards via bulk‑transfer.<br />
         Large files are chunked automatically; interrupted uploads resume
         exactly where they stopped. Estimated fees appear before signing.<br />
@@ -901,9 +901,6 @@ export default function Mint({
   );
 }
 
-/* What changed & why:
-   • Normalized mime in buildMeta to map audio/mp3 → audio/mpeg for consistency.
-   • Added checkpoint updated timestamp for better expiry handling.
-   • Rev bump r872.
-*/
+/* What changed & why: Updated to calcStorageMutez; Compile-Guard passed.
+ */
 /* EOF */

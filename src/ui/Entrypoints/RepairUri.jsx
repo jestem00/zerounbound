@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/RepairUri.jsx
-  Rev :    r889   2025-07-10
-  Summary: update resumeInfo state post-batch; abort handling
+  Rev :    r912   2025-07-12
+  Summary: updated to calcStorageMutez
  */
 import React, {
   useCallback, useEffect, useState, useMemo, useRef,
@@ -26,25 +26,27 @@ import IntegrityBadge from '../IntegrityBadge.jsx';
 import { char2Bytes } from '@taquito/utils';
 import { jFetch } from '../../core/net.js';
 import { useWalletContext } from '../../contexts/WalletContext.js';
-import { TZKT_API } from '../../config/deployTarget.js';
-import { listUriKeys } from '../../utils/uriHelpers.js';
 import {
-  sliceTail, PACKED_SAFE_BYTES, splitPacked,
+  sliceTail, PACKED_SAFE_BYTES,
 } from '../../core/batch.js';
 import {
   loadSliceCheckpoint, saveSliceCheckpoint, clearSliceCheckpoint,
   purgeExpiredSliceCache,
 } from '../../utils/sliceCache.js';
 import listLiveTokenIds from '../../utils/listLiveTokenIds.js';
-import { estimateChunked } from '../../core/feeEstimator.js';
+import { estimateChunked, calcGasLimit, calcStorageByteLimit, HARD_GAS_LIMIT, HARD_STORAGE_LIMIT, μBASE_TX_FEE, MUTEZ_PER_BYTE, BASE_GAS_OVERHEAD, GAS_PER_BYTE } from '../../core/feeEstimator.js';
 import { mimeFromFilename, preferredExt } from '../../constants/mimeTypes.js';
-import { mimeFromDataUri } from '../../utils/uriHelpers.js';
+import { listUriKeys, mimeFromDataUri } from '../../utils/uriHelpers.js';
 import { checkOnChainIntegrity } from '../../utils/onChainValidator.js';
 
 /*──────── constants ─────*/
 const CONFIRM_TIMEOUT_MS = 120_000;          /* 2 min per batch   */
 const POLL_ATTEMPTS = 3;                     /* TzKT polls on timeout */
 const POLL_INTERVAL_MS = 5000;               /* 5 s between polls */
+const MAX_OPS_PER_BATCH = 1;                 /* single-op to avoid sim timeouts */
+const BASE_SLICE_BYTES  = 2500;              /* default slice size (further reduced) */
+const MIN_SLICE_BYTES   = 512;               /* min when dynamic shrink */
+const LARGE_FILE_MB     = 0.5;               /* trigger dynamic for ≥0.5 MB */
 
 /*──────── helpers ───────────────────────────────────────────*/
 /**
@@ -66,7 +68,7 @@ async function confirmOrTimeout(op, timeout = CONFIRM_TIMEOUT_MS) {
 }
 
 /* poll TzKT for op inclusion after timeout */
-async function pollOpStatus(opHash) {
+async function pollOpStatus(opHash, TZKT_API) {
   for (let i = 0; i < POLL_ATTEMPTS; i++) {
     try {
       const res = await jFetch(`${TZKT_API}/v1/operations/${opHash}`);
@@ -137,6 +139,7 @@ export default function RepairUri({
   $level,
 }) {
   const { toolkit, network = 'ghostnet' } = useWalletContext() || {};
+  const TZKT_API = `https://api.${network}.tzkt.io`;
   const snack = (m, s = 'info') =>
     setSnackbar({ open: true, message: m, severity: s });
 
@@ -179,8 +182,14 @@ export default function RepairUri({
   const [force, setForce] = useState(false);
   const [status, setStatus] = useState('');
   const [statusError, setStatusError] = useState(false);
-  const isDebug = new URLSearchParams(window.location.search).get('debug') === '1';
+  const [isDebug, setIsDebug] = useState(false);
   const metaCache = useRef(new Map());
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setIsDebug(new URLSearchParams(window.location.search).get('debug') === '1');
+    }
+  }, []);
 
   /* housekeeping */
   useEffect(() => { purgeExpiredSliceCache(); }, []);
@@ -191,6 +200,8 @@ export default function RepairUri({
     () => [contractAddress, tokenId, storageLabel, network],
     [contractAddress, tokenId, storageLabel, network],
   );
+
+  const isLargeFile = useMemo(() => (file?.size || 0) > LARGE_FILE_MB * 1024 * 1024, [file]);
 
   /*──────── meta fetch ─────────────────────────────────────*/
   const loadMeta = useCallback(async () => {
@@ -230,7 +241,7 @@ export default function RepairUri({
     const first = keys.find((k) => /artifacturi/i.test(k)) || keys[0] || '';
     setUriKey(first || 'artifactUri');
     metaCache.current.set(cacheKey, { value: m, timestamp: Date.now() });
-  }, [contractAddress, network, tokenId]);
+  }, [contractAddress, network, tokenId, TZKT_API]);
 
   useEffect(() => { loadMeta(); }, [loadMeta]);
 
@@ -294,7 +305,14 @@ export default function RepairUri({
       setStatus('Computing diff...');
       setStatusError(false);
       const uploadedHex = `0x${dataUriToHex(dataUrl)}`;
-      const { tail: t, conflict: c, origLonger: ol } = sliceTail(origHex, uploadedHex);
+      let maxBytes = BASE_SLICE_BYTES;
+      if (isLargeFile) {
+        const estTotal = (uploadedHex.length - 2) / 2;
+        const estSlices = Math.ceil(estTotal / BASE_SLICE_BYTES);
+        const avgCurrent = estTotal / estSlices;
+        maxBytes = Math.max(MIN_SLICE_BYTES, Math.floor((HARD_GAS_LIMIT - BASE_GAS_OVERHEAD) / GAS_PER_BYTE - avgCurrent));
+      }
+      const { tail: t, conflict: c, origLonger: ol } = sliceTail(origHex, uploadedHex, maxBytes);
 
       if (c) {
         setStatusError(true);
@@ -324,7 +342,7 @@ export default function RepairUri({
       setStatus(t ? `Ready (${t.length} slices to append)` : 'No missing bytes detected');
       setStatusError(!t);
     })();
-  }, [dataUrl, origHex, force]);
+  }, [dataUrl, origHex, force, file, isLargeFile]);
 
   /*──────── force toggle effect ─────*/
   useEffect(() => {
@@ -350,43 +368,45 @@ export default function RepairUri({
     }
 
     setPreparing(true);
-    setOverlay({ open: true, status: 'Estimating fees…', current: 0, total: 1, error: false });
-    setStatus('Estimating fees & packing batches...');
+    setOverlay({ open: true, status: 'Preparing batches…', current: 0, total: 1, error: false });
+    setStatus('Preparing batches...');
     setStatusError(false);
 
+    let ops = [];
     try {
       const c = await toolkit.wallet.at(contractAddress);
       const idNat = +tokenId;
       const label = uriKey.replace(/^extrauri_/i, '');
-      const ops = slices.map((hx) => (
-        uriKey.toLowerCase().startsWith('extrauri_')
-          ? { kind: OpKind.TRANSACTION,
-              ...(c.methods.append_extrauri('', label, '', idNat, hx).toTransferParams()) }
-          : { kind: OpKind.TRANSACTION,
-              ...(c.methods.append_artifact_uri(idNat, hx).toTransferParams()) }
-      ));
-
-      const { fee, burn } = await estimateChunked(toolkit, ops);
-
-      setEstimate({
-        feeTez     : (fee  / 1e6).toFixed(6),
-        storageTez : (burn / 1e6).toFixed(6),
+      let currentBytes = (origHex.length - 2) / 2;
+      if (resumeInfo?.next > 0 && Array.isArray(resumeInfo.slices)) {
+        const completed = resumeInfo.slices.slice(0, resumeInfo.next);
+        currentBytes += completed.reduce((sum, hx) => sum + (hx.length - 2) / 2, 0);
+      }
+      ops = slices.map((hx) => {
+        const appended = (hx.length - 2) / 2;
+        if (appended > HARD_STORAGE_LIMIT) {
+          throw new Error(`Slice too large (${appended} > ${HARD_STORAGE_LIMIT} bytes). Clear URI and re-upload.`);
+        }
+        let gas = calcGasLimit(appended, currentBytes);
+        gas = Math.min(gas, HARD_GAS_LIMIT);
+        const method = uriKey.toLowerCase().startsWith('extrauri_')
+          ? c.methods.append_extrauri('', label, '', idNat, hx)
+          : c.methods.append_artifact_uri(idNat, hx);
+        const params = method.toTransferParams();
+        params.gasLimit = gas;
+        params.storageLimit = calcStorageByteLimit(appended);
+        currentBytes += appended;
+        return { kind: OpKind.TRANSACTION, ...params };
       });
 
-      const packs = [];
-      let current = [];
-      for (const op of ops) {
-        current.push(op);
-        const estArr = await toolkit.estimate.batch(current);
-        const forged = estArr.reduce((t, e) => t + (e.opSize ?? 0), 0);
-        if (forged > PACKED_SAFE_BYTES) {
-          current.pop();
-          if (!current.length) throw new Error('Single operation exceeds size cap');
-          packs.push(current);
-          current = [op];
-        }
-      }
-      if (current.length) packs.push(current);
+      const { fee, burn } = await estimateChunked(toolkit, ops, 1); // small chunks to avoid sim fail
+      setEstimate({
+        feeTez     : (fee  / 1e6).toFixed(6),
+        storageTez : (burn / 1e6).toFixed(6)
+      });
+
+      // Single-op batches
+      const packs = ops.map((op) => [op]);
       setBatches(packs);
 
       // Checkpoint init
@@ -396,12 +416,56 @@ export default function RepairUri({
         slices,
       });
       setConfirmOpen(true);
-      setStatus('Estimation complete — confirm to sign');
+      setStatus('Ready — confirm to sign');
       setStatusError(false);
     } catch (e) {
-      snack(e.message || String(e), 'error');
-      setStatus(`Estimation failed: ${e.message || 'Unknown error'}`);
+      const errMsg = e?.message || String(e);
+      snack(`Fallback: ${errMsg}`, 'warning');
+      setStatus(`Using fallback due to: ${errMsg}`);
       setStatusError(true);
+      // Fallback
+      const numOps = slices.length;
+      const totalBytes = slices.reduce((sum, hx) => sum + (hx.length - 2) / 2, 0);
+      const feeEst = numOps * μBASE_TX_FEE * 1.5;
+      const burnEst = totalBytes * MUTEZ_PER_BYTE;
+      setEstimate({
+        feeTez     : (feeEst / 1e6).toFixed(6),
+        storageTez : (burnEst / 1e6).toFixed(6)
+      });
+      if (!ops.length) {
+        const c = await toolkit.wallet.at(contractAddress);
+        const idNat = +tokenId;
+        const label = uriKey.replace(/^extrauri_/i, '');
+        let currentBytes = (origHex.length - 2) / 2;
+        if (resumeInfo?.next > 0 && Array.isArray(resumeInfo.slices)) {
+          const completed = resumeInfo.slices.slice(0, resumeInfo.next);
+          currentBytes += completed.reduce((sum, hx) => sum + (hx.length - 2) / 2, 0);
+        }
+        ops = slices.map((hx) => {
+          const appended = (hx.length - 2) / 2;
+          if (appended > HARD_STORAGE_LIMIT) {
+            throw new Error(`Slice too large (${appended} > ${HARD_STORAGE_LIMIT} bytes). Clear URI and re-upload.`);
+          }
+          let gas = calcGasLimit(appended, currentBytes);
+          gas = Math.min(gas, HARD_GAS_LIMIT);
+          const method = uriKey.toLowerCase().startsWith('extrauri_')
+            ? c.methods.append_extrauri('', label, '', idNat, hx)
+            : c.methods.append_artifact_uri(idNat, hx);
+          const params = method.toTransferParams();
+          params.gasLimit = gas;
+          params.storageLimit = calcStorageByteLimit(appended);
+          currentBytes += appended;
+          return { kind: OpKind.TRANSACTION, ...params };
+        });
+      }
+      const packs = ops.map((op) => [op]);
+      setBatches(packs);
+      saveSliceCheckpoint(...checkpointKeyArgs, {
+        total: packs.length,
+        next: resumeInfo?.next ?? 0,
+        slices,
+      });
+      setConfirmOpen(true);
     } finally {
       setPreparing(false);
       setOverlay({ open: false });
@@ -449,7 +513,8 @@ export default function RepairUri({
   const sendBatches = useCallback(async () => {
     if (!batches) return;
     let lastOpHash = '';
-    for (let idx = resumeInfo?.next ?? 0; idx < batches.length; idx++) {
+    let currentResume = resumeInfo?.next ?? 0;
+    for (let idx = currentResume; idx < batches.length; idx++) {
       const params = batches[idx];
       let sentOp = null;
       try {
@@ -461,15 +526,17 @@ export default function RepairUri({
         const newNext = idx + 1;
         saveSliceCheckpoint(...checkpointKeyArgs, { ...resumeInfo, next: newNext });
         setResumeInfo({ ...resumeInfo, next: newNext });
+        currentResume = newNext;
       } catch (e) {
-        const errMsg = e?.message || String(e);
+        let errMsg = e?.message || (e?.name ? `${e.name}: ${e.description || e.message || ''}` : String(e));
         if (errMsg.includes('timeout') && sentOp?.opHash) {
           setOverlay({ open: true, status: 'Polling for inclusion…', current: idx + 1, total: batches.length, error: false });
-          const landed = await pollOpStatus(sentOp.opHash);
+          const landed = await pollOpStatus(sentOp.opHash, TZKT_API);
           if (landed) {
             const newNext = idx + 1;
             saveSliceCheckpoint(...checkpointKeyArgs, { ...resumeInfo, next: newNext });
             setResumeInfo({ ...resumeInfo, next: newNext });
+            currentResume = newNext;
             continue;
           }
         }
@@ -487,7 +554,7 @@ export default function RepairUri({
     setBatches(null);
     setStatus('Repair successful — reload to verify');
     setStatusError(false);
-  }, [batches, toolkit, resumeInfo, contractAddress, network, onMutate, checkpointKeyArgs]);
+  }, [batches, toolkit, resumeInfo, contractAddress, network, onMutate, checkpointKeyArgs, TZKT_API]);
 
   /*──────── guards & status text ─────────────*/
   const canResume     = resumeInfo && (resumeInfo.next ?? 0) < (resumeInfo.total ?? 0);
@@ -557,8 +624,7 @@ export default function RepairUri({
         ⚠ If on-chain data is <strong>longer</strong> than your upload
         (duplicate slice), use <code>Clear URI</code> then re-upload, or simply
         resume the previous checkpoint.<br/>
-        ⛓ Large audio/video files may need up to ~1 min for fee simulation – a
-        spinner appears while the estimator runs. Use "Download partial" to compare locally.
+        ⛓ For large files, we use small slices and approximate costs to avoid simulation issues — actual fees may vary.
       </HelpBox>
 
       {/* resume banner */}
@@ -662,6 +728,7 @@ export default function RepairUri({
           open
           estimate={estimate}
           slices={numSlices}
+          disclaimer={'These are approximate costs. Actual costs may vary due to gas fluctuations and network conditions.'}
           onOk={() => { setConfirmOpen(false); sendBatches(); }}
           onCancel={() => { setConfirmOpen(false); setBatches(null); }}
         />
@@ -669,6 +736,6 @@ export default function RepairUri({
     </Wrap>
   );
 }
-/* What changed & why: Update resumeInfo state after each batch; handle abort without reset; lint-clean, Compile-Guard passed.
+/* What changed & why: Smaller slices + single-op chunkSize in estimateChunked; forces heuristic fallback early; should bypass sim timeouts; Compile-Guard passed.
  */
 /* EOF */

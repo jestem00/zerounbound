@@ -2,7 +2,7 @@
 Developed by @jams2blues – ZeroContract Studio
 File:    docs/Master_Overview_And_Manifest_zerounbound_contractmanagement.md
 Rev :    r864   2025‑09‑05 UTC
-Summary: add marketplace UI paths + invariant
+Summary: add new React components (MAINTokenMetaPanel, TokenPreviewWindow, TransferRow), VSCode config files, contract backup file, and new invariants I113‑I117 for consent management, portal windows, hazard detection, form patterns, and script security
 ──────────────────────────────────────────────────────────────────*/
 
 /*════════════════════════════════════════════════════════════════
@@ -294,6 +294,11 @@ I110 [F] **Integrity badge standardisation** — every component that
       conveys the long‑form label from `constants/integrityBadges.js`.
 I111 [F,C,E,I] Don't use "global" in any comments or line summaries, it messes with yarn lint and throws false warnings
 I112 [F,E] Marketplace dialogs (buy/list/offer) must call `feeEstimator.js` and display `<OperationOverlay/>` before dispatching any transaction.
+I113 [F] **Unified Consent Management** — all consent decisions use `useConsent` hook with standardized keys: `'nsfw'` (for content), `'flash'` (for flashing), `'scripts:{contractAddress}'` (per‑contract script execution). Consent state syncs across components via CustomEvent broadcasting and always requires explicit user acknowledgment through `PixelConfirmDialog` with checkbox agreement to terms.
+I114 [F] **Portal‑Based Draggable Windows** — draggable preview windows use `createPortal(component, document.body)` for z‑index isolation. Draggable state managed through `useRef` pattern with randomized start positions (`60 + Math.random()*30`) to prevent stacking. SSR compatibility: `typeof document === 'undefined' ? body : createPortal(body, document.body)`.
+I115 [F] **Hazard Detection & Content Protection** — all media rendering components must call `detectHazards(metadata)` before display. Hazard types: `{ nsfw, flashing, scripts }`. Script hazards detect HTML MIME types, JavaScript URIs, SVG with `<script>` tags. Obfuscation overlays block content until explicit user consent with age verification (18+) for NSFW.
+I116 [F] **Debounced Form State Pattern** — form components maintain local state mirroring parent props with upward change propagation via `useEffect`. Input sanitization applied at component level. Unique `id` attributes use index pattern: `id={\`tid-${index}\`}`.
+I117 [F] **Script Security Model** — script execution requires both hazard detection AND user consent. Script consent persists per contract address. `EnableScriptsOverlay` provides inline consent, `EnableScriptsToggle` provides permanent toggle. Terms agreement checkbox required for all script consent flows.
 
 /──────────────────────────────────────────────────────────────────────────────
 3 · reserved for future research notes
@@ -325,6 +330,10 @@ zerounbound/package.json                        – NPM manifest; Imports:· Exp
 zerounbound/tsconfig.json                       – TS path hints for IDE; Imports:· Exports: compilerOptions
 zerounbound/yarn.lock                           – Yarn lockfile; Imports:· Exports:·
 
+╭── development environment ────────────────────────────────────────────────╮
+zerounbound/.vscode/settings.json               – VSCode TypeScript configuration; Imports:· Exports:·
+zerounbound/.vscode/tasks.json                  – VSCode build task configuration; Imports:· Exports:·
+
 ╭── build / infra ───────────────────────────────────────────────────────────╮
 zerounbound/scripts/ensureDevManifest.js        – CI guard for dev manifest; Imports: fs,path; Exports: main
 zerounbound/scripts/generateBundles.js          – dumps bundles → summarized_files; Imports: globby,fs; Exports: main
@@ -338,6 +347,7 @@ zerounbound/scripts/codex-setup.sh              – Codex CI bootstrap; Imports:
 zerounbound/contracts/Zero_Contract_V3.tz       – legacy contract v3 (read‑only); Imports:· Exports:·
 zerounbound/contracts/Zero_Contract_V4.tz       – canonical ZeroContract v4; Imports:· Exports:·
 zerounbound/contracts/ZeroSum.tz                – ZeroSum marketplace; Imports:· Exports:·
+zerounbound/contracts/ZeroSum - Copy.txt        – backup copy of ZeroSum marketplace contract; Imports:· Exports:·
 zerounbound/contracts/metadata/views/Zero_Contract_v4_views.json – off‑chain views; Imports:· Exports:·
 
 ╭── public assets ───────────────────────────────────────────────────────────╮
@@ -428,6 +438,7 @@ zerounbound/src/ui/WalletNotice.jsx             – wallet status banner; Import
 zerounbound/src/ui/ZerosBackground.jsx          – animated zeros field; Imports: react; Exports: ZerosBackground
 zerounbound/src/ui/IntegrityBadge.jsx           – on‑chain integrity badge; Imports: react,integrityBadges.js,PixelButton.jsx; Exports: IntegrityBadge
 zerounbound/src/ui/MakeOfferBtn.jsx             - XS size, make-offer button from marketplace contract ZeroSum.tz Import:PropTypes,PixelButton Export:MakeOfferBtn
+zerounbound/src/ui/MAINTokenMetaPanel.jsx       – enhanced token metadata panel with hazard detection and consent handling; Imports: React,PropTypes,date-fns,styled-components,detectHazards,useConsent,IntegrityBadge,onChainValidator,hashMatrix; Exports: MAINTokenMetaPanel
 
 ╭── src/ui/operation & misc ─────────────────────────────────────────────────╮
 zerounbound/src/ui/AdminTools.jsx               – dynamic entry‑point modal; Imports: react,WalletContext; Exports: AdminTools
@@ -477,6 +488,8 @@ zerounbound/src/ui/Entrypoints/ManageCollaboratorsv4a.jsx     – v4a collab GUI
 zerounbound/src/ui/Entrypoints/UpdateContractMetadatav4a.jsx  – v4a contract meta editor; Imports: react; Exports: UpdateContractMetadatav4a
 zerounbound/src/ui/Entrypoints/AppendTokenMetadatav4a.jsx     – v4a token meta slices; Imports: batchV4a.js,sliceCacheV4a.js,feeEstimator.js; Exports: AppendTokenMetadatav4a
 zerounbound/src/ui/Entrypoints/UpdateTokenMetadatav4a.jsx     – v4a token meta editor; Imports: react; Exports: UpdateTokenMetadatav4a
+zerounbound/src/ui/Entrypoints/TokenPreviewWindow.jsx        – draggable token preview window component using portal pattern; Imports: React,createPortal,styled-components,PixelButton,TokenMetaPanel,jFetch,TZKT_API; Exports: TokenPreviewWindow
+zerounbound/src/ui/Entrypoints/TransferRow.jsx               – reusable row component for batch transfer UI with metadata preview; Imports: React,styled-components,PixelInput,PixelButton,TokenMetaPanel,TZKT_API,jFetch; Exports: TransferRow
 
 ╭── src/utils ───────────────────────────────────────────────────────────────╮
 zerounbound/src/utils/countAmount.js            - count editions in tokens(exclude burned tokens); Imports:· Exports: countAmount

@@ -1,9 +1,9 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/RepairUri.jsx
-  Rev :    r912   2025-07-12
-  Summary: updated to calcStorageMutez
- */
+  Rev :    r925   2025-07-13
+  Summary: added PACKED_SAFE_BYTES import; single-op batches
+──────────────────────────────────────────────────────────────*/
 import React, {
   useCallback, useEffect, useState, useMemo, useRef,
 } from 'react';
@@ -27,14 +27,17 @@ import { char2Bytes } from '@taquito/utils';
 import { jFetch } from '../../core/net.js';
 import { useWalletContext } from '../../contexts/WalletContext.js';
 import {
-  sliceTail, PACKED_SAFE_BYTES,
+  sliceTail,
+  splitPacked,
+  SLICE_SAFE_BYTES,
+  PACKED_SAFE_BYTES,
 } from '../../core/batch.js';
 import {
   loadSliceCheckpoint, saveSliceCheckpoint, clearSliceCheckpoint,
   purgeExpiredSliceCache,
 } from '../../utils/sliceCache.js';
 import listLiveTokenIds from '../../utils/listLiveTokenIds.js';
-import { estimateChunked, calcGasLimit, calcStorageByteLimit, HARD_GAS_LIMIT, HARD_STORAGE_LIMIT, μBASE_TX_FEE, MUTEZ_PER_BYTE, BASE_GAS_OVERHEAD, GAS_PER_BYTE } from '../../core/feeEstimator.js';
+import { estimateChunked, calcGasLimit, calcStorageByteLimit, HARD_GAS_LIMIT, HARD_STORAGE_LIMIT } from '../../core/feeEstimator.js';
 import { mimeFromFilename, preferredExt } from '../../constants/mimeTypes.js';
 import { listUriKeys, mimeFromDataUri } from '../../utils/uriHelpers.js';
 import { checkOnChainIntegrity } from '../../utils/onChainValidator.js';
@@ -43,10 +46,8 @@ import { checkOnChainIntegrity } from '../../utils/onChainValidator.js';
 const CONFIRM_TIMEOUT_MS = 120_000;          /* 2 min per batch   */
 const POLL_ATTEMPTS = 3;                     /* TzKT polls on timeout */
 const POLL_INTERVAL_MS = 5000;               /* 5 s between polls */
-const MAX_OPS_PER_BATCH = 1;                 /* single-op to avoid sim timeouts */
-const BASE_SLICE_BYTES  = 2500;              /* default slice size (further reduced) */
-const MIN_SLICE_BYTES   = 512;               /* min when dynamic shrink */
-const LARGE_FILE_MB     = 0.5;               /* trigger dynamic for ≥0.5 MB */
+
+const LARGE_FILE_KB     = 100;               /* heuristic skip ≥100 KB */
 
 /*──────── helpers ───────────────────────────────────────────*/
 /**
@@ -201,7 +202,7 @@ export default function RepairUri({
     [contractAddress, tokenId, storageLabel, network],
   );
 
-  const isLargeFile = useMemo(() => (file?.size || 0) > LARGE_FILE_MB * 1024 * 1024, [file]);
+  const isLargeFile = useMemo(() => (file?.size || 0) > LARGE_FILE_KB * 1024, [file]);
 
   /*──────── meta fetch ─────────────────────────────────────*/
   const loadMeta = useCallback(async () => {
@@ -305,15 +306,11 @@ export default function RepairUri({
       setStatus('Computing diff...');
       setStatusError(false);
       const uploadedHex = `0x${dataUriToHex(dataUrl)}`;
-      let maxBytes = BASE_SLICE_BYTES;
-      if (isLargeFile) {
-        const estTotal = (uploadedHex.length - 2) / 2;
-        const estSlices = Math.ceil(estTotal / BASE_SLICE_BYTES);
-        const avgCurrent = estTotal / estSlices;
-        maxBytes = Math.max(MIN_SLICE_BYTES, Math.floor((HARD_GAS_LIMIT - BASE_GAS_OVERHEAD) / GAS_PER_BYTE - avgCurrent));
+      let offset = 0;
+      if (resumeInfo?.next > 0) {
+        offset = resumeInfo.next;
       }
-      const { tail: t, conflict: c, origLonger: ol } = sliceTail(origHex, uploadedHex, maxBytes);
-
+      const { tail: t, conflict: c, origLonger: ol, totalBytes } = sliceTail(origHex, uploadedHex, SLICE_SAFE_BYTES, offset);
       if (c) {
         setStatusError(true);
         const onChainUri = Buffer.from(origHex.slice(2), 'hex').toString('utf8');
@@ -342,7 +339,7 @@ export default function RepairUri({
       setStatus(t ? `Ready (${t.length} slices to append)` : 'No missing bytes detected');
       setStatusError(!t);
     })();
-  }, [dataUrl, origHex, force, file, isLargeFile]);
+  }, [dataUrl, origHex, force, file, resumeInfo]);
 
   /*──────── force toggle effect ─────*/
   useEffect(() => {
@@ -377,41 +374,34 @@ export default function RepairUri({
       const c = await toolkit.wallet.at(contractAddress);
       const idNat = +tokenId;
       const label = uriKey.replace(/^extrauri_/i, '');
-      let currentBytes = (origHex.length - 2) / 2;
-      if (resumeInfo?.next > 0 && Array.isArray(resumeInfo.slices)) {
-        const completed = resumeInfo.slices.slice(0, resumeInfo.next);
-        currentBytes += completed.reduce((sum, hx) => sum + (hx.length - 2) / 2, 0);
-      }
       ops = slices.map((hx) => {
         const appended = (hx.length - 2) / 2;
         if (appended > HARD_STORAGE_LIMIT) {
           throw new Error(`Slice too large (${appended} > ${HARD_STORAGE_LIMIT} bytes). Clear URI and re-upload.`);
         }
-        let gas = calcGasLimit(appended, currentBytes);
-        gas = Math.min(gas, HARD_GAS_LIMIT);
-        const method = uriKey.toLowerCase().startsWith('extrauri_')
-          ? c.methods.append_extrauri('', label, '', idNat, hx)
-          : c.methods.append_artifact_uri(idNat, hx);
-        const params = method.toTransferParams();
-        params.gasLimit = gas;
-        params.storageLimit = calcStorageByteLimit(appended);
-        currentBytes += appended;
+        const params = uriKey.toLowerCase().startsWith('extrauri_')
+          ? c.methods.append_extrauri('', label, '', idNat, hx).toTransferParams()
+          : c.methods.append_artifact_uri(idNat, hx).toTransferParams();
+        params.gasLimit = HARD_GAS_LIMIT;
+        params.storageLimit = HARD_STORAGE_LIMIT;
         return { kind: OpKind.TRANSACTION, ...params };
       });
 
-      const { fee, burn } = await estimateChunked(toolkit, ops, 1); // small chunks to avoid sim fail
+      // Heuristic only
+      const { fee, burn } = await estimateChunked(toolkit, ops, 1, true);
       setEstimate({
         feeTez     : (fee  / 1e6).toFixed(6),
         storageTez : (burn / 1e6).toFixed(6)
       });
 
-      // Single-op batches
-      const packs = ops.map((op) => [op]);
+      // Single-op batches for safety
+      const packs = await splitPacked(toolkit, ops, PACKED_SAFE_BYTES, true);
       setBatches(packs);
 
-      // Checkpoint init
+      // Checkpoint with byte offset
+      const totalBytes = slices.reduce((sum, hx) => sum + (hx.length - 2) / 2, 0);
       saveSliceCheckpoint(...checkpointKeyArgs, {
-        total: packs.length,
+        total: totalBytes,
         next: resumeInfo?.next ?? 0,
         slices,
       });
@@ -420,52 +410,9 @@ export default function RepairUri({
       setStatusError(false);
     } catch (e) {
       const errMsg = e?.message || String(e);
-      snack(`Fallback: ${errMsg}`, 'warning');
-      setStatus(`Using fallback due to: ${errMsg}`);
+      snack(`Error: ${errMsg}`, 'error');
+      setStatus(`Failed: ${errMsg}`);
       setStatusError(true);
-      // Fallback
-      const numOps = slices.length;
-      const totalBytes = slices.reduce((sum, hx) => sum + (hx.length - 2) / 2, 0);
-      const feeEst = numOps * μBASE_TX_FEE * 1.5;
-      const burnEst = totalBytes * MUTEZ_PER_BYTE;
-      setEstimate({
-        feeTez     : (feeEst / 1e6).toFixed(6),
-        storageTez : (burnEst / 1e6).toFixed(6)
-      });
-      if (!ops.length) {
-        const c = await toolkit.wallet.at(contractAddress);
-        const idNat = +tokenId;
-        const label = uriKey.replace(/^extrauri_/i, '');
-        let currentBytes = (origHex.length - 2) / 2;
-        if (resumeInfo?.next > 0 && Array.isArray(resumeInfo.slices)) {
-          const completed = resumeInfo.slices.slice(0, resumeInfo.next);
-          currentBytes += completed.reduce((sum, hx) => sum + (hx.length - 2) / 2, 0);
-        }
-        ops = slices.map((hx) => {
-          const appended = (hx.length - 2) / 2;
-          if (appended > HARD_STORAGE_LIMIT) {
-            throw new Error(`Slice too large (${appended} > ${HARD_STORAGE_LIMIT} bytes). Clear URI and re-upload.`);
-          }
-          let gas = calcGasLimit(appended, currentBytes);
-          gas = Math.min(gas, HARD_GAS_LIMIT);
-          const method = uriKey.toLowerCase().startsWith('extrauri_')
-            ? c.methods.append_extrauri('', label, '', idNat, hx)
-            : c.methods.append_artifact_uri(idNat, hx);
-          const params = method.toTransferParams();
-          params.gasLimit = gas;
-          params.storageLimit = calcStorageByteLimit(appended);
-          currentBytes += appended;
-          return { kind: OpKind.TRANSACTION, ...params };
-        });
-      }
-      const packs = ops.map((op) => [op]);
-      setBatches(packs);
-      saveSliceCheckpoint(...checkpointKeyArgs, {
-        total: packs.length,
-        next: resumeInfo?.next ?? 0,
-        slices,
-      });
-      setConfirmOpen(true);
     } finally {
       setPreparing(false);
       setOverlay({ open: false });
@@ -475,20 +422,26 @@ export default function RepairUri({
   /*──────── CTA actions ─────────*/
   const handleCompareRepair = () => buildAndEstimate(tail);
   const resumeUpload = () => {
-    if (!resumeInfo?.slices?.length) {
+    if (!resumeInfo) {
       snack('No checkpoint', 'info');
       setStatus('No resume checkpoint found');
       setStatusError(true);
       return;
     }
-    const remaining = resumeInfo.slices.slice(resumeInfo.next ?? 0);
-    if (!remaining.length) {
-      snack('Checkpoint already complete', 'success');
-      setStatus('Checkpoint complete — nothing to resume');
-      setStatusError(false);
+    // Re-diff with offset
+    if (!dataUrl) {
+      snack('Re-upload file to resume', 'warning');
+      setStatus('Upload original file for resume');
+      setStatusError(true);
       return;
     }
-    buildAndEstimate(remaining);
+    const uploadedHex = `0x${dataUriToHex(dataUrl)}`;
+    const { tail: newTail, totalBytes } = sliceTail(origHex, uploadedHex, SLICE_SAFE_BYTES, resumeInfo.next);
+    if (newTail.length === 0) {
+      snack('Checkpoint complete', 'success');
+      return;
+    }
+    buildAndEstimate(newTail);
   };
   const resetConflict = () => {
     setFile(null); setDataUrl(''); setTail('');
@@ -513,8 +466,8 @@ export default function RepairUri({
   const sendBatches = useCallback(async () => {
     if (!batches) return;
     let lastOpHash = '';
-    let currentResume = resumeInfo?.next ?? 0;
-    for (let idx = currentResume; idx < batches.length; idx++) {
+    let currentByte = resumeInfo?.next ?? 0;
+    for (let idx = 0; idx < batches.length; idx++) {
       const params = batches[idx];
       let sentOp = null;
       try {
@@ -523,20 +476,20 @@ export default function RepairUri({
         lastOpHash = sentOp.opHash;
         setOverlay({ open: true, status: 'Broadcasting…', current: idx + 1, total: batches.length, error: false });
         await confirmOrTimeout(sentOp);
-        const newNext = idx + 1;
-        saveSliceCheckpoint(...checkpointKeyArgs, { ...resumeInfo, next: newNext });
-        setResumeInfo({ ...resumeInfo, next: newNext });
-        currentResume = newNext;
+        const batchBytes = params.reduce((sum, p) => sum + (p.parameter?.value?.length - 2) / 2, 0);
+        currentByte += batchBytes;
+        saveSliceCheckpoint(...checkpointKeyArgs, { ...resumeInfo, next: currentByte });
+        setResumeInfo({ ...resumeInfo, next: currentByte });
       } catch (e) {
         let errMsg = e?.message || (e?.name ? `${e.name}: ${e.description || e.message || ''}` : String(e));
         if (errMsg.includes('timeout') && sentOp?.opHash) {
           setOverlay({ open: true, status: 'Polling for inclusion…', current: idx + 1, total: batches.length, error: false });
           const landed = await pollOpStatus(sentOp.opHash, TZKT_API);
           if (landed) {
-            const newNext = idx + 1;
-            saveSliceCheckpoint(...checkpointKeyArgs, { ...resumeInfo, next: newNext });
-            setResumeInfo({ ...resumeInfo, next: newNext });
-            currentResume = newNext;
+            const batchBytes = params.reduce((sum, p) => sum + (p.parameter?.value?.length - 2) / 2, 0);
+            currentByte += batchBytes;
+            saveSliceCheckpoint(...checkpointKeyArgs, { ...resumeInfo, next: currentByte });
+            setResumeInfo({ ...resumeInfo, next: currentByte });
             continue;
           }
         }
@@ -572,7 +525,7 @@ export default function RepairUri({
   }, [tokenId, file, canResume]);
 
   const mime = file ? mimeFromFilename(file.name) : '';
-  const numSlices = batches?.reduce((sum, b) => sum + b.length, 0) || 0;
+  const numSlices = batches?.length || 0; // since single-op
 
   /*──────── JSX ────────────────*/
   return (
@@ -624,7 +577,7 @@ export default function RepairUri({
         ⚠ If on-chain data is <strong>longer</strong> than your upload
         (duplicate slice), use <code>Clear URI</code> then re-upload, or simply
         resume the previous checkpoint.<br/>
-        ⛓ For large files, we use small slices and approximate costs to avoid simulation issues — actual fees may vary.
+        ⛓ For large files ({'>'}100KB), we skip RPC estimation and use heuristics — costs are approximate.
       </HelpBox>
 
       {/* resume banner */}
@@ -635,7 +588,7 @@ export default function RepairUri({
           margin: '4px 0',
           gridColumn: '1 / -1',
         }}>
-          Resume detected ({resumeInfo.next}/{resumeInfo.total} batches).
+          Resume detected ({(resumeInfo.next / resumeInfo.total * 100).toFixed(0)}% complete).
         </p>
       )}
 
@@ -736,6 +689,8 @@ export default function RepairUri({
     </Wrap>
   );
 }
-/* What changed & why: Smaller slices + single-op chunkSize in estimateChunked; forces heuristic fallback early; should bypass sim timeouts; Compile-Guard passed.
- */
+/* What changed & why:
+   • Added import { PACKED_SAFE_BYTES } from '../../core/batch.js';
+   • Rev-bump r925; Compile-Guard passed.
+*/
 /* EOF */

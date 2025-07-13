@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/Mint.jsx
-  Rev :    r874   2025-07-12
-  Summary: updated to calcStorageMutez
+  Rev :    r875   2025-07-13
+  Summary: dynamic first-slice limit to push up to max
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useRef, useState, useEffect, useMemo, useCallback,
@@ -37,6 +37,7 @@ import {
 
 import {
   estimateChunked, calcStorageMutez, μBASE_TX_FEE, toTez,
+  calcExactOverhead, MAX_OP_DATA_BYTES,
 } from '../../core/feeEstimator.js';
 import { mimeFromFilename } from '../../constants/mimeTypes.js';
 
@@ -54,8 +55,6 @@ const isSim500 = (e) => {
 
 /*──────── constants ─────────────────────────────────────────*/
 const META_PAD_BYTES = 1_000;                  /* estimator head‑room  */
-const HEADROOM_BYTES = 1_024;                  /* slice‑0 buffer       */
-const SAFE_BYTES_0   = SLICE_SAFE_BYTES - HEADROOM_BYTES;
 
 /* enforce self‑recipient for these */
 const requiresSelfRecipient = (oversize, metaBytes) =>
@@ -289,20 +288,33 @@ export default function Mint({
 
   /* oversize slicing logic */
   const artifactHex = useMemo(() => char2Bytes(url), [url]);
-  const oversize    = artifactHex.length / 2 > SLICE_SAFE_BYTES;
+
+  const metaMap = useMemo(() => {
+    const clean = attrs.filter((a) => a.name && a.value);
+    const mimeNorm = mimeFromFilename(file?.name || '').replace('audio/mp3', 'audio/mpeg');
+    return buildMeta({
+      f, attrs: clean, tags, dataUrl: '', mime: mimeNorm, shares: {},
+    });
+  }, [f, attrs, tags, file]);
+
+  const metaOverhead = useMemo(() => calcExactOverhead(metaMap), [metaMap]);
+
+  const maxFirstSlice = MAX_OP_DATA_BYTES - metaOverhead - 512; // safety
+
+  const oversize = artifactHex.length / 2 > maxFirstSlice;
 
   const allSlices = useMemo(
-    () => (oversize ? sliceHex(`0x${artifactHex}`, SAFE_BYTES_0) : []),
-    [oversize, artifactHex],
+    () => oversize ? sliceHex(`0x${artifactHex}`, maxFirstSlice) : [],
+    [oversize, artifactHex, maxFirstSlice],
   );
 
   const slice0DataUri = useMemo(
-    () => (oversize ? Buffer.from(allSlices[0].slice(2), 'hex').toString('utf8') : url),
+    () => oversize ? Buffer.from(allSlices[0].slice(2), 'hex').toString('utf8') : url,
     [oversize, allSlices, url],
   );
 
   const appendSlices = useMemo(
-    () => (oversize ? allSlices.slice(1) : []),
+    () => oversize ? allSlices.slice(1) : [],
     [oversize, allSlices],
   );
 
@@ -321,7 +333,7 @@ export default function Mint({
   }, [roys]);
 
   /* metadata & bytes */
-  const metaMap = useMemo(() => {
+  const finalMetaMap = useMemo(() => {
     const clean = attrs.filter((a) => a.name && a.value);
     const mimeNorm = mimeFromFilename(file?.name || '').replace('audio/mp3', 'audio/mpeg');
     return buildMeta({
@@ -329,7 +341,7 @@ export default function Mint({
     });
   }, [f, attrs, tags, slice0DataUri, file, shares]);
 
-  const metaBytes = useMemo(() => mapSize(metaMap), [metaMap]);
+  const metaBytes = useMemo(() => mapSize(finalMetaMap), [finalMetaMap]);
 
   const forceSelf = requiresSelfRecipient(oversize, metaBytes);
 
@@ -443,7 +455,7 @@ export default function Mint({
     const mintParams = {
       kind: OpKind.TRANSACTION,
       ...(await buildMintCall(
-        c, contractVersion, f.amount, metaMap, f.toAddress,
+        c, contractVersion, f.amount, finalMetaMap, f.toAddress,
       ).toTransferParams() ),
     };
 
@@ -482,7 +494,7 @@ export default function Mint({
       }
     }
     return out;
-  }, [toolkit, contractAddress, contractVersion, f.amount, metaMap, f.toAddress,
+  }, [toolkit, contractAddress, contractVersion, f.amount, finalMetaMap, f.toAddress,
       appendSlices, artifactHex]);
 
   /*──────── confirm‑dialog gate ───────────────────*/
@@ -834,7 +846,6 @@ export default function Mint({
           checked={f.agree}
           onChange={(e) => setF({ ...f, agree: e.target.checked })}
         />
-        {' '}
         I agree to the 
         <a href="/terms" target="_blank" rel="noopener noreferrer">
           terms & conditions
@@ -901,6 +912,6 @@ export default function Mint({
   );
 }
 
-/* What changed & why: Updated to calcStorageMutez; Compile-Guard passed.
+/* What changed & why: Use calcExactOverhead to set dynamic maxFirstSlice; allow up to exact limit without slicing if fits; rev-bump r875; Compile-Guard passed.
  */
 /* EOF */

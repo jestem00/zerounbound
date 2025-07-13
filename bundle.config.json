@@ -20,6 +20,21 @@
         "src/ui/GlobalSnackbar.jsx"
       ]
     },
+    
+    {
+      "bundleName": "entrypoints_bundle",
+      "patterns": [
+        "src/config/**",
+        "src/core/net.js",
+        "src/pages/manage.js",
+        "src/ui/AdminTools.jsx",
+        "src/ui/Entrypoints/AppendArtifactUri.jsx",
+        "src/ui/Entrypoints/AppendExtraUri.jsx",
+        "src/ui/Entrypoints/RepairUri.jsx",
+        "src/ui/Entrypoints/Mint.jsx",
+        "src/utils/**"
+      ]
+    },
 
     {
       "bundleName": "explore_bundle",

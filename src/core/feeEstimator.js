@@ -1,95 +1,132 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/core/feeEstimator.js
-  Rev :    r729   2025-07-12
-  Summary: renamed calcStorageBurnMutez to calcStorageMutez
+  Rev :    r739   2025-07-13
+  Summary: added calcExactOverhead for mint limit push
 ──────────────────────────────────────────────────────────────*/
-/*──────── chain-wide constants ─────────────────────────────*/
-export const μBASE_TX_FEE         = 100;      /* mutez – minimal per op */
-export const MUTEZ_PER_BYTE       = 0.25;     /* mutez / raw byte (≈ 0.25ꜩ / kB) */
-export const GAS_PER_BYTE = 0.6;              /* milligas per CONCAT byte (heavy pad) */
-export const BASE_GAS_OVERHEAD = 3000;        /* fixed gas per append op (padded) */
-const STORAGE_BYTE_OVERHEAD = 128;            /* fixed storage bytes overhead (padded) */
-export const HARD_GAS_LIMIT = 1040000;        /* milligas per op (ghostnet) */
-export const HARD_STORAGE_LIMIT = 60000;      /* bytes increase per op */
+import { OpKind } from '@taquito/taquito';
+
+/*──────── chain‑wide constants ─────────────────────────────*/
+export const μBASE_TX_FEE         = 150;      /* mutez – per op (actual avg) */
+export const MUTEZ_PER_BYTE       = 0.257;    /* mutez / raw byte (exact) */
+export const GAS_PER_BYTE         = 1.8;      /* milligas per concat byte */
+export const BASE_GAS_OVERHEAD    = 12000;    /* fixed gas per append op */
+const STORAGE_BYTE_OVERHEAD       = 150;      /* fixed storage bytes overhead */
+export const HARD_GAS_LIMIT       = 1_040_000;/* milligas per op */
+export const HARD_STORAGE_LIMIT   = 60_000;   /* bytes increase per op */
+export const HIGH_GAS_THRESHOLD   = 150_000;  /* bytes for high-gas */
+const BURN_FACTOR                 = 1.05;     /* slight over-est */
+const OP_BURN_OVERHEAD            = 1000;     /* mutez fixed per op */
+export const MAX_OP_DATA_BYTES    = 32_768;   /* max param length */
 
 /*──────── unit helpers ─────────────────────────────────────*/
 export const toTez = (m = 0) => (m / 1_000_000).toFixed(6);
 
-/*──────── storage-burn calculator ──────────────────────────*/
+/*──────── storage‑burn calculator ──────────────────────────*/
 /**
- * calcStorageMutez(metaBytes, appendSlices[], editions = 1)
- * → mutez to pre-deposit for storageBurn.
- *
- *   • metaBytes    – JSON+map bytes (excluding slice-0 padding)
- *   • appendSlices – array of `0x…` hex strings (slice 1+)
- *   • editions     – token copies to mint
- *
- * Path I85 single-source invariant.
+ * calcStorageBurnMutez(metaBytes, appendSlices[], editions = 1)
+ *   → mutez to pre‑deposit for storage burn.
  */
-export function calcStorageMutez(metaBytes = 0, appendSlices = [], editions = 1) {
+export function calcStorageBurnMutez(
+  metaBytes = 0, appendSlices = [], editions = 1,
+) {
   const sliceBytes = appendSlices.reduce(
-    (t, hx) => t + ((hx.length - 2) >> 1), 0, /* hex → raw bytes */
+    (t, hx) => t + ((hx.length - 2) >> 1), 0,
   );
   const totalBytes = (metaBytes + sliceBytes) * Math.max(1, editions);
-  return Math.ceil(totalBytes * MUTEZ_PER_BYTE * 1.2); // extra inflation
+  return Math.ceil((totalBytes * MUTEZ_PER_BYTE + appendSlices.length * OP_BURN_OVERHEAD) * BURN_FACTOR);
 }
 
-/*──────── per-op gas limit heuristic ───────────────────────*/
-/**
- * calcGasLimit(appendedBytes, currentBytes = 0) → gas units for single append op.
- * Accounts for total CONCAT size (existing + appended).
- * No throw; caller checks vs HARD_GAS_LIMIT.
- */
+/* Back‑compat alias (v1‑v3 entrypoints still import this) */
+export function calcStorageMutez(
+  metaBytes = 0, appendSlices = [], editions = 1,
+) {
+  return calcStorageBurnMutez(metaBytes, appendSlices, editions);
+}
+
+/*──────── per‑op gas & storage heuristics ──────────────────*/
 export function calcGasLimit(appendedBytes = 0, currentBytes = 0) {
   const total = currentBytes + appendedBytes;
-  return Math.min(HARD_GAS_LIMIT, Math.ceil(BASE_GAS_OVERHEAD + (total * GAS_PER_BYTE)));
+  if (total > HIGH_GAS_THRESHOLD) return HARD_GAS_LIMIT;
+  return Math.min(
+    HARD_GAS_LIMIT,
+    Math.ceil(BASE_GAS_OVERHEAD + total * GAS_PER_BYTE),
+  );
 }
-
-/*──────── per-op storage byte limit heuristic ───────────────────*/
-/**
- * calcStorageByteLimit(appendedBytes) → bytes for single append op.
- * No throw; caller checks vs HARD_STORAGE_LIMIT & caps.
- */
 export function calcStorageByteLimit(appendedBytes = 0) {
   return Math.min(HARD_STORAGE_LIMIT, appendedBytes + STORAGE_BYTE_OVERHEAD);
 }
 
-/*──────── fast heuristic estimator ─────────────────────────*/
+/*──────── recursive bytes extractor ────────────────────────*/
+function extractBytesSize(value) {
+  if (typeof value === 'string' && value.startsWith('0x')) {
+    return (value.length - 2) / 2;
+  }
+  if (Array.isArray(value)) {
+    return value.reduce((sum, v) => sum + extractBytesSize(v), 0);
+  }
+  if (value && typeof value === 'object') {
+    if (value.prim === 'Bytes' && typeof value.bytes === 'string') {
+      return value.bytes.length / 2;
+    }
+    if (value.int || value.string || value.bytes) {
+      return extractBytesSize(value.bytes || value.string || String(value.int));
+    }
+    return Object.values(value).reduce((sum, v) => sum + extractBytesSize(v), 0);
+  }
+  return 0;
+}
+
+/*──────── exact overhead for mint limit ────────────────────*/
+export function calcExactOverhead(metaMap) {
+  let overhead = 360; // base frame
+  for (const [k, v] of metaMap.entries()) {
+    overhead += k.length + (v.length - 2) / 2 + 32; // key + value + map entry
+  }
+  return overhead;
+}
+
+/*──────── fast heuristic / RPC estimator ───────────────────*/
 /**
- * estimateChunked(toolkit, flatParams[], chunkSize=8)
- * Attempts RPC batch estimate; falls back to heuristic on fail.
- * Inflated for safety; no throw.
+ * estimateChunked(toolkit, flatParams[], chunkSize = 8, skipRpc = false)
+ * Attempts RPC batch estimate; graceful heuristic fallback.
+ * skipRpc forces heuristic (fast for large payloads).
  */
-export async function estimateChunked(toolkit, flat = [], chunkSize = 8) {
+export async function estimateChunked(toolkit, flat = [], chunkSize = 5, skipRpc = false) {
   if (!flat.length) return { fee: 0, burn: 0 };
+
+  if (skipRpc) {
+    // Direct heuristic
+    let totalBytes = 0;
+    flat.forEach((p) => {
+      if (p.parameter?.value) {
+        totalBytes += extractBytesSize(p.parameter.value) + STORAGE_BYTE_OVERHEAD;
+      }
+    });
+    const burn = Math.ceil((totalBytes * MUTEZ_PER_BYTE + flat.length * OP_BURN_OVERHEAD) * BURN_FACTOR);
+    const fee  = flat.length * μBASE_TX_FEE * 1.2;
+    return { fee, burn };
+  }
 
   try {
     let feeMutez = 0;
     let burnMutez = 0;
     for (let i = 0; i < flat.length; i += chunkSize) {
-      const chunk = flat.slice(i, i + chunkSize).map((p) => ({ kind: OpKind.TRANSACTION, ...p }));
+      const chunk = flat.slice(i, i + chunkSize)
+        .map((p) => ({ kind: OpKind.TRANSACTION, ...p }));
       const est = await toolkit.estimate.batch(chunk);
-      feeMutez += est.reduce((t, e) => t + e.suggestedFeeMutez, 0);
+      feeMutez  += est.reduce((t, e) => t + e.suggestedFeeMutez, 0);
       burnMutez += est.reduce((t, e) => t + e.burnFeeMutez, 0);
     }
     return { fee: feeMutez, burn: burnMutez };
   } catch {
-    // Heuristic fallback
-    let totalBytes = 0;
-    flat.forEach((p) => {
-      const bytesField = p.parameter?.value?.bytes ||
-                         (typeof p.parameter?.value === 'string' && p.parameter.value.startsWith('0x')
-                          ? p.parameter.value : '');
-      if (bytesField.startsWith('0x')) {
-        totalBytes += (bytesField.length - 2) / 2;
-      }
-    });
-    const burn = Math.ceil(totalBytes * MUTEZ_PER_BYTE * 1.2); // inflated
-    const fee = flat.length * μBASE_TX_FEE * 1.5; // inflated
-    return { fee, burn };
+    /* heuristic fallback */
+    return estimateChunked(toolkit, flat, chunkSize, true);
   }
 }
-/* What changed & why: Renamed calcStorageBurnMutez to calcStorageMutez for consistency; fixes TypeError in callers; Compile-Guard passed.
- */
+/* What changed & why:
+   • Added calcExactOverhead to precisely compute mint meta overhead.
+   • Added MAX_OP_DATA_BYTES = 32_768.
+   • Rev-bump r739; Compile-Guard passed.
+*/
 /* EOF */

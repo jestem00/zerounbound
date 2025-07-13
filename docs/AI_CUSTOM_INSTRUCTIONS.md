@@ -1,11 +1,11 @@
 /*───────────────────────────────────────────────────────────────
 Developed by @jams2blues – ZeroContract Studio
-File:    docs/CODEX_CUSTOM_INSTRUCTIONS.md
+File:    docs/AI_CUSTOM_INSTRUCTIONS.md
 Rev :    r1    2025‑09‑05
-Summary: minimal 2‑KB prompt for Codex “Custom instructions” UI
+Summary: minimal 2‑KB prompt for Codex & any AI “Custom instructions” UI
 ───────────────────────────────────────────────────────────────*/
 
-### Codex Custom Instructions — Zero Unbound v4
+### AI Custom Instructions — Zero Unbound v4
 
 **Mission**  Fix bugs, refactor, and extend an 8‑bit‑themed fully‑on‑chain
 Tezos NFT suite.  All rules below override defaults.

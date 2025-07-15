@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/manage.js
-  Rev :    r876   2025‑09‑04 UTC
-  Summary: restore big‑map path, resilient meta decode, “—” fix
+  Rev :    r881   2025-07-14 UTC
+  Summary: visible loading spinner near search; metadata cache; parallel fetches; fixes slow load; lint-clean; compile-guard passed.
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useState, useEffect, useCallback, useRef,
@@ -17,6 +17,7 @@ import PixelInput         from '../ui/PixelInput.jsx';
 import PixelButton        from '../ui/PixelButton.jsx';
 import AdminTools         from '../ui/AdminTools.jsx';
 import RenderMedia        from '../utils/RenderMedia.jsx';
+import LoadingSpinner     from '../ui/LoadingSpinner.jsx';
 import { useWalletContext } from '../contexts/WalletContext.js';
 import { jFetch, sleep }  from '../core/net.js';
 import hashMatrix         from '../data/hashMatrix.json' assert { type: 'json' };
@@ -43,7 +44,7 @@ const Wrap = styled.div`
   width: 100%;
   max-width: min(90vw, 1920px);
   margin: 0 auto;
-  min-height: calc(var(--vh) - var(--hdr));
+  min-height: calc(var(--vh) - var(--hdr,0));
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;
@@ -60,6 +61,16 @@ const Center = styled.div`
   font-size: .8rem;
 `;
 
+const SearchWrap = styled.div`
+  display:flex;flex-wrap:wrap;gap:10px;justify-content:center;
+  align-items:center;margin-top:.4rem;
+`;
+
+const BusyWrap = styled.div`
+  display:flex;align-items:center;gap:6px;font-size:.8rem;
+  color:var(--zu-accent-sec);
+`;
+
 /*──────── helpers ──────────────────────────────────────────*/
 const TZKT = {
   ghostnet: 'https://api.ghostnet.tzkt.io/v1',
@@ -72,6 +83,28 @@ const HASH_TO_VER = Object.entries(hashMatrix)
 const hex2str  = (h) => Buffer.from(h.replace(/^0x/, ''), 'hex').toString('utf8');
 const parseHex = (h) => { try { return JSON.parse(hex2str(h)); } catch { return {}; } };
 
+const META_CACHE_KEY = 'zu_meta_cache_v1';
+const META_TTL = 5 * 60 * 1000; // 5 min
+
+const getCachedMeta = (addr, net) => {
+  try {
+    const all = JSON.parse(localStorage.getItem(META_CACHE_KEY) || '{}');
+    const key = `${net}_${addr}`;
+    const hit = all[key];
+    if (hit && Date.now() - hit.ts < META_TTL) return hit.meta;
+  } catch {}
+  return null;
+};
+
+const cacheMeta = (addr, net, meta) => {
+  try {
+    const all = JSON.parse(localStorage.getItem(META_CACHE_KEY) || '{}');
+    const key = `${net}_${addr}`;
+    all[key] = { meta, ts: Date.now() };
+    localStorage.setItem(META_CACHE_KEY, JSON.stringify(all));
+  } catch {}
+};
+
 /**
  * Retrieve & normalise on‑chain contract metadata.
  * • Tries storage.metadata JSON then big‑map (`/contents` first, fallback `/content`)
@@ -79,15 +112,27 @@ const parseHex = (h) => { try { return JSON.parse(hex2str(h)); } catch { return 
  */
 async function fetchMeta(addr = '', net = 'ghostnet') {
   if (!addr) return null;
+
+  const cached = getCachedMeta(addr, net);
+  if (cached) return cached;
+
   const base = `${TZKT[net]}/contracts/${addr}`;
   try {
-    const det  = await jFetch(base);
-    let   meta = det.metadata ?? {};
+    const [det, bmContents, bmContent] = await Promise.allSettled([
+      jFetch(base),
+      jFetch(`${base}/bigmaps/metadata/keys/contents`),
+      jFetch(`${base}/bigmaps/metadata/keys/content`),
+    ]);
 
-    /* fallback to big‑map entry if needed (old ghostnet path = .../contents) */
+    let meta = det.status === 'fulfilled' ? det.value.metadata ?? {} : {};
+
+    /* fallback to big‑map entry if needed */
     if (!meta.name || !meta.imageUri) {
-      const bm = await jFetch(`${base}/bigmaps/metadata/keys/contents`).catch(() => null)
-              ?? await jFetch(`${base}/bigmaps/metadata/keys/content`).catch(() => null);
+      const bm = bmContents.status === 'fulfilled' && bmContents.value?.value
+              ? bmContents.value
+              : bmContent.status === 'fulfilled' && bmContent.value?.value
+              ? bmContent.value
+              : null;
       if (bm?.value) meta = { ...parseHex(bm.value), ...meta };
     }
 
@@ -97,15 +142,18 @@ async function fetchMeta(addr = '', net = 'ghostnet') {
       return (v === undefined || v === null || v === '') ? def : v;
     };
 
-    return {
+    const resolved = {
       address    : addr,
-      version    : HASH_TO_VER[det.typeHash] || '?',
+      version    : HASH_TO_VER[det.status === 'fulfilled' ? det.value.typeHash : 0] || '?',
       name       : safe('name', addr),
       description: safe('description'),
       imageUri   : safe('imageUri', ''),
       /* pass full meta downstream for ContractMetaPanel */
       meta       : meta,
     };
+
+    cacheMeta(addr, net, resolved);
+    return resolved;
   } catch {
     return null;
   }
@@ -113,17 +161,21 @@ async function fetchMeta(addr = '', net = 'ghostnet') {
 
 export async function getServerSideProps() { return { props: {} }; }
 
-/*════════ component ═══════════════════════════════════════*/
+/*════════ component ════════════════════════════════════════*/
 export default function ManagePage() {
-  const { network } = useWalletContext();
+  const { network: walletNet } = useWalletContext();
+  const network = walletNet || 'ghostnet';
   const router      = useRouter();
 
   const [hydrated,  setHydrated ] = useState(false);
   const [kt,        setKt       ] = useState('');
   const [busy,      setBusy     ] = useState(false);
   const [contract,  setContract ] = useState(null);
+  const [loading,   setLoading  ] = useState(false);
 
   const loadSeq = useRef(0);           /* discard stale async results */
+  const searchRef = useRef(null);
+  const carouselsRef = useRef(null);
 
   useEffect(() => { setHydrated(true); }, []);
 
@@ -140,6 +192,10 @@ export default function ManagePage() {
     await sleep(80);
     setContract(meta);
     setBusy(false);
+
+    if (searchRef.current) {
+      searchRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
   }, [network]);
 
   /* initial load from ?addr query */
@@ -165,6 +221,15 @@ export default function ManagePage() {
     load(address);
   }, [navigateIfDiff, load]);
 
+  const handleRefresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      await carouselsRef.current?.refresh(true);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   const go = (e) => {
     e?.preventDefault();
     const a = kt.trim();
@@ -185,31 +250,33 @@ export default function ManagePage() {
     <Wrap>
       <Title>Manage Contract</Title>
       <Center>
-        Network&nbsp;<strong>{network}</strong>
+        Network <strong>{network}</strong>
       </Center>
 
-      <ContractCarousels onSelect={onSelect} />
-
-      <form
-        onSubmit={go}
-        style={{
-          display        : 'flex',
-          gap            : 10,
-          justifyContent : 'center',
-          flexWrap       : 'wrap',
-          marginTop      : '.4rem',
-        }}
-      >
+      <SearchWrap ref={searchRef}>
         <PixelInput
           placeholder="Paste KT1…"
           value={kt}
           onChange={(e) => setKt(e.target.value)}
           style={{ minWidth: 220, maxWidth: 640, flex: '1 1 640px' }}
         />
-        <PixelButton type="submit">GO</PixelButton>
-      </form>
+        <PixelButton onClick={go}>GO</PixelButton>
+        <PixelButton onClick={handleRefresh}>Refresh</PixelButton>
+        {busy && (
+          <BusyWrap>
+            <LoadingSpinner size={16} />
+            <span>Loading... first time can take 30s</span>
+          </BusyWrap>
+        )}
+        {loading && (
+          <BusyWrap>
+            <LoadingSpinner size={16} />
+            <span>Refreshing…</span>
+          </BusyWrap>
+        )}
+      </SearchWrap>
 
-      {busy && <Center style={{ marginTop: '.3rem' }}>Loading…</Center>}
+      <ContractCarousels ref={carouselsRef} onSelect={onSelect} />
 
       {contract && !busy && (
         <AdminTools contract={contract} onClose={() => setContract(null)} />
@@ -233,13 +300,5 @@ export default function ManagePage() {
     </Wrap>
   );
 }
-/* What changed & why:
-   • Restored /bigmaps/metadata/keys/contents endpoint (tzkt path change
-     broke meta.name/imageUri) with fallback to /content.
-   • Added defensive safe() helper to guarantee non‑empty strings –
-     fixes “—” placeholders & AdminTools blank preview/title.
-   • Propagates full meta object via contract.meta for downstream
-     ContractMetaPanel integrity grid.
-   • Minor spinner delay tweak for smoother UX.
-*/
-/* EOF */
+
+/* What changed & why: added metadata cache w/ 5 min TTL; parallelized fetches via Promise.allSettled; visible BusyWrap w/ LoadingSpinner near search; fixes slow load + hidden status; Rev-bump r881. */

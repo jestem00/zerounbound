@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/OperationOverlay.jsx
-  Rev :    r953   2025‑08‑14
-  Summary: Close → clear SW & CacheStorage, then hard reload
+  Rev :    r955   2025-07-13
+  Summary: merged timeout msg, Beacon err, clear cache on close
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useMemo, useState, useRef, useCallback,
@@ -232,6 +232,8 @@ export default function OperationOverlay({
   const caption = error ? status : (status||'Preparing request…');
   const walletHint = /wallet/i.test(caption)&&!error;
   const showSig    = total>1 && !error;
+  const isTimeout = /timeout|took more time/i.test(caption);
+  const isBeaconInvalid = /parameters invalid|beacon/i.test(caption);
 
   return (
     <Back>
@@ -244,7 +246,7 @@ export default function OperationOverlay({
 
         {showSig && (
           <h3 style={{margin:'.25rem 0 .4rem',fontSize:'1rem'}}>
-            Signature&nbsp;{cur}&nbsp;of&nbsp;{total}
+            Signature {cur} of {total}
           </h3>
         )}
 
@@ -259,6 +261,18 @@ export default function OperationOverlay({
             Wallet pop‑up opening.<br/>
             <strong>Review total fees</strong> then sign.<br/>
             Confirmation may take a while.
+          </p>
+        )}
+
+        {isTimeout && (
+          <p style={{fontSize:'.8rem',opacity:.8,marginTop:4}}>
+            Node simulation timed out—reducing chunk size for retry.
+          </p>
+        )}
+
+        {isBeaconInvalid && (
+          <p style={{fontSize:'.8rem',opacity:.8,marginTop:4}}>
+            Wallet rejected params—check inputs or try smaller file.
           </p>
         )}
 
@@ -289,10 +303,6 @@ export default function OperationOverlay({
     </Back>
   );
 }
-/* What changed & why:
-   • Added clearCachesAndReload(): deletes CacheStorage + unregisters
-     service‑workers, then reloads → approximates “hard reload”.
-   • Success Close button now invokes the new routine.
-   • Rev bump → r953.
-*/
+/* What changed & why: Merged timeout msg, Beacon err handling, and clear cache/SW on close; rev-bump r955; Compile-Guard passed.
+ */
 /* EOF */

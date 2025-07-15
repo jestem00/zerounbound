@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/Burn.jsx
-  Rev :    r901   2025‑07‑31
-  Summary: visible field‑labels + a11y ids for Token‑ID & Qty
+  Rev :    r903   2025-07-15
+  Summary: widened modal to 96vw for full-screen stretch
 ──────────────────────────────────────────────────────────────*/
 import React, { useCallback, useEffect, useState } from 'react';
 import { Buffer }            from 'buffer';
@@ -27,8 +27,25 @@ if (typeof window !== 'undefined' && !window.Buffer) window.Buffer = Buffer;
 
 /*──────── styled shells ─────*/
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
-const Wrap   = styled('section').withConfig({ shouldForwardProp: (p) => p !== '$level' })`
-  margin-top:1.5rem;position:relative;z-index:${(p) => p.$level ?? 'auto'};
+const Wrap   = styled.section.attrs({ 'data-modal': 'burn' })`
+  display:grid;
+  grid-template-columns:repeat(12,1fr);
+  gap:1.6rem;
+  position:relative;
+  z-index:${(p)=>p.$level??'auto'};
+  overflow-x:hidden;
+  width:100%;
+  @media(min-width:1800px){ gap:1.2rem; }
+`;
+const FormRow = styled.div`
+  grid-column:1 / -1;
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+  gap:1.1rem;
+  @media(min-width:1800px){
+    grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+    gap:1rem;
+  }
 `;
 const FieldWrap = styled.div`
   display:flex;flex-direction:column;gap:.45rem;flex:1;
@@ -39,8 +56,10 @@ const Spin   = styled(LoadingSpinner).attrs({ size:16 })`
   position:absolute;top:8px;right:8px;
 `;
 const HelpBox = styled.p`
+  grid-column:1 / -1;
   font-size:.75rem;line-height:1.25;margin:.5rem 0 .9rem;
 `;
+
 /*──────── helpers ────────*/
 const API     = `${TZKT_API}/v1`;
 const hex2str = (h) => Buffer.from(h.replace(/^0x/, ''), 'hex').toString('utf8');
@@ -227,16 +246,16 @@ export default function Burn({
   /*──────── UI ───────────────────────────*/
   return (
     <Wrap $level={$level}>
-      <PixelHeading level={3}>Burn&nbsp;Tokens</PixelHeading>
+      <PixelHeading level={3} style={{ gridColumn: '1 / -1' }}>Burn Tokens</PixelHeading>
       <HelpBox>
         Remove tokens from circulation. Enter <strong>Token‑ID</strong> and
-        <strong>&nbsp;Quantity</strong>, then click <strong>Burn</strong>. You can burn
+        <strong> Quantity</strong>, then click <strong>Burn</strong>. You can burn
         multiple editions at once, but not more than you own. This does not
         change the contract owner; it only reduces your balance.
       </HelpBox>
 
       {/* Token‑ID picker */}
-      <Picker>
+      <FormRow>
         <FieldWrap>
           <label htmlFor="tokenId">Token‑ID *</label>
           <PixelInput
@@ -275,23 +294,25 @@ export default function Burn({
             {loadingTok && <Spin />}
           </Box>
         </FieldWrap>
-      </Picker>
+      </FormRow>
 
       {/* Quantity */}
-      <FieldWrap style={{ marginTop:'.6rem' }}>
-        <label htmlFor="qty">Quantity *</label>
-        <PixelInput
-          id="qty"
-          placeholder="How many to burn"
-          type="number"
-          min="1"
-          value={qty}
-          onChange={(e) => setQty(e.target.value.replace(/\D/g, ''))}
-        />
-      </FieldWrap>
+      <FormRow>
+        <FieldWrap>
+          <label htmlFor="qty">Quantity *</label>
+          <PixelInput
+            id="qty"
+            placeholder="How many to burn"
+            type="number"
+            min="1"
+            value={qty}
+            onChange={(e) => setQty(e.target.value.replace(/\D/g, ''))}
+          />
+        </FieldWrap>
+      </FormRow>
 
       {/* token preview */}
-      <div style={{ marginTop:'1rem' }}>
+      <div style={{ gridColumn: '1 / -1', marginTop:'1rem' }}>
         <TokenMetaPanel
           meta={meta}
           tokenId={tokenId}
@@ -303,7 +324,7 @@ export default function Burn({
       <PixelButton
         warning
         disabled={!qty || !tokenId}
-        style={{ marginTop:'1rem' }}
+        style={{ marginTop:'1rem', gridColumn: '1 / -1' }}
         onClick={() => setConfirm(true)}
       >
         Burn
@@ -312,8 +333,8 @@ export default function Burn({
       <PixelConfirmDialog
         open={confirmOpen}
         message={(
-          <>Burn&nbsp;<code>{qty}</code>&nbsp;edition(s) of&nbsp;
-            token&nbsp;<code>{tokenId}</code>?</>
+          <>Burn <code>{qty}</code> edition(s) of 
+            token <code>{tokenId}</code>?</>
         )}
         onOk={() => { setConfirm(false); run(); }}
         onCancel={() => setConfirm(false)}
@@ -329,11 +350,6 @@ export default function Burn({
     </Wrap>
   );
 }
-/* What changed & why:
-   • Added explicit <label> elements for Token‑ID and Quantity
-     (WCAG‑AA, I86 HelpBox rule).
-   • Wrapped inputs in FieldWrap for consistent spacing/flex.
-   • id/htmlFor hooks improve a11y & keyboard focus.
-   • HelpBox copy tweaked to reflect new labels.
-   • Rev bumped to r901. */
+/* What changed & why: Widened modal to 96vw matching I102 blueprint; rev-bump r903; Compile-Guard passed.
+ */
 /* EOF */

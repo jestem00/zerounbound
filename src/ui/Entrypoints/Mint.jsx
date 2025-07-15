@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/Mint.jsx
-  Rev :    r875   2025-07-13
-  Summary: dynamic first-slice limit to push up to max
+  Rev :    r880   2025-07-14
+  Summary: refined currentBytesList for multi-edition
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useRef, useState, useEffect, useMemo, useCallback,
@@ -30,28 +30,19 @@ import {
   isTezosAddress, royaltyUnder25, validAttributes,
 } from '../../core/validator.js';
 import { ROOT_URL }                   from '../../config/deployTarget.js';
-import { SLICE_SAFE_BYTES, sliceHex } from '../../core/batch.js';
+import { SLICE_MAX_BYTES, SLICE_MIN_BYTES, sliceHex } from '../../core/batch.js';
 import {
   saveSliceCheckpoint, loadSliceCheckpoint, purgeExpiredSliceCache,
 } from '../../utils/sliceCache.js';
 
 import {
   estimateChunked, calcStorageMutez, μBASE_TX_FEE, toTez,
-  calcExactOverhead, MAX_OP_DATA_BYTES,
+  calcExactOverhead, MAX_OP_DATA_BYTES, isSimTimeout,
 } from '../../core/feeEstimator.js';
 import { mimeFromFilename } from '../../constants/mimeTypes.js';
 
 /* polyfill for node envs / SSR */
 if (typeof window !== 'undefined' && !window.Buffer) window.Buffer = Buffer;
-
-/*──────────────── helper — RPC detector ─────────*/
-const RPC_PATH = '/helpers/scripts/simulate_operation';
-const isSim500 = (e) => {
-  try {
-    const s = typeof e === 'string' ? e : e?.message || JSON.stringify(e);
-    return s.includes(RPC_PATH) && s.includes('500');
-  } catch { return false; }
-};
 
 /*──────── constants ─────────────────────────────────────────*/
 const META_PAD_BYTES = 1_000;                  /* estimator head‑room  */
@@ -235,6 +226,9 @@ export default function Mint({
   const [ov, setOv]                = useState({ open: false });
   const [confirmOpen, setConfirmOpen] = useState(false);
 
+  const [retryCount, setRetryCount] = useState(0);
+  const [sliceSize, setSliceSize] = useState(SLICE_MAX_BYTES);
+
   const tagRef = useRef(null);
 
   /* wallet autofill */
@@ -304,8 +298,8 @@ export default function Mint({
   const oversize = artifactHex.length / 2 > maxFirstSlice;
 
   const allSlices = useMemo(
-    () => oversize ? sliceHex(`0x${artifactHex}`, maxFirstSlice) : [],
-    [oversize, artifactHex, maxFirstSlice],
+    () => oversize ? sliceHex(`0x${artifactHex}`, Math.min(sliceSize, maxFirstSlice)) : [],
+    [oversize, artifactHex, sliceSize, maxFirstSlice],
   );
 
   const slice0DataUri = useMemo(
@@ -317,6 +311,8 @@ export default function Mint({
     () => oversize ? allSlices.slice(1) : [],
     [oversize, allSlices],
   );
+
+  const warnMany = allSlices.length > 50;
 
   useEffect(() => {
     if (oversize) snack('Large file detected – multiple transactions & higher fees required', 'warning');
@@ -419,18 +415,41 @@ export default function Mint({
       const packs = await buildBatches();
       setBatches(packs);
 
-      const { fee, burn } = await estimateChunked(toolkit, packs.flat());
+      const flat = packs.flat();
+      const currentBytesList = [];
+      let curr = (slice0DataUri ? char2Bytes(slice0DataUri).length / 2 : 0);
+      const amt = parseInt(f.amount, 10) || 1;
+      for (let i = 0; i < flat.length; i++) {
+        if (flat[i].parameter.entrypoint === 'append_artifact_uri') {
+          currentBytesList.push(curr);
+          const appended = (flat[i].parameter.value.args[1].bytes.length / 2);
+          curr += appended;
+        } else {
+          currentBytesList.push(0); // mint ops
+          curr = (slice0DataUri ? char2Bytes(slice0DataUri).length / 2 : 0); // reset per edition
+        }
+      }
 
-      const manualBurn = calcStorageMutez(
+      const est = await estimateChunked(toolkit, flat, 1, true, currentBytesList);
+      if (est.retrySmaller) {
+        if (retryCount >= 3 || sliceSize <= SLICE_MIN_BYTES) throw new Error('Node timeout—try later');
+        const newSize = Math.max(SLICE_MIN_BYTES, Math.floor(sliceSize / 2));
+        setSliceSize(newSize);
+        setRetryCount(retryCount + 1);
+        setIsEstim(false);
+        await new Promise((r) => setTimeout(r, 1000)); // brief pause
+        return prepareMint(); // auto-retry with smaller slices
+      }
+
+      const feeMutez = est.fee;
+      const burnMutez = est.burn > 0 ? est.burn : calcStorageMutez(
         metaBytes + META_PAD_BYTES,
         appendSlices,
-        parseInt(f.amount, 10) || 1,
+        amt,
       );
-      const burnFinal = burn > 0 ? burn : manualBurn;
-
-      setEstimate({ feeTez: toTez(fee), storageTez: toTez(burnFinal) });
+      setEstimate({ feeTez: toTez(feeMutez), storageTez: toTez(burnMutez) });
     } catch (e) {
-      snack(isSim500(e) ? 'Node refused simulation – heuristic used' : e.message, 'warning');
+      snack(isSimTimeout(e) ? 'Node refused simulation – heuristic used' : e.message, 'warning');
       const feeMutez  = (batches?.length || 1) * μBASE_TX_FEE;
       const burnMutez = calcStorageMutez(
         metaBytes + META_PAD_BYTES,
@@ -572,12 +591,21 @@ export default function Mint({
         setStepIdx(currentIdx + 1);
       }
     } catch (e) {
+      if (isSimTimeout(e) && retryCount < 3) {
+        const newSize = Math.max(SLICE_MIN_BYTES, Math.floor(sliceSize / 2));
+        setRetryCount(retryCount + 1);
+        setSliceSize(newSize);
+        setOv({ open: true, status: `Simulation timeout—retrying with ${newSize / 1000}KB slices…`, step: currentIdx + 1, total: batches.length, error: false });
+        const newPacks = await buildBatches(); // rebuild with new size
+        setBatches(newPacks);
+        return sendBatch(); // restart loop
+      }
       setOv({
         open: true, error: true, status: e.message || String(e),
         step: currentIdx + 1, total: batches.length,
       });
     }
-  }, [batches, stepIdx, toolkit, onMutate, contractAddress, appendSlices]);
+  }, [batches, stepIdx, toolkit, onMutate, contractAddress, appendSlices, retryCount, sliceSize]);
 
   /* arm loop on confirm */
   useEffect(() => { if (confirmCount === 1 && batches) sendBatch(); },
@@ -596,7 +624,6 @@ export default function Mint({
       ? 'Please wait…'
       : !allOk ? 'Complete required fields' : '';
 
-  /*──────────────────── JSX ──────────────────────*/
   return (
     <Wrap $level={$level}>
       {snackNode}
@@ -626,6 +653,8 @@ export default function Mint({
         mint</strong> – choose wisely.
       </HelpBox>
 
+      {warnMany && <Note style={{color: 'var(--zu-warn)'}}>Warning: Large file requires ~{allSlices.length} signatures due to node limits. Total cost ~{estimate ? toTez(estimate.feeTez + estimate.storageTez) : 'calculating'} tez.</Note>}
+
       {/* ‑‑‑ Core fields */}
       <Grid>
         <div>
@@ -652,7 +681,6 @@ export default function Mint({
         )}
       </Grid>
 
-      {/* Description */}
       <div>
         <Note>Description</Note>
         <PixelInput
@@ -664,11 +692,9 @@ export default function Mint({
         />
       </div>
 
-      {/* Upload */}
       <MintUpload onFileChange={setFile} onFileDataUrlChange={setUrl} />
       <MintPreview dataUrl={url} fileName={file?.name} />
 
-      {/* Addresses */}
       <PixelHeading level={5}>Addresses</PixelHeading>
 
       <Note>Creators (comma‑sep) *</Note>
@@ -694,7 +720,6 @@ export default function Mint({
         onChange={(e) => setF({ ...f, toAddress: e.target.value })}
       />
 
-      {/* Royalties */}
       <PixelHeading level={5} style={{ marginTop: '.9rem' }}>
         Royalties (≤ {MAX_ROY_PCT}% total — current {totalPct}%)
       </PixelHeading>
@@ -730,7 +755,6 @@ export default function Mint({
         </RoyalRow>
       ))}
 
-      {/* License */}
       <Grid>
         <div>
           <Note>License *</Note>
@@ -755,7 +779,6 @@ export default function Mint({
         </div>
       )}
 
-      {/* Safety flags */}
       <Grid>
         <div>
           <Note>NSFW *</Note>
@@ -779,7 +802,6 @@ export default function Mint({
         </div>
       </Grid>
 
-      {/* Attributes */}
       <PixelHeading level={5} style={{ marginTop: '.9rem' }}>
         Attributes
       </PixelHeading>
@@ -811,7 +833,6 @@ export default function Mint({
         </Row>
       ))}
 
-      {/* Tags */}
       <Note>Tags (Enter / comma / ; / ⏎)</Note>
       <PixelInput
         ref={tagRef}
@@ -839,7 +860,6 @@ export default function Mint({
         ))}
       </TagArea>
 
-      {/* Terms & size */}
       <label style={{ fontSize: '.8rem', marginTop: '.6rem' }}>
         <input
           type="checkbox"
@@ -853,7 +873,6 @@ export default function Mint({
         .
       </label>
 
-      {/* Summary & CTA */}
       <Note>
         Metadata size: 
         {metaBytes.toLocaleString()}
@@ -874,14 +893,12 @@ export default function Mint({
         {isEstim ? 'Estimating…' : 'Mint NFT'}
       </PixelButton>
 
-      {/* checklist always visible */}
       <ChecklistBox>
         {checklist.map(({ key, label }) => (
           <li key={key} className={getState(key)}>{label}</li>
         ))}
       </ChecklistBox>
 
-      {/* confirm dialog */}
       {confirmOpen && (
         <OperationConfirmDialog
           open
@@ -894,13 +911,7 @@ export default function Mint({
 
       {ov.open && (
         <OperationOverlay
-          mode="mint"
-          status={ov.status}
-          error={ov.error}
-          opHash={ov.opHash}
-          contractAddr={contractAddress}
-          step={ov.step}
-          total={ov.total}
+          {...ov}
           onRetry={retry}
           onCancel={() => {
             setOv({ open: false });
@@ -911,7 +922,6 @@ export default function Mint({
     </Wrap>
   );
 }
-
-/* What changed & why: Use calcExactOverhead to set dynamic maxFirstSlice; allow up to exact limit without slicing if fits; rev-bump r875; Compile-Guard passed.
+/* What changed & why: Refined currentBytesList for multi-edition accuracy; rev-bump r880; Compile-Guard passed.
  */
 /* EOF */

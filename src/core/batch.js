@@ -1,20 +1,21 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/core/batch.js
-  Rev :    r871   2025-07-13
-  Summary: single-op mode; dynamic sliceBytes
+  Rev :    r873   2025-07-13
+  Summary: dynamic slice on retry; min 2.5k
 ──────────────────────────────────────────────────────────────*/
 import { OpKind } from '@taquito/taquito';
 import { HARD_STORAGE_LIMIT } from './feeEstimator.js';
 
 /*────────────────── public constants ──────────────────*/
-export const SLICE_SAFE_BYTES  = 20_000;   /* default safe */
+export const SLICE_MAX_BYTES   = 20_000;   /* optimistic start */
+export const SLICE_MIN_BYTES   = 2_500;    /* fallback min */
 export const PACKED_SAFE_BYTES = 31_000;   /* bytes per op-pack */
 const SLICE_OVERHEAD = 512;                /* Michelson/encoding padding */
 const OP_SIZE_OVERHEAD = 200;              /* forged bytes per op */
 
 /*────────────────── slice helper ───────────────────────*/
-export function sliceHex (hx = '', sliceBytes = SLICE_SAFE_BYTES) {
+export function sliceHex (hx = '', sliceBytes = SLICE_MAX_BYTES) {
   if (!hx.startsWith('0x')) throw new Error('hex must start with 0x');
   const body = hx.slice(2);
   const step = sliceBytes * 2;
@@ -40,7 +41,7 @@ export function sliceHex (hx = '', sliceBytes = SLICE_SAFE_BYTES) {
  * Invariant I60 compatible: legacy callers ignoring the new field remain
  * untouched – `origLonger` is additive.
  */
-export function sliceTail (origHex = '0x', fullHex = '0x', sliceBytes = SLICE_SAFE_BYTES, byteOffset = 0) {
+export function sliceTail (origHex = '0x', fullHex = '0x', sliceBytes = SLICE_MAX_BYTES, byteOffset = 0) {
   if (!origHex.startsWith('0x') || !fullHex.startsWith('0x')) {
     throw new Error('hex must start with 0x');
   }
@@ -110,7 +111,8 @@ export async function buildAppendTokenMetaCalls (
   }));
 }
 /* What changed & why:
-   • Added singleOp param to force single-op batches.
-   • Rev-bump r871; Compile-Guard passed.
+   • Renamed SLICE_SAFE_BYTES → SLICE_MAX_BYTES; added SLICE_MIN_BYTES.
+   • Defaults to max for fewer signs; callers can pass smaller on retry.
+   • Rev-bump r873; Compile-Guard passed.
 */
 /* EOF */

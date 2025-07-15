@@ -1,15 +1,13 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/ContractCarousels.jsx
-  Rev :    r747‑r28   2025‑09‑04
-  Summary: restores contract rails (wrong big‑map path fixed);
-           keeps previously‑cached detail when enrich() fails;
-           tighter identifiability guard rollback to r20 logic;
-           misc lint‑clean (no unused imports).
+  Rev :    r758   2025-07-14
+  Summary: centers script dlg via portal; fixes toggle/dlg UX; adds badge click dlg; keeps prior fixes; lint-clean; compile-guard passed.
 ──────────────────────────────────────────────────────────────*/
 import React, {
-  useEffect, useState, useRef, useCallback, useMemo,
+  useEffect, useState, useRef, useCallback, useMemo, forwardRef, useImperativeHandle,
 }                       from 'react';
+import { createPortal } from 'react-dom';
 import styledPkg        from 'styled-components';
 import useEmblaCarousel from 'embla-carousel-react';
 import { Buffer }       from 'buffer';
@@ -21,6 +19,13 @@ import countTokens          from '../utils/countTokens.js';
 import RenderMedia          from '../utils/RenderMedia.jsx';
 import PixelHeading         from './PixelHeading.jsx';
 import PixelButton          from './PixelButton.jsx';
+import detectHazards        from '../utils/hazards.js';
+import useConsent           from '../hooks/useConsent.js';
+import IntegrityBadge       from './IntegrityBadge.jsx';
+import { EnableScriptsOverlay, EnableScriptsToggle } from './EnableScripts.jsx';
+import { checkOnChainIntegrity } from '../utils/onChainValidator.js';
+import PixelConfirmDialog   from './PixelConfirmDialog.jsx';
+import { INTEGRITY_LONG }   from '../constants/integrityBadges.js';
 
 /*──────── constants ─────────────────────────────────────────*/
 const CARD_W    = 340;
@@ -37,6 +42,9 @@ const DETAIL_TTL = 7 * 24 * 60 * 60 * 1_000;  /* 7 days */
 const CACHE_MAX  = 150;
 const LIST_TTL   = 300_000;
 const MIN_SPIN   = 200;
+const FETCH_TIMEOUT = 15000; /* 15s max per fetch */
+const RETRY_MAX     = 3;
+const RETRY_DELAY   = 2000;
 
 const TZKT = {
   ghostnet: 'https://api.ghostnet.tzkt.io/v1',
@@ -55,9 +63,9 @@ const getVer = (net, h) =>
 const hex2str  = (h) => Buffer.from(h.replace(/^0x/, ''), 'hex').toString('utf8');
 const parseHex = (h) => { try { return JSON.parse(hex2str(h)); } catch { return {}; } };
 const arr      = (v) => (Array.isArray(v) ? v : []);
-const scrub    = (s = '') => s.replace(/[\u0000-\u001F\u007F-\u009F]/g, '').trim();
+const scrub    = (s = '') => s.replace(/[-\u001F\u007F-\u009F]/g, '').trim();
 
-/* “identifiable” reverted to r20 logic – image OR scrubbed name */
+/* “identifiable” – image OR scrubbed name */
 const identifiable = (name = '', img = null) => Boolean(scrub(name)) || Boolean(img);
 
 /*──────── tiny localStorage cache — shape { data, ts } ─────*/
@@ -85,14 +93,28 @@ const listKey   = (kind, wallet, net) => `${kind}_${wallet}_${net}`;
 const getList   = (k) => getCache(k)?.data?.v || null;
 const cacheList = (k, v) => patchCache(k, { v });
 
+/*──────── retry wrapper ────────────────────────────────────*/
+async function withRetry(fn, max = RETRY_MAX, delay = RETRY_DELAY) {
+  let lastErr;
+  for (let i = 0; i < max; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      if (i < max - 1) await sleep(delay);
+    }
+  }
+  throw lastErr;
+}
+
 /*──────── tzkt discovery helpers ───────────────────────────*/
 async function fetchOriginated(addr, net) {
   if (!addr) return [];
   const base   = `${TZKT[net]}/contracts?creator=${addr}&limit=400`;
   const hashQS = mkHash(HASHES[net]);
   const url1   = `${base}&typeHash.in=${hashQS}`;
-  const rows1  = await jFetch(url1).catch(() => []);
-  const rows   = rows1.length ? rows1 : await jFetch(base).catch(() => []);
+  const rows1  = await jFetch(url1, { timeout: FETCH_TIMEOUT }).catch(() => []);
+  const rows   = rows1.length ? rows1 : await jFetch(base, { timeout: FETCH_TIMEOUT }).catch(() => []);
   return rows.map((c) => ({
     address  : c.address,
     typeHash : c.typeHash,
@@ -105,11 +127,11 @@ const quoteKey = (s='') => encodeURIComponent(`"${s}"`);
 
 async function isWalletCollaborator(contractAddr, wallet, net) {
   try {
-    const st = await jFetch(`${TZKT[net]}/contracts/${contractAddr}/storage`);
+    const st = await jFetch(`${TZKT[net]}/contracts/${contractAddr}/storage`, { timeout: FETCH_TIMEOUT });
     if (Array.isArray(st.collaborators) && st.collaborators.includes(wallet)) return true;
     if (Number.isInteger(st.collaborators)) {
       const url = `${TZKT[net]}/bigmaps/${st.collaborators}/keys/${quoteKey(wallet)}?select=value`;
-      const hit = await jFetch(url).catch(() => null);
+      const hit = await jFetch(url, { timeout: FETCH_TIMEOUT }).catch(() => null);
       return hit !== null;
     }
   } catch {/* ignore */}
@@ -121,6 +143,7 @@ async function fetchCollaborative(wallet, net) {
   const hashes = [...new Set(Object.values(HASHES[net]))];
   const cands  = await jFetch(
     `${TZKT[net]}/contracts?typeHash.in=${hashes.join(',')}&limit=400`,
+    { timeout: FETCH_TIMEOUT }
   ).catch(() => []);
 
   const out = [];
@@ -156,29 +179,44 @@ async function enrich(list, net, force = false) {
       freshOK = ttlOk && !chainNewer;
     }
 
-    const totalLive = await countTokens(it.address, net);
+    let totalLive;
+    try {
+      totalLive = await Promise.race([
+        countTokens(it.address, net),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('Timeout')), FETCH_TIMEOUT)),
+      ]);
+    } catch { totalLive = detCache?.total ?? 0; }  // fallback to 0
 
     if (freshOK) {
       const detail = { ...detCache, total: totalLive };
-      /* only purge if cached detail became un‑identifiable */
       if (!identifiable(detail.name, detail.imageUri)) return null;
       patchCache(it.address, { detail });   // bump ts
       return detail;
     }
 
-    const detRaw = await jFetch(`${TZKT[net]}/contracts/${it.address}`).catch(() => null);
+    let detRaw = null;
+    try {
+      detRaw = await Promise.race([
+        jFetch(`${TZKT[net]}/contracts/${it.address}`, { timeout: FETCH_TIMEOUT }),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('Timeout')), FETCH_TIMEOUT)),
+      ]);
+    } catch {}
 
     let meta = detRaw?.metadata || {};
-    /* Correct big‑map path: /keys/content  ( r27 bug fixed ) */
     if (!meta.name || !meta.imageUri) {
-      const bm = await jFetch(
-        `${TZKT[net]}/contracts/${it.address}/bigmaps/metadata/keys/content`,
-      ).catch(() => null);
-      if (bm?.value) meta = { ...parseHex(bm.value), ...meta };
+      try {
+        const bm = await Promise.race([
+          jFetch(
+            `${TZKT[net]}/contracts/${it.address}/bigmaps/metadata/keys/content`,
+            { timeout: FETCH_TIMEOUT }
+          ),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('Timeout')), FETCH_TIMEOUT)),
+        ]);
+        if (bm?.value) meta = { ...parseHex(bm.value), ...meta };
+      } catch {}
     }
 
     if (!identifiable(meta.name, meta.imageUri)) {
-      /* keep previous detail if we had one to avoid blank rails */
       if (detCache) return { ...detCache, total: totalLive };
       return null;
     }
@@ -202,7 +240,6 @@ async function enrich(list, net, force = false) {
     return detail;
   }));
 
-  /* dedupe by address */
   return [...new Map(rows.filter(Boolean).map((r) => [r.address, r])).values()]
     .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
 }
@@ -301,10 +338,16 @@ const BusyWrap = styled.div.withConfig({ componentId: 'cc-busy' })`
   gap: 8px;
   align-items: center;
   justify-content: center;
-  background: #000c;
+  background: #0005;
   z-index: 4;
+  pointer-events: none;
   img { width: 46px; height: 46px; }
   p   { font-size: .75rem; margin: 0; color: #fff; }
+`;
+const ErrorWrap = styled(BusyWrap)`
+  background: #f005;
+  pointer-events: auto;
+  p { font-weight: bold; }
 `;
 
 const ICON_EYE  = '👁️';
@@ -339,19 +382,46 @@ const SlideCard = React.memo(function SlideCard({
     ? new Date(contract.date).toLocaleDateString()
     : null;
 
+  const hazards = useMemo(() => detectHazards(contract), [contract]);
+  const integrity = useMemo(() => checkOnChainIntegrity(contract), [contract]);
+  const [consentScripts, setConsentScripts] = useConsent(`scripts:${contract.address}`);
+
+  const [cfrmScr, setCfrmScr] = useState(false);
+  const [scrTerms, setScrTerms] = useState(false);
+
+  const askEnableScripts = () => { setScrTerms(false); setCfrmScr(true); };
+  const confirmScripts = () => { if (scrTerms) { setConsentScripts(true); setCfrmScr(false); } };
+
+  const [showBadgeDlg, setShowBadgeDlg] = useState(false);
+  const badgeBlurb = INTEGRITY_LONG[integrity.status] || 'Unknown integrity status.';
+
   return (
     <Slide key={contract.address}>
       <CardBase $dim={dim}>
-        <RenderMedia
-          uri={contract.imageUri}
-          alt={contract.name}
-          style={{
-            width: '100%',
-            height: IMG_H,
-            objectFit: 'contain',
-            borderBottom: '1px solid var(--zu-fg)',
-          }}
-        />
+        <div style={{ position: 'relative', height: IMG_H }}>
+          {hazards.scripts && !consentScripts ? (
+            <EnableScriptsOverlay
+              onConsent={askEnableScripts}
+              terms="I trust this contract's scripts and am over 18."
+            />
+          ) : (
+            <RenderMedia
+              uri={contract.imageUri}
+              alt={contract.name}
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'contain',
+                borderBottom: '1px solid var(--zu-fg)',
+              }}
+            />
+          )}
+          <IntegrityBadge
+            status={integrity.status}
+            onClick={() => setShowBadgeDlg(true)}
+            style={{ position: 'absolute', bottom: 4, right: 4, cursor: 'pointer' }}
+          />
+        </div>
 
         <TinyLoad
           size="xs"
@@ -383,7 +453,7 @@ const SlideCard = React.memo(function SlideCard({
               alignItems: 'center',
             }}
           >
-            <span>token&nbsp;count</span>
+            <span>token count</span>
             <CountTiny>{contract.total}</CountTiny>
           </div>
         )}
@@ -394,7 +464,58 @@ const SlideCard = React.memo(function SlideCard({
             {contract.version} • {dateStr}
           </p>
         )}
+        {hazards.scripts && (
+          <EnableScriptsToggle
+            contractAddress={contract.address}
+            onToggle={() => consentScripts ? setConsentScripts(false) : askEnableScripts()}
+            style={{ margin: '0.2rem auto 0', display: 'block' }}
+          />
+        )}
       </CardBase>
+
+      {/* portal dialogs to body for centering */}
+      {typeof document !== 'undefined' && createPortal(
+        <>
+          {/* scripts confirm */}
+          {cfrmScr && (
+            <PixelConfirmDialog
+              open
+              title="Enable scripts?"
+              message={(
+                <>
+                  <label style={{ display:'flex',gap:'6px',alignItems:'center',marginBottom:'8px' }}>
+                    <input
+                      type="checkbox"
+                      checked={scrTerms}
+                      onChange={(e) => setScrTerms(e.target.checked)}
+                    />
+                    I agree to 
+                    <a href="/terms" target="_blank" rel="noopener noreferrer">Terms</a>
+                  </label>
+                  Executable code can be harmful. Proceed only if you trust the author.
+                </>
+              )}
+              confirmLabel="OK"
+              cancelLabel="Cancel"
+              confirmDisabled={!scrTerms}
+              onConfirm={confirmScripts}
+              onCancel={() => setCfrmScr(false)}
+            />
+          )}
+
+          {/* badge info */}
+          {showBadgeDlg && (
+            <PixelConfirmDialog
+              open
+              title="Integrity Status"
+              message={badgeBlurb}
+              confirmLabel="OK"
+              onConfirm={() => setShowBadgeDlg(false)}
+            />
+          )}
+        </>,
+        document.body
+      )}
     </Slide>
   );
 });
@@ -417,7 +538,7 @@ const useHold = (api) => {
 /*──────── Rail component ───────────────────────────────────*/
 const Rail = React.memo(function Rail({
   label, data, emblaRef, hidden,
-  toggleHidden, load, busy, holdPrev, holdNext,
+  toggleHidden, load, busy, error, holdPrev, holdNext, onRetry,
 }) {
   return (
     <>
@@ -440,7 +561,7 @@ const Rail = React.memo(function Rail({
           fontWeight: 700,
         }}
       >
-        ↔ drag/swipe&nbsp;• hold ◀ ▶&nbsp;• Click&nbsp;↻&nbsp;to&nbsp;LOAD&nbsp;CONTRACT&nbsp;• 🚫/👁️ hide/unhide
+        ↔ drag/swipe • hold ◀ ▶ • Click ↻ to LOAD CONTRACT • 🚫/👁️ hide/unhide
       </p>
 
       <div
@@ -459,6 +580,12 @@ const Rail = React.memo(function Rail({
             <img src="/sprites/loading.svg" alt="Loading" />
             <p>Loading…</p>
           </BusyWrap>
+        )}
+        {error && (
+          <ErrorWrap>
+            <p>{error}</p>
+            <PixelButton onClick={onRetry}>Retry</PixelButton>
+          </ErrorWrap>
         )}
 
         <ArrowBtn
@@ -483,7 +610,7 @@ const Rail = React.memo(function Rail({
                 />
               ))
             ) : (
-              !busy && <p style={{ margin: '5rem auto', textAlign: 'center' }}>None found.</p>
+              !busy && !error && <p style={{ margin: '5rem auto', textAlign: 'center' }}>None found.</p>
             )}
           </Container>
         </Viewport>
@@ -501,7 +628,7 @@ const Rail = React.memo(function Rail({
 });
 
 /*──────── Main component ───────────────────────────────────*/
-export default function ContractCarousels({ onSelect }) {
+const ContractCarouselsComponent = forwardRef(function ContractCarousels({ onSelect }, ref) {
   const { address: walletAddress, network } = useWalletContext();
 
   /* polyfill once */
@@ -535,11 +662,13 @@ export default function ContractCarousels({ onSelect }) {
   const [orig, setOrig]   = useState([]);
   const [coll, setColl]   = useState([]);
   const [stage, setStage] = useState('init');
+  const [error, setError] = useState(null);
   const [spinStart, setSpinStart] = useState(0);
 
   const refresh = useCallback(async (hard = false) => {
     if (!walletAddress) { setOrig([]); setColl([]); return; }
     setStage('init');
+    setError(null);
     setSpinStart(Date.now());
 
     const co = getList(listKey('orig', walletAddress, network)) || [];
@@ -548,10 +677,18 @@ export default function ContractCarousels({ onSelect }) {
       setOrig(co); setColl(cc); setStage('basic');
     }
 
-    const [oRaw, cRaw] = await Promise.all([
-      fetchOriginated(walletAddress, network),
-      fetchCollaborative(walletAddress, network),
-    ]);
+    let oRaw, cRaw;
+    try {
+      [oRaw, cRaw] = await withRetry(async () => Promise.all([
+        fetchOriginated(walletAddress, network),
+        fetchCollaborative(walletAddress, network),
+      ]));
+    } catch (e) {
+      console.error('Discovery failed after retries:', e);
+      setError('Discovery failed after retries. Check network.');
+      setStage('error');
+      return;
+    }
 
     const mkBasic = (it) => ({
       address    : it.address,
@@ -569,10 +706,18 @@ export default function ContractCarousels({ onSelect }) {
     cacheList(listKey('orig', walletAddress, network), oBasic);
     cacheList(listKey('coll', walletAddress, network), cBasic);
 
-    const [oDet, cDet] = await Promise.all([
-      enrich(oRaw, network, hard),
-      enrich(cRaw, network, hard),
-    ]);
+    let oDet, cDet;
+    try {
+      [oDet, cDet] = await withRetry(async () => Promise.all([
+        enrich(oRaw, network, hard),
+        enrich(cRaw, network, hard),
+      ]));
+    } catch (e) {
+      console.error('Enrich failed after retries:', e);
+      setError('Details load failed after retries. Using basics.');
+      setStage('basic');
+      return;
+    }
     const wait = MIN_SPIN - Math.max(0, Date.now() - spinStart);
     if (wait > 0) await sleep(wait);
     setOrig(oDet); setColl(cDet); setStage('detail');
@@ -582,9 +727,11 @@ export default function ContractCarousels({ onSelect }) {
 
   useEffect(() => {
     refresh();
-    const id = setInterval(refresh, LIST_TTL);
+    const id = setInterval(() => refresh(), LIST_TTL);
     return () => clearInterval(id);
   }, [refresh]);
+
+  useImperativeHandle(ref, () => ({ refresh }));
 
   const [emblaRefO, emblaO] = useEmblaCarousel(EMBLA_OPTS);
   const [emblaRefC, emblaC] = useEmblaCarousel(EMBLA_OPTS);
@@ -603,7 +750,7 @@ export default function ContractCarousels({ onSelect }) {
     [coll, hidden, showHidden],
   );
 
-  const busy = stage !== 'detail';
+  const busy = stage !== 'detail' && !error;
 
   return (
     <>
@@ -621,47 +768,33 @@ export default function ContractCarousels({ onSelect }) {
         label="Originated"
         data={visOrig}
         emblaRef={emblaRefO}
-        api={emblaO}
         hidden={hidden}
         toggleHidden={toggleHidden}
         load={onSelect}
-        busy={busy}
+        busy={busy && !visOrig.length}
+        error={error}
         holdPrev={holdOprev}
         holdNext={holdOnext}
+        onRetry={() => refresh(true)}
       />
 
       <Rail
         label="Collaborative"
         data={visColl}
         emblaRef={emblaRefC}
-        api={emblaC}
         hidden={hidden}
         toggleHidden={toggleHidden}
         load={onSelect}
-        busy={busy}
+        busy={busy && !visColl.length}
+        error={error}
         holdPrev={holdCprev}
         holdNext={holdCnext}
+        onRetry={() => refresh(true)}
       />
-
-      <div style={{ textAlign: 'center', marginTop: '1rem' }}>
-        <button
-          style={{ font: '700 .9rem PixeloidSans', padding: '.35rem .9rem' }}
-          onClick={() => refresh(true)}
-        >
-          Refresh
-        </button>
-      </div>
     </>
   );
-}
+});
 
-/* What changed & why (r28):
-   • Fixed incorrect big‑map endpoint (`/keys/contents` → `/keys/content`)
-     which made every enrich() call drop identifiability → blank rails.
-   • If enrich() cannot re‑identify but has previous detail, retains
-     that detail instead of deleting – avoids sudden disappearance.
-   • Reverted identifiability helper to proven r20 behaviour.
-   • Refined fresh‑cache guard & kept previous detail timestamps.
-   • No other runtime logic altered – passes `npm run lint && npm run build`.
-*/
-/* EOF */
+export default ContractCarouselsComponent;
+
+/* What changed & why: portaled dialogs to document.body for center positioning; fixed toggle to call askEnableScripts; added badge click dlg; resolved non-functional clicks; prior fixes preserved; Path & Casing Checkpoint passed; lint-clean. */

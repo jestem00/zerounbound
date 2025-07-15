@@ -94,7 +94,7 @@ export const PACKAGE_NAME   = NET.pkgName;
 export const DEV_PORT       = NET.devPort;
 
 /*homepage logo*/
-export const SITE_LOGO       = NET.siteLogo;
+export const SITE_LOGO      = NET.siteLogo;
 
 /*──── explorer bases (consumed by OperationOverlay) ────*/
 export const URL_BCD_BASE   = TARGET === 'ghostnet'

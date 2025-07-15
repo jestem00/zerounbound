@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/BalanceOf.jsx
-  Rev :    r901   2025‑07‑30
-  Summary: HelpBox wording – clarifies wallet requirement
+  Rev :    r902   2025-07-14
+  Summary: adopted 12-col grid for responsive layout
 ──────────────────────────────────────────────────────────────*/
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import styledPkg             from 'styled-components';
@@ -16,10 +16,27 @@ import listLiveTokenIds      from '../../utils/listLiveTokenIds.js';
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
 /*──────── shells ───────────────────────────────────────────*/
-const Wrap = styled('section').withConfig({ shouldForwardProp: (p) => p !== '$level' })`
-  margin-top:1.5rem;position:relative;z-index:${(p) => p.$level ?? 'auto'};
+const Wrap = styled.section.attrs({ 'data-modal': 'balance-of' })`
+  display:grid;
+  grid-template-columns:repeat(12,1fr);
+  gap:1.6rem;
+  position:relative;
+  z-index:${(p)=>p.$level??'auto'};
+  overflow-x:hidden;
+  width:100%;
+  @media(min-width:1800px){ gap:1.2rem; }
 `;
-const Row  = styled.div`display:flex;gap:.5rem;align-items:center;`;
+const FormRow = styled.div`
+  grid-column:1 / -1;
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+  gap:1.1rem;
+  @media(min-width:1800px){
+    grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+    gap:1rem;
+  }
+`;
+const Row  = styled.div`display:flex;gap:.5rem;align-items:center;grid-column:1 / -1;`;
 const Box  = styled.div`position:relative;flex:1;`;
 const Chips = styled.div`
   display:flex;flex-wrap:wrap;gap:.35rem;margin-top:.35rem;
@@ -29,9 +46,10 @@ const Chips = styled.div`
   }
 `;
 const Res = styled.div`
-  font-size:.8rem;margin-top:.8rem;white-space:pre-wrap;word-break:break-all;
+  font-size:.8rem;margin-top:.8rem;white-space:pre-wrap;word-break:break-all;grid-column:1 / -1;
 `;
 const HelpBox = styled.p`
+  grid-column:1 / -1;
   font-size:.75rem;line-height:1.25;margin:.5rem 0 .9rem;
 `;
 const Spin = styled(LoadingSpinner).attrs({ size:16 })`
@@ -107,25 +125,27 @@ export default function BalanceOf({
 
   return (
     <Wrap $level={$level}>
-      <PixelHeading level={3}>Check&nbsp;Balances</PixelHeading>
+      <PixelHeading level={3} style={{ gridColumn: '1 / -1' }}>Check Balances</PixelHeading>
       <HelpBox>
         Read‑only utility — returns FA2 balances for <strong>one</strong> wallet
         or contract address across <strong>multiple token‑IDs</strong>.
         <br/>
-        1)&nbsp;Connect your wallet&nbsp;→ 2)&nbsp;Enter target tz*/KT1* address&nbsp;→
-        3)&nbsp;Select IDs from dropdown <em>or</em> type comma‑list&nbsp;→
-        4)&nbsp;Click&nbsp;<b>Check</b>.
+        1) Connect your wallet → 2) Enter target tz*/KT1* address →
+        3) Select IDs from dropdown <em>or</em> type comma‑list →
+        4) Click <b>Check</b>.
       </HelpBox>
 
       {/* address */}
-      <PixelInput
-        placeholder="tz… / KT1… (wallet or contract)"
-        value={addr}
-        onChange={(e) => setAddr(e.target.value.trim())}
-      />
+      <FormRow>
+        <PixelInput
+          placeholder="tz… / KT1… (wallet or contract)"
+          value={addr}
+          onChange={(e) => setAddr(e.target.value.trim())}
+        />
+      </FormRow>
 
       {/* token selector */}
-      <Row style={{ marginTop: '.6rem' }}>
+      <Row>
         <PixelInput
           as="textarea"
           rows={3}
@@ -168,7 +188,7 @@ export default function BalanceOf({
 
       {/* CTA */}
       <PixelButton
-        style={{ marginTop: '.8rem' }}
+        style={{ marginTop: '.8rem', gridColumn: '1 / -1' }}
         onClick={run}
         disabled={busy}
       >
@@ -182,9 +202,6 @@ export default function BalanceOf({
     </Wrap>
   );
 }
-/* What changed & why (r901):
-   • HelpBox text now states wallet connection is required and
-     removes the previous incorrect “No wallet connection required”.
-   • No functional logic altered – dropdown multi‑select and query
-     behaviour remain intact. */
+/* What changed & why: Adopted 12-col grid from RepairUri; FormRow for addr, Row for selector; rev-bump r902; Compile-Guard passed.
+ */
 /* EOF */

@@ -794,9 +794,77 @@ Json schema:
 }
 Michelson type:
 (pair %withdraw_offer (address %nft_contract) (nat %token_id))
-
-
 /* EOF */
+
+E. off-chain views (injected at origination using zerounbound\contracts\metadata\views\Zero_Contract_v4_views.json)
+Contracts that have off-chain views:
+V4, V4b
+
+Views
+
+get_active_tokens
+off-chain
+Parameters type:
+parameter unit
+
+get_destroyed_tokens
+off-chain
+Parameters type:
+parameter unit
+
+get_extrauris
+off-chain
+Parameters type:
+parameter nat
+
+get_balance
+off-chain
+parameter pair
+owner address
+token_id nat
+
+get_parents
+Parameters type:
+parameter unit
+
+get_token_metadata
+Parameters type:
+parameter nat
+
+get_contract_metadata
+Parameters type:
+parameter unit
+
+total_supply
+Parameters type:
+parameter nat
+
+get_collaborators
+Parameters type:
+parameter unit
+
+get_children
+Parameters type:
+parameter unit
+
+is_operator
+Parameters type:
+parameter pair
+owner address
+operator address
+token_id nat
+
+get_extrauris reveals information like the parameters for the extrauri:
+0:4 items
+description: Extra asset (SVG)
+key: extrauri_svg
+name: abundance2
+value: data:image/svg+xml;base64,P.......
+1:4 items
+description: extra asset png fallback image
+key: extrauri_png
+name: abundance
+value: data:image/png;base64, iV........
 
 /*──────────────────────────────────────────────────────────────
 CHANGELOG

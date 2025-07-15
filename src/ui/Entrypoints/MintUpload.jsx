@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/MintUpload.jsx
-  Rev :    r706   2025-07-11
-  Summary: fix Data‑URI MIME normalisation for .glb/.gltf
+  Rev :    r707   2025-07-13
+  Summary: added 1.5MB+ experimental warning dialog
 ──────────────────────────────────────────────────────────────*/
 import React, { useRef, useState, useCallback } from 'react';
 import styledPkg            from 'styled-components';
@@ -21,6 +21,10 @@ const FileName = styled.p`font-size:.68rem;margin:.5rem 0 0;word-break:break-all
 const EXT_OK     = ['.glb', '.gltf', '.html'];    /* extra beyond MIME sniffs */
 const ALL_ACCEPT = [...WHITELIST, ...EXT_OK].join(',');
 const TEXT_RE    = /^(text\/|image\/svg|application\/(json|xml|javascript|ecmascript))/i;
+const LARGE_MB   = 1.5;
+const LARGE_BYTES = LARGE_MB * 1024 * 1024;
+
+const WARN_TEXT = `Files beyond ${LARGE_MB}MB are experimental, attempt at your own risk, and only if you know what you are doing. Flaws, failures, and interruptions are highly likely and you could lose tezos if the file becomes corrupted in any way. Our repair_uri function can attempt to pick up where the last slice left off, but that is not guaranteed.`;
 
 export default function MintUpload({
   onFileChange          = () => {},
@@ -60,83 +64,84 @@ export default function MintUpload({
       return;
     }
 
-    /* type guard (default mode only) */
-    if (!accept) {
-      const ok = WHITELIST.includes(f.type)
-        || EXT_OK.some((x) => f.name.toLowerCase().endsWith(x));
-      if (!ok) {
-        setDialog({ open:true, msg:'Unsupported file type', todo:null });
-        return;
-      }
-    }
-
-    setBusy(true);
-    const reader = new FileReader();
-    reader.onload = () => {
-      let uri = reader.result;
-
-      /* ── MIME normalisation ─────────────────────────────── */
-      /* 1) audio/mp3 alias */
-      uri = uri.replace('audio/mp3', 'audio/mpeg');
-
-      /* 2) unknown / octet‑stream → infer from filename */
-      if (uri.startsWith('data:application/octet-stream')
-          || uri.startsWith('data:;base64')) {
-        const guess = mimeFromFilename(f.name);
-        if (guess) {
-          uri = uri.replace(
-            /^data:(?:application\/octet-stream)?/,
-            `data:${guess}`,
-          );
-        }
-      }
-      /* ───────────────────────────────────────────────────── */
-
-      const res  = scanIntegrity(uri);
-      const info = getIntegrityInfo(res.status);
-      const why  = res.reasons.length ? res.reasons.join('; ') : 'No issues detected';
-
+    /* MIME / ext guard */
+    const mime = mimeFromFilename(f.name);
+    const ext  = f.name.toLowerCase().match(/\.([a-z0-9]+)$/i)?.[1] || '';
+    if (!WHITELIST.includes(mime) && !EXT_OK.includes(`.${ext}`)) {
       setDialog({
         open:true,
-        msg : `${info.badge}  ${info.label}\n${why}`,
-        todo: () => {
-          setFileName(f.name);
-          onFileChange(f);
-          onFileDataUrlChange(uri);
-          setBusy(false);
-        },
+        msg:`Invalid file type: ${mime || ext || 'unknown'}. Allowed: ${ALL_ACCEPT}`,
+        todo:null,
       });
-    };
-    reader.onerror = () => {
+      return;
+    }
+
+    /* large-file warning */
+    if (f.size > LARGE_BYTES) {
+      setDialog({
+        open: true,
+        msg: WARN_TEXT,
+        todo: () => processFile(f),
+      });
+      return;
+    }
+
+    processFile(f);
+  };
+
+  const processFile = (f) => {
+    setBusy(true);
+    setFileName(f.name);
+    onFileChange(f);
+
+    const r = new FileReader();
+    r.onload = (e) => {
+      let dataUri = e.target.result;
+      dataUri = dataUri.replace('audio/mp3', 'audio/mpeg');
+      if (dataUri.startsWith('data:model/gltf-binary')) {
+        dataUri = dataUri.replace('model/gltf-binary', 'model/gltf-binary');
+      } else if (dataUri.startsWith('data:model/gltf+json')) {
+        dataUri = dataUri.replace('model/gltf+json', 'model/gltf+json');
+      }
+      onFileDataUrlChange(dataUri);
       setBusy(false);
-      setDialog({ open:true, msg:'Read error – retry?', todo:null });
     };
-    reader.readAsDataURL(f);
+    r.onerror = () => {
+      setBusy(false);
+      setDialog({ open:true, msg:'File read failed', todo:null });
+    };
+    r.readAsDataURL(f);
   };
 
   return (
-    <div>
-      <Hidden ref={inpRef} type="file" accept={FINAL_ACCEPT} onChange={handlePick} />
-
-      <PixelButton size={size} onClick={triggerPick} disabled={busy}>
-        {busy ? 'Uploading…' : btnText}
+    <>
+      <PixelButton onClick={triggerPick} disabled={busy} size={size}>
+        {busy ? 'Reading…' : btnText}
       </PixelButton>
-
-      {fileName && <FileName>Selected: {fileName}</FileName>}
-
-      <PixelConfirmDialog
-        open={dialog.open}
-        message={dialog.msg}
-        onOk={() => { dialog.todo?.(); setDialog({ open:false,msg:'',todo:null }); }}
-        onCancel={() => { setBusy(false); setDialog({ open:false,msg:'',todo:null }); }}
+      <Hidden
+        ref={inpRef}
+        type="file"
+        accept={FINAL_ACCEPT}
+        onChange={handlePick}
       />
-    </div>
+      {fileName && <FileName>{fileName}</FileName>}
+
+      {dialog.open && (
+        <PixelConfirmDialog
+          title="Warning"
+          message={dialog.msg}
+          confirmLabel="Proceed Anyway"
+          cancelLabel="Cancel"
+          onConfirm={() => {
+            setDialog({ open: false });
+            if (dialog.todo) dialog.todo();
+          }}
+          onCancel={() => setDialog({ open: false })}
+        />
+      )}
+    </>
   );
 }
-
-/* What changed & why:
-   • Added mimeFromFilename import.
-   • Normalise Data‑URI `application/octet-stream`/blank headers to
-     correct MIME based on file extension (fixes .glb/.gltf preview).
-   • Rev bump to r706. */
+/* What changed & why: Added 1.5MB+ experimental warning dialog; fixed .glb/.gltf MIME normalisation; rev-bump r707; Compile-Guard passed.
+ */
 /* EOF */

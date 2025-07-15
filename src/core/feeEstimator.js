@@ -1,23 +1,29 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/core/feeEstimator.js
-  Rev :    r739   2025-07-13
-  Summary: added calcExactOverhead for mint limit push
+  Rev :    r743   2025-07-14
+  Summary: updated to 250 mutez/byte; added packing overhead
 ──────────────────────────────────────────────────────────────*/
 import { OpKind } from '@taquito/taquito';
 
 /*──────── chain‑wide constants ─────────────────────────────*/
+export const MINIMAL_FEE_MUTEZ         = 100;     /* base per op */
+export const MINIMAL_MUTEZ_PER_MILLIGAS = 0.1;    /* per milligas */
+export const MINIMAL_MUTEZ_PER_BYTE     = 1;      /* per op byte */
+
 export const μBASE_TX_FEE         = 150;      /* mutez – per op (actual avg) */
-export const MUTEZ_PER_BYTE       = 0.257;    /* mutez / raw byte (exact) */
+export const MUTEZ_PER_BYTE       = 250;      /* mutez / raw byte (Paris) */
 export const GAS_PER_BYTE         = 1.8;      /* milligas per concat byte */
 export const BASE_GAS_OVERHEAD    = 12000;    /* fixed gas per append op */
 const STORAGE_BYTE_OVERHEAD       = 150;      /* fixed storage bytes overhead */
 export const HARD_GAS_LIMIT       = 1_040_000;/* milligas per op */
 export const HARD_STORAGE_LIMIT   = 60_000;   /* bytes increase per op */
 export const HIGH_GAS_THRESHOLD   = 150_000;  /* bytes for high-gas */
-const BURN_FACTOR                 = 1.05;     /* slight over-est */
+const BURN_FACTOR                 = 1.1;      /* over-est for safety */
 const OP_BURN_OVERHEAD            = 1000;     /* mutez fixed per op */
 export const MAX_OP_DATA_BYTES    = 32_768;   /* max param length */
+const OP_SIZE_OVERHEAD            = 200;      /* forged bytes per op */
+const PACKING_OVERHEAD            = 50;       /* per-batch packing est */
 
 /*──────── unit helpers ─────────────────────────────────────*/
 export const toTez = (m = 0) => (m / 1_000_000).toFixed(6);
@@ -86,26 +92,36 @@ export function calcExactOverhead(metaMap) {
   return overhead;
 }
 
+/*──────── sim timeout detector ─────────────────────────────*/
+export function isSimTimeout(e) {
+  const msg = e?.message || String(e);
+  return msg.includes('script') && msg.includes('took more time than the operation said');
+}
+
 /*──────── fast heuristic / RPC estimator ───────────────────*/
 /**
- * estimateChunked(toolkit, flatParams[], chunkSize = 8, skipRpc = false)
+ * estimateChunked(toolkit, flatParams[], chunkSize = 8, skipRpc = false, currentBytes=[])
  * Attempts RPC batch estimate; graceful heuristic fallback.
  * skipRpc forces heuristic (fast for large payloads).
+ * Returns { ..., retrySmaller?:boolean } on sim timeout.
  */
-export async function estimateChunked(toolkit, flat = [], chunkSize = 5, skipRpc = false) {
+export async function estimateChunked(toolkit, flat = [], chunkSize = 5, skipRpc = false, currentBytes = []) {
   if (!flat.length) return { fee: 0, burn: 0 };
 
   if (skipRpc) {
     // Direct heuristic
-    let totalBytes = 0;
-    flat.forEach((p) => {
-      if (p.parameter?.value) {
-        totalBytes += extractBytesSize(p.parameter.value) + STORAGE_BYTE_OVERHEAD;
-      }
+    let feeMutez = 0;
+    let burnMutez = 0;
+    flat.forEach((p, i) => {
+      const paramBytes = extractBytesSize(p.parameter?.value || 0);
+      const gas = calcGasLimit(paramBytes, currentBytes[i] || 0);
+      const opSize = JSON.stringify(p).length + OP_SIZE_OVERHEAD + PACKING_OVERHEAD; // rough forged size
+      feeMutez += MINIMAL_FEE_MUTEZ + gas * MINIMAL_MUTEZ_PER_MILLIGAS + opSize * MINIMAL_MUTEZ_PER_BYTE;
+      burnMutez += (paramBytes + STORAGE_BYTE_OVERHEAD) * MUTEZ_PER_BYTE + OP_BURN_OVERHEAD;
     });
-    const burn = Math.ceil((totalBytes * MUTEZ_PER_BYTE + flat.length * OP_BURN_OVERHEAD) * BURN_FACTOR);
-    const fee  = flat.length * μBASE_TX_FEE * 1.2;
-    return { fee, burn };
+    feeMutez *= 1.2; // safety over-est
+    burnMutez *= BURN_FACTOR;
+    return { fee: Math.ceil(feeMutez), burn: Math.ceil(burnMutez) };
   }
 
   try {
@@ -119,14 +135,17 @@ export async function estimateChunked(toolkit, flat = [], chunkSize = 5, skipRpc
       burnMutez += est.reduce((t, e) => t + e.burnFeeMutez, 0);
     }
     return { fee: feeMutez, burn: burnMutez };
-  } catch {
+  } catch (e) {
+    if (isSimTimeout(e)) {
+      return { fee: 0, burn: 0, retrySmaller: true };
+    }
     /* heuristic fallback */
-    return estimateChunked(toolkit, flat, chunkSize, true);
+    return estimateChunked(toolkit, flat, chunkSize, true, currentBytes);
   }
 }
 /* What changed & why:
-   • Added calcExactOverhead to precisely compute mint meta overhead.
-   • Added MAX_OP_DATA_BYTES = 32_768.
-   • Rev-bump r739; Compile-Guard passed.
+   • Increased BURN_FACTOR to 1.1 for better safety.
+   • Added PACKING_OVERHEAD=50 per op for batch encoding.
+   • Rev-bump r743; Compile-Guard passed.
 */
 /* EOF */

@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/core/net.js
-  Rev :    r910   2025-07-11
-  Summary: added retry on ERR_CONNECTION_RESET; increased tries to 5
+  Rev :    r911   2025-07-13
+  Summary: added retry on TypeError/failed; up tries to 10 for TzKT
 ──────────────────────────────────────────────────────────────*/
 const LIMIT = 4;                         // parallel fetch cap
 let   active = 0;                        // in-flight counter
@@ -24,14 +24,15 @@ async function exec(task) {
  * Safe JSON fetch with:
  * • global concurrency throttle (LIMIT)
  * • 429 exponential back-off
- * • network error retries (connection reset, CORS, timeout, ERR_CONNECTION_RESET)
+ * • network error retries (connection reset, CORS, timeout, ERR_CONNECTION_RESET, TypeError/failed)
  * • hard 45 s request timeout
+ * • up to 10 tries for TzKT API endpoints
  *
  * @param   {string} url     fully-qualified URL
  * @param   {number} tries   max attempts (default 5)
  * @returns {Promise<any>}   parsed JSON
  */
-export function jFetch(url, tries = 5) {
+export function jFetch(url, tries = /tzkt\.io/i.test(url) ? 10 : 5) {
   return new Promise((resolve, reject) => {
     const run = () => exec(async () => {
       for (let i = 0; i < tries; i += 1) {
@@ -50,9 +51,13 @@ export function jFetch(url, tries = 5) {
           return resolve(await res.json());
         } catch (e) {                          // network / parse error
           clearTimeout(timer);
-          const errStr = String(e);
+          const errStr = e?.name || String(e?.message || e);
           if (errStr.includes('ERR_CONNECTION_RESET') || errStr.includes('ECONNRESET')) {
             await sleep(1200 * (i + 1));      // longer back-off for reset
+            continue;
+          }
+          if (errStr === 'TypeError' || errStr.includes('failed to fetch') || errStr.includes('NetworkError')) {
+            await sleep(800 * (i + 1));       // retry on general network fails
             continue;
           }
           if (i === tries - 1) return reject(e);
@@ -65,6 +70,6 @@ export function jFetch(url, tries = 5) {
   });
 }
 
-/* What changed & why: Increased tries to 5; added explicit retry on ERR_CONNECTION_RESET/ECONNRESET with longer sleep; improves resilience to network flakes in dev; Compile-Guard passed.
+/* What changed & why: Added retry on TypeError/failed to fetch/NetworkError; increased tries to 10 for TzKT URLs to handle flaky large responses; Compile-Guard passed.
 */
 /* EOF */

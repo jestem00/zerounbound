@@ -62,7 +62,7 @@ const getVer = (net, h) =>
 const hex2str  = (h) => Buffer.from(h.replace(/^0x/, ''), 'hex').toString('utf8');
 const parseHex = (h) => { try { return JSON.parse(hex2str(h)); } catch { return {}; } };
 const arr      = (v) => (Array.isArray(v) ? v : []);
-const scrub    = (s = '') => s.replace(/[-\u001F\u007F-\u009F]/g, '').trim();
+const scrub    = (s = '') => s.replace(/[\u0000-\u001F\u007F-\u009F]/g, '').trim();
 
 /* “identifiable” – image OR scrubbed name */
 const identifiable = (name = '', img = null) => Boolean(scrub(name)) || Boolean(img);

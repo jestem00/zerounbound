@@ -48,7 +48,6 @@ const CONFIRM_TIMEOUT_MS = 120_000;          /* 2 min per batch   */
 const POLL_ATTEMPTS = 3;                     /* TzKT polls on timeout */
 const POLL_INTERVAL_MS = 5000;               /* 5 s between polls */
 
-const LARGE_FILE_KB     = 100;               /* heuristic skip ≥100 KB */
 const WARN_MB = 1.5;
 const WARN_BYTES = WARN_MB * 1024 * 1024;
 
@@ -231,7 +230,6 @@ export default function RepairUri({
     [contractAddress, tokenId, storageLabel, network],
   );
 
-  const isLargeFile = useMemo(() => (file?.size || 0) > LARGE_FILE_KB * 1024, [file]);
 
   const warnMany = tail.length > 50;
 
@@ -363,7 +361,7 @@ export default function RepairUri({
       if (resumeInfo?.next > 0) {
         offset = resumeInfo.next;
       }
-      const { tail: t, conflict: c, origLonger: ol, totalBytes } = sliceTail(origHex, uploadedHex, sliceSize, offset);
+      const { tail: t, conflict: c, origLonger: ol } = sliceTail(origHex, uploadedHex, sliceSize, offset);
       if (c) {
         setStatusError(true);
         const onChainUri = Buffer.from(origHex.slice(2), 'hex').toString('utf8');

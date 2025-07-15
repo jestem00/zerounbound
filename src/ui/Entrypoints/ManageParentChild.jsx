@@ -112,7 +112,7 @@ export default function ManageParentChild({
       <HelpBox>
         Shows current *parents* or *children* sets. Switch tab, click ✖ to unlink. Use **Add/Remove Parent Child** entrypoint to add links.
         <br/>
-        <strong>Note:</strong> this does not change the contract owner, it only updates the token's hierarchial ordering and connectome.
+          <strong>Note:</strong> this does not change the contract owner, it only updates the token&apos;s hierarchial ordering and connectome.
       </HelpBox>
       <Tabs>
         <Tab $sel={tab === 'parent'} size="xs" onClick={() => setTab('parent')}>

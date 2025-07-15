@@ -327,7 +327,6 @@ export default function AppendExtraUri({
   };
 
   /*──────── guards ─────*/
-  const oversize = dataUrl.length > 45_000;
   const disabled = isEstim || tokenId === '' || !finalLabel || desc.trim() === '' || name.trim() === '' || !(prep || resumeInfo);
 
   return (

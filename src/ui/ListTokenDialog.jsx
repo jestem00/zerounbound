@@ -19,7 +19,7 @@ const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 const Wrap   = styled.section`margin-top:1.4rem;`;
 
 export default function ListTokenDialog({
-  open, contract, tokenId, market, onClose = () => {},
+  open, contract, tokenId, market: _market, onClose = () => {},
 }) {
   const { toolkit }          = useWalletContext() || {};
   const [price, setPrice]    = useState('');

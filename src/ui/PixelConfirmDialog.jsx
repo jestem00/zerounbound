@@ -91,11 +91,13 @@ export default function PixelConfirmDialog({
   const handleConfirm = () => (onConfirm || onOk || (() => {}))();
 
   const body = (
+    // eslint-disable-next-line styled-components-a11y/no-noninteractive-element-interactions
     <Back
       role="dialog"
       aria-modal="true"
       aria-labelledby={title ? 'pcd-title' : undefined}
       aria-describedby="pcd-message"
+      tabIndex="-1"
       onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
     >
       <Panel onClick={(e) => e.stopPropagation()}>

@@ -92,7 +92,7 @@ const PLACEHOLDER = '/sprites/cover_default.svg';
 const ipfsToHttp  = (u='') => u.replace(/^ipfs:\/\//,'https://ipfs.io/ipfs/');
 
 /*──────── component ───────────────────────────────────────*/
-export default function MAINTokenMetaPanel({ token, collection, walletAddress }) {
+export default function MAINTokenMetaPanel({ token, collection, walletAddress: _wa }) {
   const [copied,setCopied] = useState(false);
 
   const collMeta = collection.metadata || {};

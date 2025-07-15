@@ -42,7 +42,6 @@ const DETAIL_TTL = 7 * 24 * 60 * 60 * 1_000;  /* 7 days */
 const CACHE_MAX  = 150;
 const LIST_TTL   = 300_000;
 const MIN_SPIN   = 200;
-const FETCH_TIMEOUT = 15000; /* 15s max per fetch */
 const RETRY_MAX     = 3;
 const RETRY_DELAY   = 2000;
 
@@ -113,14 +112,8 @@ async function fetchOriginated(addr, net) {
   const base   = `${TZKT[net]}/contracts?creator=${addr}&limit=400`;
   const hashQS = mkHash(HASHES[net]);
   const url1   = `${base}&typeHash.in=${hashQS}`;
-  const rows1  = await Promise.race([
-    jFetch(url1),
-    sleep(FETCH_TIMEOUT).then(() => { throw new Error('Timeout'); }),
-  ]).catch(() => []);
-  const rows   = rows1.length ? rows1 : await Promise.race([
-    jFetch(base),
-    sleep(FETCH_TIMEOUT).then(() => { throw new Error('Timeout'); }),
-  ]).catch(() => []);
+  const rows1 = await jFetch(url1, 3).catch(() => []);
+  const rows  = rows1.length ? rows1 : await jFetch(base, 3).catch(() => []);
   return rows.map((c) => ({
     address  : c.address,
     typeHash : c.typeHash,
@@ -133,17 +126,11 @@ const quoteKey = (s='') => encodeURIComponent(`"${s}"`);
 
 async function isWalletCollaborator(contractAddr, wallet, net) {
   try {
-    const st = await Promise.race([
-      jFetch(`${TZKT[net]}/contracts/${contractAddr}/storage`),
-      sleep(FETCH_TIMEOUT).then(() => { throw new Error('Timeout'); }),
-    ]);
+    const st = await jFetch(`${TZKT[net]}/contracts/${contractAddr}/storage`, 3);
     if (Array.isArray(st.collaborators) && st.collaborators.includes(wallet)) return true;
     if (Number.isInteger(st.collaborators)) {
       const url = `${TZKT[net]}/bigmaps/${st.collaborators}/keys/${quoteKey(wallet)}?select=value`;
-      const hit = await Promise.race([
-        jFetch(url),
-        sleep(FETCH_TIMEOUT).then(() => { throw new Error('Timeout'); }),
-      ]).catch(() => null);
+      const hit = await jFetch(url, 3).catch(() => null);
       return hit !== null;
     }
   } catch {/* ignore */}
@@ -153,10 +140,10 @@ async function isWalletCollaborator(contractAddr, wallet, net) {
 async function fetchCollaborative(wallet, net) {
   if (!wallet) return [];
   const hashes = [...new Set(Object.values(HASHES[net]))];
-  const cands  = await Promise.race([
-    jFetch(`${TZKT[net]}/contracts?typeHash.in=${hashes.join(',')}&limit=400`),
-    sleep(FETCH_TIMEOUT).then(() => { throw new Error('Timeout'); }),
-  ]).catch(() => []);
+  const cands = await jFetch(
+    `${TZKT[net]}/contracts?typeHash.in=${hashes.join(',')}&limit=400`,
+    3,
+  ).catch(() => []);
 
   const out = [];
   await Promise.all(cands.map(async (c) => {
@@ -193,10 +180,7 @@ async function enrich(list, net, force = false) {
 
     let totalLive;
     try {
-      totalLive = await Promise.race([
-        countTokens(it.address, net),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('Timeout')), FETCH_TIMEOUT)),
-      ]);
+      totalLive = await countTokens(it.address, net);
     } catch { totalLive = detCache?.total ?? 0; }  // fallback to 0
 
     if (freshOK) {
@@ -208,19 +192,16 @@ async function enrich(list, net, force = false) {
 
     let detRaw = null;
     try {
-      detRaw = await Promise.race([
-        jFetch(`${TZKT[net]}/contracts/${it.address}`),
-        sleep(FETCH_TIMEOUT).then(() => { throw new Error('Timeout'); }),
-      ]);
+      detRaw = await jFetch(`${TZKT[net]}/contracts/${it.address}`, 3);
     } catch {}
 
     let meta = detRaw?.metadata || {};
     if (!meta.name || !meta.imageUri) {
       try {
-        const bm = await Promise.race([
-          jFetch(`${TZKT[net]}/contracts/${it.address}/bigmaps/metadata/keys/content`),
-          sleep(FETCH_TIMEOUT).then(() => { throw new Error('Timeout'); }),
-        ]);
+        const bm = await jFetch(
+          `${TZKT[net]}/contracts/${it.address}/bigmaps/metadata/keys/content`,
+          3,
+        );
         if (bm?.value) meta = { ...parseHex(bm.value), ...meta };
       } catch {}
     }

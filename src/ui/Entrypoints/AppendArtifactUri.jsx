@@ -32,7 +32,7 @@ import { useWalletContext } from '../../contexts/WalletContext.js';
 import { TZKT_API }         from '../../config/deployTarget.js';
 import listLiveTokenIds     from '../../utils/listLiveTokenIds.js';
 import {
-  estimateChunked, calcStorageMutez, isSimTimeout,
+  estimateChunked, calcStorageMutez,
 } from '../../core/feeEstimator.js';
 
 /*──────── styled shells ─────*/

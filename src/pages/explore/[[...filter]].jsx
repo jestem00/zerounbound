@@ -98,6 +98,16 @@ export default function ExploreGrid() {
     ? adminFilterRaw
     : '';
 
+  /* state ----------------------------------------------------------------*/
+  const [collections, setCollections] = useState([]);
+  const [tokens,      setTokens]      = useState([]);
+  const [loading,     setLoading]     = useState(false);
+  const [offset,      setOffset]      = useState(0);
+  const [end,         setEnd]         = useState(false);
+
+  const [seenColl] = useState(() => new Set());
+  const [seenTok]  = useState(() => new Set());
+
   /* quick exit – listings WIP --------------------------------------------*/
   if (isListingsMode) {
     return (
@@ -110,16 +120,6 @@ export default function ExploreGrid() {
       </Wrap>
     );
   }
-
-  /* state ----------------------------------------------------------------*/
-  const [collections, setCollections] = useState([]);
-  const [tokens,      setTokens]      = useState([]);
-  const [loading,     setLoading]     = useState(false);
-  const [offset,      setOffset]      = useState(0);
-  const [end,         setEnd]         = useState(false);
-
-  const [seenColl] = useState(() => new Set());
-  const [seenTok]  = useState(() => new Set());
 
   /*──────── fetch helpers ──────────────────────────────────*/
   const fetchBatchCollections = useCallback(async (off) => {

@@ -24,15 +24,7 @@ const styled =
   typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
 /*──────── helper utils ───────────────────────────*/
-const sz = (v) =>
-  Array.isArray(v)                     ? v.length
-    : v && typeof v.size === 'number'  ? v.size
-    : v && typeof v.forEach === 'function' ? [...v].length
-    : typeof v === 'number'            ? v
-    : v && typeof v.int === 'string'   ? parseInt(v.int, 10)
-    : 0;
 
-const len = (x) => (Array.isArray(x) ? x.length : 0);
 
 const COUNTS_CACHE_KEY = 'zu_counts_cache_v1';
 const COUNTS_TTL = 5 * 60 * 1000; // 5 min
@@ -253,7 +245,7 @@ export default function AdminTools({ contract, onClose }) {
     return () => { html.style.overflow = prev; };
   }, []);
 
-  /* global open‑tool events */
+  /* open-tool events */
   useEffect(() => {
     const handler = (e) => {
       const { key, contract: addr } = e.detail || {};

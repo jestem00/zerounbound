@@ -113,8 +113,14 @@ async function fetchOriginated(addr, net) {
   const base   = `${TZKT[net]}/contracts?creator=${addr}&limit=400`;
   const hashQS = mkHash(HASHES[net]);
   const url1   = `${base}&typeHash.in=${hashQS}`;
-  const rows1  = await jFetch(url1, { timeout: FETCH_TIMEOUT }).catch(() => []);
-  const rows   = rows1.length ? rows1 : await jFetch(base, { timeout: FETCH_TIMEOUT }).catch(() => []);
+  const rows1  = await Promise.race([
+    jFetch(url1),
+    sleep(FETCH_TIMEOUT).then(() => { throw new Error('Timeout'); }),
+  ]).catch(() => []);
+  const rows   = rows1.length ? rows1 : await Promise.race([
+    jFetch(base),
+    sleep(FETCH_TIMEOUT).then(() => { throw new Error('Timeout'); }),
+  ]).catch(() => []);
   return rows.map((c) => ({
     address  : c.address,
     typeHash : c.typeHash,
@@ -127,11 +133,17 @@ const quoteKey = (s='') => encodeURIComponent(`"${s}"`);
 
 async function isWalletCollaborator(contractAddr, wallet, net) {
   try {
-    const st = await jFetch(`${TZKT[net]}/contracts/${contractAddr}/storage`, { timeout: FETCH_TIMEOUT });
+    const st = await Promise.race([
+      jFetch(`${TZKT[net]}/contracts/${contractAddr}/storage`),
+      sleep(FETCH_TIMEOUT).then(() => { throw new Error('Timeout'); }),
+    ]);
     if (Array.isArray(st.collaborators) && st.collaborators.includes(wallet)) return true;
     if (Number.isInteger(st.collaborators)) {
       const url = `${TZKT[net]}/bigmaps/${st.collaborators}/keys/${quoteKey(wallet)}?select=value`;
-      const hit = await jFetch(url, { timeout: FETCH_TIMEOUT }).catch(() => null);
+      const hit = await Promise.race([
+        jFetch(url),
+        sleep(FETCH_TIMEOUT).then(() => { throw new Error('Timeout'); }),
+      ]).catch(() => null);
       return hit !== null;
     }
   } catch {/* ignore */}
@@ -141,10 +153,10 @@ async function isWalletCollaborator(contractAddr, wallet, net) {
 async function fetchCollaborative(wallet, net) {
   if (!wallet) return [];
   const hashes = [...new Set(Object.values(HASHES[net]))];
-  const cands  = await jFetch(
-    `${TZKT[net]}/contracts?typeHash.in=${hashes.join(',')}&limit=400`,
-    { timeout: FETCH_TIMEOUT }
-  ).catch(() => []);
+  const cands  = await Promise.race([
+    jFetch(`${TZKT[net]}/contracts?typeHash.in=${hashes.join(',')}&limit=400`),
+    sleep(FETCH_TIMEOUT).then(() => { throw new Error('Timeout'); }),
+  ]).catch(() => []);
 
   const out = [];
   await Promise.all(cands.map(async (c) => {
@@ -197,8 +209,8 @@ async function enrich(list, net, force = false) {
     let detRaw = null;
     try {
       detRaw = await Promise.race([
-        jFetch(`${TZKT[net]}/contracts/${it.address}`, { timeout: FETCH_TIMEOUT }),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('Timeout')), FETCH_TIMEOUT)),
+        jFetch(`${TZKT[net]}/contracts/${it.address}`),
+        sleep(FETCH_TIMEOUT).then(() => { throw new Error('Timeout'); }),
       ]);
     } catch {}
 
@@ -206,11 +218,8 @@ async function enrich(list, net, force = false) {
     if (!meta.name || !meta.imageUri) {
       try {
         const bm = await Promise.race([
-          jFetch(
-            `${TZKT[net]}/contracts/${it.address}/bigmaps/metadata/keys/content`,
-            { timeout: FETCH_TIMEOUT }
-          ),
-          new Promise((_, rej) => setTimeout(() => rej(new Error('Timeout')), FETCH_TIMEOUT)),
+          jFetch(`${TZKT[net]}/contracts/${it.address}/bigmaps/metadata/keys/content`),
+          sleep(FETCH_TIMEOUT).then(() => { throw new Error('Timeout'); }),
         ]);
         if (bm?.value) meta = { ...parseHex(bm.value), ...meta };
       } catch {}

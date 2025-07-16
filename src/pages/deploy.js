@@ -64,7 +64,6 @@ export default function DeployPage() {
     const timeoutId = setTimeout(() => {
       setErr('Metadata compression timeout after 60s');
       worker.terminate();
-      reset();
     }, 60000);
 
     const onMessage = (e) => {

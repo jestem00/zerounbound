@@ -1,14 +1,18 @@
-//File: next.config.js
-/*Developed by @jams2blues with love for the Tezos community
-  r269 – Origination accel: add webpack rule for views.hex.js
-   • during build, emit src/constants/views.hex.js from views JSON
-   • rev-bump r269; keeps Vercel ESLint skip intact
-*/
+/*─────────────────────────────────────────────────────────────
+  Developed by @jams2blues – ZeroContract Studio
+  File:    next.config.js
+  Rev :    r270    2025‑07‑16
+  Summary: patch __dirname for ESM so Vercel build passes
+──────────────────────────────────────────────────────────────*/
 
 import { GenerateSW } from 'workbox-webpack-plugin';
 import fs             from 'fs';
 import path           from 'path';
+import { fileURLToPath } from 'url';
 import { char2Bytes } from '@taquito/utils';
+
+/*──────────────── helper: __dirname in ESM ────────────────*/
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -19,10 +23,6 @@ const nextConfig = {
 
   /*──────── ESLint (CI) ─────────*/
   eslint: {
-    /*  Vercel fails build on stylistic warnings from strict ruleset.
-        We keep linting locally (‵yarn lint‵) but allow production
-        build to proceed.  Invariants allow – no rule requires
-        build-breaking lint. */
     ignoreDuringBuilds: true,
   },
 
@@ -35,13 +35,13 @@ const nextConfig = {
       generator: { dataUrl: c => c.toString() },
     });
 
-    /* Shim Node built-ins for browser bundle */
+    /* Shim Node built‑ins for browser bundle */
     config.resolve.fallback = {
       ...(config.resolve.fallback || {}),
       fs: false, path: false, crypto: false, stream: false,
     };
 
-    /* PWA service-worker for prod client build */
+    /* PWA service‑worker for prod client build */
     if (!isServer && !dev) {
       config.plugins.push(
         new GenerateSW({
@@ -65,7 +65,7 @@ const nextConfig = {
       );
     }
 
-    /* Pre-build views.hex.js during production build */
+    /* Pre‑build views.hex.js during production build */
     if (!dev && !isServer) {
       const viewsPath = path.resolve(__dirname, 'contracts/metadata/views/Zero_Contract_v4_views.json');
       const viewsData = fs.readFileSync(viewsPath, 'utf8');
@@ -81,5 +81,4 @@ const nextConfig = {
 };
 
 export default nextConfig;
-
-/* What changed & why: Added webpack hook to generate views.hex.js from JSON during build; rev r269. */
+/* EOF */

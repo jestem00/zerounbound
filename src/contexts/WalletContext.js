@@ -12,10 +12,8 @@ import React, {
 import { TezosToolkit } from '@taquito/taquito';
 import { BeaconWallet }  from '@taquito/beacon-wallet';
 import { BeaconEvent }   from '@airgap/beacon-sdk';
-import {
-  DEFAULT_NETWORK,
-  selectFastestRpc,
-} from '../config/deployTarget.js';
+import { DEFAULT_NETWORK } from '../config/deployTarget.js';
+import { chooseFastestRpc } from '../utils/chooseFastestRpc.js';
 
 /*──────── constants ─────*/
 const APP_NAME      = 'ZeroUnbound.art';
@@ -37,7 +35,7 @@ if (typeof window !== 'undefined' && !window.__ZU_SPAM_LOCK__) {
 
 /*──────── RPC helper ─────*/
 async function pickRpc() {
-  return selectFastestRpc().catch(() => {
+  return chooseFastestRpc().catch(() => {
     throw new Error('No reachable RPC for active network');
   });
 }

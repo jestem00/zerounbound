@@ -24,8 +24,10 @@ const SPAM_RX       = /\/_synapse\/client\/beacon\/info|Syncing stopped manually
 if (typeof window !== 'undefined' && !window.__ZU_SPAM_LOCK__) {
   window.__ZU_SPAM_LOCK__ = true;
   const mute = x => SPAM_RX.test(typeof x === 'string' ? x : x?.message || '');
-  ['warn','error'].forEach(k => {
+  ['warn', 'error'].forEach(k => {
+    // eslint-disable-next-line no-console
     const orig = console[k].bind(console);
+    // eslint-disable-next-line no-console
     console[k] = (...args) => { if (!mute(args[0])) orig(...args); };
   });
   window.addEventListener('unhandledrejection', e => {
@@ -69,43 +71,13 @@ export function WalletProvider({ children, initialNetwork = DEFAULT_NETWORK }) {
   const [needsReveal, setRev]  = useState(false);
   const [needsFunds, setFunds] = useState(false);
 
-  /*── init ────────────────────────────────────────────────*/
-  const init = useCallback(async () => {
-    if (initRef.current) return initRef.current;
-
-    const p = (async () => {
-      const rpc = await pickRpc();
-      rpcRef.current = rpc;
-      tkRef.current  = makeToolkit(rpc);
-
-      walletRef.current = new BeaconWallet({
-        name            : APP_NAME,
-        preferredNetwork: network,
-        matrixNodes     : [],    // disable P2P
-        colorMode       : 'dark',
-      });
-      walletRef.current.client.sendMetrics = async () => {};
-      walletRef.current.client.updateMetricsStorage = async () => {};
-      tkRef.current.setWalletProvider(walletRef.current);
-      walletRef.current.client.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, sync);
-
-      // silent restore
-      const acc = await walletRef.current.client.getActiveAccount().catch(() => null);
-      if (acc) await sync();
-
-    })();
-
-    initRef.current = p;
-    await p;
-  }, [network]);
-
-  /*── state sync ─────────────────────────────────────────*/
-  const sync = useCallback(async () => {
-    const acc = await walletRef.current?.client.getActiveAccount();
-    if (!acc) {
-      setAddr(''); setConn(false); setMis(false); setRev(false); setFunds(false);
-      return;
-    }
+/*── state sync ─────────────────────────────────────────*/
+const sync = useCallback(async () => {
+  const acc = await walletRef.current?.client.getActiveAccount();
+  if (!acc) {
+    setAddr(''); setConn(false); setMis(false); setRev(false); setFunds(false);
+    return;
+  }
     setAddr(acc.address);
     setConn(true);
     const netType = (acc.network?.type || '').toLowerCase();
@@ -117,8 +89,38 @@ export function WalletProvider({ children, initialNetwork = DEFAULT_NETWORK }) {
       ]);
       setRev(!mgrKey);
       setFunds(balance.toNumber() < BALANCE_FLOOR);
-    } catch {}
-  }, [network]);
+  } catch {}
+}, [network]);
+
+/*── init ────────────────────────────────────────────────*/
+const init = useCallback(async () => {
+  if (initRef.current) return initRef.current;
+
+  const p = (async () => {
+    const rpc = await pickRpc();
+    rpcRef.current = rpc;
+    tkRef.current  = makeToolkit(rpc);
+
+    walletRef.current = new BeaconWallet({
+      name            : APP_NAME,
+      preferredNetwork: network,
+      matrixNodes     : [],    // disable P2P
+      colorMode       : 'dark',
+    });
+    walletRef.current.client.sendMetrics = async () => {};
+    walletRef.current.client.updateMetricsStorage = async () => {};
+    tkRef.current.setWalletProvider(walletRef.current);
+    walletRef.current.client.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, sync);
+
+    // silent restore
+    const acc = await walletRef.current.client.getActiveAccount().catch(() => null);
+    if (acc) await sync();
+
+  })();
+
+  initRef.current = p;
+  await p;
+}, [network, sync]);
 
   /* silent restore on mount */
   useEffect(() => {
@@ -143,7 +145,7 @@ export function WalletProvider({ children, initialNetwork = DEFAULT_NETWORK }) {
       });
     }
     await sync();
-  }, [network, sync, init]);
+  }, [network, sync, init, disconnect]);
 
   const disconnect = useCallback(async () => {
     if (!walletRef.current) return;

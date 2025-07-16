@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/core/validator.js
-  Rev :    r912   2025‑09‑05
-  Summary: forceSelfRecipient rule for >32 kB meta or oversize
+  Rev :    r913   2025‑09‑05
+  Summary: raise tag limit to 30
 ──────────────────────────────────────────────────────────────*/
 import { Buffer } from 'buffer';
 
@@ -19,7 +19,7 @@ export const LOCK_SELF_BYTES = 30_000;            // guard‑rail threshold
 export const MAX_ATTR        = 10;
 export const MAX_ATTR_N      = 32;
 export const MAX_ATTR_V      = 32;
-export const MAX_TAGS        = 10;
+export const MAX_TAGS        = 30;
 export const MAX_TAG_LEN     = 20;
 export const MAX_ROY_PCT     = 25;
 export const MAX_EDITIONS    = 10_000;

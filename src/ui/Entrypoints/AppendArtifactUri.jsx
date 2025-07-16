@@ -21,7 +21,7 @@ import RenderMedia         from '../../utils/RenderMedia.jsx';
 import TokenMetaPanel      from '../TokenMetaPanel.jsx';
 import LoadingSpinner      from '../LoadingSpinner.jsx';
 
-import { splitPacked, sliceHex, sliceTail, PACKED_SAFE_BYTES, SLICE_MAX_BYTES, SLICE_MIN_BYTES } from '../../core/batch.js';
+import { splitPacked, planSlices, sliceTail, PACKED_SAFE_BYTES, SLICE_MAX_BYTES, SLICE_MIN_BYTES } from '../../core/batch.js';
 import {
   loadSliceCheckpoint, saveSliceCheckpoint,
   clearSliceCheckpoint, purgeExpiredSliceCache,
@@ -166,7 +166,7 @@ export default function AppendArtifactUri({
       setMime(mimeFromFilename(file.name) || file.type || '');
 
       const fullHex = `0x${char2Bytes(du)}`;
-      const slices = sliceHex(fullHex, sliceSize);
+      const slices = planSlices(fullHex, sliceSize);
       setPrep({
         slices,
         hash: `sha256:${await sha256Hex(fullHex)}`,

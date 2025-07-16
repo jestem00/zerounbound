@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/core/feeEstimator.js
-  Rev :    r743   2025-07-14
-  Summary: updated to 250 mutez/byte; added packing overhead
+  Rev :    r744   2025-09-05
+  Summary: clamp gas limit; added MIN_GAS constant
 ──────────────────────────────────────────────────────────────*/
 import { OpKind } from '@taquito/taquito';
 
@@ -19,6 +19,7 @@ const STORAGE_BYTE_OVERHEAD       = 150;      /* fixed storage bytes overhead */
 export const HARD_GAS_LIMIT       = 1_040_000;/* milligas per op */
 export const HARD_STORAGE_LIMIT   = 60_000;   /* bytes increase per op */
 export const HIGH_GAS_THRESHOLD   = 150_000;  /* bytes for high-gas */
+export const MIN_GAS             = 10_000;   /* gas floor */
 const BURN_FACTOR                 = 1.1;      /* over-est for safety */
 const OP_BURN_OVERHEAD            = 1000;     /* mutez fixed per op */
 export const MAX_OP_DATA_BYTES    = 32_768;   /* max param length */
@@ -54,9 +55,12 @@ export function calcStorageMutez(
 export function calcGasLimit(appendedBytes = 0, currentBytes = 0) {
   const total = currentBytes + appendedBytes;
   if (total > HIGH_GAS_THRESHOLD) return HARD_GAS_LIMIT;
-  return Math.min(
-    HARD_GAS_LIMIT,
-    Math.ceil(BASE_GAS_OVERHEAD + total * GAS_PER_BYTE),
+  return Math.max(
+    MIN_GAS,
+    Math.min(
+      HARD_GAS_LIMIT,
+      Math.ceil(BASE_GAS_OVERHEAD + total * GAS_PER_BYTE),
+    ),
   );
 }
 export function calcStorageByteLimit(appendedBytes = 0) {

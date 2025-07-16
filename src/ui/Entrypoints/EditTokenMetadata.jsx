@@ -1,9 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/EditTokenMetadata.jsx
-  Rev :    r935   2025‑08‑11 T15:28 UTC
-  Summary: hot‑fix ReferenceError — restored `loading` state
-           removed inadvertently in r934; no logic drift
+  Rev :    r936   2025‑09‑05
+  Summary: warn on >30 tags; tooltip on disabled CTA
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useCallback, useEffect, useMemo, useRef, useState,
@@ -30,7 +29,7 @@ import { jFetch }             from '../../core/net.js';
 import {
   validateEditTokenFields,
   validAttributes,
-  MAX_ATTR, MAX_ATTR_N, MAX_ATTR_V,
+  MAX_ATTR, MAX_ATTR_N, MAX_ATTR_V, MAX_TAGS,
 } from '../../core/validator.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
@@ -265,8 +264,10 @@ export default function EditTokenMetadata({
   const { errors } = useMemo(() => validateEditTokenFields({
     form:{ ...form, tags, attributes:cleanAttrs }, metaBytes, walletOK:!!wallet,
   }), [form, tags, cleanAttrs, metaBytes, wallet]);
+  const tagErr = tags.length > MAX_TAGS;
   if (totalPct > MAX_ROY_PCT) errors.push('Royalties exceed limit');
   if (cannotUnset)            errors.push('Contract v4 forbids removing “mature” or “flashing” flags');
+  if (tagErr)                 errors.push(`> ${MAX_TAGS} tags`);
 
   /*──────── contract handle (wallet‑bound) ──────*/
   const [contractHandle, setHandle] = useState(null);
@@ -518,7 +519,11 @@ export default function EditTokenMetadata({
                 marginTop:'1rem',
               }}
             >
-              <PixelButton disabled={disabled} onClick={() => setConfirm(true)}>
+              <PixelButton
+                disabled={disabled}
+                onClick={() => setConfirm(true)}
+                title={tagErr ? `> ${MAX_TAGS} tags` : undefined}
+              >
                 {contractHandle ? 'UPDATE' : 'Connecting…'}
               </PixelButton>
 

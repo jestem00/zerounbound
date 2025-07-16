@@ -293,9 +293,9 @@ export default function Mint({
 
   const metaOverhead = useMemo(() => calcExactOverhead(metaMap), [metaMap]);
 
-  const maxFirstSlice = MAX_OP_DATA_BYTES - metaOverhead - 512; // safety
-
-  const oversize = artifactHex.length / 2 > maxFirstSlice;
+  const maxFirstSlice = MAX_OP_DATA_BYTES - metaOverhead - META_PAD_BYTES;
+  const firstBytesEst = metaOverhead + artifactHex.length / 2 + META_PAD_BYTES;
+  const oversize = firstBytesEst > MAX_OP_DATA_BYTES;
   const oversizeLarge = artifactHex.length / 2 > 100_000;
 
   const allSlices = useMemo(

@@ -177,6 +177,7 @@ export default function AppendArtifactUri({
   }, [file, sliceSize]);
 
   const warnMany = prep ? prep.slices.length > 50 : false;
+  const oversizeLarge = prep ? prep.fullHex.length / 2 > 100_000 : false;
 
   /*──────── build flat ops ─────*/
   const buildFlat = useCallback(async (slices) => {
@@ -204,7 +205,7 @@ export default function AppendArtifactUri({
     try {
       const { ops, currentBytesList } = await buildFlat(slices.slice(startIdx));
 
-      const est = await estimateChunked(toolkit, ops, 1, true, currentBytesList);
+      const est = await estimateChunked(toolkit, ops, 1, oversizeLarge, currentBytesList);
       if (est.retrySmaller) {
         if (retryCount >= 3 || sliceSize <= SLICE_MIN_BYTES) throw new Error('Node timeout—try later');
         setSliceSize(Math.max(SLICE_MIN_BYTES, Math.floor(sliceSize / 2)));

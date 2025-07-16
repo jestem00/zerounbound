@@ -296,6 +296,7 @@ export default function Mint({
   const maxFirstSlice = MAX_OP_DATA_BYTES - metaOverhead - 512; // safety
 
   const oversize = artifactHex.length / 2 > maxFirstSlice;
+  const oversizeLarge = artifactHex.length / 2 > 100_000;
 
   const allSlices = useMemo(
     () => oversize ? planSlices(`0x${artifactHex}`, sliceSize, maxFirstSlice) : [],
@@ -430,7 +431,7 @@ export default function Mint({
         }
       }
 
-      const est = await estimateChunked(toolkit, flat, 1, true, currentBytesList);
+      const est = await estimateChunked(toolkit, flat, 1, oversizeLarge, currentBytesList);
       if (est.retrySmaller) {
         if (retryCount >= 3 || sliceSize <= SLICE_MIN_BYTES) throw new Error('Node timeout—try later');
         const newSize = Math.max(SLICE_MIN_BYTES, Math.floor(sliceSize / 2));

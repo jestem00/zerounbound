@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/ContractCarousels.jsx
-  Rev :    r758   2025-07-14
-  Summary: centers script dlg via portal; fixes toggle/dlg UX; adds badge click dlg; keeps prior fixes; lint-clean; compile-guard passed.
+  Rev :    r759   2025-07-15
+  Summary: adds fetch timeouts and fallbacks so carousels recover from network stalls; never drop contracts with missing meta.
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useEffect, useState, useRef, useCallback, useMemo, forwardRef, useImperativeHandle,
@@ -106,14 +106,24 @@ async function withRetry(fn, max = RETRY_MAX, delay = RETRY_DELAY) {
   throw lastErr;
 }
 
+/*──────── timeout helper ───────────────────────────────────*/
+async function fetchWithTimeout(promise, ms = 10000) {
+  return Promise.race([
+    promise,
+    sleep(ms).then(() => { throw new Error('timeout'); }),
+  ]);
+}
+
 /*──────── tzkt discovery helpers ───────────────────────────*/
 async function fetchOriginated(addr, net) {
   if (!addr) return [];
   const base   = `${TZKT[net]}/contracts?creator=${addr}&limit=400`;
   const hashQS = mkHash(HASHES[net]);
   const url1   = `${base}&typeHash.in=${hashQS}`;
-  const rows1 = await jFetch(url1, 3).catch(() => []);
-  const rows  = rows1.length ? rows1 : await jFetch(base, 3).catch(() => []);
+  const rows1 = await fetchWithTimeout(jFetch(url1, 3)).catch(() => []);
+  const rows  = rows1.length
+    ? rows1
+    : await fetchWithTimeout(jFetch(base, 3)).catch(() => []);
   return rows.map((c) => ({
     address  : c.address,
     typeHash : c.typeHash,
@@ -126,11 +136,13 @@ const quoteKey = (s='') => encodeURIComponent(`"${s}"`);
 
 async function isWalletCollaborator(contractAddr, wallet, net) {
   try {
-    const st = await jFetch(`${TZKT[net]}/contracts/${contractAddr}/storage`, 3);
+    const st = await fetchWithTimeout(
+      jFetch(`${TZKT[net]}/contracts/${contractAddr}/storage`, 3),
+    );
     if (Array.isArray(st.collaborators) && st.collaborators.includes(wallet)) return true;
     if (Number.isInteger(st.collaborators)) {
       const url = `${TZKT[net]}/bigmaps/${st.collaborators}/keys/${quoteKey(wallet)}?select=value`;
-      const hit = await jFetch(url, 3).catch(() => null);
+      const hit = await fetchWithTimeout(jFetch(url, 3)).catch(() => null);
       return hit !== null;
     }
   } catch {/* ignore */}
@@ -140,9 +152,11 @@ async function isWalletCollaborator(contractAddr, wallet, net) {
 async function fetchCollaborative(wallet, net) {
   if (!wallet) return [];
   const hashes = [...new Set(Object.values(HASHES[net]))];
-  const cands = await jFetch(
-    `${TZKT[net]}/contracts?typeHash.in=${hashes.join(',')}&limit=400`,
-    3,
+  const cands = await fetchWithTimeout(
+    jFetch(
+      `${TZKT[net]}/contracts?typeHash.in=${hashes.join(',')}&limit=400`,
+      3,
+    ),
   ).catch(() => []);
 
   const out = [];
@@ -192,26 +206,43 @@ async function enrich(list, net, force = false) {
 
     let detRaw = null;
     try {
-      detRaw = await jFetch(`${TZKT[net]}/contracts/${it.address}`, 3);
+      detRaw = await fetchWithTimeout(
+        jFetch(`${TZKT[net]}/contracts/${it.address}`, 3),
+      );
     } catch {}
 
     let meta = detRaw?.metadata || {};
     if (!meta.name || !meta.imageUri) {
       try {
-        const bm = await jFetch(
-          `${TZKT[net]}/contracts/${it.address}/bigmaps/metadata/keys/content`,
-          3,
+        const bm = await fetchWithTimeout(
+          jFetch(
+            `${TZKT[net]}/contracts/${it.address}/bigmaps/metadata/keys/content`,
+            3,
+          ),
         );
         if (bm?.value) meta = { ...parseHex(bm.value), ...meta };
       } catch {}
     }
 
-    if (!identifiable(meta.name, meta.imageUri)) {
-      if (detCache) return { ...detCache, total: totalLive };
-      return null;
-    }
-
     const cleanName = scrub(meta.name || '');
+
+    if (!identifiable(cleanName, meta.imageUri)) {
+      const detail = {
+        address    : it.address,
+        typeHash   : it.typeHash,
+        name       : cleanName || it.address,
+        description: meta.description || '',
+        imageUri   : meta.imageUri || null,
+        total      : totalLive,
+        version    : getVer(net, it.typeHash),
+        date       : it.timestamp
+          || detRaw?.firstActivityTime
+          || detRaw?.lastActivityTime
+          || null,
+      };
+      patchCache(it.address, { detail });
+      return detail;
+    }
 
     const detail = {
       address    : it.address,

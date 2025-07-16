@@ -4,7 +4,7 @@
   Rev :    r752   2025‑07‑15
   Summary: increase worker timeout to 60s; add error on worker fail
 ──────────────────────────────────────────────────────────────*/
-import React, { useRef, useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { MichelsonMap }                                     from '@taquito/michelson-encoder';
 import { char2Bytes }                                       from '@taquito/utils';
 
@@ -19,15 +19,6 @@ import contractCode         from '../../contracts/Zero_Contract_V4.tz';
 const worker = typeof window !== 'undefined' ? new Worker(new URL('../workers/originate.worker.js', import.meta.url)) : null;
 
 /*──────── helpers ─────*/
-const uniqInterfaces = (src = []) => {
-  const base = ['TZIP-012', 'TZIP-016'];
-  const map  = new Map();
-  [...src, ...base].forEach((i) => {
-    const k = String(i ?? '').trim();
-    if (k) map.set(k.toUpperCase(), k);
-  });
-  return Array.from(map.values());
-};
 
 /*──────── constants ─────*/
 const blank = () => new MichelsonMap();
@@ -72,11 +63,13 @@ export default function DeployPage() {
     setStep(0); setLabel('Compressing metadata'); setPct(0);
 
     const taskId = Date.now().toString();
-    const timeoutId = setTimeout(() => {
-      setErr('Metadata compression timeout after 60s');
-      worker.terminate();
-      reset();
-    }, 60000);
+      const timeoutId = setTimeout(() => {
+        worker.terminate();
+        setStep(-1);
+        setPct(0);
+        setLabel('');
+        setErr('Metadata compression timeout after 60s');
+      }, 60000);
 
     const onMessage = (e) => {
       const d = e.data;

@@ -37,14 +37,16 @@ async function exec(task) {
  * @param   {number} tries   max attempts (default 5)
  * @returns {Promise<any>}   parsed JSON
  */
-export function jFetch(url, tries = /tzkt\.io/i.test(url) ? 10 : 5) {
+export function jFetch(url, opts = {}, tries) {
+  if (typeof opts === 'number') { tries = opts; opts = {}; }
+  if (!Number.isFinite(tries)) tries = /tzkt\.io/i.test(url) ? 10 : 5;
   return new Promise((resolve, reject) => {
     const run = () => exec(async () => {
       for (let i = 0; i < tries; i += 1) {
         const ctrl  = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), 45_000);
         try {
-          const res = await fetch(url, { signal: ctrl.signal });
+          const res = await fetch(url, { ...opts, signal: ctrl.signal });
           clearTimeout(timer);
 
           if (res.status === 429) {            // rate-limit
@@ -53,7 +55,11 @@ export function jFetch(url, tries = /tzkt\.io/i.test(url) ? 10 : 5) {
           }
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-          return resolve(await res.json());
+          const ct = res.headers.get('content-type') || '';
+          const data = ct.includes('application/json')
+            ? await res.json()
+            : await res.text();
+          return resolve(data);
         } catch (e) {                          // network / parse error
           clearTimeout(timer);
           const errStr = e?.name || String(e?.message || e);
@@ -96,14 +102,22 @@ export async function forgeOrigination(code, storage) {
     }]
   };
   if (USE_BACKEND) {
-    return jFetch('/api/forge', { method: 'POST', body: JSON.stringify(op) });
+    const { forged } = await jFetch('/api/forge', {
+      method : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body   : JSON.stringify(op),
+    });
+    return forged;
   } else {
     const res = await fetch(`${rpc}/chains/main/blocks/head/helpers/forge/operations`, {
       method: 'POST',
-      body: JSON.stringify(op)
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(op),
     });
     if (!res.ok) throw new Error(`Forge failed: HTTP ${res.status}`);
-    return await res.text();  // hex string
+    let txt = await res.text();
+    try { txt = JSON.parse(txt); } catch {}
+    return String(txt).replace(/"/g, '').trim();
   }
 }
 
@@ -111,7 +125,12 @@ export async function forgeOrigination(code, storage) {
 export async function injectSigned(signedBytes) {
   const rpc = await selectFastestRpc().catch(() => { throw new Error('No reachable RPC'); });
   if (USE_BACKEND) {
-    return jFetch('/api/inject', { method: 'POST', body: JSON.stringify({ signedBytes }) });
+    const { opHash } = await jFetch('/api/inject', {
+      method : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body   : JSON.stringify({ signedBytes }),
+    });
+    return opHash;
   } else {
     const res = await fetch(`${rpc}/injection/operation`, {
       method: 'POST',
@@ -121,4 +140,4 @@ export async function injectSigned(signedBytes) {
     return await res.text();  // op hash
   }
 }
-/* What changed & why: Added retry for Temple 'Receiving end' error; rev r914; Compile-Guard passed. */
+/* What changed & why: jFetch supports options & text; forge/inject helpers return parsed values. rev r915 */

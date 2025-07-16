@@ -6,7 +6,7 @@
 ──────────────────────────────────────────────────────────────*/
 import React, { useRef, useState, useCallback } from 'react';
 import { MichelsonMap }            from '@taquito/michelson-encoder';
-import { char2Bytes }              from '@taquito/utils';
+import { char2Bytes, b58cdecode, prefix, buf2hex } from '@taquito/utils';
 
 import DeployCollectionForm from '../ui/DeployCollectionForm.jsx';
 import PixelHeading         from '../ui/PixelHeading.jsx';
@@ -15,6 +15,7 @@ import OperationOverlay     from '../ui/OperationOverlay.jsx';
 import { useWallet }        from '../contexts/WalletContext.js';
 import contractCode         from '../../contracts/Zero_Contract_V4.tz';
 import viewsHex             from '../constants/views.hex.js';
+import { forgeOrigination, injectSigned, sleep } from '../core/net.js';
 
 /*──────── helpers ─────*/
 const uniqInterfaces = (src = []) => {
@@ -53,6 +54,13 @@ const hexToString = (hex) => {
   return new TextDecoder().decode(bytes);
 };
 
+const sigToHex = (sig) => {
+  if (sig.startsWith('edsig')) return buf2hex(b58cdecode(sig, prefix.edsig));
+  if (sig.startsWith('spsig')) return buf2hex(b58cdecode(sig, prefix.spsig));
+  if (sig.startsWith('p2sig')) return buf2hex(b58cdecode(sig, prefix.p2sig));
+  throw new Error('Unknown signature prefix');
+};
+
 /*──────── constants ─────*/
 const blank = () => new MichelsonMap();
 const BURN  = 'tz1burnburnburnburnburnburnburjAYjjX';
@@ -68,17 +76,18 @@ export const STORAGE_TEMPLATE = {
 
 /*──────── component ─────*/
 export default function DeployPage() {
-  const { toolkit, address, connect } = useWallet();
+  const { toolkit, address, connect, wallet } = useWallet();
 
   const rafRef        = useRef(0);
   const [step, setStep]   = useState(-1);
   const [pct, setPct]     = useState(0);
   const [label, setLabel] = useState('');
   const [kt1, setKt1]     = useState('');
+  const [opHash, setOpHash] = useState('');
   const [err, setErr]     = useState('');
 
   const reset = () => {
-    setStep(-1); setPct(0); setLabel(''); setKt1(''); setErr('');
+    setStep(-1); setPct(0); setLabel(''); setKt1(''); setOpHash(''); setErr('');
     cancelAnimationFrame(rafRef.current);
   };
 
@@ -166,23 +175,35 @@ export default function DeployPage() {
     rafRef.current = requestAnimationFrame(tick);
 
     try {
-      const op = await toolkit.wallet.originate({
-        code: contractCode,
-        storage: { ...STORAGE_TEMPLATE, admin: address, metadata: md },
-      }).send();
+      const bytes = await forgeOrigination(contractCode, {
+        ...STORAGE_TEMPLATE,
+        admin: address,
+        metadata: md,
+      });
 
       cancelAnimationFrame(rafRef.current);
-      setStep(2); setLabel('Forging & injecting'); setPct(0.5);
+      setStep(2); setLabel('Signing bytes'); setPct(0.5);
 
-      await op.confirmation(2);
-      setStep(3); setLabel('Confirming on-chain'); setPct(1);
+      let signature;
+      for (let i = 0; i < 3; i += 1) {
+        try {
+          const res = await wallet.client.requestSignPayload({
+            signingType: 'operation',
+            payload: bytes.startsWith('0x') ? bytes : '0x' + bytes,
+          });
+          signature = res.signature;
+          break;
+        } catch (e) {
+          if (i === 2) throw e;
+          await sleep(800 * (i + 1));
+        }
+      }
 
-      const adr =
-        op.contractAddress ||
-        (await op.contract())?.address ||
-        op.results?.[0]?.metadata?.operation_result?.originated_contracts?.[0];
-      if (!adr) throw new Error('Originated KT1 not found');
-      setKt1(adr);
+      setStep(3); setLabel('Injecting'); setPct(0.75);
+      const opHash = await injectSigned(bytes.replace(/^0x/, '') + sigToHex(signature));
+
+      setStep(4); setLabel('Confirming on-chain'); setPct(1);
+      setOpHash(opHash);
     } catch (e) {
       cancelAnimationFrame(rafRef.current);
       if (/Receiving end does not exist/i.test(e.message)) {
@@ -204,6 +225,7 @@ export default function DeployPage() {
             status={label}
             progress={pct}
             kt1={kt1}
+            opHash={opHash}
             error={err}
             onRetry={reset}
             onCancel={reset}
@@ -213,4 +235,4 @@ export default function DeployPage() {
     </div>
   );
 }
-/* What changed & why: Added retryConnect for Temple errors; specific err msg for connection issues; rev r747; Compile-Guard passed. */
+/* What changed & why: Forge & sign bytes locally to keep Beacon payload small; rev r748 */

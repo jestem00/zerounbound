@@ -5,6 +5,7 @@
   Summary: clamp gas limit; added MIN_GAS constant
 ──────────────────────────────────────────────────────────────*/
 import { OpKind } from '@taquito/taquito';
+import { Buffer } from 'buffer';
 
 /*──────── chain‑wide constants ─────────────────────────────*/
 export const MINIMAL_FEE_MUTEZ         = 100;     /* base per op */
@@ -69,8 +70,10 @@ export function calcStorageByteLimit(appendedBytes = 0) {
 
 /*──────── recursive bytes extractor ────────────────────────*/
 function extractBytesSize(value) {
-  if (typeof value === 'string' && value.startsWith('0x')) {
-    return (value.length - 2) / 2;
+  if (typeof value === 'string') {
+    if (value.startsWith('0x')) return (value.length - 2) / 2;
+    if (/^[0-9a-fA-F]+$/.test(value)) return value.length / 2;
+    return Buffer.byteLength(value, 'utf8');
   }
   if (Array.isArray(value)) {
     return value.reduce((sum, v) => sum + extractBytesSize(v), 0);

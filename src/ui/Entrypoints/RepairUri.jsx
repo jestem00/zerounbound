@@ -461,7 +461,8 @@ export default function RepairUri({
         return;
       }
 
-      const est = await estimateChunked(toolkit, ops, 1, true, currentBytesList);
+      const oversizeLarge = fullHex.length / 2 > 100_000;
+      const est = await estimateChunked(toolkit, ops, 1, oversizeLarge, currentBytesList);
       if (est.retrySmaller) {
         if (retryCount >= 3 || sliceSize <= SLICE_MIN_BYTES) throw new Error('Node timeout—try later');
         const newSize = Math.max(SLICE_MIN_BYTES, Math.floor(sliceSize / 2));

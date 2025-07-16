@@ -191,8 +191,14 @@ async function enrich(list, net, force = false) {
     } catch { totalLive = detCache?.total ?? 0; }  // fallback to 0
 
     if (freshOK) {
-      const detail = { ...detCache, total: totalLive };
-      if (!identifiable(detail.name, detail.imageUri)) return null;
+      let detail = { ...detCache, total: totalLive };
+      if (!identifiable(detail.name, detail.imageUri)) {
+        detail = {
+          ...detail,
+          name    : scrub(detail.name) || it.address,
+          imageUri: detail.imageUri || null,
+        };
+      }
       patchCache(it.address, { detail });   // bump ts
       return detail;
     }

@@ -1,18 +1,37 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/core/batch.js
-  Rev :    r873   2025-07-13
-  Summary: dynamic slice on retry; min 2.5k
+  Rev :    r874   2025-09-05
+  Summary: add planSlices; min slice 1k
 ──────────────────────────────────────────────────────────────*/
 import { OpKind } from '@taquito/taquito';
 import { HARD_STORAGE_LIMIT } from './feeEstimator.js';
 
 /*────────────────── public constants ──────────────────*/
 export const SLICE_MAX_BYTES   = 20_000;   /* optimistic start */
-export const SLICE_MIN_BYTES   = 2_500;    /* fallback min */
+export const SLICE_MIN_BYTES   = 1_024;    /* fallback min */
 export const PACKED_SAFE_BYTES = 31_000;   /* bytes per op-pack */
 const SLICE_OVERHEAD = 512;                /* Michelson/encoding padding */
 const OP_SIZE_OVERHEAD = 200;              /* forged bytes per op */
+
+/*────────────────── plan helper ───────────────────────*/
+/**
+ * planSlices(fullHex, sliceBytes, firstLimit)
+ * Returns an array of 0x-prefixed slices where the first slice may
+ * be shorter to respect a custom limit (e.g. metadata overhead).
+ */
+export function planSlices(fullHex = '0x', sliceBytes = SLICE_MAX_BYTES, firstLimit = sliceBytes) {
+  if (!fullHex.startsWith('0x')) throw new Error('hex must start with 0x');
+  const body = fullHex.slice(2);
+  const first = Math.min(sliceBytes, firstLimit);
+  const out = [];
+  out.push('0x' + body.slice(0, first * 2));
+  const step = sliceBytes * 2;
+  for (let i = first * 2; i < body.length; i += step) {
+    out.push('0x' + body.slice(i, i + step));
+  }
+  return out;
+}
 
 /*────────────────── slice helper ───────────────────────*/
 export function sliceHex (hx = '', sliceBytes = SLICE_MAX_BYTES) {

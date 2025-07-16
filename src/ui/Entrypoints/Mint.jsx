@@ -30,7 +30,7 @@ import {
   isTezosAddress, royaltyUnder25, validAttributes,
 } from '../../core/validator.js';
 import { ROOT_URL }                   from '../../config/deployTarget.js';
-import { SLICE_MAX_BYTES, SLICE_MIN_BYTES, sliceHex } from '../../core/batch.js';
+import { SLICE_MAX_BYTES, SLICE_MIN_BYTES, planSlices } from '../../core/batch.js';
 import {
   saveSliceCheckpoint, loadSliceCheckpoint, purgeExpiredSliceCache,
 } from '../../utils/sliceCache.js';
@@ -262,7 +262,7 @@ export default function Mint({
     if (!/^[a-z0-9-_]+$/i.test(t))      return snack('Invalid tag', 'error');
     if (t.length > MAX_TAG_LEN)         return snack('Tag too long', 'error');
     if (tags.includes(t))               return;
-    if (tags.length >= MAX_TAGS)        return snack('Max 10 tags', 'error');
+    if (tags.length >= MAX_TAGS)        return snack(`Max ${MAX_TAGS} tags`, 'error');
     setTags((p) => [...p, t]);
   };
 
@@ -298,7 +298,7 @@ export default function Mint({
   const oversize = artifactHex.length / 2 > maxFirstSlice;
 
   const allSlices = useMemo(
-    () => oversize ? sliceHex(`0x${artifactHex}`, Math.min(sliceSize, maxFirstSlice)) : [],
+    () => oversize ? planSlices(`0x${artifactHex}`, sliceSize, maxFirstSlice) : [],
     [oversize, artifactHex, sliceSize, maxFirstSlice],
   );
 

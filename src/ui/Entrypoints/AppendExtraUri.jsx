@@ -24,7 +24,7 @@ import TokenMetaPanel      from '../TokenMetaPanel.jsx';
 import LoadingSpinner      from '../LoadingSpinner.jsx';
 
 import {
-  splitPacked, sliceHex, sliceTail, PACKED_SAFE_BYTES, SLICE_MAX_BYTES, SLICE_MIN_BYTES,
+  splitPacked, planSlices, sliceTail, PACKED_SAFE_BYTES, SLICE_MAX_BYTES, SLICE_MIN_BYTES,
 } from '../../core/batch.js';
 import {
   loadSliceCheckpoint, saveSliceCheckpoint,
@@ -172,7 +172,7 @@ export default function AppendExtraUri({
       const url = e.target.result;
       setDataUrl(url);
       const hexStr = `0x${char2Bytes(url)}`;
-      const slices = sliceHex(hexStr, sliceSize);
+      const slices = planSlices(hexStr, sliceSize);
       setPrep({
         slices,
         hash: `sha256:${await sha256Hex(hexStr)}`,

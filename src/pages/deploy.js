@@ -16,7 +16,12 @@ import { useWallet }        from '../contexts/WalletContext.js';
 import contractCode         from '../../contracts/Zero_Contract_V4.tz';
 
 /*──────── worker integration ─────*/
-const worker = typeof window !== 'undefined' ? new Worker(new URL('../workers/originate.worker.js', import.meta.url)) : null;
+const worker = typeof window !== 'undefined'
+  ? new Worker(
+      new URL('../workers/originate.worker.js', import.meta.url),
+      { type: 'module' },
+    )
+  : null;
 
 /*──────── constants ─────*/
 const blank = () => new MichelsonMap();

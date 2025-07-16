@@ -4,14 +4,12 @@
   Rev :    r707   2025-07-13
   Summary: added 1.5MB+ experimental warning dialog
 ──────────────────────────────────────────────────────────────*/
-import React, { useRef, useState, useCallback } from 'react';
+import React, { useRef, useState } from 'react';
 import styledPkg            from 'styled-components';
 import PixelButton          from '../PixelButton.jsx';
 import { MIME_TYPES as WHITELIST,               /* whitelist guard   */
          mimeFromFilename } from '../../constants/mimeTypes.js';  /* ★ NEW */
 import PixelConfirmDialog   from '../PixelConfirmDialog.jsx';
-import { checkOnChainIntegrity }  from '../../utils/onChainValidator.js';
-import { getIntegrityInfo }       from '../../constants/integrityBadges.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -20,7 +18,6 @@ const FileName = styled.p`font-size:.68rem;margin:.5rem 0 0;word-break:break-all
 
 const EXT_OK     = ['.glb', '.gltf', '.html'];    /* extra beyond MIME sniffs */
 const ALL_ACCEPT = [...WHITELIST, ...EXT_OK].join(',');
-const TEXT_RE    = /^(text\/|image\/svg|application\/(json|xml|javascript|ecmascript))/i;
 const LARGE_MB   = 1.5;
 const LARGE_BYTES = LARGE_MB * 1024 * 1024;
 
@@ -42,17 +39,6 @@ export default function MintUpload({
   const FINAL_ACCEPT = accept || ALL_ACCEPT;
   const triggerPick  = () => inpRef.current?.click();
 
-  /* integrity helper – lightweight heuristic only */
-  const scanIntegrity = useCallback((dataUri) => {
-    const mime = dataUri.startsWith('data:')
-      ? dataUri.slice(5).split(/[;,]/)[0] || ''
-      : '';
-    const normMime = mime.replace('audio/mp3', 'audio/mpeg');
-    const meta = TEXT_RE.test(normMime)
-      ? (()=>{ const [,b64='']=dataUri.split(','); return { artifactUri:dataUri, body:atob(b64) }; })()
-      : { artifactUri:dataUri.replace(mime, normMime) };
-    return checkOnChainIntegrity(meta);
-  }, []);
 
   const handlePick = (e) => {
     const f = e.target.files?.[0];

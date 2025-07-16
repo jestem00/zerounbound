@@ -1,6 +1,5 @@
 {
   "outputDir": "summarized_files",
-
   "bundles": [
     {
       "bundleName": "contracts_bundle",
@@ -17,10 +16,15 @@
         "src/utils/uriHelpers.js",
         "src/core/net.js",
         "src/ui/OperationOverlay.jsx",
-        "src/ui/GlobalSnackbar.jsx"
+        "src/ui/GlobalSnackbar.jsx",
+        "src/ui/Entrypoints/Mint.jsx",
+        "src/ui/Entrypoints/MintPreview.jsx",
+        "src/ui/Entrypoints/MintUpload.jsx",
+        "src/ui/Entrypoints/AppendArtifactUri.jsx",
+        "src/ui/Entrypoints/AppendExtraUri.jsx",
+        "src/ui/Entrypoints/EditTokenMetadata.jsx"
       ]
     },
-    
     {
       "bundleName": "entrypoints_bundle",
       "patterns": [
@@ -35,11 +39,10 @@
         "src/utils/**"
       ]
     },
-
     {
       "bundleName": "explore_bundle",
       "patterns": [
-        "src/hooks/useConsent.js", 
+        "src/hooks/useConsent.js",
         "src/pages/contracts/**/*.jsx",
         "src/pages/explore/**/*.jsx",
         "src/pages/search.jsx",
@@ -48,9 +51,9 @@
         "src/ui/ContractMetaPanelContracts.jsx",
         "src/ui/TokenIdSelect.jsx",
         "src/ui/TokenCard.jsx",
-        "src/ui/FullScreenModal.jsx",
+        "src/ui/FullscreenModal.jsx",
         "src/utils/pixelUpscale.js",
-        "srce/ui/MakeOfferBtn.jsx",
+        "src/ui/MakeOfferBtn.jsx",
         "src/ui/MakeOfferDialog.jsx",
         "src/ui/FiltersPanel.jsx",
         "src/utils/decodeHexFields.js",
@@ -68,7 +71,7 @@
         "src/config/**/*.js",
         "src/data/**/*.json",
         "src/utils/countAmount.js",
-        "src/ui/layout.jsx",
+        "src/ui/Layout.jsx",
         "src/pages/_app.js",
         "src/ui/BuyDialog.jsx",
         "src/ui/ListTokenDialog.jsx",
@@ -78,7 +81,6 @@
         "src/ui/MAINTokenMetaPanel.jsx"
       ]
     },
-    
     {
       "bundleName": "render_media_bundle",
       "patterns": [
@@ -105,12 +107,10 @@
         "src/utils/countOwners.js",
         "src/utils/countTokens.js",
         "src/utils/countAmount.js",
-        "src/utils/countAmount.js",
         "src/utils/pixelUpscale.js",
-        "src/utils/FullscreenModal.jsx"
+        "src/ui/FullscreenModal.jsx"
       ]
     },
-
     {
       "bundleName": "assets_bundle",
       "patterns": [
@@ -121,7 +121,6 @@
         "!public/fonts/**"
       ]
     },
-
     {
       "bundleName": "engine_bundle",
       "patterns": [
@@ -136,7 +135,6 @@
         "src/core/validator.js"
       ]
     },
-
     {
       "bundleName": "frontend_bundle",
       "patterns": [
@@ -149,7 +147,6 @@
         "src/utils/**"
       ]
     },
-
     {
       "bundleName": "infra_bundle",
       "patterns": [
@@ -161,6 +158,59 @@
         ".prettierrc",
         ".eslintrc.cjs",
         ".gitignore"
+      ]
+    },
+    {
+      "bundleName": "origination_accel_bundle",
+      "patterns": [
+        "next.config.js",
+        "package.json",
+        "src/pages/deploy.js",
+        "src/workers/originate.worker.js",
+        "src/ui/DeployCollectionForm.jsx",
+        "src/ui/OperationOverlay.jsx",
+        "src/contexts/WalletContext.js",
+        "src/core/net.js",
+        "src/config/deployTarget.js",
+        "contracts/metadata/views/Zero_Contract_v4_views.json",
+        "src/constants/views.hex.js",
+        "src/pages/api/forge.js",
+        "src/pages/api/inject.js",
+        "src/utils/chooseFastestRpc.js",
+        "jest.config.cjs",
+        "next.config.js",
+        "package.json",
+        "tsconfig.json",
+        ".eslintrc.cjs"      
+      ]
+    },
+    
+    {
+      "bundleName": "manage_contracts_bundle",
+      "patterns": [
+        "src/pages/manage.js",
+        "src/ui/ContractCarousels.jsx",
+        "src/ui/PixelHeading.jsx",
+        "src/ui/PixelInput.jsx",
+        "src/ui/PixelButton.jsx",
+        "src/ui/AdminTools.jsx",
+        "src/utils/RenderMedia.jsx",
+        "src/ui/LoadingSpinner.jsx",
+        "src/contexts/WalletContext.js",
+        "src/core/net.js",
+        "src/data/hashMatrix.json",
+        "src/utils/countTokens.js",
+        "src/utils/hazards.js",
+        "src/hooks/useConsent.js",
+        "src/ui/IntegrityBadge.jsx",
+        "src/ui/EnableScripts.jsx",
+        "src/utils/onChainValidator.js",
+        "src/ui/PixelConfirmDialog.jsx",
+        "src/constants/integrityBadges.js",
+        "src/utils/countAmount.js",
+        "src/utils/countOwners.js",
+        "Src/utils,countTokens.js",
+        "src/utils/formatAddress.js"   
       ]
     }
   ]

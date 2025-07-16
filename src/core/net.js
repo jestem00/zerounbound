@@ -1,14 +1,18 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/core/net.js
-  Rev :    r911   2025-07-13
-  Summary: added retry on TypeError/failed; up tries to 10 for TzKT
+  Rev :    r913   2025-07-15
+  Summary: implement client-side forge/inject via RPC when !USE_BACKEND
 ──────────────────────────────────────────────────────────────*/
 const LIMIT = 4;                         // parallel fetch cap
 let   active = 0;                        // in-flight counter
 const queue  = [];                       // FIFO backlog
 
+import { selectFastestRpc } from '../config/deployTarget.js';
+
 export const sleep = (ms = 500) => new Promise(r => setTimeout(r, ms));
+
+const USE_BACKEND = process.env.USE_BACKEND === 'true';  // env toggle
 
 async function exec(task) {
   active += 1;
@@ -29,6 +33,7 @@ async function exec(task) {
  * • up to 10 tries for TzKT API endpoints
  *
  * @param   {string} url     fully-qualified URL
+ * • proxy to /api/forge or /api/inject when USE_BACKEND
  * @param   {number} tries   max attempts (default 5)
  * @returns {Promise<any>}   parsed JSON
  */
@@ -70,6 +75,46 @@ export function jFetch(url, tries = /tzkt\.io/i.test(url) ? 10 : 5) {
   });
 }
 
-/* What changed & why: Added retry on TypeError/failed to fetch/NetworkError; increased tries to 10 for TzKT URLs to handle flaky large responses; Compile-Guard passed.
-*/
-/* EOF */
+/* origination forger */
+export async function forgeOrigination(code, storage) {
+  const rpc = await selectFastestRpc().catch(() => { throw new Error('No reachable RPC'); });
+  const branch = await jFetch(`${rpc}/chains/main/blocks/head/hash`);
+  const op = {
+    branch,
+    contents: [{
+      kind: 'origination',
+      balance: '0',
+      script: {
+        code,
+        storage,
+      }
+    }]
+  };
+  if (USE_BACKEND) {
+    return jFetch('/api/forge', { method: 'POST', body: JSON.stringify(op) });
+  } else {
+    const res = await fetch(`${rpc}/chains/main/blocks/head/helpers/forge/operations`, {
+      method: 'POST',
+      body: JSON.stringify(op)
+    });
+    if (!res.ok) throw new Error(`Forge failed: HTTP ${res.status}`);
+    return await res.text();  // hex string
+  }
+}
+
+/* signed injection */
+export async function injectSigned(signedBytes) {
+  const rpc = await selectFastestRpc().catch(() => { throw new Error('No reachable RPC'); });
+  if (USE_BACKEND) {
+    return jFetch('/api/inject', { method: 'POST', body: JSON.stringify({ signedBytes }) });
+  } else {
+    const res = await fetch(`${rpc}/injection/operation`, {
+      method: 'POST',
+      body: JSON.stringify(signedBytes)
+    });
+    if (!res.ok) throw new Error(`Inject failed: HTTP ${res.status}`);
+    return await res.text();  // op hash
+  }
+}
+
+/* What changed & why: Implemented client-side forge/inject via direct RPC calls when !USE_BACKEND to avoid hanging if backend unavailable; rev r913. */

@@ -1,9 +1,9 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/utils/countTokens.js
-  Rev :    r5   2025‑07‑15 UTC
-  Summary: lightweight token‑count via TzKT storage with
-           5 min cache; drops expensive per‑token scans.
+  Rev :    r6   2025‑07‑16 UTC
+  Summary: primary tokens/count fallback; fixes v4a miscounts
+           and retains 5 min cache for carousels.
 ──────────────────────────────────────────────────────────────*/
 import { jFetch } from '../core/net.js';
 
@@ -40,21 +40,26 @@ export default async function countTokens(addr = '', net = 'ghostnet') {
     ? 'https://api.tzkt.io/v1'
     : 'https://api.ghostnet.tzkt.io/v1';
 
-  /* Fetch minimal storage slice for token counts */
-  const st = await jFetch(
-    `${base}/contracts/${addr}/storage?select=active_tokens,next_token_id,total_supply`,
-  ).catch(() => null);
-
   let total = 0;
-  if (st) {
-    /* active_tokens big‑map fastest when present */
-    if (Number.isInteger(st.active_tokens)) {
-      const bm = await jFetch(`${base}/bigmaps/${st.active_tokens}?select=totalKeys`)
-        .catch(() => null);
-      if (bm?.totalKeys) total = bm.totalKeys;
+
+  /* Primary: TzKT tokens/count endpoint */
+  const cnt = await jFetch(`${base}/tokens/count?contract=${addr}`)
+    .catch(() => null);
+  if (Number.isFinite(cnt)) {
+    total = Number(cnt);
+  } else {
+    /* Fallback: minimal storage slice */
+    const st = await jFetch(
+      `${base}/contracts/${addr}/storage?select=active_tokens,next_token_id,total_supply`,
+    ).catch(() => null);
+    if (st) {
+      if (Number.isInteger(st.active_tokens)) {
+        const bm = await jFetch(`${base}/bigmaps/${st.active_tokens}`)
+          .catch(() => null);
+        if (bm?.totalKeys) total = bm.totalKeys;
+      }
+      if (!total) total = Number(st.next_token_id || st.total_supply || 0);
     }
-    /* else fall back to next_token_id or total_supply */
-    if (!total) total = Number(st.next_token_id || st.total_supply || 0);
   }
 
   setCached(addr, net, total);

@@ -1,10 +1,9 @@
 /*  Developed by @jams2blues with love for the Tezos community
     File:   src/contexts/WalletContext.js
-    Rev :   r526
+    Rev :   r529
     Summary:
-      • Silent session restore on mount if active account exists
-      • connect() only calls requestPermissions() when no session  
-      • getActiveAccount() flow moved into mount effect        */
+      • Restore silent session on mount via useEffect calling init
+      • Handle init errors silently to avoid blocking  */
 
 import React, {
   createContext, useContext, useEffect, useState, useRef,
@@ -16,7 +15,7 @@ import { BeaconEvent }   from '@airgap/beacon-sdk';
 import {
   DEFAULT_NETWORK,
   selectFastestRpc,
-} from '../config/networkConfig.js';
+} from '../config/deployTarget.js';
 
 /*──────── constants ─────*/
 const APP_NAME      = 'ZeroUnbound.art';
@@ -63,6 +62,7 @@ export function WalletProvider({ children, initialNetwork = DEFAULT_NETWORK }) {
   const tkRef     = useRef(null);
   const walletRef = useRef(null);
   const rpcRef    = useRef('');
+  const initRef   = useRef(null);  // promise for init
 
   const [network]        = useState(initialNetwork);
   const [address, setAddr]    = useState('');
@@ -70,6 +70,36 @@ export function WalletProvider({ children, initialNetwork = DEFAULT_NETWORK }) {
   const [mismatch, setMis]     = useState(false);
   const [needsReveal, setRev]  = useState(false);
   const [needsFunds, setFunds] = useState(false);
+
+  /*── init ────────────────────────────────────────────────*/
+  const init = useCallback(async () => {
+    if (initRef.current) return initRef.current;
+
+    const p = (async () => {
+      const rpc = await pickRpc();
+      rpcRef.current = rpc;
+      tkRef.current  = makeToolkit(rpc);
+
+      walletRef.current = new BeaconWallet({
+        name            : APP_NAME,
+        preferredNetwork: network,
+        matrixNodes     : [],    // disable P2P
+        colorMode       : 'dark',
+      });
+      walletRef.current.client.sendMetrics = async () => {};
+      walletRef.current.client.updateMetricsStorage = async () => {};
+      tkRef.current.setWalletProvider(walletRef.current);
+      walletRef.current.client.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, sync);
+
+      // silent restore
+      const acc = await walletRef.current.client.getActiveAccount().catch(() => null);
+      if (acc) await sync();
+
+    })();
+
+    initRef.current = p;
+    await p;
+  }, [network]);
 
   /*── state sync ─────────────────────────────────────────*/
   const sync = useCallback(async () => {
@@ -80,7 +110,8 @@ export function WalletProvider({ children, initialNetwork = DEFAULT_NETWORK }) {
     }
     setAddr(acc.address);
     setConn(true);
-    setMis((acc.network?.type||'').toLowerCase() !== network);
+    const netType = (acc.network?.type || '').toLowerCase();
+    setMis(netType !== network);
     try {
       const [mgrKey, balance] = await Promise.all([
         tkRef.current.rpc.getManagerKey(acc.address).catch(() => null),
@@ -91,46 +122,30 @@ export function WalletProvider({ children, initialNetwork = DEFAULT_NETWORK }) {
     } catch {}
   }, [network]);
 
-  /*── init toolkit + silent session restore ───────────────*/
+  /* silent restore on mount */
   useEffect(() => {
-    (async () => {
-      // pick RPC and init toolkit
-      const rpc = await pickRpc();
-      rpcRef.current = rpc;
-      tkRef.current  = makeToolkit(rpc);
-
-      // instantiate wallet client once
-      walletRef.current = new BeaconWallet({
-        name            : APP_NAME,
-        preferredNetwork: network,
-        matrixNodes     : [],    // disable P2P
-        colorMode       : 'dark',
-      });
-      // suppress metrics noise
-      walletRef.current.client.sendMetrics = async () => {};
-      walletRef.current.client.updateMetricsStorage = async () => {};
-      tkRef.current.setWalletProvider(walletRef.current);
-      walletRef.current.client.subscribeToEvent(BeaconEvent.ACTIVE_ACCOUNT_SET, sync);
-
-      // attempt to restore existing session silently
-      const acc = await walletRef.current.client.getActiveAccount().catch(() => null);
-      if (acc) {
-        await sync();
-      }
-    })().catch(console.error);
-  }, [network, sync]);
+    init().catch(() => {});  // silent error
+  }, [init]);
 
   /*── actions ────────────────────────────────────────────*/
   const connect = useCallback(async () => {
-    // if already have session, no need to re-prompt
-    const acc = await walletRef.current.client.getActiveAccount().catch(() => null);
+    await init();
+
+    let acc = await walletRef.current.client.getActiveAccount().catch(() => null);
+    if (acc) {
+      const netType = (acc.network?.type || '').toLowerCase();
+      if (netType !== network) {
+        await disconnect();
+        acc = null;
+      }
+    }
     if (!acc) {
       await walletRef.current.requestPermissions({
         network: { type: network, rpcUrl: rpcRef.current },
       });
     }
     await sync();
-  }, [network, sync]);
+  }, [network, sync, init]);
 
   const disconnect = useCallback(async () => {
     if (!walletRef.current) return;
@@ -184,3 +199,6 @@ export function WalletProvider({ children, initialNetwork = DEFAULT_NETWORK }) {
 }
 
 export default WalletProvider;
+
+/* What changed & why: Added useEffect to call init() on mount for silent restore; catch init errors silently; rev r529; Compile-Guard passed. */
+/* EOF */

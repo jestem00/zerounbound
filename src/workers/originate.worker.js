@@ -1,11 +1,12 @@
 /*Developed by @jams2blues with love for the Tezos community
   File: src/workers/originate.worker.js
-  Summary: same interfaces-dedupe helper as deploy.js */
+  Rev : r5   2025-07-15
+  Summary: import views from hex.js; fast hex conv; progress every 1000 iter */
 
 import { char2Bytes } from '@taquito/utils';
-import viewsJson      from '../../contracts/metadata/views/Zero_Contract_v4_views.json' assert { type:'json' };
+import viewsHex       from '../constants/views.hex.js';
 
-/* helpers */
+/*──────── helpers ─────*/
 const uniqInterfaces = src => {
   const base = ['TZIP-012', 'TZIP-016'];
   const map  = new Map();
@@ -17,43 +18,70 @@ const uniqInterfaces = src => {
   return Array.from(map.values());
 };
 
-const HEX = Array.from({ length: 256 }, (_, i) =>
-  i.toString(16).padStart(2, '0'),
-);
-const utf8ToHex = str => {
-  const bytes=new TextEncoder().encode(str);
-  return '0x'+bytes.reduce((acc,b)=>acc+HEX[b],'');
+const hexToString = (hex) => {
+  hex = hex.slice(2);
+  let str = '';
+  for (let i = 0; i < hex.length; i += 2) {
+    str += String.fromCharCode(parseInt(hex.substr(i, 2), 16));
+  }
+  return str;
+};
+
+const views = JSON.parse(hexToString(viewsHex)).views;
+
+const byteToHex = new Array(256);
+for (let i = 0; i < 256; i++) {
+  byteToHex[i] = i.toString(16).padStart(2, '0');
+}
+
+const utf8ToHex = (str, taskId) => {
+  const bytes = new TextEncoder().encode(str);
+  const length = bytes.length;
+  const hexArr = new Array(length);
+  let lastProgress = -1;
+  for (let i = 0; i < length; i++) {
+    hexArr[i] = byteToHex[bytes[i]];
+    if (i % 1000 === 0) {
+      const progress = Math.floor((i / length) * 100);
+      if (progress > lastProgress) {
+        self.postMessage({ taskId, progress });
+        lastProgress = progress;
+      }
+    }
+  }
+  return '0x' + hexArr.join('');
 };
 
 /*──────── worker ───────*/
 self.onmessage = ({ data }) => {
-  const { meta, taskId='orig' } = data;
+  const { meta, taskId } = data;
 
-  const ordered = {
-    name:          meta.name,
-    description:   meta.description,
-    version:       'ZeroContractV4',
-    license:       meta.license,
-    authors:       meta.authors,
-    homepage:      meta.homepage,
-    authoraddress: meta.authoraddress,
-    creators:      meta.creators,
-    type:          meta.type,
-    interfaces:    uniqInterfaces(meta.interfaces),
-    imageUri:      meta.imageUri,
-    views:         viewsJson.views,
-  };
-  Object.keys(ordered).forEach(k => ordered[k] === undefined && delete ordered[k]);
+  try {
+    const ordered = {
+      name:          meta.name.trim(),
+      symbol:        meta.symbol.trim(),
+      description:   meta.description.trim(),
+      version:       'ZeroContractV4',
+      license:       meta.license,
+      authors:       meta.authors,
+      homepage:      meta.homepage || undefined,
+      authoraddress: meta.authoraddress || undefined,
+      creators:      meta.creators,
+      type:          meta.type,
+      interfaces:    uniqInterfaces(meta.interfaces),
+      imageUri:      meta.imageUri || undefined,
+      views,
+    };
+    Object.keys(ordered).forEach(k => ordered[k] === undefined && delete ordered[k]);
 
-  const header = '0x' + char2Bytes('tezos-storage:content');
-  const body   = utf8ToHex(JSON.stringify(ordered));
+    const header = '0x' + char2Bytes('tezos-storage:content');
+    const body   = utf8ToHex(JSON.stringify(ordered), taskId);
 
-  self.postMessage({
-    taskId,
-    header,
-    body,
-  });
+    self.postMessage({ taskId, header, body });
+  } catch (error) {
+    self.postMessage({ taskId, error: error.message });
+  }
 };
 
-/* What changed & why: shared uniqInterfaces ensures metadata emitted by
-   worker also has single “TZIP-012/016” entries. */
+/* What changed & why: Switched to views.hex.js import & parse; precomputed byteToHex for fast conv; progress every 1000 iter; rev r5; Compile-Guard passed. */
+/* EOF */

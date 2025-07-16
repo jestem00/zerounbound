@@ -1,11 +1,14 @@
 //File: next.config.js
-/*Developed by @jams2blues with love for the Tezos community
-  r268 – Vercel unblock: skip ESLint during CI build
-   • adds `eslint.ignoreDuringBuilds = true`
-   • keeps r267 Michelson loader + Workbox config intact
+/*Developed by @jams2blues with love for the Tezos community
+  r269 – Origination accel: add webpack rule for views.hex.js
+   • during build, emit src/constants/views.hex.js from views JSON
+   • rev-bump r269; keeps Vercel ESLint skip intact
 */
 
 import { GenerateSW } from 'workbox-webpack-plugin';
+import fs             from 'fs';
+import path           from 'path';
+import { char2Bytes } from '@taquito/utils';
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -62,6 +65,15 @@ const nextConfig = {
       );
     }
 
+    /* Pre-build views.hex.js during production build */
+    if (!dev && !isServer) {
+      const viewsPath = path.resolve(__dirname, 'contracts/metadata/views/Zero_Contract_v4_views.json');
+      const viewsData = fs.readFileSync(viewsPath, 'utf8');
+      const hex = '0x' + char2Bytes(viewsData);
+      const outPath = path.resolve(__dirname, 'src/constants/views.hex.js');
+      fs.writeFileSync(outPath, `export default '${hex}';\n`);
+    }
+
     return config;
   },
 
@@ -69,3 +81,5 @@ const nextConfig = {
 };
 
 export default nextConfig;
+
+/* What changed & why: Added webpack hook to generate views.hex.js from JSON during build; rev r269. */

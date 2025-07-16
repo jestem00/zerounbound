@@ -1,9 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    .eslintrc.cjs
-  Rev :    r6    2025‑09‑05
-  Summary: widen per‑folder overrides; demote remaining
-           blocking style errors to warnings so CI passes
+  Rev :    r7    2025-07-15
+  Summary: add views.hex.js to ignorePatterns; relax warnings for new API routes
 ──────────────────────────────────────────────────────────────*/
 module.exports = {
   env: { browser: true, es2022: true, node: true },
@@ -68,14 +67,21 @@ module.exports = {
         'styled-components-a11y/no-noninteractive-element-to-interactive-role': 'off',
       },
     },
+    /* API routes – allow console for server logs */
+    {
+      files: ['src/pages/api/**'],
+      rules: {
+        'no-console': 'off',
+      },
+    },
   ],
 
   /*
    * NOTE: These suppressions are **temporary** and tracked under
    * Invariant ledger; they will be rolled back once legacy files
    * are fully migrated. The project still blocks on any remaining
-   * “error” level diagnostics.
+   * “error” level diagnostics.
    */
-  ignorePatterns: ['summarized_files/**', 'public/**'],
+  ignorePatterns: ['summarized_files/**', 'public/**', 'src/constants/views.hex.js'],
 };
 /* EOF */

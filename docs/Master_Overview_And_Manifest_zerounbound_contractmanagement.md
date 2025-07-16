@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────────
 Developed by @jams2blues – ZeroContract Studio
 File:    docs/Master_Overview_And_Manifest_zerounbound_contractmanagement.md
-Rev :    r864   2025‑09‑05 UTC
-Summary: add new React components (MAINTokenMetaPanel, TokenPreviewWindow, TransferRow), VSCode config files, contract backup file, and new invariants I113‑I117 for consent management, portal windows, hazard detection, form patterns, and script security
+Rev :    r865   2025‑07‑16 UTC
+Summary: fix countTokens using tokens/count endpoint; adjust manifest entry
 ──────────────────────────────────────────────────────────────────*/
 
 /*════════════════════════════════════════════════════════════════
@@ -360,7 +360,7 @@ zerounbound/public/sw.js                        – Workbox 7 service‑worker;
 zerounbound/public/fonts/PixeloidMono-d94EV.ttf – mono pixel font; Imports:· Exports:·
 zerounbound/public/fonts/PixeloidSans-mLxMm.ttf – sans pixel font; Imports:· Exports:·
 zerounbound/public/fonts/PixeloidSansBold-PKnYd.ttf – bold pixel font; Imports:· Exports:·
-zerounbound/public/sprites/Banner.png           – hero banner PNG; Imports:· Exports:·
+zerounbound/public/sprites/Banner.png           – hero banner PNG; Imports:·Exports:·
 zerounbound/public/sprites/Banner.psd           – banner source PSD; Imports:· Exports:·
 zerounbound/public/sprites/Burst.svg            – celebration burst; Imports:· Exports:·
 zerounbound/public/sprites/cover_default.svg    – fallback NFT cover; Imports:· Exports:·
@@ -494,7 +494,7 @@ zerounbound/src/ui/Entrypoints/TransferRow.jsx               – reusable row co
 ╭── src/utils ───────────────────────────────────────────────────────────────╮
 zerounbound/src/utils/countAmount.js            - count editions in tokens(exclude burned tokens); Imports:· Exports: countAmount
 zerounbound/src/utils/countOwners.js            – distinct owner counter; Imports: net.js; Exports: countOwners
-zerounbound/src/utils/countTokens.js            – on‑chain + fallback counts; Imports: listLiveTokenIds; Exports: countTokens
+zerounbound/src/utils/countTokens.js            – on‑chain count via tokens/count; Imports: jFetch; Exports: countTokens
 zerounbound/src/utils/decodeHexFields.js        – hex → UTF‑8 deep repair; Imports:· Exports: default
 zerounbound/src/utils/formatAddress.js          – tz/KT1 truncator + copy; Imports:· Exports: shortKt,copyToClipboard
 zerounbound/src/utils/hazards.js                – detect nsfw/flashing/script flags; Imports: mimeTypes; Exports: detectHazards
@@ -869,5 +869,7 @@ value: data:image/png;base64, iV........
 /*──────────────────────────────────────────────────────────────
 CHANGELOG
 ──────────────────────────────────────────────────────────────*/
+• r865 2025‑07‑16 UTC — countTokens.js now fetches /tokens/count for
+  reliable totals; manifest entry updated accordingly.
 ...
 /* EOF */

@@ -98,19 +98,6 @@ export default function ExploreGrid() {
     ? adminFilterRaw
     : '';
 
-  /* quick exit – listings WIP --------------------------------------------*/
-  if (isListingsMode) {
-    return (
-      <Wrap>
-        <ExploreNav />
-        <p style={{ textAlign:'center', marginTop:'2rem', fontSize:'1rem' }}>
-          Marketplace integration is&nbsp;
-          <strong>Work&nbsp;In&nbsp;Progress</strong> — coming soon! 🚧
-        </p>
-      </Wrap>
-    );
-  }
-
   /* state ----------------------------------------------------------------*/
   const [collections, setCollections] = useState([]);
   const [tokens,      setTokens]      = useState([]);
@@ -120,6 +107,13 @@ export default function ExploreGrid() {
 
   const [seenColl] = useState(() => new Set());
   const [seenTok]  = useState(() => new Set());
+
+  const listingsMsg = isListingsMode && (
+    <p style={{ textAlign:'center', marginTop:'2rem', fontSize:'1rem' }}>
+      Marketplace integration is&nbsp;
+      <strong>Work&nbsp;In&nbsp;Progress</strong> — coming soon! 🚧
+    </p>
+  );
 
   /*──────── fetch helpers ──────────────────────────────────*/
   const fetchBatchCollections = useCallback(async (off) => {
@@ -229,6 +223,8 @@ export default function ExploreGrid() {
     <Wrap>
       <ExploreNav />
 
+      {listingsMsg}
+
       {adminFilter && (
         <p style={{
           textAlign:'center',fontSize:'.8rem',margin:'6px 0 0',
@@ -248,19 +244,23 @@ export default function ExploreGrid() {
         </p>
       )}
 
-      <Grid>{cardList}</Grid>
+      {!isListingsMode && (
+        <>
+          <Grid>{cardList}</Grid>
 
-      {!end && (
-        <Center>
-          <button
-            type="button"
-            className="btn"
-            disabled={loading}
-            onClick={() => loadBatch(DESIRED_BATCH)}
-          >
-            {loading ? 'Loading…' : 'Load More 🔻'}
-          </button>
-        </Center>
+          {!end && (
+            <Center>
+              <button
+                type="button"
+                className="btn"
+                disabled={loading}
+                onClick={() => loadBatch(DESIRED_BATCH)}
+              >
+                {loading ? 'Loading…' : 'Load More 🔻'}
+              </button>
+            </Center>
+          )}
+        </>
       )}
     </Wrap>
   );

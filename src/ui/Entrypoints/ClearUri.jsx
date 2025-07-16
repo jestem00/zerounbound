@@ -15,7 +15,6 @@ import PixelConfirmDialog    from '../PixelConfirmDialog.jsx';
 import TokenMetaPanel        from '../TokenMetaPanel.jsx';
 import LoadingSpinner        from '../LoadingSpinner.jsx';
 
-import { listUriKeys }       from '../../utils/uriHelpers.js';
 import { useWalletContext }  from '../../contexts/WalletContext.js';
 import { jFetch }            from '../../core/net.js';
 import { TZKT_API }          from '../../config/deployTarget.js';
@@ -69,13 +68,12 @@ export default function ClearUri({
   /* local state */
   const [tokenId,   setTokenId]   = useState('');
   const [meta,      setMeta]      = useState(null);
-  const [keys,      setKeys]      = useState([]);
   const [confirmKey,setConfirmKey]= useState('');
   const [ov,        setOv]        = useState({ open:false });
 
   /* meta loader */
   const loadMeta = useCallback(async (id) => {
-    setMeta(null); setKeys([]); setConfirmKey('');
+    setMeta(null); setConfirmKey('');
     if (!contractAddress || id === '') return;
 
     let rows = await jFetch(
@@ -89,7 +87,7 @@ export default function ClearUri({
       if (one?.value) rows = [{ metadata: JSON.parse(hex2str(one.value)) }];
     }
     const m = rows[0]?.metadata || {};
-    setMeta(m); setKeys(listUriKeys(m));
+    setMeta(m);
   }, [contractAddress]);
 
   useEffect(() => { void loadMeta(tokenId); }, [tokenId, loadMeta]);

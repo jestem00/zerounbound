@@ -8,7 +8,7 @@ Origination Acceleration Plan — ZeroUnbound v4
 
 **Goal** Cut end‑to‑end contract origination time on mobile from
 >8 min ➜ <90 s without sacrificing 100 % on‑chain storage or any
-existing invariants (I00‑I117).
+existing invariants (I00‑I117 or latest).
 
 ------------------------------------------------------------------
 Step‑by‑Step Implementation (💎 = quick win, 🛠 = code change,

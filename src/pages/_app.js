@@ -73,7 +73,7 @@ export default function ZeroUnboundApp({ Component, pageProps }) {
           <Component {...pageProps} />
         </Layout>
 
-        {/* global reactive snackbar */}
+        {/* app-wide reactive snackbar */}
         <GlobalSnackbar />
 
         {/* dialogs */}

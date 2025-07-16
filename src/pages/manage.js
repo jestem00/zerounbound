@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/manage.js
-  Rev :    r881   2025-07-14 UTC
-  Summary: visible loading spinner near search; metadata cache; parallel fetches; fixes slow load; lint-clean; compile-guard passed.
+  Rev :    r882   2025-07-15 UTC
+  Summary: refresh clears kt/nav/cache/reload; fixes new contract visibility; lint-clean; compile-guard passed.
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useState, useEffect, useCallback, useRef,
@@ -223,12 +223,18 @@ export default function ManagePage() {
 
   const handleRefresh = useCallback(async () => {
     setLoading(true);
+    setKt('');
+    localStorage.removeItem('zu_contract_cache_v1');
+    localStorage.removeItem('zu_meta_cache_v1');
+    localStorage.removeItem('zu_hidden_contracts_v1');
+    router.replace('/manage', undefined, { shallow: true });
     try {
       await carouselsRef.current?.refresh(true);
     } finally {
       setLoading(false);
+      window.location.reload();
     }
-  }, []);
+  }, [router]);
 
   const go = (e) => {
     e?.preventDefault();
@@ -265,7 +271,7 @@ export default function ManagePage() {
         {busy && (
           <BusyWrap>
             <LoadingSpinner size={16} />
-            <span>Loading... first time can take 30s</span>
+            <span>Loading…</span>
           </BusyWrap>
         )}
         {loading && (
@@ -301,4 +307,4 @@ export default function ManagePage() {
   );
 }
 
-/* What changed & why: added metadata cache w/ 5 min TTL; parallelized fetches via Promise.allSettled; visible BusyWrap w/ LoadingSpinner near search; fixes slow load + hidden status; Rev-bump r881. */
+/* What changed & why: handleRefresh clears kt/nav/cache/reload; fixes new contract visibility; Rev-bump r882. */

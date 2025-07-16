@@ -37,7 +37,7 @@ import { TZKT_API }         from '../../config/deployTarget.js';
 import { listUriKeys }      from '../../utils/uriHelpers.js';
 import listLiveTokenIds     from '../../utils/listLiveTokenIds.js';
 import {
-  estimateChunked, calcStorageMutez, isSimTimeout,
+  estimateChunked, calcStorageMutez,
 } from '../../core/feeEstimator.js';
 
 /*──────── styled shells ─────*/
@@ -327,7 +327,6 @@ export default function AppendExtraUri({
   };
 
   /*──────── guards ─────*/
-  const oversize = dataUrl.length > 45_000;
   const disabled = isEstim || tokenId === '' || !finalLabel || desc.trim() === '' || name.trim() === '' || !(prep || resumeInfo);
 
   return (

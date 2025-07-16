@@ -172,8 +172,8 @@ function useSnackbarBridge(cb) {
        : setLocal({ open: true, message: msg, severity: sev });
   };
   const node = local?.open && (
-    <div
-      role="alert"
+    <button
+      type="button"
       style={{
         position: 'fixed', bottom: 20, left: '50%', transform: 'translateX(-50%)',
         background: '#222', color: '#fff', padding: '6px 12px', borderRadius: 4,
@@ -181,7 +181,7 @@ function useSnackbarBridge(cb) {
       }}
       onClick={() => setLocal(null)}
     >{local.message}
-    </div>
+    </button>
   );
   return [api, node];
 }

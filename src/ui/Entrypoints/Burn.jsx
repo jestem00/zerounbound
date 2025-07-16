@@ -50,7 +50,6 @@ const FormRow = styled.div`
 const FieldWrap = styled.div`
   display:flex;flex-direction:column;gap:.45rem;flex:1;
 `;
-const Picker = styled.div`display:flex;gap:.5rem;`;
 const Box    = styled.div`position:relative;flex:1;`;
 const Spin   = styled(LoadingSpinner).attrs({ size:16 })`
   position:absolute;top:8px;right:8px;

@@ -1,11 +1,11 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/OperationOverlay.jsx
-  Rev :    r955   2025-07-13
-  Summary: merged timeout msg, Beacon err, clear cache on close
+  Rev :    r956   2025-07-15
+  Summary: add granular stages & 90s auto-abort
 ──────────────────────────────────────────────────────────────*/
 import React, {
-  useMemo, useState, useRef, useCallback,
+  useMemo, useState, useRef, useCallback, useEffect,
 } from 'react';
 import styled, { css, keyframes } from 'styled-components';
 
@@ -134,6 +134,10 @@ const List = styled.ul.attrs((p)=>({$n:p.$n}))`
   @media (prefers-reduced-motion:reduce){ animation:none; }
 `;
 
+const STAGES = [
+  'PACK', 'WALLET', 'FORGE', 'INJECT', 'CONFIRM (1/2)',
+];
+
 /*════════ component ════════════════════════════════════*/
 export default function OperationOverlay({
   status    = '',
@@ -160,6 +164,13 @@ export default function OperationOverlay({
 
   /* img fallback */
   const [gifOk,setGifOk]=useState(true);
+
+  /* 90s auto-abort */
+  useEffect(() => {
+    if (error || kt1 || opHash) return;
+    const timer = setTimeout(() => onCancel(), 90_000);
+    return () => clearTimeout(timer);
+  }, [error, kt1, opHash, onCancel]);
 
   /* helpers */
   const linkBtn = useCallback(
@@ -229,7 +240,7 @@ export default function OperationOverlay({
   }
 
   /*──────── progress / error branch ─────*/
-  const caption = error ? status : (status||'Preparing request…');
+  const caption = error ? status : (status||STAGES[cur-1]||'Preparing request…');
   const walletHint = /wallet/i.test(caption)&&!error;
   const showSig    = total>1 && !error;
   const isTimeout = /timeout|took more time/i.test(caption);
@@ -303,6 +314,4 @@ export default function OperationOverlay({
     </Back>
   );
 }
-/* What changed & why: Merged timeout msg, Beacon err handling, and clear cache/SW on close; rev-bump r955; Compile-Guard passed.
- */
-/* EOF */
+/* What changed & why: Added granular STAGES & 90s auto-abort; rev r956. */

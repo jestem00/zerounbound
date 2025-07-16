@@ -31,7 +31,6 @@ import {
   validateEditTokenFields,
   validAttributes,
   MAX_ATTR, MAX_ATTR_N, MAX_ATTR_V,
-  MAX_TAGS, MAX_TAG_LEN,
 } from '../../core/validator.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
@@ -223,16 +222,6 @@ export default function EditTokenMetadata({
   }, [roys]);
   const totalPct = useMemo(() => Object.values(shares).reduce((t, v) => t + v, 0) / 100, [shares]);
 
-  /*──────── tag helpers ─────────────────────────*/
-  const pushTag = (raw) => {
-    const t = raw.trim().toLowerCase();
-    if (!t) return;
-    if (!/^[a-z0-9-_]+$/i.test(t)) return snack('Invalid tag', 'error');
-    if (t.length > MAX_TAG_LEN)     return snack('Tag too long', 'error');
-    if (tags.includes(t))           return;
-    if (tags.length >= MAX_TAGS)    return snack('Max 10 tags', 'error');
-    setTags((p) => [...p, t]);
-  };
 
   /*──────── attribute helpers ───────────────────*/
   const setAttr = (i, k, v) => {

@@ -22,7 +22,6 @@ const REMOTE_BARE_RE =
 
 const IMPORT_RE      = /@import\s+url\(/i;
 /* NOTE: <script> tags no longer affect integrity scoring */
-const SCRIPT_RE      = /<script/i;
 
 const URI_KEY_RE     = /(artifact|display|thumbnail|image|extrauri_).*uri$/i;
 
@@ -106,7 +105,8 @@ export function checkOnChainIntegrity(meta = {}) {
   }
 
   /*── printable‑JSON guard ─*/
-  const { body, ...metaSansBody } = meta;
+  const metaSansBody = { ...meta };
+  delete metaSansBody.body;
   if (!asciiPrintable(JSON.stringify(metaSansBody))) reasons.add('metadata non‑printable chars');
 
   /*── verdict ─*/

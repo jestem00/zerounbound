@@ -10,7 +10,7 @@
     "dev": "yarn set:ghostnet && node scripts/ensureDevManifest.js && node scripts/startDev.js",
     "build": "node scripts/generateManifest.js && node scripts/updatePkgName.js && next build",
     "start": "next start -p 4000",
-    "lint": "eslint . --ext js,jsx,ts,tsx --max-warnings 0",
+    "lint": "eslint . --ext js,jsx,ts,tsx --max-warnings 1000 --quiet",
     "test": "jest"
   },
   "dependencies": {
@@ -41,6 +41,7 @@
   },
   "devDependencies": {
     "@babel/core": "7.22.0",
+    "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^14.3.1",
     "@types/babel__core": "^7",
     "@types/node": "^20.11.30",

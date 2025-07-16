@@ -4,7 +4,7 @@
   Rev :    r751   2025‑07‑15
   Summary: add 30s worker timeout; check mismatch after connect
 ──────────────────────────────────────────────────────────────*/
-import React, { useRef, useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { MichelsonMap }                                     from '@taquito/michelson-encoder';
 import { char2Bytes }                                       from '@taquito/utils';
 
@@ -17,17 +17,6 @@ import contractCode         from '../../contracts/Zero_Contract_V4.tz';
 
 /*──────── worker integration ─────*/
 const worker = typeof window !== 'undefined' ? new Worker(new URL('../workers/originate.worker.js', import.meta.url)) : null;
-
-/*──────── helpers ─────*/
-const uniqInterfaces = (src = []) => {
-  const base = ['TZIP-012', 'TZIP-016'];
-  const map  = new Map();
-  [...src, ...base].forEach((i) => {
-    const k = String(i ?? '').trim();
-    if (k) map.set(k.toUpperCase(), k);
-  });
-  return Array.from(map.values());
-};
 
 /*──────── constants ─────*/
 const blank = () => new MichelsonMap();

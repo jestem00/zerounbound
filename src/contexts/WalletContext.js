@@ -128,6 +128,12 @@ const init = useCallback(async () => {
   }, [init]);
 
   /*── actions ────────────────────────────────────────────*/
+  const disconnect = useCallback(async () => {
+    if (!walletRef.current) return;
+    try { await walletRef.current.clearActiveAccount(); } catch {}
+    await sync();
+  }, [sync]);
+
   const connect = useCallback(async () => {
     await init();
 
@@ -146,12 +152,6 @@ const init = useCallback(async () => {
     }
     await sync();
   }, [network, sync, init, disconnect]);
-
-  const disconnect = useCallback(async () => {
-    if (!walletRef.current) return;
-    try { await walletRef.current.clearActiveAccount(); } catch {}
-    await sync();
-  }, [sync]);
 
   const revealAccount = useCallback(async () => {
     if (!address) throw new Error('Wallet not connected');

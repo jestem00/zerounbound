@@ -1,7 +1,7 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/utils/chooseFastestRpc.js
-  Rev :    r1   2025‑07‑15
+  Rev :    r2   2025‑07‑15
   Summary: RPC race selector with 10min cache
 ──────────────────────────────────────────────────────────────*/
 import { RPC_URLS } from '../config/deployTarget.js';
@@ -9,11 +9,20 @@ import { RPC_URLS } from '../config/deployTarget.js';
 const CACHE_KEY = 'zu_fastest_rpc';
 const TTL_MS    = 10 * 60 * 1000;  // 10 min
 
-async function raceRpcs(urls) {
-  return Promise.race(urls.map(async url => {
+async function raceRpcs(urls, timeout = 2000) {
+  return Promise.race(urls.map(async (url) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
     const start = Date.now();
-    await fetch(`${url}/chains/main/blocks/head/header`);
-    return { url, time: Date.now() - start };
+    try {
+      const res = await fetch(`${url}/chains/main/blocks/head/header`, { signal: controller.signal });
+      clearTimeout(timer);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return { url, time: Date.now() - start };
+    } catch {
+      clearTimeout(timer);
+      return { url, time: Infinity };
+    }
   }));
 }
 
@@ -29,4 +38,4 @@ export async function chooseFastestRpc() {
   return url;
 }
 
-/* What changed & why: New RPC selector; rev r1. */
+/* What changed & why: Added 2s timeout, abort on slow RPCs; rev r2. */

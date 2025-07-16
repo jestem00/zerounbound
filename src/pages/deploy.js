@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/deploy.js
-  Rev :    r751   2025‑07‑15
-  Summary: add 30s worker timeout; check mismatch after connect
+  Rev :    r752   2025‑07‑15
+  Summary: increase worker timeout to 60s; add error on worker fail
 ──────────────────────────────────────────────────────────────*/
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { MichelsonMap }                                     from '@taquito/michelson-encoder';
@@ -73,10 +73,10 @@ export default function DeployPage() {
 
     const taskId = Date.now().toString();
     const timeoutId = setTimeout(() => {
-      setErr('Metadata compression timeout');
+      setErr('Metadata compression timeout after 60s');
       worker.terminate();
       reset();
-    }, 30000);
+    }, 60000);
 
     const onMessage = (e) => {
       const d = e.data;
@@ -86,10 +86,18 @@ export default function DeployPage() {
         setPct(d.progress / 400);  // 0-0.25 range
         return;
       }
+      if (d.error) {
+        setErr(d.error);
+        return;
+      }
       worker.removeEventListener('message', onMessage);
       handleWorkerResponse(d);
     };
     worker.addEventListener('message', onMessage);
+    worker.addEventListener('error', (ev) => {
+      clearTimeout(timeoutId);
+      setErr(`Worker error: ${ev.message}`);
+    });
     worker.postMessage({ meta, taskId });
   }, [address, toolkit, connect, step, networkMismatch]);
 
@@ -149,5 +157,5 @@ export default function DeployPage() {
     </div>
   );
 }
-/* What changed & why: Added 30s timeout for worker response; check networkMismatch after connect; rev r751; Compile-Guard passed. */
+/* What changed & why: Increased worker timeout to 60s; added worker 'error' listener to catch init failures; rev r752; Compile-Guard passed (event listeners, async). */
 /* EOF */

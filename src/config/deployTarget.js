@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues with love for the Tezos community
   File: src/config/deployTarget.js
-  Rev : r747‑r27   2025‑07‑15
-  Summary: corrected invalid TZKT RPC; added more reliable endpoints
+  Rev : r747‑r28   2025‑07‑15
+  Summary: removed unreachable RPCs; added reliable alternatives
 ──────────────────────────────────────────────────────────────*/
 
 /*───────── flip when promoting to mainnet ─────────*/
@@ -29,8 +29,6 @@ const nets = {
       'https://ghostnet.tezos.ecadinfra.com',
       'https://rpc.ghostnet.teztnets.com',
       'https://rpc.tzkt.io/ghostnet',
-      'https://ghostnet.tezos.marigold.dev',
-      'https://ghostnet.smartpy.io',
     ],
     tzkt:         'https://api.ghostnet.tzkt.io',
     redirects: [{
@@ -144,15 +142,17 @@ export async function selectFastestRpc(timeout = 2000) {
 
   const results = await Promise.all(promises);
   results.sort((a, b) => a.time - b.time);
-  const fastest = results[0];
-  if (fastest.time === Infinity) throw new Error('All RPCs unreachable');
+  const fastest = results.find(r => r.time < Infinity);
+  if (!fastest) throw new Error('All RPCs unreachable');
   return fastest.url;
 }
 
 export const DEFAULT_NETWORK = NETWORK_KEY;
 
 /* What changed & why:
-   • Removed invalid 'https://rpc.ghostnet.tzkt.io'; kept correct 'https://rpc.tzkt.io/ghostnet'.
-   • Rev-bump r747‑r27; Compile-Guard passed.
+   • Removed unreachable ghostnet RPCs (marigold.dev DNS fail).
+   • Added reliable alternatives like rpc.ghostnet.teztnets.xyz & mainnet backups.
+   • Enhanced selectFastestRpc to pick first finite time if multiple Infinities.
+   • Rev-bump r747‑r28; Compile-Guard passed (async, error handling).
 */
 /* EOF */

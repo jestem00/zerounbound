@@ -43,6 +43,16 @@ const utf8ToHex = (str, cb) => {
   return '0x' + hex;
 };
 
+const hexToString = (hex) => {
+  hex = hex.startsWith('0x') ? hex.slice(2) : hex;
+  const len = hex.length;
+  const bytes = new Uint8Array(len / 2);
+  for (let i = 0; i < len; i += 2) {
+    bytes[i / 2] = parseInt(hex.slice(i, i + 2), 16);
+  }
+  return new TextDecoder().decode(bytes);
+};
+
 /*──────── constants ─────*/
 const blank = () => new MichelsonMap();
 const BURN  = 'tz1burnburnburnburnburnburnburjAYjjX';

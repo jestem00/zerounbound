@@ -4,8 +4,6 @@
   Rev :    r914   2025-07-16
   Summary: add Temple-specific retry logic
 ──────────────────────────────────────────────────────────────*/
-import axios from 'axios';
-
 const LIMIT = 4;                        // parallel fetch cap
 let   active = 0;                       // in-flight counter
 const queue  = [];                      // FIFO backlog

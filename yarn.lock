@@ -2620,12 +2620,21 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@noble/curves@npm:1.9.2, @noble/curves@npm:^1.6.0, @noble/curves@npm:~1.9.0":
+"@noble/curves@npm:1.9.2":
   version: 1.9.2
   resolution: "@noble/curves@npm:1.9.2"
   dependencies:
     "@noble/hashes": "npm:1.8.0"
   checksum: 10c0/21d049ae4558beedbf5da0004407b72db84360fa29d64822d82dc9e80251e1ecb46023590cc4b20e70eed697d1b87279b4911dc39f8694c51c874289cfc8e9a7
+  languageName: node
+  linkType: hard
+
+"@noble/curves@npm:^1.6.0, @noble/curves@npm:~1.9.0":
+  version: 1.9.3
+  resolution: "@noble/curves@npm:1.9.3"
+  dependencies:
+    "@noble/hashes": "npm:1.8.0"
+  checksum: 10c0/cadea78e50261997d9c4d5050af5fcec9307a4ff7dad3cbda61c432167e2a02d7bcbfdd959586c140a371d9987170d0571ff3347d24a05f462f1d5c7b0cae900
   languageName: node
   linkType: hard
 
@@ -2869,9 +2878,9 @@ __metadata:
   linkType: hard
 
 "@sinclair/typebox@npm:^0.34.0":
-  version: 0.34.37
-  resolution: "@sinclair/typebox@npm:0.34.37"
-  checksum: 10c0/22fff01853d8f35e8a1f0be004e91a0c3ced16f35b8d7e915392e91bf021190bcba45102cd148679c53440c4ed228b31d7a2635461ea5d089ef581f6254ecfb4
+  version: 0.34.38
+  resolution: "@sinclair/typebox@npm:0.34.38"
+  checksum: 10c0/c1b9a1547c64de01ff5c89351baf289d2d5f19cfef3ae30fe4748a103eb58d0842618318543cd3de964cb0370d5a859e24aba231ade9b43ee2ef4d0bb4db7084
   languageName: node
   linkType: hard
 
@@ -5948,9 +5957,9 @@ __metadata:
   linkType: hard
 
 "electron-to-chromium@npm:^1.5.173":
-  version: 1.5.183
-  resolution: "electron-to-chromium@npm:1.5.183"
-  checksum: 10c0/052cb9d53ff84451ad719a9f6c8c50a66a9128623288b84a389e270a863819ce00b437716294370e28907c461604b0b3d738f1e4a92535bca0f9351b0a8e2180
+  version: 1.5.185
+  resolution: "electron-to-chromium@npm:1.5.185"
+  checksum: 10c0/26820527fc85f64798ec21fcd32d3607efdf4567b701da749bbd1dd407a162373bf18733d7f0b12c56ae71ece721073b45beeba82b7d2692c494fb4b5636c4a8
   languageName: node
   linkType: hard
 
@@ -9597,9 +9606,9 @@ __metadata:
   linkType: hard
 
 "picomatch@npm:^4.0.2":
-  version: 4.0.2
-  resolution: "picomatch@npm:4.0.2"
-  checksum: 10c0/7c51f3ad2bb42c776f49ebf964c644958158be30d0a510efd5a395e8d49cb5acfed5b82c0c5b365523ce18e6ab85013c9ebe574f60305892ec3fa8eee8304ccc
+  version: 4.0.3
+  resolution: "picomatch@npm:4.0.3"
+  checksum: 10c0/9582c951e95eebee5434f59e426cddd228a7b97a0161a375aed4be244bd3fe8e3a31b846808ea14ef2c8a2527a6eeab7b3946a67d5979e81694654f939473ae2
   languageName: node
   linkType: hard
 

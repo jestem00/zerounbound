@@ -1,12 +1,14 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/core/net.js
-  Rev :    r913   2025-07-15
-  Summary: implement client-side forge/inject via RPC when !USE_BACKEND
+  Rev :    r914   2025-07-16
+  Summary: add Temple-specific retry logic
 ──────────────────────────────────────────────────────────────*/
-const LIMIT = 4;                         // parallel fetch cap
-let   active = 0;                        // in-flight counter
-const queue  = [];                       // FIFO backlog
+import axios from 'axios';
+
+const LIMIT = 4;                        // parallel fetch cap
+let   active = 0;                       // in-flight counter
+const queue  = [];                      // FIFO backlog
 
 import { selectFastestRpc } from '../config/deployTarget.js';
 
@@ -57,6 +59,11 @@ export function jFetch(url, tries = /tzkt\.io/i.test(url) ? 10 : 5) {
         } catch (e) {                          // network / parse error
           clearTimeout(timer);
           const errStr = e?.name || String(e?.message || e);
+          if (errStr.includes('Receiving end does not exist')) {
+            // Temple-specific: extension port closed
+            await sleep(1200 * (i + 1));
+            continue;
+          }
           if (errStr.includes('ERR_CONNECTION_RESET') || errStr.includes('ECONNRESET')) {
             await sleep(1200 * (i + 1));      // longer back-off for reset
             continue;
@@ -116,5 +123,4 @@ export async function injectSigned(signedBytes) {
     return await res.text();  // op hash
   }
 }
-
-/* What changed & why: Implemented client-side forge/inject via direct RPC calls when !USE_BACKEND to avoid hanging if backend unavailable; rev r913. */
+/* What changed & why: Added retry for Temple 'Receiving end' error; rev r914; Compile-Guard passed. */

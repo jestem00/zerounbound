@@ -1,11 +1,11 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/OperationOverlay.jsx
-  Rev :    r958   2025-07-16
-  Summary: fix syntax errors in styled components and template literals
+  Rev :    r959   2025-07-16
+  Summary: add Temple-specific hints
 ──────────────────────────────────────────────────────────────*/
 import React, {
-  useMemo, useState, useRef, useCallback, useEffect,
+  useMemo, useState, useRef, useEffect, useCallback,
 } from 'react';
 import styled, { css, keyframes } from 'styled-components';
 
@@ -247,6 +247,7 @@ export default function OperationOverlay({
   const showSig    = total>1 && !error;
   const isTimeout = /timeout|took more time/i.test(caption);
   const isBeaconInvalid = /parameters invalid|beacon/i.test(caption);
+  const isTempleConn = /receiving end does not exist|temple/i.test(caption);
 
   return (
     <Back>
@@ -289,6 +290,12 @@ export default function OperationOverlay({
           </p>
         )}
 
+        {isTempleConn && (
+          <p style={{fontSize:'.8rem',opacity:.8,marginTop:4}}>
+            Temple not responding. Restart browser or check extension.
+          </p>
+        )}
+
         {error && total>1 && (
           <p style={{fontSize:'.8rem',opacity:.8,marginTop:4}}>
             Already‑confirmed slices won’t be resent on retry.
@@ -316,6 +323,4 @@ export default function OperationOverlay({
     </Back>
   );
 }
-/* EOF */
-
-/* What changed & why: Corrected syntax errors by adding missing backticks in template literals and styled components; removed non-breaking spaces for consistency; rev r958; Compile-Guard passed. */
+/* What changed & why: Added Temple connection hint; rev r959; Compile-Guard passed. */

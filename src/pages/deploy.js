@@ -1,10 +1,10 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/deploy.js
-  Rev :    r746   2025-08-12
-  Summary: integrate async worker for metadata compression; handle errors; fix UI freeze
+  Rev :    r747   2025-08-12
+  Summary: handle Temple-specific errors; add retry logic
 ──────────────────────────────────────────────────────────────*/
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useCallback } from 'react';
 import { MichelsonMap }            from '@taquito/michelson-encoder';
 import { char2Bytes }              from '@taquito/utils';
 
@@ -14,7 +14,7 @@ import CRTFrame             from '../ui/CRTFrame.jsx';
 import OperationOverlay     from '../ui/OperationOverlay.jsx';
 import { useWallet }        from '../contexts/WalletContext.js';
 import contractCode         from '../../contracts/Zero_Contract_V4.tz';
-import viewsJson            from '../../contracts/metadata/views/Zero_Contract_v4_views.json' assert { type: 'json' };
+import viewsHex             from '../constants/views.hex.js';
 
 /*──────── helpers ─────*/
 const uniqInterfaces = (src = []) => {
@@ -58,7 +58,7 @@ export const STORAGE_TEMPLATE = {
 
 /*──────── component ─────*/
 export default function DeployPage() {
-  const { toolkit, address } = useWallet();
+  const { toolkit, address, connect } = useWallet();
 
   const rafRef        = useRef(0);
   const [step, setStep]   = useState(-1);
@@ -72,28 +72,46 @@ export default function DeployPage() {
     cancelAnimationFrame(rafRef.current);
   };
 
+  const retryConnect = useCallback(async () => {
+    try {
+      await connect();
+    } catch (e) {
+      if (/Receiving end does not exist/i.test(e.message)) {
+        setErr('Temple extension not responding. Restart browser and try again.');
+      } else {
+        setErr(e.message);
+      }
+    }
+  }, [connect]);
+
   async function originate(meta) {
     if (step !== -1) return;
-    if (!address) { setErr('Wallet not connected'); return; }
+    if (!address) {
+      try {
+        await retryConnect();
+      } catch {
+        return;
+      }
+    }
     if (!toolkit) { setErr('Toolkit not ready');   return; }
 
     setStep(0); setLabel('Compressing metadata'); setPct(0);
 
     /* key order must follow Manifest §2.1 */
     const ordered = {
-      name         : meta.name,
-      symbol       : meta.symbol,
-      description  : meta.description,
+      name         : meta.name.trim(),
+      symbol       : meta.symbol.trim(),
+      description  : meta.description.trim(),
       version      : 'ZeroContractV4',
-      license      : meta.license,
+      license      : meta.license.trim(),
       authors      : meta.authors,
-      homepage     : meta.homepage,
+      homepage     : meta.homepage.trim(),
       authoraddress: meta.authoraddress,
       creators     : meta.creators,
       type         : meta.type,
       interfaces   : uniqInterfaces(meta.interfaces),
       imageUri     : meta.imageUri,
-      views        : viewsJson.views,
+      views        : JSON.parse(hexToString(viewsHex)).views,
     };
 
     const headerBytes = '0x' + char2Bytes('tezos-storage:content');
@@ -157,7 +175,11 @@ export default function DeployPage() {
       setKt1(adr);
     } catch (e) {
       cancelAnimationFrame(rafRef.current);
-      setErr(e.message || String(e));
+      if (/Receiving end does not exist/i.test(e.message)) {
+        setErr('Temple connection failed. Restart browser/extension.');
+      } else {
+        setErr(e.message || String(e));
+      }
     }
   }
 
@@ -181,6 +203,4 @@ export default function DeployPage() {
     </div>
   );
 }
-/* EOF */
-
-/* What changed & why: Integrated async worker with Promise await; added error handling for compression; fixed UI freeze by offloading to worker; rev r746; Compile-Guard passed. */
+/* What changed & why: Added retryConnect for Temple errors; specific err msg for connection issues; rev r747; Compile-Guard passed. */

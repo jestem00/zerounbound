@@ -18,7 +18,7 @@ corepack prepare yarn@4.9.1 --activate
 
 # 2 · install dependencies from lockfile (creates .yarn/install-state.gz)
 echo "📦  Installing dependencies (immutable)…"
-yarn install --immutable
+yarn install --immutable --inline-builds
 
 # 3 · surface runtime versions for easier CI debugging
 echo "🐣 Node: $(node --version)"

@@ -1,15 +1,15 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    next.config.js
-  Rev :    r270    2025‑07‑16
-  Summary: patch __dirname for ESM so Vercel build passes
+  Rev :    r271    2025‑07‑16
+  Summary: always (dev + prod) regenerate views.hex.js
 ──────────────────────────────────────────────────────────────*/
 
-import { GenerateSW } from 'workbox-webpack-plugin';
-import fs             from 'fs';
-import path           from 'path';
-import { fileURLToPath } from 'url';
-import { char2Bytes } from '@taquito/utils';
+import { GenerateSW }       from 'workbox-webpack-plugin';
+import fs                   from 'fs';
+import path                 from 'path';
+import { fileURLToPath }    from 'url';
+import { char2Bytes }       from '@taquito/utils';
 
 /*──────────────── helper: __dirname in ESM ────────────────*/
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -65,12 +65,15 @@ const nextConfig = {
       );
     }
 
-    /* Pre‑build views.hex.js during production build */
-    if (!dev && !isServer) {
-      const viewsPath = path.resolve(__dirname, 'contracts/metadata/views/Zero_Contract_v4_views.json');
+    /* Pre‑build views.hex.js for *all* client builds (dev + prod)  */
+    if (!isServer) {                              // ⬅ was (!dev && !isServer)
+      const viewsPath = path.resolve(
+        __dirname,
+        'contracts/metadata/views/Zero_Contract_v4_views.json',
+      );
       const viewsData = fs.readFileSync(viewsPath, 'utf8');
-      const hex = '0x' + char2Bytes(viewsData);
-      const outPath = path.resolve(__dirname, 'src/constants/views.hex.js');
+      const hex       = '0x' + char2Bytes(viewsData);
+      const outPath   = path.resolve(__dirname, 'src/constants/views.hex.js');
       fs.writeFileSync(outPath, `export default '${hex}';\n`);
     }
 
@@ -82,3 +85,8 @@ const nextConfig = {
 
 export default nextConfig;
 /* EOF */
+
+/* What changed & why: regenerated views.hex.js on every client build
+   (dev & prod) by dropping the `!dev` guard—removes stale/erroneous
+   “export default viewsHex;” line that broke worker compression and
+   blocked Beacon popup during origination. */

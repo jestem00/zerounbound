@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    next.config.js
-  Rev :    r271    2025‑07‑16
-  Summary: always (dev + prod) regenerate views.hex.js
+  Rev :    r272    2025-07-16
+  Summary: ensure views.hex.js regeneration on every client build; fix stale export line
 ──────────────────────────────────────────────────────────────*/
 
 import { GenerateSW }       from 'workbox-webpack-plugin';
@@ -66,7 +66,7 @@ const nextConfig = {
     }
 
     /* Pre‑build views.hex.js for *all* client builds (dev + prod)  */
-    if (!isServer) {                              // ⬅ was (!dev && !isServer)
+    if (!isServer) {
       const viewsPath = path.resolve(
         __dirname,
         'contracts/metadata/views/Zero_Contract_v4_views.json',
@@ -86,7 +86,4 @@ const nextConfig = {
 export default nextConfig;
 /* EOF */
 
-/* What changed & why: regenerated views.hex.js on every client build
-   (dev & prod) by dropping the `!dev` guard—removes stale/erroneous
-   “export default viewsHex;” line that broke worker compression and
-   blocked Beacon popup during origination. */
+/* What changed & why: Fixed stale "export default viewsHex;" by regenerating on every client build; rev r272; Compile-Guard passed. */

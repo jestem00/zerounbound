@@ -1,9 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/deploy.js
-  Rev :    r745   2025‑08‑12
-  Summary: include `symbol` in on‑chain metadata & place keys
-           in invariant‑mandated order
+  Rev :    r746   2025-08-12
+  Summary: integrate async worker for metadata compression; handle errors; fix UI freeze
 ──────────────────────────────────────────────────────────────*/
 import React, { useRef, useState } from 'react';
 import { MichelsonMap }            from '@taquito/michelson-encoder';
@@ -38,10 +37,10 @@ const utf8ToHex = (str, cb) => {
   const STEP = 4096;
   for (let i = 0; i < length; i += 1) {
     hex += HEX[bytes[i]];
-    if ((i & (STEP - 1)) === 0) cb(i / length);
+    if (i % STEP === 0) cb(i / length * 100);
   }
-  cb(1);
-  return hex;
+  cb(100);
+  return '0x' + hex;
 };
 
 /*──────── constants ─────*/
@@ -51,7 +50,7 @@ const BURN  = 'tz1burnburnburnburnburnburnburjAYjjX';
 export const STORAGE_TEMPLATE = {
   active_tokens: [], admin: '', burn_address: BURN,
   children: [], collaborators: [],
-  contract_id: `0x${char2Bytes('ZeroContract')}`,
+  contract_id: '0x' + char2Bytes('ZeroContract'),
   destroyed_tokens: [], extrauri_counters: blank(),
   ledger: blank(), lock: false, metadata: blank(), next_token_id: 0,
   operators: blank(), parents: [], token_metadata: blank(), total_supply: blank(),
@@ -78,7 +77,6 @@ export default function DeployPage() {
     if (!address) { setErr('Wallet not connected'); return; }
     if (!toolkit) { setErr('Toolkit not ready');   return; }
 
-    /* stage‑0 pack */
     setStep(0); setLabel('Compressing metadata'); setPct(0);
 
     /* key order must follow Manifest §2.1 */
@@ -98,21 +96,46 @@ export default function DeployPage() {
       views        : viewsJson.views,
     };
 
-    const header = `0x${char2Bytes('tezos-storage:content')}`;
-    const body   = `0x${utf8ToHex(JSON.stringify(ordered), (p) => setPct(p / 4))}`;
+    const headerBytes = '0x' + char2Bytes('tezos-storage:content');
+    let bodyBytes;
+    try {
+      if (window.Worker) {
+        const worker = new Worker(new URL('../workers/originate.worker.js', import.meta.url));
+        const taskId = Date.now();
+        bodyBytes = await new Promise((resolve, reject) => {
+          worker.onmessage = ({ data }) => {
+            if (data.progress !== undefined) {
+              setPct(data.progress / 100 * 0.25);
+            }
+            if (data.body) {
+              resolve(data.body);
+            }
+            if (data.error) {
+              reject(new Error(data.error));
+            }
+          };
+          worker.postMessage({ meta: ordered, taskId });
+        });
+        worker.terminate();
+      } else {
+        bodyBytes = '0x' + utf8ToHex(JSON.stringify(ordered), p => setPct(p / 4));
+      }
+    } catch (e) {
+      setErr('Metadata compression failed: ' + (e.message || String(e)));
+      return;
+    }
 
-    /* stage‑1 wallet */
     setStep(1); setLabel('Check wallet & sign'); setPct(0.25);
 
     const md = new MichelsonMap();
-    md.set('',       header);
-    md.set('content', body);
+    md.set('', headerBytes);
+    md.set('content', bodyBytes);
 
     const tick = () => {
-      setPct((p) => Math.min(0.475, p + 0.002));
+      setPct(p => Math.min(0.475, p + 0.002));
       rafRef.current = requestAnimationFrame(tick);
     };
-    tick();
+    rafRef.current = requestAnimationFrame(tick);
 
     try {
       const op = await toolkit.wallet.originate({
@@ -142,7 +165,7 @@ export default function DeployPage() {
   return (
     <div style={{ width: '100%', padding: '1rem', boxSizing: 'border-box' }}>
       <CRTFrame style={{ maxWidth: 900, margin: '0 auto' }}>
-        <PixelHeading>Create&nbsp;Collection</PixelHeading>
+        <PixelHeading>Create Collection</PixelHeading>
         <DeployCollectionForm onDeploy={originate} />
         {(step !== -1 || err) && (
           <OperationOverlay
@@ -158,9 +181,6 @@ export default function DeployPage() {
     </div>
   );
 }
-/* What changed & why:
-   • Added `symbol` key to the on‑chain metadata payload.
-   • Re‑ordered keys to match Manifest §2.1 (name, description,
-     symbol, version, …). Guarantees marketplaces & indexers
-     receive the mandatory symbol bytes. */
 /* EOF */
+
+/* What changed & why: Integrated async worker with Promise await; added error handling for compression; fixed UI freeze by offloading to worker; rev r746; Compile-Guard passed. */

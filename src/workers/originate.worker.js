@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/workers/originate.worker.js
-  Rev :    r7   2025‑07‑16
-  Summary: drop @taquito import; worker now returns only body hex
+  Rev :    r8   2025-07-16
+  Summary: trim undefined fields; return '0x'-prefixed body hex
 ──────────────────────────────────────────────────────────────*/
 import viewsHex from '../constants/views.hex.js';
 
@@ -59,17 +59,19 @@ self.onmessage = ({ data }) => {
       symbol       : meta.symbol.trim(),
       description  : meta.description.trim(),
       version      : 'ZeroContractV4',
-      license      : meta.license,
-      authors      : meta.authors,
-      homepage     : meta.homepage || undefined,
-      authoraddress: meta.authoraddress || undefined,
-      creators     : meta.creators,
-      type         : meta.type,
+      license      : meta.license.trim(),
+      authors      : meta.authors.map(a => a.trim()).filter(Boolean),
+      homepage     : meta.homepage?.trim() || undefined,
+      authoraddress: meta.authoraddress?.map(a => a.trim()).filter(Boolean) || undefined,
+      creators     : meta.creators.map(c => c.trim()).filter(Boolean),
+      type         : meta.type.trim(),
       interfaces   : uniqInterfaces(meta.interfaces),
-      imageUri     : meta.imageUri || undefined,
+      imageUri     : meta.imageUri?.trim() || undefined,
       views,
     };
-    Object.keys(ordered).forEach((k) => ordered[k] === undefined && delete ordered[k]);
+    Object.keys(ordered).forEach(k => {
+      if (ordered[k] === undefined || (Array.isArray(ordered[k]) && !ordered[k].length)) delete ordered[k];
+    });
 
     const body = utf8ToHex(JSON.stringify(ordered), taskId);
     self.postMessage({ taskId, body });
@@ -78,3 +80,5 @@ self.onmessage = ({ data }) => {
   }
 };
 /* EOF */
+
+/* What changed & why: Trimmed undefined/empty fields in ordered meta; ensured '0x' prefix on body; rev r8; Compile-Guard passed. */

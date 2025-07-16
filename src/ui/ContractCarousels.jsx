@@ -42,8 +42,9 @@ const DETAIL_TTL = 7 * 24 * 60 * 60 * 1_000;  /* 7 days */
 const CACHE_MAX  = 150;
 const LIST_TTL   = 300_000;
 const MIN_SPIN   = 200;
-const RETRY_MAX     = 3;
-const RETRY_DELAY   = 2000;
+const FETCH_MS   = 30_000;
+const RETRY_MAX  = 3;
+const RETRY_DELAY= 2000;
 
 const TZKT = {
   ghostnet: 'https://api.ghostnet.tzkt.io/v1',
@@ -107,7 +108,7 @@ async function withRetry(fn, max = RETRY_MAX, delay = RETRY_DELAY) {
 }
 
 /*──────── timeout helper ───────────────────────────────────*/
-async function fetchWithTimeout(promise, ms = 10000) {
+async function fetchWithTimeout(promise, ms = FETCH_MS) {
   return Promise.race([
     promise,
     sleep(ms).then(() => { throw new Error('timeout'); }),

@@ -104,6 +104,7 @@ const init = useCallback(async () => {
     walletRef.current = new BeaconWallet({
       name            : APP_NAME,
       preferredNetwork: network,
+      matrixNodes     : [],   // disable P2P to fix Temple
       colorMode       : 'dark',
     });
     walletRef.current.client.sendMetrics = async () => {};

@@ -17,7 +17,7 @@ import {
 
 export const sleep = (ms = 500) => new Promise(r => setTimeout(r, ms));
 
-const USE_BACKEND = process.env.USE_BACKEND === 'true';   /* vercel toggle */
+const USE_BACKEND = process.env.USE_BACKEND !== 'false';  /* default on */
 
 /*──────── throttled fetch ─────────────────────────────────*/
 function exec(task){ active++; return task().finally(()=>{ active--; if(queue.length) queue.shift()();}); }

@@ -20,7 +20,7 @@ import OperationOverlay     from '../ui/OperationOverlay.jsx';
 import { useWallet }        from '../contexts/WalletContext.js';
 import { TZKT_API }         from '../config/deployTarget.js';
 import { jFetch, sleep }    from '../core/net.js';
-import contractCode         from '../../contracts/Zero_Contract_v4.tz';
+import contractCode         from '../../contracts/Zero_Contract_V4.tz';
 import viewsHex             from '../constants/views.hex.js';
 import {
   forgeOrigination,

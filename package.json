@@ -1,6 +1,6 @@
 {
   "name": "zerounbound-ghostnet",
-  "version": "1.5.3",
+  "version": "1.5.4",
   "private": true,
   "type": "module",
   "scripts": {
@@ -21,6 +21,8 @@
     "@stablelib/utf8": "1.0.2",
     "@stablelib/x25519-session": "1.0.4",
     "@taquito/beacon-wallet": "21.0.4",
+    "@taquito/michel-codec": "^22.0.0",
+    "@taquito/signer": "21.0.4",
     "@taquito/taquito": "21.0.4",
     "@taquito/tzip12": "21.0.4",
     "@taquito/tzip16": "21.0.4",

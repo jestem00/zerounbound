@@ -2954,6 +2954,17 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@stablelib/hmac@npm:^1.0.1":
+  version: 1.0.1
+  resolution: "@stablelib/hmac@npm:1.0.1"
+  dependencies:
+    "@stablelib/constant-time": "npm:^1.0.1"
+    "@stablelib/hash": "npm:^1.0.1"
+    "@stablelib/wipe": "npm:^1.0.1"
+  checksum: 10c0/a111d5e687966b62c81f7dbd390f13582b027edee9bd39df6474a6472e5ad89d705e735af32bae2c9280a205806649f54b5ff8c4e8c8a7b484083a35b257e9e6
+  languageName: node
+  linkType: hard
+
 "@stablelib/int@npm:^1.0.1":
   version: 1.0.1
   resolution: "@stablelib/int@npm:1.0.1"
@@ -2980,6 +2991,18 @@ __metadata:
     "@stablelib/x25519": "npm:^1.0.3"
     "@stablelib/xsalsa20": "npm:^1.0.2"
   checksum: 10c0/8b9d3bf6fa12a8e47cedac73c65a7278dd934b5bf41bb3403bf6e470a2c78f4a830618066768f2679357bb574f68ac784f20ff94698f20be63881be3c8123bb0
+  languageName: node
+  linkType: hard
+
+"@stablelib/pbkdf2@npm:^1.0.1":
+  version: 1.0.1
+  resolution: "@stablelib/pbkdf2@npm:1.0.1"
+  dependencies:
+    "@stablelib/binary": "npm:^1.0.1"
+    "@stablelib/hash": "npm:^1.0.1"
+    "@stablelib/hmac": "npm:^1.0.1"
+    "@stablelib/wipe": "npm:^1.0.1"
+  checksum: 10c0/914477dbf7ac73cc99c201fb96be7a3b340d30873bb1bc8106dc45721fd41b4caaac7491437be898ece30f1c35c58f22d835f1d3ab497cf8863f8487d2d1a889
   languageName: node
   linkType: hard
 
@@ -3118,6 +3141,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@taquito/core@npm:^22.0.0":
+  version: 22.0.0
+  resolution: "@taquito/core@npm:22.0.0"
+  dependencies:
+    json-stringify-safe: "npm:^5.0.1"
+  checksum: 10c0/37d20e20f4f1e24b220e482eeb6864b324391afeef319977cbe470900590ae407c9d36eb9babe75b099354f5ba3eff7782068ceac542853b987032046491cf5d
+  languageName: node
+  linkType: hard
+
 "@taquito/http-utils@npm:^21.0.4, @taquito/http-utils@npm:^21.0.5":
   version: 21.0.5
   resolution: "@taquito/http-utils@npm:21.0.5"
@@ -3148,6 +3180,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@taquito/michel-codec@npm:^22.0.0":
+  version: 22.0.0
+  resolution: "@taquito/michel-codec@npm:22.0.0"
+  dependencies:
+    "@taquito/core": "npm:^22.0.0"
+  checksum: 10c0/e354241585a04ff2d394662a97d41ffbdb6b77a88044305a07628f2c82c35594d7733b10e233da3635ca282ec756cdb921405fdbf29ceaf940d5c6d6e9c27ea4
+  languageName: node
+  linkType: hard
+
 "@taquito/michelson-encoder@npm:^21.0.4, @taquito/michelson-encoder@npm:^21.0.5":
   version: 21.0.5
   resolution: "@taquito/michelson-encoder@npm:21.0.5"
@@ -3170,6 +3211,28 @@ __metadata:
     "@taquito/utils": "npm:^21.0.5"
     bignumber.js: "npm:^9.1.2"
   checksum: 10c0/dddf4129c861763de3da3cbde1c9a5546e3f676da88c572b5a77961857ac6eb47a7a4498ff5c5bb91ec71bcf16948623eb6b9e328dcb6e191d7a74f51533b11f
+  languageName: node
+  linkType: hard
+
+"@taquito/signer@npm:21.0.4":
+  version: 21.0.4
+  resolution: "@taquito/signer@npm:21.0.4"
+  dependencies:
+    "@stablelib/blake2b": "npm:^1.0.1"
+    "@stablelib/ed25519": "npm:^1.0.3"
+    "@stablelib/hmac": "npm:^1.0.1"
+    "@stablelib/nacl": "npm:^1.0.4"
+    "@stablelib/pbkdf2": "npm:^1.0.1"
+    "@stablelib/sha512": "npm:^1.0.1"
+    "@taquito/core": "npm:^21.0.4"
+    "@taquito/taquito": "npm:^21.0.4"
+    "@taquito/utils": "npm:^21.0.4"
+    "@types/bn.js": "npm:^5.1.5"
+    bip39: "npm:3.1.0"
+    elliptic: "npm:^6.6.1"
+    pbkdf2: "npm:^3.1.2"
+    typedarray-to-buffer: "npm:^4.0.0"
+  checksum: 10c0/c05923e710d25bab31809ad49fef9ccf8f44aefd7d21e365cff874186b48ef390ef4af24927533d6358d540ef5aa03482e3fdbfd93bee9b277ac008b550562e7
   languageName: node
   linkType: hard
 
@@ -3389,6 +3452,15 @@ __metadata:
   dependencies:
     "@babel/types": "npm:^7.20.7"
   checksum: 10c0/5386f0af44f8746b063b87418f06129a814e16bb2686965a575e9d7376b360b088b89177778d8c426012abc43dd1a2d8ec3218bfc382280c898682746ce2ffbd
+  languageName: node
+  linkType: hard
+
+"@types/bn.js@npm:^5.1.5":
+  version: 5.2.0
+  resolution: "@types/bn.js@npm:5.2.0"
+  dependencies:
+    "@types/node": "npm:*"
+  checksum: 10c0/7a36114b8e61faba5c28b433c3e5aabded261745dabb8f3fe41b2d84e8c4c2b8282e52a88a842bd31a565ff5dbf685145ccd91171f1a8d657fb249025c17aa85
   languageName: node
   linkType: hard
 
@@ -4981,6 +5053,15 @@ __metadata:
   version: 9.3.1
   resolution: "bignumber.js@npm:9.3.1"
   checksum: 10c0/61342ba5fe1c10887f0ecf5be02ff6709271481aff48631f86b4d37d55a99b87ce441cfd54df3d16d10ee07ceab7e272fc0be430c657ffafbbbf7b7d631efb75
+  languageName: node
+  linkType: hard
+
+"bip39@npm:3.1.0":
+  version: 3.1.0
+  resolution: "bip39@npm:3.1.0"
+  dependencies:
+    "@noble/hashes": "npm:^1.2.0"
+  checksum: 10c0/68f9673a0d6a851e9635f3af8a85f2a1ecef9066c76d77e6f0d58d274b5bf22a67f429da3997e07c0d2cf153a4d7321f9273e656cac0526f667575ddee28ef71
   languageName: node
   linkType: hard
 
@@ -12418,6 +12499,8 @@ __metadata:
     "@stablelib/utf8": "npm:1.0.2"
     "@stablelib/x25519-session": "npm:1.0.4"
     "@taquito/beacon-wallet": "npm:21.0.4"
+    "@taquito/michel-codec": "npm:^22.0.0"
+    "@taquito/signer": "npm:21.0.4"
     "@taquito/taquito": "npm:21.0.4"
     "@taquito/tzip12": "npm:21.0.4"
     "@taquito/tzip16": "npm:21.0.4"

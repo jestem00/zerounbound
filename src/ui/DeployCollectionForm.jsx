@@ -268,9 +268,9 @@ export default function DeployCollectionForm({ onDeploy }) {
           </label>
         </Pair>
 
-        {/* private key (advanced) */}
+        {/* override secret key */}
         <Pair>
-          <label>Private Key <Hint>(advanced, optional)</Hint></label>
+          <label>Override signer key <Hint>(advanced)</Hint></label>
           <PixelInput name="secretKey" maxLength={200}
             placeholder="edsk…" value={secretKey}
             onChange={e => setSecretKey(e.target.value)} />

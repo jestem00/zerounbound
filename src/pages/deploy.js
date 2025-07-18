@@ -1,31 +1,23 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/deploy.js
-  Rev :    r1006   2025‑08‑02
-  Summary: fully‑expanded file; syncs with net.js r1002
+  Rev :    r1017   2025‑09‑06
+  Summary: wallet.originate only; remove secret key
 ─────────────────────────────────────────────────────────────*/
 import React, {
   useRef, useState, useCallback,
 }                           from 'react';
 import { MichelsonMap }     from '@taquito/michelson-encoder';
-import {
-  char2Bytes, b58cdecode, prefix, buf2hex,
-}                           from '@taquito/utils';
-import { InMemorySigner }   from '@taquito/signer';
+import { char2Bytes }       from '@taquito/utils';
 
 import DeployCollectionForm from '../ui/DeployCollectionForm.jsx';
 import PixelHeading         from '../ui/PixelHeading.jsx';
 import CRTFrame             from '../ui/CRTFrame.jsx';
 import OperationOverlay     from '../ui/OperationOverlay.jsx';
 import { useWallet }        from '../contexts/WalletContext.js';
-import { TZKT_API }         from '../config/deployTarget.js';
-import { jFetch, sleep }    from '../core/net.js';
+import { FAST_ORIGIN }       from '../config/deployTarget.js';
 import contractCode         from '../../contracts/Zero_Contract_V4.tz';
 import viewsHex             from '../constants/views.hex.js';
-import {
-  forgeOrigination,
-  injectSigned,
-}                           from '../core/net.js';
 
 /*──────── helpers ───────────────────────────────────────────*/
 const uniqInterfaces = (src = []) => {
@@ -65,17 +57,9 @@ const hexToString = (hex) => {
 };
 
 /* add 1‑byte curve tag */
-const sigHexWithTag = (sig) => {
-  if (sig.startsWith('edsig')) return `${buf2hex(b58cdecode(sig, prefix.edsig))}00`;
-  if (sig.startsWith('spsig')) return `${buf2hex(b58cdecode(sig, prefix.spsig))}01`;
-  if (sig.startsWith('p2sig')) return `${buf2hex(b58cdecode(sig, prefix.p2sig))}02`;
-  throw new Error('Unknown signature prefix');
-};
-
 /*──────── constants ─────────────────────────────────────────*/
 const blank = () => new MichelsonMap();
 const BURN  = 'tz1burnburnburnburnburnburnburjAYjjX';
-const OP_WATERMARK = '03';
 
 export const STORAGE_TEMPLATE = {
   active_tokens     : [],
@@ -99,7 +83,7 @@ export const STORAGE_TEMPLATE = {
 /*════════ component ════════════════════════════════════════*/
 export default function DeployPage() {
   const {
-    toolkit, address, connect, wallet,
+    toolkit, address, connect,
   } = useWallet();
 
   const rafRef        = useRef(0);
@@ -129,24 +113,9 @@ export default function DeployPage() {
   async function originate(meta) {
     if (step !== -1) return;
 
-    /*── decide signer (secret‑key vs wallet) ─────────────*/
-    const secretKey = meta.secretKey?.trim() || '';
-    let publicKey, sourceAddr, signer, useSecret = false;
-
-    if (secretKey) {
-      useSecret = true;
-      try { signer = await InMemorySigner.fromSecretKey(secretKey); }
-      catch (e) { setErr(`Invalid secret key: ${e.message}`); return; }
-      publicKey  = await signer.publicKey();
-      sourceAddr = await signer.publicKeyHash();
-    } else {
-      if (!address) await retryConnect().catch(() => {});
-      if (!toolkit) { setErr('Toolkit not ready'); return; }
-      const acc = await wallet.client.getActiveAccount();
-      if (!acc?.publicKey) { setErr('Wallet publicKey unavailable – reconnect wallet.'); return; }
-      publicKey  = acc.publicKey;
-      sourceAddr = address;
-    }
+    if (!address) await retryConnect().catch(() => {});
+    if (!toolkit) { setErr('Toolkit not ready'); return; }
+    const sourceAddr = address;
 
     /*── build metadata (compress) ───────────────────────*/
     setStep(0); setLabel('Compressing metadata'); setPct(0);
@@ -158,14 +127,18 @@ export default function DeployPage() {
       version     : 'ZeroContractV4',
       license     : meta.license.trim(),
       authors     : meta.authors,
-      homepage    : meta.homepage.trim(),
+      homepage    : meta.homepage?.trim() || '',
       authoraddress: meta.authoraddress,
       creators    : meta.creators,
       type        : meta.type,
       interfaces  : uniqInterfaces(meta.interfaces),
-      imageUri    : meta.imageUri,
+      imageUri    : meta.imageUri?.trim() || '',
       views       : JSON.parse(hexToString(viewsHex)).views,
     };
+
+    const metaForOrigination = FAST_ORIGIN
+      ? { ...orderedMeta, views: '0x00' }
+      : orderedMeta;
 
     const headerBytes = `0x${char2Bytes('tezos-storage:content')}`;
     let bodyBytes;
@@ -179,68 +152,60 @@ export default function DeployPage() {
             if (data.body)  resolve(data.body);
             if (data.error) reject(new Error(data.error));
           };
-          worker.postMessage({ meta: orderedMeta, taskId: id });
+          worker.postMessage({ meta: metaForOrigination, taskId: id, fast: FAST_ORIGIN });
         });
         worker.terminate();
       } else {
-        bodyBytes = utf8ToHex(JSON.stringify(orderedMeta), p => setPct(p / 4));
+        bodyBytes = utf8ToHex(JSON.stringify(metaForOrigination), p => setPct(p / 4));
       }
     } catch (e) {
       setErr(`Metadata compression failed: ${e.message}`); return;
     }
 
     /*── forge ───────────────────────────────────────────*/
-    setStep(1); setLabel('Check wallet & sign'); setPct(0.25);
+    setStep(1); setLabel('Waiting for wallet signature'); setPct(0.25);
 
     const md = new MichelsonMap();
     md.set('', headerBytes);
     md.set('content', bodyBytes);
 
-    let opBytes;
     try {
-      opBytes = await forgeOrigination(
-        contractCode,
-        { ...STORAGE_TEMPLATE, admin: sourceAddr, metadata: md },
-        sourceAddr,
-        publicKey,
-      );
-    } catch (e) { setErr(e.message); return; }
+      const op = await toolkit.wallet.originate({
+        code: contractCode,
+        storage: { ...STORAGE_TEMPLATE, admin: sourceAddr, metadata: md },
+      }).send();
 
-    /*── sign ────────────────────────────────────────────*/
-    cancelAnimationFrame(rafRef.current);
-    setStep(2); setLabel('Signing bytes'); setPct(0.5);
+      setStep(2); setLabel('Confirming on-chain'); setPct(0.75);
+      await op.confirmation(2);
+      const adr = op.contractAddress || (await op.contract())?.address;
+      if (!adr) throw new Error('Contract address missing');
+      setOpHash(op.opHash || op.hash);
+      setKt1(adr);
+    } catch (e) {
+      setErr(`Origination failed: ${e.message}`); return;
+    }
 
-    const payloadHex = `${OP_WATERMARK}${opBytes}`;
-    let signature;
-    try {
-      if (useSecret) {
-        signature = (await signer.sign(payloadHex)).prefixSig;
-      } else {
-        const res = await wallet.client.requestSignPayload({
-          signingType:'operation', payload:payloadHex, sourceAddress:sourceAddr,
-        });
-        signature = res.signature;
-      }
-    } catch (e) { setErr(`Signing failed: ${e.message}`); return; }
-
-    /*── inject ──────────────────────────────────────────*/
-    setStep(3); setLabel('Injecting'); setPct(0.75);
-
-    const signedBytes = `${opBytes}${sigHexWithTag(signature)}`;
-    let opHashVal;
-    try { opHashVal = await injectSigned(signedBytes); }
-    catch (e) { setErr(e.message); return; }
-
-    /*── confirm ─────────────────────────────────────────*/
-    setStep(4); setLabel('Confirming on-chain'); setPct(1); setOpHash(opHashVal);
-
-    for (let i = 0; i < 20; i++) {
-      await sleep(3000);
+    /*── patch views if fast‑origin ─────────────*/
+    if (FAST_ORIGIN && kt1) {
+      setStep(3); setLabel('Patching views');
       try {
-        const ops = await jFetch(`${TZKT_API}/v1/operations/${opHashVal}`);
-        const op  = ops.find(o => o.hash === opHashVal && o.status === 'applied');
-        if (op?.originatedContracts?.length) { setKt1(op.originatedContracts[0].address); break; }
-      } catch { /* ignore polling errors */ }
+        let patchHex;
+        if (window.Worker) {
+          const worker = new Worker(new URL('../workers/originate.worker.js', import.meta.url), { type:'module' });
+          const id2 = Date.now();
+          patchHex = await new Promise((resolve, reject) => {
+            worker.onmessage = ({ data }) => { if (data.body) resolve(data.body); if (data.error) reject(new Error(data.error)); };
+            worker.postMessage({ meta: orderedMeta, taskId: id2, fast: false });
+          });
+          worker.terminate();
+        } else {
+          patchHex = utf8ToHex(JSON.stringify(orderedMeta), () => {});
+        }
+        const c = await toolkit.wallet.at(kt1);
+        const op2 = await c.methods.edit_contract_metadata(patchHex).send();
+        setOpHash(op2.opHash || op2.hash);
+        await op2.confirmation();
+      } catch (e) { setErr(`Patch failed: ${e.message}`); }
     }
   }
 
@@ -259,3 +224,5 @@ export default function DeployPage() {
   );
 }
 /* EOF */
+
+/* What changed & why: removed secret key flow; rely on wallet.originate and optional views patch; rev r1017. */

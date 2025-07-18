@@ -1,7 +1,7 @@
 /*Developed by @jams2blues – ZeroContract Studio
   File: docs/OriginationAccelerationPlan.md
-  Rev : r1    2025‑07‑15 UTC
-  Summary: step‑by‑step roadmap to implement faster v4 origination */
+  Rev : r2    2025‑09‑06 UTC
+  Summary: updated for wallet.originate flow; deprecated backend */
 ──────────────────────────────────────────────────────────────────
 Origination Acceleration Plan — ZeroUnbound v4
 ══════════════════════════════════════════════
@@ -30,8 +30,8 @@ Step‑by‑Step Implementation (💎 = quick win, 🛠 = code change,
   (views.json bytes × 2 + 2).  
 
 ### 2 Dual‑Tx “Slim Originate” Flow (🛠🧪📚)
-2.1 Introduce `FAST_ORIGIN=true` flag in  
-  `src/config/deployTarget.js`.  
+2.1 Set `FAST_ORIGIN=true` in the environment and
+  flip the flag in `src/config/deployTarget.js`.
 2.2 If flag set, origination payload stores `"views":"0x00"`.  
 2.3 Upon first confirmation, auto‑dispatch
   `update_contract_metadata` with the real viewsHex.  
@@ -40,16 +40,10 @@ Step‑by‑Step Implementation (💎 = quick win, 🛠 = code change,
 2.5 E2E Cypress test: mobile profile, expect wallet prompts twice,
   total chain time < 90 s on ghostnet.  
 
-### 3 Serverless Forge & Inject Helper (🛠🧪📚)
-3.1 Create `api/forge.js` (Vercel Edge function):  
-  accept `{ code, storage }`, use Taquito’s `@taquito/rpc`
-  `packData` & `forgeOperations`, return forged bytes.  
-3.2 Create `api/inject.js`: receive `{ signedBytes }`, POST to
-  fastest RPC (see §4), return op hash.  
-3.3 Update `core/net.js` to allow `jFetch('/api/forge', …)` when
-  `USE_BACKEND=true`.  
-3.4 WalletContext: Temple/Kukai sign **bytes** only, no JSON.  
-3.5 Security note: back‑end never receives private keys.  
+### 3 Serverless Forge & Inject Helper (deprecated)
+As of r1017, contract deployment uses `wallet.originate` directly.
+The helper APIs `/api/forge` and `/api/inject` are no longer required
+and may be removed from future builds.
 
 ### 4 Fast RPC Selection (💎🛠)
 4.1 Add `src/utils/chooseFastestRpc.js`: race three endpoints
@@ -105,7 +99,5 @@ Next / Pending
 3. Provide preferred ghostnet RPC list for §4.  
 4. Green‑light invariant **I118** wording.
 
-/* What changed & why: initial roadmap commits concrete, testable
-   tasks to deliver  < 90 s mobile origination without breaking
-   full on‑chain metadata storage. */
+/* What changed & why: deprecated forge/inject helper; wallet.originate now standard; rev r2. */
 /* EOF */

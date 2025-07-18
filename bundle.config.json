@@ -174,8 +174,6 @@
         "src/config/deployTarget.js",
         "contracts/metadata/views/Zero_Contract_v4_views.json",
         "src/constants/views.hex.js",
-        "src/pages/api/forge.js",
-        "src/pages/api/inject.js",
         "src/utils/chooseFastestRpc.js",
         "jest.config.cjs",
         "next.config.js",

@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/workers/originate.worker.js
-  Rev :    r8   2025-07-16
-  Summary: trim undefined fields; return '0x'-prefixed body hex
+  Rev :    r9   2025-09-06
+  Summary: fast mode w/ placeholder views
 ──────────────────────────────────────────────────────────────*/
 import viewsHex from '../constants/views.hex.js';
 
@@ -52,7 +52,7 @@ const utf8ToHex = (str, taskId) => {
 
 /*──────── worker message ─────*/
 self.onmessage = ({ data }) => {
-  const { meta, taskId } = data;
+  const { meta, taskId, fast } = data;
   try {
     const ordered = {
       name         : meta.name.trim(),
@@ -67,7 +67,7 @@ self.onmessage = ({ data }) => {
       type         : meta.type.trim(),
       interfaces   : uniqInterfaces(meta.interfaces),
       imageUri     : meta.imageUri?.trim() || undefined,
-      views,
+      views        : fast ? '0x00' : views,
     };
     Object.keys(ordered).forEach(k => {
       if (ordered[k] === undefined || (Array.isArray(ordered[k]) && !ordered[k].length)) delete ordered[k];
@@ -81,4 +81,4 @@ self.onmessage = ({ data }) => {
 };
 /* EOF */
 
-/* What changed & why: Trimmed undefined/empty fields in ordered meta; ensured '0x' prefix on body; rev r8; Compile-Guard passed. */
+/* What changed & why: Added fast flag to emit placeholder views; rev r9. */

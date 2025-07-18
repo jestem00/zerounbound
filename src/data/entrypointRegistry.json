@@ -77,6 +77,22 @@
     "add_collaborator": false,
     "remove_collaborator": false,
     "update_contract_metadata": false
+  },
+
+  "v4d": {
+    "$extends": "v3",
+    "burn":                  ["nat","nat"],
+    "append_token_metadata": ["string","nat","bytes"],
+    "update_contract_metadata": ["bytes"],
+    "update_token_metadata":    ["map(string,bytes)","nat"],
+    "add_collaborators":     ["set<address>"],
+    "remove_collaborators":  ["set<address>"],
+    "add_parent":  false,
+    "remove_parent":false,
+    "add_child":   false,
+    "remove_child":false,
+    "lock_metadata": false,
+    "repair_uri":   false
   }
 }
 

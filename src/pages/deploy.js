@@ -196,15 +196,16 @@ export default function DeployPage() {
     md.set('', headerBytes);
     md.set('content', bodyBytes);
 
-    let opBytes;
+    let forgeRes;
     try {
-      opBytes = await forgeOrigination(
+      forgeRes = await forgeOrigination(
         contractCode,
         { ...STORAGE_TEMPLATE, admin: sourceAddr, metadata: md },
         sourceAddr,
         publicKey,
       );
     } catch (e) { setErr(e.message); return; }
+    const { bytes: opBytes, rpc: forgeRpc } = forgeRes;
 
     /*── sign ────────────────────────────────────────────*/
     cancelAnimationFrame(rafRef.current);
@@ -228,7 +229,7 @@ export default function DeployPage() {
 
     const signedBytes = `${opBytes}${sigHexWithTag(signature)}`;
     let opHashVal;
-    try { opHashVal = await injectSigned(signedBytes); }
+    try { opHashVal = await injectSigned(signedBytes, forgeRpc); }
     catch (e) { setErr(e.message); return; }
 
     /*── confirm ─────────────────────────────────────────*/

@@ -52,7 +52,7 @@ export function jFetch(url, opts = {}, tries){
   });
 }
 
-/*──────────────── forgeOrigination – r4 ───────────────────*/
+/*──────────────── forgeOrigination – r5 ───────────────────*/
 export async function forgeOrigination(
   sourceTz,
   storageJs,
@@ -115,9 +115,9 @@ export async function forgeOrigination(
     const { forged } = await jFetch('/api/forge',{
       method :'POST',
       headers:{'Content-Type':'application/json'},
-      body   : JSON.stringify(opObj),
+      body   : JSON.stringify({ ...opObj, rpc }),
     });
-    return forged.replace(/^0x/,'');
+    return { bytes: forged.replace(/^0x/,''), rpc };
   }
 
   const res = await fetch(`${rpc}/chains/main/blocks/head/helpers/forge/operations`,{
@@ -129,13 +129,13 @@ export async function forgeOrigination(
     const detail=await res.text().catch(()=>res.statusText);
     throw new Error(`Forge failed: HTTP ${res.status} – ${detail}`);
   }
-  return (await res.text()).replace(/^0x/,'').replace(/"/g,'').trim();
+  return { bytes: (await res.text()).replace(/^0x/,'').replace(/"/g,'').trim(), rpc };
 }
 
-/*──────────────── injectSigned – r6 ────────────────────────*/
-export async function injectSigned(signedBytes){
+/*──────────────── injectSigned – r7 ────────────────────────*/
+export async function injectSigned(signedBytes, rpcHint = null){
   const fastest = await selectFastestRpc().catch(()=>null);
-  const rpcPool = [...new Set([fastest, ...RPC_URLS])].filter(Boolean);
+  const rpcPool = [...new Set([rpcHint, fastest, ...RPC_URLS])].filter(Boolean);
   const sanitize=u=>(u||'').split(/[?#]/)[0].replace(/\/+$/,'');
   const hex = signedBytes.replace(/^0x/,'');
 
@@ -164,7 +164,7 @@ export async function injectSigned(signedBytes){
     const { opHash } = await jFetch('/api/inject',{
       method :'POST',
       headers:{'Content-Type':'application/json'},
-      body   : JSON.stringify({ signedBytes: hex }),
+      body   : JSON.stringify({ signedBytes: hex, rpc: rpcHint }),
     });
     return opHash;
   }

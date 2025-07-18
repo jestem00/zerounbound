@@ -5,12 +5,12 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
   try {
-    const { branch, contents } = req.body || {};
+    const { branch, contents, rpc: rpcHint } = req.body || {};
     if (!branch || !contents) {
       return res.status(400).json({ error: 'Missing branch/contents' });
     }
 
-    const rpc = process.env.RPC_URL || (await selectFastestRpc().catch(() => null));
+    const rpc = rpcHint || process.env.RPC_URL || (await selectFastestRpc().catch(() => null));
     if (!rpc) return res.status(500).json({ error: 'No reachable RPC' });
 
     const tk = new TezosToolkit(rpc);

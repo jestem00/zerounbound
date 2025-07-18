@@ -5,12 +5,12 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
   try {
-    const { signedBytes } = req.body || {};
+    const { signedBytes, rpc: rpcHint } = req.body || {};
     if (!signedBytes)
       return res.status(400).json({ error: 'Missing signedBytes' });
 
     const fastest = await selectFastestRpc().catch(() => null);
-    const pool = [process.env.RPC_URL, fastest, ...RPC_URLS]
+    const pool = [rpcHint, process.env.RPC_URL, fastest, ...RPC_URLS]
       .filter(Boolean)
       .filter((v, i, a) => a.indexOf(v) === i);
     const hex = signedBytes.replace(/^0x/, '');

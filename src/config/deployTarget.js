@@ -150,7 +150,7 @@ export async function selectFastestRpc(timeout = 2000) {
 export const DEFAULT_NETWORK = NETWORK_KEY;
 
 /* optional slim origination (see docs/ThinBackendsteps.md) */
-export const FAST_ORIGIN = process.env.FAST_ORIGIN === 'true';
+export const FAST_ORIGIN = process.env.FAST_ORIGIN !== 'false';
 
 /* What changed & why:
    • Removed unreachable ghostnet RPCs (marigold.dev DNS fail).

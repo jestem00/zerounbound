@@ -238,7 +238,7 @@ export default function DeployCollectionForm({ onDeploy }) {
         {/* thumbnail */}
         <Pair>
           <label style={{ textAlign: 'center' }}>
-            Collection Thumbnail <Hint>(1:1 recommended)</Hint>
+            Collection Thumbnail&nbsp;<Hint>(1:1 recommended)</Hint>
           </label>
 
           <MintUpload
@@ -263,14 +263,14 @@ export default function DeployCollectionForm({ onDeploy }) {
           <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <input type="checkbox" name="agree"
               checked={data.agree} onChange={setField} />
-            Accept 
+            Accept&nbsp;
             <a href="/terms" target="_blank" rel="noopener noreferrer">terms</a>
           </label>
         </Pair>
 
         {/* override secret key */}
         <Pair>
-          <label>Override signer key <Hint>(advanced)</Hint></label>
+          <label>Private key override <Hint>(advanced)</Hint></label>
           <PixelInput name="secretKey" maxLength={200}
             placeholder="edsk…" value={secretKey}
             onChange={e => setSecretKey(e.target.value)} />
@@ -281,7 +281,7 @@ export default function DeployCollectionForm({ onDeploy }) {
           <Cnt style={metaBodyBytes + OVERHEAD_BYTES > MAX_META_BYTES
             ? { color: 'var(--zu-accent-sec)' }
             : undefined}>
-            Meta {(metaBodyBytes + OVERHEAD_BYTES).toLocaleString()} / {MAX_META_BYTES} B
+            Meta&nbsp;{(metaBodyBytes + OVERHEAD_BYTES).toLocaleString()} / {MAX_META_BYTES} B
           </Cnt>
           {(metaBodyBytes + OVERHEAD_BYTES > MAX_META_BYTES) && (
             <Hint style={{ color: 'var(--zu-accent-sec)' }}>

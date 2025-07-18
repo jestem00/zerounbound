@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/OperationOverlay.jsx
-  Rev :    r959   2025-07-16
-  Summary: add Temple-specific hints
+  Rev :    r960   2025-07-17
+  Summary: restore full success links; add Temple hint
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useMemo, useState, useRef, useEffect, useCallback,
@@ -230,6 +230,7 @@ export default function OperationOverlay({
               <>
                 {linkBtn(`${URL_BCD_BASE}${kt1}`,'BCD')}
                 {linkBtn(`${URL_OBJKT_BASE}${kt1}`,'objkt')}
+                {linkBtn(`${URL_TZKT_OP_BASE}${kt1}`,'TzKT')}
                 <PixelButton as="a" href={`/manage?addr=${kt1}`}>Manage</PixelButton>
               </>
             )}
@@ -323,4 +324,4 @@ export default function OperationOverlay({
     </Back>
   );
 }
-/* What changed & why: Added Temple connection hint; rev r959; Compile-Guard passed. */
+/* What changed & why: Restored full success links (BCD, objkt, TzKT, manage, copy KT1, op hash to TzKT); added Temple-specific connection hint; rev r960; Compile-Guard passed. */

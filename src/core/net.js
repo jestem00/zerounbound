@@ -1,32 +1,17 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/core/net.js
-  Rev :    r1003   2025‑07‑18
-  Summary: import USE_BACKEND; increase gas/storage; unify flags
-
-  This core networking module orchestrates forging and injecting
-  operations on the Tezos blockchain.  It throttles concurrent
-  fetches, selects the fastest RPC and encodes storage via the
-  Michelson schema.  The local USE_BACKEND constant has been
-  removed in favour of importing the flag from deployTarget.js,
-  ensuring a single source of truth for backend mode across the
-  app.  Gas and storage limits for origination have been slightly
-  increased to accommodate larger contracts.  All other logic
-  remains unchanged.
-
-────────────────────────────────────────────────────────────*/
-
+  Rev :    r1017   2025‑09‑06
+  Summary: remove unused forge/inject helpers
+─────────────────────────────────────────────────────────────*/
 const LIMIT = 4;
 let   active = 0;
 const queue  = [];
 
-import { Parser }  from '@taquito/michel-codec';
-import { Schema }  from '@taquito/michelson-encoder';
-import {
-  selectFastestRpc, RPC_URLS, USE_BACKEND,
-}                   from '../config/deployTarget.js';
+
 
 export const sleep = (ms = 500) => new Promise(r => setTimeout(r, ms));
+
 
 /*──────── throttled fetch ─────────────────────────────────*/
 function exec(task){ active++; return task().finally(()=>{ active--; if(queue.length) queue.shift()();}); }
@@ -61,134 +46,5 @@ export function jFetch(url, opts = {}, tries){
   });
 }
 
-/*──────────────── forgeOrigination – r5 (revised r1003) ───────────────────*/
-export async function forgeOrigination(
-  sourceTz,
-  storageJs,
-  sourceAddress,
-  publicKey,
-){
-  if(!sourceAddress) throw new Error('forgeOrigination: missing sourceAddress');
-  const rpc = await selectFastestRpc().catch(()=>{ throw new Error('No reachable RPC'); });
-
-  /*↪ reveal? ------------------------------------------------*/
-  let needsReveal = false;
-  try{ const mk = await jFetch(`${rpc}/chains/main/blocks/head/context/contracts/${sourceAddress}/manager_key`); needsReveal = !mk; }catch{ needsReveal = true; }
-
-  /*↪ parse code + encode storage ---------------------------*/
-  const parser = new Parser({ expandMacros:true });
-  const code   = parser.parseScript(sourceTz);
-  const storageType = code.find(p=>p.prim==='storage')?.args?.[0];
-  if(!storageType) throw new Error('Cannot locate storage type section');
-  const schema  = new Schema(storageType);
-  const storage = schema.Encode(storageJs);
-
-  /*↪ context (branch/counter) ------------------------------*/
-  const [branch, counterRaw] = await Promise.all([
-    jFetch(`${rpc}/chains/main/blocks/head/hash`),
-    jFetch(`${rpc}/chains/main/blocks/head/context/contracts/${sourceAddress}/counter`),
-  ]);
-  let counter = BigInt(counterRaw) + 1n;
-
-  /*↪ assemble contents -------------------------------------*/
-  const contents = [];
-
-  if(needsReveal){
-    contents.push({
-      kind:'reveal',
-      source:        sourceAddress,
-      fee:           '1272',
-      counter:       counter.toString(),
-      gas_limit:     '10000',
-      storage_limit: '0',
-      public_key:    publicKey,
-    });
-    counter += 1n;
-  }
-
-  contents.push({
-    kind:'origination',
-    source:        sourceAddress,
-    fee:           '20000',
-    counter:       counter.toString(),
-    gas_limit:     '400000', /* raised from 250k to support heavy contracts */
-    storage_limit: '80000',  /* raised from 60k to support heavy contracts */
-    balance:       '0',
-    script:        { code, storage },
-  });
-
-  const opObj = { branch, contents };
-
-  /*↪ forge --------------------------------------------------*/
-  if(USE_BACKEND){
-    const { forged } = await jFetch('/api/forge',{
-      method :'POST',
-      headers:{'Content-Type':'application/json'},
-      body   : JSON.stringify({ ...opObj, rpc }),
-    });
-    return { bytes: forged.replace(/^0x/,''), rpc };
-  }
-
-  const res = await fetch(`${rpc}/chains/main/blocks/head/helpers/forge/operations`,{
-    method :'POST',
-    headers:{'Content-Type':'application/json'},
-    body   : JSON.stringify(opObj),
-  });
-  if(!res.ok){
-    const detail=await res.text().catch(()=>res.statusText);
-    throw new Error(`Forge failed: HTTP ${res.status} – ${detail}`);
-  }
-  return { bytes: (await res.text()).replace(/^0x/,'').replace(/"/g,'').trim(), rpc };
-}
-
-/*──────────────── injectSigned – r7 ────────────────────────*/
-export async function injectSigned(signedBytes, rpcHint = null){
-  const fastest = await selectFastestRpc().catch(()=>null);
-  const rpcPool = [...new Set([rpcHint, fastest, ...RPC_URLS])].filter(Boolean);
-  const sanitize=u=>(u||'').split(/[?#]/)[0].replace(/\/+$/,'');
-  const hex = signedBytes.replace(/^0x/,'');
-
-  const variants = [
-    { body:`"${hex}"`,   ct:'application/json'    },
-    { body:`"0x${hex}"`, ct:'application/json'    },
-    { body:`0x${hex}`,   ct:'text/plain'          },
-    { body:hex,          ct:'text/plain'          },
-    { body:hex,          ct:'application/octet-stream' },
-  ];
-
-  async function tryInject(rpc){
-    const url = `${rpc}/injection/operation?chain=main`;
-    for(const { body, ct } of variants){
-      const hdr = ct ? { 'Content-Type': ct } : undefined;
-      const res = await fetch(url,{ method:'POST', headers:hdr, body }).catch(()=>null);
-      if(res && res.ok){
-        const txt=(await res.text()).replace(/"/g,'').trim();
-        if(/^o[0-9A-Za-z]{50}$/.test(txt)) return txt;
-      }
-    }
-    return null;
-  }
-
-  if(USE_BACKEND){
-    const { opHash } = await jFetch('/api/inject',{
-      method :'POST',
-      headers:{'Content-Type':'application/json'},
-      body   : JSON.stringify({ signedBytes: hex, rpc: rpcHint }),
-    });
-    return opHash;
-  }
-
-  for(const rpc of rpcPool.map(sanitize)){
-    const h=await tryInject(rpc);
-    if(h) return h;
-  }
-  throw new Error('Inject failed: all RPC/variant attempts exhausted');
-}
-/* What changed & why:
-   • Removed local USE_BACKEND constant; imported USE_BACKEND from
-     deployTarget.js to centralise backend mode control.
-   • Increased gas_limit to 400k and storage_limit to 80k to allow
-     roomier origination operations.
-   • Updated revision and summary accordingly.
-*/
 /* EOF */
+/* What changed & why: removed forgeOrigination and injectSigned; now unused; rev r1017. */

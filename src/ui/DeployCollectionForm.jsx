@@ -1,3 +1,9 @@
+/*─────────────────────────────────────────────────────────────
+  Developed by @jams2blues – ZeroContract Studio
+  File:    src/ui/DeployCollectionForm.jsx
+  Rev :    r1017   2025-09-06
+  Summary: remove secret-key override; wallet-only deploy
+──────────────────────────────────────────────────────────────*/
 import React, { useEffect, useMemo, useState } from 'react';
 import styledPkg from 'styled-components';
 import { char2Bytes } from '@taquito/utils';
@@ -66,7 +72,6 @@ export default function DeployCollectionForm({ onDeploy }) {
     type:'art', license:LICENSES[0], customLicense:'',
     imageUri:'', agree:false,
   });
-  const [secretKey, setSecretKey] = useState('');
 
   const setField = e => {
     const { name, value, type, checked } = e.target;
@@ -122,7 +127,7 @@ export default function DeployCollectionForm({ onDeploy }) {
   /* validation */
   const { errors, checklist } = validateDeployFields({
     data,
-    walletOK: Boolean((address && wallet) || secretKey),
+    walletOK: Boolean(address && wallet),
     thumbBytes,
     metaBodyBytes,
     thumbLimitBytes: thumbLimit,
@@ -134,7 +139,6 @@ export default function DeployCollectionForm({ onDeploy }) {
     onDeploy({
       ...metaBase,
       imageUri: data.imageUri,
-      ...(secretKey ? { secretKey: secretKey.trim() } : {}),
     });
   };
 
@@ -268,13 +272,6 @@ export default function DeployCollectionForm({ onDeploy }) {
           </label>
         </Pair>
 
-        {/* override secret key */}
-        <Pair>
-          <label>Private key override <Hint>(advanced)</Hint></label>
-          <PixelInput name="secretKey" maxLength={200}
-            placeholder="edsk…" value={secretKey}
-            onChange={e => setSecretKey(e.target.value)} />
-        </Pair>
 
         {/* meta size + checklist */}
         <Pair>
@@ -297,9 +294,11 @@ export default function DeployCollectionForm({ onDeploy }) {
         </ChecklistBox>
 
         <PixelButton type="submit" disabled={errors.length}>
-          {(wallet || secretKey) ? 'Deploy' : 'Connect wallet'}
+          {wallet ? 'Deploy' : 'Connect wallet'}
         </PixelButton>
       </Form>
     </Wrap>
   );
 }
+
+/* What changed & why: removed secret key field and rely on wallet connection; rev r1017. */

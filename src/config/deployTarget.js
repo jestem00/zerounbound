@@ -1,9 +1,9 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues with love for the Tezos community
   File: src/config/deployTarget.js
-  Rev : r747‑r28   2025‑07‑15
-  Summary: removed unreachable RPCs; added reliable alternatives
-──────────────────────────────────────────────────────────────*/
+  Rev : r748   2025‑07‑18
+  Summary: expose FAST_ORIGIN and USE_BACKEND flags
+─────────────────────────────────────────────────────────────*/
 
 /*───────── flip when promoting to mainnet ─────────*/
 export const TARGET = 'ghostnet';           // 'ghostnet' | 'mainnet'
@@ -149,10 +149,18 @@ export async function selectFastestRpc(timeout = 2000) {
 
 export const DEFAULT_NETWORK = NETWORK_KEY;
 
+/* Environment flags (front‑end accessible) */
+const flag = (name) => {
+  if (typeof process === 'undefined') return false;
+  const val = process.env[`NEXT_PUBLIC_${name}`] ?? process.env[name];
+  return val === 'true';
+};
+export const FAST_ORIGIN = flag('FAST_ORIGIN');
+export const USE_BACKEND = flag('USE_BACKEND');
+
 /* What changed & why:
-   • Removed unreachable ghostnet RPCs (marigold.dev DNS fail).
-   • Added reliable alternatives like rpc.ghostnet.teztnets.xyz & mainnet backups.
-   • Enhanced selectFastestRpc to pick first finite time if multiple Infinities.
-   • Rev-bump r747‑r28; Compile-Guard passed (async, error handling).
+   • Added FAST_ORIGIN and USE_BACKEND exports derived from environment variables
+     (reads NEXT_PUBLIC_FAST_ORIGIN/FAST_ORIGIN and NEXT_PUBLIC_USE_BACKEND/USE_BACKEND).
+   • Updated revision and summary; Compile‑Guard passed.
 */
 /* EOF */

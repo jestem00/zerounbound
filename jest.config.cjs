@@ -1,4 +1,3 @@
-/*──────── jest.config.cjs ────────*/
 // jest.config.cjs
 /*───────────────────────────────────────────────────────────────
 Developed by @jams2blues – ZeroContract Studio

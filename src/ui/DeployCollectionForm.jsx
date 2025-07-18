@@ -238,7 +238,7 @@ export default function DeployCollectionForm({ onDeploy }) {
         {/* thumbnail */}
         <Pair>
           <label style={{ textAlign: 'center' }}>
-            Collection Thumbnail&nbsp;<Hint>(1:1 recommended)</Hint>
+            Collection Thumbnail <Hint>(1:1 recommended)</Hint>
           </label>
 
           <MintUpload
@@ -263,7 +263,7 @@ export default function DeployCollectionForm({ onDeploy }) {
           <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <input type="checkbox" name="agree"
               checked={data.agree} onChange={setField} />
-            Accept&nbsp;
+            Accept 
             <a href="/terms" target="_blank" rel="noopener noreferrer">terms</a>
           </label>
         </Pair>
@@ -281,7 +281,7 @@ export default function DeployCollectionForm({ onDeploy }) {
           <Cnt style={metaBodyBytes + OVERHEAD_BYTES > MAX_META_BYTES
             ? { color: 'var(--zu-accent-sec)' }
             : undefined}>
-            Meta&nbsp;{(metaBodyBytes + OVERHEAD_BYTES).toLocaleString()} / {MAX_META_BYTES} B
+            Meta {(metaBodyBytes + OVERHEAD_BYTES).toLocaleString()} / {MAX_META_BYTES} B
           </Cnt>
           {(metaBodyBytes + OVERHEAD_BYTES > MAX_META_BYTES) && (
             <Hint style={{ color: 'var(--zu-accent-sec)' }}>

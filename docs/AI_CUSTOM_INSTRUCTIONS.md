@@ -1,61 +1,69 @@
 /*───────────────────────────────────────────────────────────────
-Developed by @jams2blues – ZeroContract Studio
+Developed by @jams2blues – ZeroContract Studio
 File:    docs/AI_CUSTOM_INSTRUCTIONS.md
-Rev :    r1    2025‑09‑05
-Summary: minimal 2‑KB prompt for Codex & any AI “Custom instructions” UI
-───────────────────────────────────────────────────────────────*/
+Rev :    r2    2025-07-18 UTC
+Summary: updated custom instructions for Codex & ChatGPT; include
+local/back-end origination flags and dual-stage flow
+──────────────────────────────────────────────────────────────*/
 
-### AI Custom Instructions — Zero Unbound v4
+### AI Custom Instructions — Zero Unbound v4
 
-**Mission**  Fix bugs, refactor, and extend an 8‑bit‑themed fully‑on‑chain
-Tezos NFT suite.  All rules below override defaults.
-
----
+**Mission**  Fix bugs, refactor, and extend the fully on-chain NFT suite. All
+rules below override defaults.
 
 #### 1 · Environment
-* Repo root = `/workspace/zerounbound`.  
-* Node 22 + Yarn 4.9.1.  `scripts/codex-setup.sh` already ran.  
-* Tests → `yarn test`, lint → `yarn lint`, build → `yarn build`.
-
----
+- Repo root: `/workspace/zerounbound`.
+- Node 22 + Yarn 4.9.1. `scripts/codex-setup.sh` already ran.
+- Tests → `yarn test`, lint → `yarn lint`, build → `yarn build`.
+- Flags: set `USE_BACKEND=true` to offload forging/injecting to
+  `/api/forge` & `/api/inject`; set `FAST_ORIGIN=true` for dual-stage
+  origination (see Invariant I118).
 
 #### 2 · Ground Rules
-1. **Never** introduce IPFS/HTTP media; data‑URIs only (Invariant I24).  
-2. Respect path‑casing; CI is case‑sensitive (I11, I28).  
-3. Only modify files under `zerounbound/**`, keep Manifest append‑only.  
-4. After edits run:  
+1. **Data URI only**: never introduce IPFS/HTTP media (I24).
+2. **Case-sensitive paths**: CI enforces casing (I11/I28).
+3. **Scope**: only modify files under `zerounbound/**`; Manifest stays
+   append-only.
+4. **Commands**: after edits run:
    ```bash
    yarn lint && yarn test && yarn build
-Failures must be fixed before creating a PR.
+   ```
+All must pass before a PR is raised.
+5. One jFetch: all HTTP calls go through our jFetch helper.
+6. Local signing: signing payloads must start with watermark 03.
+When USE_BACKEND=true the front-end only signs and never forges
+bytes itself.
+7. Dual-stage flow: when FAST_ORIGIN=true, origination stores a
+placeholder views pointer and a second TX updates metadata. The UI
+must call update_contract_metadata after confirmation.
 
 3 · Output Format
 Produce a single PR with:
 
-Commit message = <type>(codex): <descr> (see AGENTS.md §5)
+Conventional commit header: type(scope): title ≤ 72 chars.
 
-Body lists Impacted Files and What changed & why in ≤ 120 words.
+Body: motive → change list → Manifest refs → notes on invariants.
 
-Include a Progress‑Ledger table row at end of body
-(| rev | ✔ | files | outcome |).
+Add a Progress‑Ledger row at end (| rev | ✔/⚠ | files | outcome |).
 
-4 · Task Execution Hints
-Ask mode → gather context; prefer ripgrep/grep -R for pointers.
+4 · Execution Hints
+Ask mode: use ripgrep/grep -R to locate definitions. Avoid
+assumptions; ask for missing context.
 
-Code mode → small surface area. If task spans >6 files, ask user to
-split.
+Code mode: keep diff small. If you need to touch more than 6
+files, ask the user to split the task.
 
-To swap chain target: yarn set:ghostnet or yarn set:mainnet.
+To switch network: yarn set:ghostnet or yarn set:mainnet.
 
-Touching bundles? run yarn bundle and commit under
-summarized_files/.
+Bundles: if views.json changed, run yarn bundle and commit
+outputs in summarized_files/.
 
 5 · Safety
-Do not write secrets.
+Never store or leak secrets.
 
-Do not shell‑exec untrusted input.
+Do not execute shell commands on untrusted input.
 
-No licence‑restricted assets.
+No license-restricted assets.
 
-End of custom instructions — keep ≤ 2 KB
-
-/* What changed & why: distilled repo policy for Codex UI “Custom instructions” */
+/* What changed & why: clarified environment flags, dual-stage flow,
+automation requirements, and condensed instructions to <2 KB */

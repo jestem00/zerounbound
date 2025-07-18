@@ -14,17 +14,6 @@
   heavily from the front‑end fallback logic in net.js to avoid
   brittle single‑variant failures.
 
-  What changed & why:
-    • Added explicit sanitisation of the incoming signed bytes
-    • Attempts injection via TezosToolkit and raw HTTP POST
-      variants (with/without 0x prefix, JSON/text payloads)
-    • Races across rpcHint, process.env.RPC_URL, the fastest RPC
-      and the list defined in deployTarget.js to find a working
-      node
-    • Returns opHash on success; provides consistent error on
-      exhaustion
-    • Maintains backward compatibility with existing call sites
-
   NOTE: This file lives under src/pages/api to be executed by
         Next.js/Vercel edge/serverless environments.
 ────────────────────────────────────────────────────────────*/
@@ -121,4 +110,9 @@ export default async function handler(req, res) {
   }
 }
 
-/* What changed & why: Added robust multi‑variant injection and RPC fallback logic; appended summary footer. */
+/* What changed & why:
+   • Multi-variant raw injection and TezosToolkit fallback (see net.js).
+   • Sanitises input, deduplicates RPC pool and returns proper errors.
+   • Revision r530 left unchanged; see deployTarget/net updates for
+     environment flag improvements.
+*/

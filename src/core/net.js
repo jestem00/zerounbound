@@ -1,10 +1,21 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/core/net.js
-  Rev :    r1002   2025‑08‑02
-  Summary: complete forge + inject overhaul; fixes 415; adds
-           reveal handling, curve‑tag compliance, multi‑CT
-─────────────────────────────────────────────────────────────*/
+  Rev :    r1003   2025‑07‑18
+  Summary: import USE_BACKEND; increase gas/storage; unify flags
+
+  This core networking module orchestrates forging and injecting
+  operations on the Tezos blockchain.  It throttles concurrent
+  fetches, selects the fastest RPC and encodes storage via the
+  Michelson schema.  The local USE_BACKEND constant has been
+  removed in favour of importing the flag from deployTarget.js,
+  ensuring a single source of truth for backend mode across the
+  app.  Gas and storage limits for origination have been slightly
+  increased to accommodate larger contracts.  All other logic
+  remains unchanged.
+
+────────────────────────────────────────────────────────────*/
+
 const LIMIT = 4;
 let   active = 0;
 const queue  = [];
@@ -12,12 +23,10 @@ const queue  = [];
 import { Parser }  from '@taquito/michel-codec';
 import { Schema }  from '@taquito/michelson-encoder';
 import {
-  selectFastestRpc, RPC_URLS,
+  selectFastestRpc, RPC_URLS, USE_BACKEND,
 }                   from '../config/deployTarget.js';
 
 export const sleep = (ms = 500) => new Promise(r => setTimeout(r, ms));
-
-const USE_BACKEND = process.env.USE_BACKEND !== 'false';  /* default on */
 
 /*──────── throttled fetch ─────────────────────────────────*/
 function exec(task){ active++; return task().finally(()=>{ active--; if(queue.length) queue.shift()();}); }
@@ -52,7 +61,7 @@ export function jFetch(url, opts = {}, tries){
   });
 }
 
-/*──────────────── forgeOrigination – r5 ───────────────────*/
+/*──────────────── forgeOrigination – r5 (revised r1003) ───────────────────*/
 export async function forgeOrigination(
   sourceTz,
   storageJs,
@@ -102,8 +111,8 @@ export async function forgeOrigination(
     source:        sourceAddress,
     fee:           '20000',
     counter:       counter.toString(),
-    gas_limit:     '250000',
-    storage_limit: '60000',
+    gas_limit:     '400000', /* raised from 250k to support heavy contracts */
+    storage_limit: '80000',  /* raised from 60k to support heavy contracts */
     balance:       '0',
     script:        { code, storage },
   });
@@ -175,4 +184,11 @@ export async function injectSigned(signedBytes, rpcHint = null){
   }
   throw new Error('Inject failed: all RPC/variant attempts exhausted');
 }
+/* What changed & why:
+   • Removed local USE_BACKEND constant; imported USE_BACKEND from
+     deployTarget.js to centralise backend mode control.
+   • Increased gas_limit to 400k and storage_limit to 80k to allow
+     roomier origination operations.
+   • Updated revision and summary accordingly.
+*/
 /* EOF */

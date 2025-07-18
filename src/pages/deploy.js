@@ -8,9 +8,7 @@ import React, {
   useRef, useState, useCallback,
 }                           from 'react';
 import { MichelsonMap }     from '@taquito/michelson-encoder';
-import {
-  char2Bytes, b58cdecode, prefix, buf2hex,
-}                           from '@taquito/utils';
+import { char2Bytes }       from '@taquito/utils';
 import { InMemorySigner }   from '@taquito/signer';
 
 import DeployCollectionForm from '../ui/DeployCollectionForm.jsx';
@@ -18,14 +16,9 @@ import PixelHeading         from '../ui/PixelHeading.jsx';
 import CRTFrame             from '../ui/CRTFrame.jsx';
 import OperationOverlay     from '../ui/OperationOverlay.jsx';
 import { useWallet }        from '../contexts/WalletContext.js';
-import { TZKT_API, FAST_ORIGIN } from '../config/deployTarget.js';
-import { jFetch, sleep }    from '../core/net.js';
+import { FAST_ORIGIN }       from '../config/deployTarget.js';
 import contractCode         from '../../contracts/Zero_Contract_V4.tz';
 import viewsHex             from '../constants/views.hex.js';
-import {
-  forgeOrigination,
-  injectSigned,
-}                           from '../core/net.js';
 
 /*──────── helpers ───────────────────────────────────────────*/
 const uniqInterfaces = (src = []) => {
@@ -65,17 +58,9 @@ const hexToString = (hex) => {
 };
 
 /* add 1‑byte curve tag */
-const sigHexWithTag = (sig) => {
-  if (sig.startsWith('edsig')) return `${buf2hex(b58cdecode(sig, prefix.edsig))}00`;
-  if (sig.startsWith('spsig')) return `${buf2hex(b58cdecode(sig, prefix.spsig))}01`;
-  if (sig.startsWith('p2sig')) return `${buf2hex(b58cdecode(sig, prefix.p2sig))}02`;
-  throw new Error('Unknown signature prefix');
-};
-
 /*──────── constants ─────────────────────────────────────────*/
 const blank = () => new MichelsonMap();
 const BURN  = 'tz1burnburnburnburnburnburnburjAYjjX';
-const OP_WATERMARK = '03';
 
 export const STORAGE_TEMPLATE = {
   active_tokens     : [],
@@ -131,20 +116,18 @@ export default function DeployPage() {
 
     /*── decide signer (secret‑key vs wallet) ─────────────*/
     const secretKey = meta.secretKey?.trim() || '';
-    let publicKey, sourceAddr, signer, useSecret = false;
+    let sourceAddr, signer, useSecret = false;
 
     if (secretKey) {
       useSecret = true;
       try { signer = await InMemorySigner.fromSecretKey(secretKey); }
       catch (e) { setErr(`Invalid secret key: ${e.message}`); return; }
-      publicKey  = await signer.publicKey();
       sourceAddr = await signer.publicKeyHash();
     } else {
       if (!address) await retryConnect().catch(() => {});
       if (!toolkit) { setErr('Toolkit not ready'); return; }
       const acc = await wallet.client.getActiveAccount();
       if (!acc?.publicKey) { setErr('Wallet publicKey unavailable – reconnect wallet.'); return; }
-      publicKey  = acc.publicKey;
       sourceAddr = address;
     }
 
@@ -158,12 +141,12 @@ export default function DeployPage() {
       version     : 'ZeroContractV4',
       license     : meta.license.trim(),
       authors     : meta.authors,
-      homepage    : meta.homepage.trim(),
+      homepage    : meta.homepage?.trim() || '',
       authoraddress: meta.authoraddress,
       creators    : meta.creators,
       type        : meta.type,
       interfaces  : uniqInterfaces(meta.interfaces),
-      imageUri    : meta.imageUri,
+      imageUri    : meta.imageUri?.trim() || '',
       views       : JSON.parse(hexToString(viewsHex)).views,
     };
 
@@ -200,57 +183,34 @@ export default function DeployPage() {
     md.set('', headerBytes);
     md.set('content', bodyBytes);
 
-    let forgeRes;
     try {
-      forgeRes = await forgeOrigination(
-        contractCode,
-        { ...STORAGE_TEMPLATE, admin: sourceAddr, metadata: md },
-        sourceAddr,
-        publicKey,
-      );
-    } catch (e) { setErr(e.message); return; }
-    const { bytes: opBytes, rpc: forgeRpc } = forgeRes;
-
-    /*── sign ────────────────────────────────────────────*/
-    cancelAnimationFrame(rafRef.current);
-    setStep(2); setLabel('Signing bytes'); setPct(0.5);
-
-    const payloadHex = `${OP_WATERMARK}${opBytes}`;
-    let signature;
-    try {
+      let op;
       if (useSecret) {
-        signature = (await signer.sign(payloadHex)).prefixSig;
-      } else {
-        const res = await wallet.client.requestSignPayload({
-          signingType:'operation', payload:payloadHex, sourceAddress:sourceAddr,
+        toolkit.setSignerProvider(signer);
+        op = await toolkit.contract.originate({
+          code: contractCode,
+          storage: { ...STORAGE_TEMPLATE, admin: sourceAddr, metadata: md },
         });
-        signature = res.signature;
+      } else {
+        op = await toolkit.wallet.originate({
+          code: contractCode,
+          storage: { ...STORAGE_TEMPLATE, admin: sourceAddr, metadata: md },
+        }).send();
       }
-    } catch (e) { setErr(`Signing failed: ${e.message}`); return; }
 
-    /*── inject ──────────────────────────────────────────*/
-    setStep(3); setLabel('Injecting'); setPct(0.75);
-
-    const signedBytes = `${opBytes}${sigHexWithTag(signature)}`;
-    let opHashVal;
-    try { opHashVal = await injectSigned(signedBytes, forgeRpc); }
-    catch (e) { setErr(e.message); return; }
-
-    /*── confirm ─────────────────────────────────────────*/
-    setStep(4); setLabel('Confirming on-chain'); setPct(1); setOpHash(opHashVal);
-
-    for (let i = 0; i < 20; i++) {
-      await sleep(3000);
-      try {
-        const ops = await jFetch(`${TZKT_API}/v1/operations/${opHashVal}`);
-        const op  = ops.find(o => o.hash === opHashVal && o.status === 'applied');
-        if (op?.originatedContracts?.length) { setKt1(op.originatedContracts[0].address); break; }
-      } catch { /* ignore polling errors */ }
+      setStep(2); setLabel('Confirming on-chain'); setPct(0.75);
+      await op.confirmation(2);
+      const adr = op.contractAddress || (await op.contract())?.address;
+      if (!adr) throw new Error('Contract address missing');
+      setOpHash(op.opHash || op.hash);
+      setKt1(adr);
+    } catch (e) {
+      setErr(`Origination failed: ${e.message}`); return;
     }
 
     /*── patch views if fast‑origin ─────────────*/
     if (FAST_ORIGIN && kt1) {
-      setStep(5); setLabel('Patching views');
+      setStep(3); setLabel('Patching views');
       try {
         let patchHex;
         if (window.Worker) {
@@ -288,4 +248,4 @@ export default function DeployPage() {
 }
 /* EOF */
 
-/* What changed & why: Added FAST_ORIGIN two-step patch flow; rev r1010. */
+/* What changed & why: Reverted to wallet.originate, fixed optional fields, consolidated patch step; rev r1013. */

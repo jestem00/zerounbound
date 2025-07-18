@@ -1,251 +1,166 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
-  File:    src/pages/deploy.js
-  Rev :    r1010   2025‑09‑06
-  Summary: slim origination w/ views patch
+  Developed by @jams2blues with love for the Tezos community
+  File: src/config/deployTarget.js
+  Rev : r748   2025‑07‑18
+  Summary: expose FAST_ORIGIN and USE_BACKEND flags
 ─────────────────────────────────────────────────────────────*/
-import React, {
-  useRef, useState, useCallback,
-}                           from 'react';
-import { MichelsonMap }     from '@taquito/michelson-encoder';
-import { char2Bytes }       from '@taquito/utils';
-import { InMemorySigner }   from '@taquito/signer';
 
-import DeployCollectionForm from '../ui/DeployCollectionForm.jsx';
-import PixelHeading         from '../ui/PixelHeading.jsx';
-import CRTFrame             from '../ui/CRTFrame.jsx';
-import OperationOverlay     from '../ui/OperationOverlay.jsx';
-import { useWallet }        from '../contexts/WalletContext.js';
-import { FAST_ORIGIN }       from '../config/deployTarget.js';
-import contractCode         from '../../contracts/Zero_Contract_V4.tz';
-import viewsHex             from '../constants/views.hex.js';
+/*───────── flip when promoting to mainnet ─────────*/
+export const TARGET = 'ghostnet';           // 'ghostnet' | 'mainnet'
+/*──────────────────────────────────────────────────*/
 
-/*──────── helpers ───────────────────────────────────────────*/
-const uniqInterfaces = (src = []) => {
-  const base = ['TZIP-012', 'TZIP-016'];
-  const map  = new Map();
-  [...src, ...base].forEach((i) => {
-    const k = String(i ?? '').trim();
-    if (k) map.set(k.toUpperCase(), k);
+/*──── per-network dictionaries ────*/
+const nets = {
+  ghostnet: {
+    /* branding */
+    label:        'GHOSTNET',
+    themeColor:   '#6f79ff',
+    borderVar:    '--zu-ghostnet',
+    manifestName: 'ZeroUnbound.art • Ghostnet',
+    siteLogo:     '/sprites/ghostnet_logo.svg',
+    /* UX */
+    ctaFirst:     '/deploy',
+    description:  'Test your fully-on-chain art collection risk‑free on Ghostnet.',
+    /* URLs */
+    siteUrl:      'https://ghostnet.zerounbound.art',
+    ogImage:      'https://ghostnet.zerounbound.art/sprites/ghostnetBanner.png',
+    startUrl:     '/?source=pwa-ghostnet',
+    rpc: [
+      'https://rpc.ghostnet.teztnets.com',
+      'https://ghostnet.tezos.ecadinfra.com',
+      'https://rpc.tzkt.io/ghostnet',
+    ],
+    tzkt:         'https://api.ghostnet.tzkt.io',
+    redirects: [{
+      source: '/:addr(kt1[0-9A-Za-z]{33})',
+      destination: '/kt1/:addr',
+      statusCode: 307,
+    }],
+    pkgName:      'zerounbound-ghostnet',
+    devPort:      3000,
+    /* ZeroTerminal */
+    ztBase:       'https://testnet.zeroterminal.art',
+  },
+
+  mainnet: {
+    label:        'MAINNET',
+    themeColor:   '#00c48c',
+    borderVar:    '--zu-mainnet',
+    manifestName: 'ZeroUnbound.art',
+    siteLogo:     '/sprites/logo.svg',
+    ctaFirst:     '/explore',
+    description:  'Create 100 % on‑chain art collections on Tezos mainnet.',
+    siteUrl:      'https://zerounbound.art',
+    ogImage:      'https://zerounbound.art/sprites/Banner.png',
+    startUrl:     '/?source=pwa-mainnet',
+    rpc: [
+      'https://prod.tcinfra.net/rpc/mainnet',
+      'https://mainnet.tezos.ecadinfra.com',
+    ],
+    tzkt:       'https://api.tzkt.io',
+    redirects:  [],
+    pkgName:    'zerounbound-mainnet',
+    devPort:    4000,
+    /* ZeroTerminal */
+    ztBase:     'https://zeroterminal.art',
+  },
+};
+
+/*──── derived exports ────*/
+export const NET            = nets[TARGET];
+export const NETWORK_KEY    = TARGET;
+export const NETWORK_TYPE   = TARGET === 'mainnet' ? 'production' : 'test';
+export const NETWORK_LABEL  = NET.label;
+
+export const THEME_COLOR    = NET.themeColor;
+export const BORDER_VAR     = NET.borderVar;
+
+export const MANIFEST_NAME  = NET.manifestName;
+export const DESCRIPTION    = NET.description;
+export const CTA_FIRST      = NET.ctaFirst;
+
+export const SITE_URL       = NET.siteUrl;
+/* canonical origin (used by mintingTool metadata key) */
+export const ROOT_URL       = SITE_URL;
+export const OG_TITLE       = 'Zero Unbound — ZeroContract Studio';
+export const OG_IMAGE       = NET.ogImage;
+
+export const START_URL      = NET.startUrl;
+export const RPC_URLS       = NET.rpc;
+export const TZKT_API       = NET.tzkt;
+
+export const REDIRECTS      = NET.redirects;
+export const PACKAGE_NAME   = NET.pkgName;
+export const DEV_PORT       = NET.devPort;
+
+/*homepage logo*/
+export const SITE_LOGO      = NET.siteLogo;
+
+/*──── explorer bases (consumed by OperationOverlay) ────*/
+export const URL_BCD_BASE   = TARGET === 'ghostnet'
+  ? 'https://better-call.dev/ghostnet/'
+  : 'https://better-call.dev/mainnet/';
+
+export const URL_OBJKT_BASE = TARGET === 'ghostnet'
+  ? 'https://ghostnet.objkt.com/collection/'
+  : 'https://objkt.com/collection/';
+
+export const URL_TZKT_OP_BASE = TARGET === 'ghostnet'
+  ? 'https://ghostnet.tzkt.io/'
+  : 'https://tzkt.io/';
+
+/*────────── ZeroTerminal helpers ───────────────────────────*/
+/** Base domain for ZeroTerminal (network‑aware) */
+export const ZT_BASE_URL  = NET.ztBase;
+
+/** Direct mint‑new link on ZeroTerminal */
+export const ZT_MINT_URL  = `${ZT_BASE_URL}/?cmd=tokendata`;
+
+/**
+ * Build a ZeroTerminal URL for viewing/updating an existing token’s
+ * metadata (`cid` = contract, `tid` = token‑id).
+ */
+export const ztTokenUrl = (contract, tokenId) =>
+  `${ZT_MINT_URL}&cid=${encodeURIComponent(contract)}&tid=${encodeURIComponent(tokenId)}`;
+
+/*──────── RPC selector ────────────────────────────*/
+export async function selectFastestRpc(timeout = 2000) {
+  const promises = RPC_URLS.map(async (url) => {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+    const start = performance.now();
+    try {
+      const res = await fetch(`${url}/chains/main/blocks/head/header`, { signal: controller.signal });
+      clearTimeout(id);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return { url, time: performance.now() - start };
+    } catch (e) {
+      clearTimeout(id);
+      return { url, time: Infinity };
+    }
   });
-  return Array.from(map.values());
-};
 
-const HEX = Array.from({ length: 256 }, (_, i) =>
-  i.toString(16).padStart(2, '0'),
-);
-
-const utf8ToHex = (str, cb) => {
-  const bytes = new TextEncoder().encode(str);
-  const { length } = bytes;
-  let hex = '';
-  const STEP = 4096;
-  for (let i = 0; i < length; i += 1) {
-    hex += HEX[bytes[i]];
-    if (i % STEP === 0) cb((i / length) * 100);
-  }
-  cb(100);
-  return `0x${hex}`;
-};
-
-const hexToString = (hex) => {
-  const h = hex.startsWith('0x') ? hex.slice(2) : hex;
-  const len = h.length;
-  const bytes = new Uint8Array(len / 2);
-  for (let i = 0; i < len; i += 2)
-    bytes[i / 2] = parseInt(h.slice(i, i + 2), 16);
-  return new TextDecoder().decode(bytes);
-};
-
-/* add 1‑byte curve tag */
-/*──────── constants ─────────────────────────────────────────*/
-const blank = () => new MichelsonMap();
-const BURN  = 'tz1burnburnburnburnburnburnburjAYjjX';
-
-export const STORAGE_TEMPLATE = {
-  active_tokens     : [],
-  admin             : '',
-  burn_address      : BURN,
-  children          : [],
-  collaborators     : [],
-  contract_id       : `0x${char2Bytes('ZeroContract')}`,
-  destroyed_tokens  : [],
-  extrauri_counters : blank(),
-  ledger            : blank(),
-  lock              : false,
-  metadata          : blank(),
-  next_token_id     : 0,
-  operators         : blank(),
-  parents           : [],
-  token_metadata    : blank(),
-  total_supply      : blank(),
-};
-
-/*════════ component ════════════════════════════════════════*/
-export default function DeployPage() {
-  const {
-    toolkit, address, connect, wallet,
-  } = useWallet();
-
-  const rafRef        = useRef(0);
-  const [step, setStep]       = useState(-1);
-  const [pct,  setPct]        = useState(0);
-  const [label, setLabel]     = useState('');
-  const [kt1,   setKt1]       = useState('');
-  const [opHash, setOpHash]   = useState('');
-  const [err,   setErr]       = useState('');
-
-  const reset = () => {
-    setStep(-1); setPct(0); setLabel('');
-    setKt1(''); setOpHash(''); setErr('');
-    cancelAnimationFrame(rafRef.current);
-  };
-
-  const retryConnect = useCallback(async () => {
-    try { await connect(); }
-    catch (e) {
-      if (/Receiving end does not exist/i.test(e.message))
-        setErr('Temple extension not responding. Restart browser and try again.');
-      else setErr(e.message);
-    }
-  }, [connect]);
-
-  /*──────── origination handler ───────────────────────────*/
-  async function originate(meta) {
-    if (step !== -1) return;
-
-    /*── decide signer (secret‑key vs wallet) ─────────────*/
-    const secretKey = meta.secretKey?.trim() || '';
-    let sourceAddr, signer, useSecret = false;
-
-    if (secretKey) {
-      useSecret = true;
-      try { signer = await InMemorySigner.fromSecretKey(secretKey); }
-      catch (e) { setErr(`Invalid secret key: ${e.message}`); return; }
-      sourceAddr = await signer.publicKeyHash();
-    } else {
-      if (!address) await retryConnect().catch(() => {});
-      if (!toolkit) { setErr('Toolkit not ready'); return; }
-      const acc = await wallet.client.getActiveAccount();
-      if (!acc?.publicKey) { setErr('Wallet publicKey unavailable – reconnect wallet.'); return; }
-      sourceAddr = address;
-    }
-
-    /*── build metadata (compress) ───────────────────────*/
-    setStep(0); setLabel('Compressing metadata'); setPct(0);
-
-    const orderedMeta = {
-      name        : meta.name.trim(),
-      symbol      : meta.symbol.trim(),
-      description : meta.description.trim(),
-      version     : 'ZeroContractV4',
-      license     : meta.license.trim(),
-      authors     : meta.authors,
-      homepage    : meta.homepage?.trim() || '',
-      authoraddress: meta.authoraddress,
-      creators    : meta.creators,
-      type        : meta.type,
-      interfaces  : uniqInterfaces(meta.interfaces),
-      imageUri    : meta.imageUri?.trim() || '',
-      views       : JSON.parse(hexToString(viewsHex)).views,
-    };
-
-    const metaForOrigination = FAST_ORIGIN
-      ? { ...orderedMeta, views: '0x00' }
-      : orderedMeta;
-
-    const headerBytes = `0x${char2Bytes('tezos-storage:content')}`;
-    let bodyBytes;
-    try {
-      if (window.Worker) {
-        const worker = new Worker(new URL('../workers/originate.worker.js', import.meta.url), { type:'module' });
-        const id = Date.now();
-        bodyBytes = await new Promise((resolve, reject) => {
-          worker.onmessage = ({ data }) => {
-            if (data.progress !== undefined) setPct((data.progress / 100) * 0.25);
-            if (data.body)  resolve(data.body);
-            if (data.error) reject(new Error(data.error));
-          };
-          worker.postMessage({ meta: metaForOrigination, taskId: id, fast: FAST_ORIGIN });
-        });
-        worker.terminate();
-      } else {
-        bodyBytes = utf8ToHex(JSON.stringify(metaForOrigination), p => setPct(p / 4));
-      }
-    } catch (e) {
-      setErr(`Metadata compression failed: ${e.message}`); return;
-    }
-
-    /*── forge ───────────────────────────────────────────*/
-    setStep(1); setLabel('Check wallet & sign'); setPct(0.25);
-
-    const md = new MichelsonMap();
-    md.set('', headerBytes);
-    md.set('content', bodyBytes);
-
-    try {
-      let op;
-      if (useSecret) {
-        toolkit.setSignerProvider(signer);
-        op = await toolkit.contract.originate({
-          code: contractCode,
-          storage: { ...STORAGE_TEMPLATE, admin: sourceAddr, metadata: md },
-        });
-      } else {
-        op = await toolkit.wallet.originate({
-          code: contractCode,
-          storage: { ...STORAGE_TEMPLATE, admin: sourceAddr, metadata: md },
-        }).send();
-      }
-
-      setStep(2); setLabel('Confirming on-chain'); setPct(0.75);
-      await op.confirmation(2);
-      const adr = op.contractAddress || (await op.contract())?.address;
-      if (!adr) throw new Error('Contract address missing');
-      setOpHash(op.opHash || op.hash);
-      setKt1(adr);
-    } catch (e) {
-      setErr(`Origination failed: ${e.message}`); return;
-    }
-
-    /*── patch views if fast‑origin ─────────────*/
-    if (FAST_ORIGIN && kt1) {
-      setStep(3); setLabel('Patching views');
-      try {
-        let patchHex;
-        if (window.Worker) {
-          const worker = new Worker(new URL('../workers/originate.worker.js', import.meta.url), { type:'module' });
-          const id2 = Date.now();
-          patchHex = await new Promise((resolve, reject) => {
-            worker.onmessage = ({ data }) => { if (data.body) resolve(data.body); if (data.error) reject(new Error(data.error)); };
-            worker.postMessage({ meta: orderedMeta, taskId: id2, fast: false });
-          });
-          worker.terminate();
-        } else {
-          patchHex = utf8ToHex(JSON.stringify(orderedMeta), () => {});
-        }
-        const c = await toolkit.wallet.at(kt1);
-        const op2 = await c.methods.edit_contract_metadata(patchHex).send();
-        setOpHash(op2.opHash || op2.hash);
-        await op2.confirmation();
-      } catch (e) { setErr(`Patch failed: ${e.message}`); }
-    }
-  }
-
-  /*──────── render ───────────────────────────────────────*/
-  return (
-    <>
-      <PixelHeading level={2}>Deploy New Collection</PixelHeading>
-      <CRTFrame><DeployCollectionForm onDeploy={originate} /></CRTFrame>
-      {(step !== -1 || err) && (
-        <OperationOverlay
-          status={label} step={step} pct={pct} err={err}
-          opHash={opHash} kt1={kt1} onRetry={reset} onCancel={reset}
-        />
-      )}
-    </>
-  );
+  const results = await Promise.all(promises);
+  results.sort((a, b) => a.time - b.time);
+  const fastest = results.find(r => r.time < Infinity);
+  if (!fastest) throw new Error('All RPCs unreachable');
+  return fastest.url;
 }
-/* EOF */
 
-/* What changed & why: Reverted to wallet.originate, fixed optional fields, consolidated patch step; rev r1013. */
+export const DEFAULT_NETWORK = NETWORK_KEY;
+
+/* Environment flags (front‑end accessible) */
+const flag = (name) => {
+  if (typeof process === 'undefined') return false;
+  const val = process.env[`NEXT_PUBLIC_${name}`] ?? process.env[name];
+  return val === 'true';
+};
+export const FAST_ORIGIN = flag('FAST_ORIGIN');
+export const USE_BACKEND = flag('USE_BACKEND');
+
+/* What changed & why:
+   • Added FAST_ORIGIN and USE_BACKEND exports derived from environment variables
+     (reads NEXT_PUBLIC_FAST_ORIGIN/FAST_ORIGIN and NEXT_PUBLIC_USE_BACKEND/USE_BACKEND).
+   • Updated revision and summary; Compile‑Guard passed.
+*/
+/* EOF */

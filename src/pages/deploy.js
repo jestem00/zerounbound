@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/deploy.js
-  Rev :    r1006   2025‑08‑02
-  Summary: fully‑expanded file; syncs with net.js r1002
+  Rev :    r1010   2025‑09‑06
+  Summary: slim origination w/ views patch
 ─────────────────────────────────────────────────────────────*/
 import React, {
   useRef, useState, useCallback,
@@ -18,7 +18,7 @@ import PixelHeading         from '../ui/PixelHeading.jsx';
 import CRTFrame             from '../ui/CRTFrame.jsx';
 import OperationOverlay     from '../ui/OperationOverlay.jsx';
 import { useWallet }        from '../contexts/WalletContext.js';
-import { TZKT_API }         from '../config/deployTarget.js';
+import { TZKT_API, FAST_ORIGIN } from '../config/deployTarget.js';
 import { jFetch, sleep }    from '../core/net.js';
 import contractCode         from '../../contracts/Zero_Contract_V4.tz';
 import viewsHex             from '../constants/views.hex.js';
@@ -167,6 +167,10 @@ export default function DeployPage() {
       views       : JSON.parse(hexToString(viewsHex)).views,
     };
 
+    const metaForOrigination = FAST_ORIGIN
+      ? { ...orderedMeta, views: '0x00' }
+      : orderedMeta;
+
     const headerBytes = `0x${char2Bytes('tezos-storage:content')}`;
     let bodyBytes;
     try {
@@ -179,11 +183,11 @@ export default function DeployPage() {
             if (data.body)  resolve(data.body);
             if (data.error) reject(new Error(data.error));
           };
-          worker.postMessage({ meta: orderedMeta, taskId: id });
+          worker.postMessage({ meta: metaForOrigination, taskId: id, fast: FAST_ORIGIN });
         });
         worker.terminate();
       } else {
-        bodyBytes = utf8ToHex(JSON.stringify(orderedMeta), p => setPct(p / 4));
+        bodyBytes = utf8ToHex(JSON.stringify(metaForOrigination), p => setPct(p / 4));
       }
     } catch (e) {
       setErr(`Metadata compression failed: ${e.message}`); return;
@@ -243,6 +247,29 @@ export default function DeployPage() {
         if (op?.originatedContracts?.length) { setKt1(op.originatedContracts[0].address); break; }
       } catch { /* ignore polling errors */ }
     }
+
+    /*── patch views if fast‑origin ─────────────*/
+    if (FAST_ORIGIN && kt1) {
+      setStep(5); setLabel('Patching views');
+      try {
+        let patchHex;
+        if (window.Worker) {
+          const worker = new Worker(new URL('../workers/originate.worker.js', import.meta.url), { type:'module' });
+          const id2 = Date.now();
+          patchHex = await new Promise((resolve, reject) => {
+            worker.onmessage = ({ data }) => { if (data.body) resolve(data.body); if (data.error) reject(new Error(data.error)); };
+            worker.postMessage({ meta: orderedMeta, taskId: id2, fast: false });
+          });
+          worker.terminate();
+        } else {
+          patchHex = utf8ToHex(JSON.stringify(orderedMeta), () => {});
+        }
+        const c = await toolkit.wallet.at(kt1);
+        const op2 = await c.methods.edit_contract_metadata(patchHex).send();
+        setOpHash(op2.opHash || op2.hash);
+        await op2.confirmation();
+      } catch (e) { setErr(`Patch failed: ${e.message}`); }
+    }
   }
 
   /*──────── render ───────────────────────────────────────*/
@@ -260,3 +287,5 @@ export default function DeployPage() {
   );
 }
 /* EOF */
+
+/* What changed & why: Added FAST_ORIGIN two-step patch flow; rev r1010. */

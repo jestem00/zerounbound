@@ -1,15 +1,14 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/deploy.js
-  Rev :    r1010   2025‑09‑06
-  Summary: slim origination w/ views patch
+  Rev :    r1017   2025‑09‑06
+  Summary: wallet.originate only; remove secret key
 ─────────────────────────────────────────────────────────────*/
 import React, {
   useRef, useState, useCallback,
 }                           from 'react';
 import { MichelsonMap }     from '@taquito/michelson-encoder';
 import { char2Bytes }       from '@taquito/utils';
-import { InMemorySigner }   from '@taquito/signer';
 
 import DeployCollectionForm from '../ui/DeployCollectionForm.jsx';
 import PixelHeading         from '../ui/PixelHeading.jsx';
@@ -84,7 +83,7 @@ export const STORAGE_TEMPLATE = {
 /*════════ component ════════════════════════════════════════*/
 export default function DeployPage() {
   const {
-    toolkit, address, connect, wallet,
+    toolkit, address, connect,
   } = useWallet();
 
   const rafRef        = useRef(0);
@@ -114,22 +113,9 @@ export default function DeployPage() {
   async function originate(meta) {
     if (step !== -1) return;
 
-    /*── decide signer (secret‑key vs wallet) ─────────────*/
-    const secretKey = meta.secretKey?.trim() || '';
-    let sourceAddr, signer, useSecret = false;
-
-    if (secretKey) {
-      useSecret = true;
-      try { signer = await InMemorySigner.fromSecretKey(secretKey); }
-      catch (e) { setErr(`Invalid secret key: ${e.message}`); return; }
-      sourceAddr = await signer.publicKeyHash();
-    } else {
-      if (!address) await retryConnect().catch(() => {});
-      if (!toolkit) { setErr('Toolkit not ready'); return; }
-      const acc = await wallet.client.getActiveAccount();
-      if (!acc?.publicKey) { setErr('Wallet publicKey unavailable – reconnect wallet.'); return; }
-      sourceAddr = address;
-    }
+    if (!address) await retryConnect().catch(() => {});
+    if (!toolkit) { setErr('Toolkit not ready'); return; }
+    const sourceAddr = address;
 
     /*── build metadata (compress) ───────────────────────*/
     setStep(0); setLabel('Compressing metadata'); setPct(0);
@@ -177,26 +163,17 @@ export default function DeployPage() {
     }
 
     /*── forge ───────────────────────────────────────────*/
-    setStep(1); setLabel('Check wallet & sign'); setPct(0.25);
+    setStep(1); setLabel('Waiting for wallet signature'); setPct(0.25);
 
     const md = new MichelsonMap();
     md.set('', headerBytes);
     md.set('content', bodyBytes);
 
     try {
-      let op;
-      if (useSecret) {
-        toolkit.setSignerProvider(signer);
-        op = await toolkit.contract.originate({
-          code: contractCode,
-          storage: { ...STORAGE_TEMPLATE, admin: sourceAddr, metadata: md },
-        });
-      } else {
-        op = await toolkit.wallet.originate({
-          code: contractCode,
-          storage: { ...STORAGE_TEMPLATE, admin: sourceAddr, metadata: md },
-        }).send();
-      }
+      const op = await toolkit.wallet.originate({
+        code: contractCode,
+        storage: { ...STORAGE_TEMPLATE, admin: sourceAddr, metadata: md },
+      }).send();
 
       setStep(2); setLabel('Confirming on-chain'); setPct(0.75);
       await op.confirmation(2);
@@ -248,4 +225,4 @@ export default function DeployPage() {
 }
 /* EOF */
 
-/* What changed & why: Reverted to wallet.originate, fixed optional fields, consolidated patch step; rev r1013. */
+/* What changed & why: removed secret key flow; rely on wallet.originate and optional views patch; rev r1017. */

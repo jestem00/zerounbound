@@ -81,5 +81,6 @@ Q	A
 “TzKT count shows 0”	Run utils/listLiveTokenIds.js TTL 30 s.
 “Slice upload stalls”	Check localStorage.zuSliceCache.*, act via utils/sliceCache.js.
 “Need a new network”	Extend src/config/networkConfig.js and deployTarget.js, bump Manifest.
+“How do I deploy a collection?” Use `wallet.originate`; forge/inject APIs are deprecated.
 
-/* What changed & why: initial AGENTS.md codifies dev rules & Codex flow */
+/* What changed & why: added wallet.originate FAQ; rev r2 */

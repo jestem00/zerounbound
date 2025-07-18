@@ -1,31 +1,25 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/deploy.js
-  Rev :    r1006   2025‑08‑02
-  Summary: fully‑expanded file; syncs with net.js r1002
+  Rev :    r1009   2025‑07‑17
+  Summary: use wallet.originate; remove estimate step
 ─────────────────────────────────────────────────────────────*/
 import React, {
   useRef, useState, useCallback,
 }                           from 'react';
 import { MichelsonMap }     from '@taquito/michelson-encoder';
 import {
-  char2Bytes, b58cdecode, prefix, buf2hex,
+  char2Bytes,
 }                           from '@taquito/utils';
-import { InMemorySigner }   from '@taquito/signer';
 
 import DeployCollectionForm from '../ui/DeployCollectionForm.jsx';
 import PixelHeading         from '../ui/PixelHeading.jsx';
 import CRTFrame             from '../ui/CRTFrame.jsx';
 import OperationOverlay     from '../ui/OperationOverlay.jsx';
 import { useWallet }        from '../contexts/WalletContext.js';
-import { TZKT_API }         from '../config/deployTarget.js';
-import { jFetch, sleep }    from '../core/net.js';
 import contractCode         from '../../contracts/Zero_Contract_V4.tz';
 import viewsHex             from '../constants/views.hex.js';
-import {
-  forgeOrigination,
-  injectSigned,
-}                           from '../core/net.js';
+import { InMemorySigner }   from '@taquito/signer';
 
 /*──────── helpers ───────────────────────────────────────────*/
 const uniqInterfaces = (src = []) => {
@@ -64,18 +58,9 @@ const hexToString = (hex) => {
   return new TextDecoder().decode(bytes);
 };
 
-/* add 1‑byte curve tag */
-const sigHexWithTag = (sig) => {
-  if (sig.startsWith('edsig')) return `${buf2hex(b58cdecode(sig, prefix.edsig))}00`;
-  if (sig.startsWith('spsig')) return `${buf2hex(b58cdecode(sig, prefix.spsig))}01`;
-  if (sig.startsWith('p2sig')) return `${buf2hex(b58cdecode(sig, prefix.p2sig))}02`;
-  throw new Error('Unknown signature prefix');
-};
-
 /*──────── constants ─────────────────────────────────────────*/
 const blank = () => new MichelsonMap();
 const BURN  = 'tz1burnburnburnburnburnburnburjAYjjX';
-const OP_WATERMARK = '03';
 
 export const STORAGE_TEMPLATE = {
   active_tokens     : [],
@@ -99,7 +84,7 @@ export const STORAGE_TEMPLATE = {
 /*════════ component ════════════════════════════════════════*/
 export default function DeployPage() {
   const {
-    toolkit, address, connect, wallet,
+    toolkit, address, connect, wallet, revealAccount,
   } = useWallet();
 
   const rafRef        = useRef(0);
@@ -129,23 +114,25 @@ export default function DeployPage() {
   async function originate(meta) {
     if (step !== -1) return;
 
+    console.log('[deploy] Starting origination...');
+
     /*── decide signer (secret‑key vs wallet) ─────────────*/
     const secretKey = meta.secretKey?.trim() || '';
-    let publicKey, sourceAddr, signer, useSecret = false;
+    let sourceAddr, useSecret = false;
 
     if (secretKey) {
       useSecret = true;
-      try { signer = await InMemorySigner.fromSecretKey(secretKey); }
-      catch (e) { setErr(`Invalid secret key: ${e.message}`); return; }
-      publicKey  = await signer.publicKey();
-      sourceAddr = await signer.publicKeyHash();
+      try {
+        const signer = new InMemorySigner(secretKey);
+        toolkit.setSignerProvider(signer);
+        sourceAddr = await signer.publicKeyHash();
+        console.log('[deploy] Using secret key signer:', sourceAddr);
+      } catch (e) { setErr(`Invalid secret key: ${e.message}`); return; }
     } else {
       if (!address) await retryConnect().catch(() => {});
       if (!toolkit) { setErr('Toolkit not ready'); return; }
-      const acc = await wallet.client.getActiveAccount();
-      if (!acc?.publicKey) { setErr('Wallet publicKey unavailable – reconnect wallet.'); return; }
-      publicKey  = acc.publicKey;
       sourceAddr = address;
+      console.log('[deploy] Using wallet:', sourceAddr);
     }
 
     /*── build metadata (compress) ───────────────────────*/
@@ -189,58 +176,62 @@ export default function DeployPage() {
       setErr(`Metadata compression failed: ${e.message}`); return;
     }
 
-    /*── forge ───────────────────────────────────────────*/
-    setStep(1); setLabel('Check wallet & sign'); setPct(0.25);
-
     const md = new MichelsonMap();
     md.set('', headerBytes);
     md.set('content', bodyBytes);
 
-    let opBytes;
-    try {
-      opBytes = await forgeOrigination(
-        contractCode,
-        { ...STORAGE_TEMPLATE, admin: sourceAddr, metadata: md },
-        sourceAddr,
-        publicKey,
-      );
-    } catch (e) { setErr(e.message); return; }
+    const storage = { ...STORAGE_TEMPLATE, admin: sourceAddr, metadata: md };
 
-    /*── sign ────────────────────────────────────────────*/
-    cancelAnimationFrame(rafRef.current);
-    setStep(2); setLabel('Signing bytes'); setPct(0.5);
+    /*── reveal if needed ────────────────────────────────*/
+    setStep(1); setLabel('Preparing account'); setPct(0.25);
 
-    const payloadHex = `${OP_WATERMARK}${opBytes}`;
-    let signature;
     try {
-      if (useSecret) {
-        signature = (await signer.sign(payloadHex)).prefixSig;
-      } else {
-        const res = await wallet.client.requestSignPayload({
-          signingType:'operation', payload:payloadHex, sourceAddress:sourceAddr,
-        });
-        signature = res.signature;
+      if (!useSecret) {
+        console.log('[deploy] Checking/revealing account...');
+        await revealAccount();
       }
-    } catch (e) { setErr(`Signing failed: ${e.message}`); return; }
+    } catch (e) {
+      setErr(`Reveal failed: ${e.message}`); return;
+    }
 
-    /*── inject ──────────────────────────────────────────*/
-    setStep(3); setLabel('Injecting'); setPct(0.75);
+    /*── originate ────────────────────────────────────────*/
+    setStep(2); setLabel('Sign & originate'); setPct(0.5);
 
-    const signedBytes = `${opBytes}${sigHexWithTag(signature)}`;
-    let opHashVal;
-    try { opHashVal = await injectSigned(signedBytes); }
-    catch (e) { setErr(e.message); return; }
+    let op;
+    try {
+      console.log('[deploy] Sending origination...');
+      if (useSecret) {
+        op = await toolkit.contract.originate({
+          code: contractCode,
+          storage,
+        });
+      } else {
+        op = await toolkit.wallet.originate({
+          code: contractCode,
+          storage,
+        }).send();
+      }
+      setOpHash(op.opHash || op.hash);
+      console.log('[deploy] Op sent:', op.opHash || op.hash);
+    } catch (e) {
+      setErr(`Origination failed: ${e.message}`); return;
+    }
 
     /*── confirm ─────────────────────────────────────────*/
-    setStep(4); setLabel('Confirming on-chain'); setPct(1); setOpHash(opHashVal);
+    setStep(3); setLabel('Confirming on-chain'); setPct(0.75);
 
-    for (let i = 0; i < 20; i++) {
-      await sleep(3000);
-      try {
-        const ops = await jFetch(`${TZKT_API}/v1/operations/${opHashVal}`);
-        const op  = ops.find(o => o.hash === opHashVal && o.status === 'applied');
-        if (op?.originatedContracts?.length) { setKt1(op.originatedContracts[0].address); break; }
-      } catch { /* ignore polling errors */ }
+    try {
+      console.log('[deploy] Awaiting confirmation...');
+      await op.confirmation(2);
+      const contractAddress = await op.contractAddress;
+      if (contractAddress) {
+        setKt1(contractAddress);
+        console.log('[deploy] Confirmed:', contractAddress);
+      } else {
+        throw new Error('No contract address returned');
+      }
+    } catch (e) {
+      setErr(`Confirmation failed: ${e.message}`);
     }
   }
 

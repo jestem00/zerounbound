@@ -1,9 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/core/net.js
-  Rev :    r1002   2025‑08‑02
-  Summary: complete forge + inject overhaul; fixes 415; adds
-           reveal handling, curve‑tag compliance, multi‑CT
+  Rev :    r1003   2025‑07‑17
+  Summary: disable backend for dev; add logging
 ─────────────────────────────────────────────────────────────*/
 const LIMIT = 4;
 let   active = 0;
@@ -17,7 +16,8 @@ import {
 
 export const sleep = (ms = 500) => new Promise(r => setTimeout(r, ms));
 
-const USE_BACKEND = process.env.USE_BACKEND !== 'false';  /* default on */
+const IS_DEV = process.env.NODE_ENV === 'development';
+const USE_BACKEND = !IS_DEV && process.env.USE_BACKEND !== 'false';  /* off in dev */
 
 /*──────── throttled fetch ─────────────────────────────────*/
 function exec(task){ active++; return task().finally(()=>{ active--; if(queue.length) queue.shift()();}); }

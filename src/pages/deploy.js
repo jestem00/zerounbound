@@ -1,19 +1,23 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/deploy.js
-  Rev :    r1018   2025‑07‑19
-  Summary: placeholder views in metadata; reduce Temple payload
+  Rev :    r1019   2025‑07‑19
+  Summary: dual‑stage origination with metadata patch
 
-  This page now performs contract origination exclusively via the
-  Beacon wallet.  It compresses metadata, builds the Michelson
-  storage map and then invokes `toolkit.wallet.originate`.  The
-  wallet handles estimation, forging, signing and injection,
-  eliminating Temple/Kukai injection failures.  Secret‑key
-  override support has been removed.  Progress steps and error
-  handling remain consistent with prior versions.
+  This page implements a two‑stage collection origination to
+  accommodate Temple Wallet’s strict payload limits.  Stage 1
+  originates the contract with minimal metadata (placeholder
+  views and a tiny placeholder image) via `wallet.originate`.  After
+  confirmation, Stage 2 compresses the full metadata (including
+  off‑chain views and the real image) and calls the
+  `edit_contract_metadata` entrypoint to patch the contract.
+  Progress and errors are displayed via OperationOverlay with
+  signature 1/2 and 2/2 indicators.  State is persisted in
+  localStorage to resume the patch if the page reloads or the
+  transaction fails.
 ────────────────────────────────────────────────────────────*/
 
-import React, { useRef, useState, useCallback } from 'react';
+import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { MichelsonMap } from '@taquito/michelson-encoder';
 import { char2Bytes } from '@taquito/utils';
 
@@ -38,9 +42,7 @@ const uniqInterfaces = (src = []) => {
   return Array.from(map.values());
 };
 
-const HEX = Array.from({ length: 256 }, (_, i) =>
-  i.toString(16).padStart(2, '0'),
-);
+const HEX = Array.from({ length: 256 }, (_, i) => i.toString(16).padStart(2, '0'));
 
 const utf8ToHex = (str, cb) => {
   const bytes = new TextEncoder().encode(str);
@@ -59,8 +61,7 @@ const hexToString = (hex) => {
   const h = hex.startsWith('0x') ? hex.slice(2) : hex;
   const len = h.length;
   const bytes = new Uint8Array(len / 2);
-  for (let i = 0; i < len; i += 2)
-    bytes[i / 2] = parseInt(h.slice(i, i + 2), 16);
+  for (let i = 0; i < len; i += 2) bytes[i / 2] = parseInt(h.slice(i, i + 2), 16);
   return new TextDecoder().decode(bytes);
 };
 
@@ -69,40 +70,42 @@ const blank = () => new MichelsonMap();
 const BURN = 'tz1burnburnburnburnburnburnburjAYjjX';
 
 export const STORAGE_TEMPLATE = {
-  active_tokens: [],
-  admin: '',
-  burn_address: BURN,
-  children: [],
-  collaborators: [],
-  contract_id: `0x${char2Bytes('ZeroContract')}`,
+  active_tokens   : [],
+  admin           : '',
+  burn_address    : BURN,
+  children        : [],
+  collaborators   : [],
+  contract_id     : `0x${char2Bytes('ZeroContract')}`,
   destroyed_tokens: [],
   extrauri_counters: blank(),
-  ledger: blank(),
-  lock: false,
-  metadata: blank(),
-  next_token_id: 0,
-  operators: blank(),
-  parents: [],
-  token_metadata: blank(),
-  total_supply: blank(),
+  ledger           : blank(),
+  lock             : false,
+  metadata         : blank(),
+  next_token_id    : 0,
+  operators        : blank(),
+  parents          : [],
+  token_metadata   : blank(),
+  total_supply     : blank(),
 };
 
-/*════════ component ════════════════════════════════════════*/
+/*──────── component ────────────────────────────────────────*/
 export default function DeployPage() {
-  const {
-    toolkit,
-    address,
-    connect,
-  } = useWallet();
+  const { toolkit, address, connect, wallet } = useWallet();
 
   const rafRef = useRef(0);
-  const [step, setStep] = useState(-1);
-  const [pct, setPct] = useState(0);
+  const [step, setStep]   = useState(-1);
+  const [pct, setPct]     = useState(0);
   const [label, setLabel] = useState('');
-  const [kt1, setKt1] = useState('');
+  const [kt1, setKt1]     = useState('');
   const [opHash, setOpHash] = useState('');
-  const [err, setErr] = useState('');
+  const [err, setErr]       = useState('');
+  const [resumeMeta, setResumeMeta] = useState(null);
 
+  /* localStorage keys for resume support */
+  const LS_KT1  = 'zu_deploy_kt1';
+  const LS_META = 'zu_deploy_meta';
+
+  /* clear and reset state */
   const reset = () => {
     setStep(-1);
     setPct(0);
@@ -110,115 +113,204 @@ export default function DeployPage() {
     setKt1('');
     setOpHash('');
     setErr('');
+    setResumeMeta(null);
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(LS_KT1);
+      localStorage.removeItem(LS_META);
+    }
     cancelAnimationFrame(rafRef.current);
   };
 
-  /*──────── origination handler ───────────────────────────*/
+  /* load resume state if stage2 incomplete */
+  useEffect(() => {
+    if (typeof localStorage === 'undefined') return;
+    const savedKt  = localStorage.getItem(LS_KT1);
+    const savedMet = localStorage.getItem(LS_META);
+    if (savedKt && savedMet) {
+      setKt1(savedKt);
+      setResumeMeta(savedMet);
+      setStep(4);
+      setLabel('Ready for metadata patch');
+    }
+  }, []);
+
+  /* ensure wallet is connected */
+  const retryConnect = useCallback(async () => {
+    try {
+      await connect();
+    } catch (e) {
+      if (/Receiving end does not exist/i.test(e.message)) {
+        setErr('Temple extension not responding. Restart browser and try again.');
+      } else {
+        setErr(e.message);
+      }
+    }
+  }, [connect]);
+
+  /**
+   * Build full metadata JSON string with views and the actual image.
+   */
+  async function buildFullMeta(meta) {
+    const ordered = {
+      name        : meta.name.trim(),
+      symbol      : meta.symbol.trim(),
+      description : meta.description.trim(),
+      version     : 'ZeroContractV4',
+      license     : meta.license.trim(),
+      authors     : meta.authors,
+      homepage    : meta.homepage.trim() || undefined,
+      authoraddress: meta.authoraddress,
+      creators    : meta.creators,
+      type        : meta.type,
+      interfaces  : uniqInterfaces(meta.interfaces),
+      imageUri    : meta.imageUri,
+      views       : JSON.parse(hexToString(viewsHex)).views,
+    };
+    return JSON.stringify(ordered);
+  }
+
+  /**
+   * Patch contract metadata via edit_contract_metadata.
+   */
+  async function patchMetadata(metaJson, contractAddr) {
+    try {
+      setStep(5);
+      setLabel('Compressing metadata (2/2)');
+      setPct(0.5);
+      const headerBytes = `0x${char2Bytes('tezos-storage:content')}`;
+      let bodyBytes;
+      if (typeof window !== 'undefined' && window.Worker) {
+        const worker = new Worker(new URL('../workers/originate.worker.js', import.meta.url), {
+          type: 'module',
+        });
+        const taskId = Date.now();
+        bodyBytes = await new Promise((resolve, reject) => {
+          worker.onmessage = ({ data }) => {
+            if (data.progress !== undefined) setPct(0.5 + (data.progress / 100) * 0.25);
+            if (data.body) resolve(data.body);
+            if (data.error) reject(new Error(data.error));
+          };
+          worker.postMessage({ meta: JSON.parse(metaJson), taskId });
+        });
+        worker.terminate();
+      } else {
+        bodyBytes = utf8ToHex(metaJson, (p) => setPct(0.5 + p / 4));
+      }
+      setStep(6);
+      setLabel('Signing metadata update (2/2)');
+      setPct(0.75);
+      const contract = await toolkit.wallet.at(contractAddr);
+      const op = await contract.methods.edit_contract_metadata(bodyBytes).send();
+      setStep(7);
+      setLabel('Confirming metadata update');
+      setPct(0.9);
+      await op.confirmation();
+      /* success */
+      setStep(8);
+      setLabel('Deployment complete');
+      setPct(1);
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(LS_KT1);
+        localStorage.removeItem(LS_META);
+      }
+      setResumeMeta(null);
+    } catch (e) {
+      if (/Receiving end does not exist/i.test(e.message)) {
+        setErr('Temple connection failed. Restart browser/extension.');
+      } else {
+        setErr(e.message || String(e));
+      }
+    }
+  }
+
+  /**
+   * Main deploy handler; initiates stage 1 or resumes stage 2.
+   */
   async function originate(meta) {
     if (step !== -1) return;
     setErr('');
-
+    // resume stage 2 if saved
+    if (resumeMeta && kt1) {
+      await patchMetadata(resumeMeta, kt1);
+      return;
+    }
+    // connect wallet
+    if (!address) await retryConnect().catch(() => {});
+    if (!toolkit) { setErr('Toolkit not ready'); return; }
+    // ensure public key for reveal
+    const acc = await wallet.client.getActiveAccount();
+    if (!acc?.publicKey) {
+      setErr('Wallet publicKey unavailable – reconnect wallet.');
+      return;
+    }
+    // stage 1: build minimal metadata
+    setStep(0);
+    setLabel('Compressing metadata (1/2)');
+    setPct(0);
+    const minimal = {
+      name        : meta.name.trim(),
+      symbol      : meta.symbol.trim(),
+      description : meta.description.trim(),
+      version     : 'ZeroContractV4',
+      license     : meta.license.trim(),
+      authors     : meta.authors,
+      homepage    : meta.homepage.trim() || undefined,
+      authoraddress: meta.authoraddress,
+      creators    : meta.creators,
+      type        : meta.type,
+      interfaces  : uniqInterfaces(meta.interfaces),
+      // tiny gray pixel as placeholder image
+      imageUri    : 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMSIgaGVpZ2h0PSIxIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxyZWN0IHdpZHRoPSIxIiBoZWlnaHQ9IjEiIGZpbGw9IiNkZGQiIC8+PC9zdmc+',
+      views       : '0x00',
+    };
+    const headerBytes = `0x${char2Bytes('tezos-storage:content')}`;
+    let bodyMin;
     try {
-      // Ensure wallet connected
-      if (!address) {
-        await connect();
+      if (typeof window !== 'undefined' && window.Worker) {
+        const worker = new Worker(new URL('../workers/originate.worker.js', import.meta.url), {
+          type: 'module',
+        });
+        const taskId = Date.now();
+        bodyMin = await new Promise((resolve, reject) => {
+          worker.onmessage = ({ data }) => {
+            if (data.progress !== undefined) setPct((data.progress / 100) * 0.25);
+            if (data.body) resolve(data.body);
+            if (data.error) reject(new Error(data.error));
+          };
+          worker.postMessage({ meta: minimal, taskId });
+        });
+        worker.terminate();
+      } else {
+        bodyMin = utf8ToHex(JSON.stringify(minimal), (p) => setPct(p / 4));
       }
-      if (!toolkit) {
-        setErr('Toolkit not ready');
-        return;
-      }
-
-      /* build metadata (compress) */
-      setStep(0);
-      setLabel('Compressing metadata');
-      setPct(0);
-
-      // Build collection metadata.  We intentionally omit the
-      // full views list for Temple compatibility: including the
-      // entire views array in the contract metadata makes the
-      // resulting operation extremely large, which causes Temple
-      // extension to drop the request with “Could not establish
-      // connection”.  Instead, we store a placeholder ('0x00'),
-      // relying on the contract code to contain the views.  Other
-      // wallets (Kukai, Umami) handle this fine, and Temple has
-      // no issue once the contract is deployed.
-      const orderedMeta = {
-        name: meta.name.trim(),
-        symbol: meta.symbol.trim(),
-        description: meta.description.trim(),
-        version: 'ZeroContractV4',
-        license: meta.license.trim(),
-        authors: meta.authors,
-        homepage: meta.homepage?.trim() || undefined,
-        authoraddress: meta.authoraddress,
-        creators: meta.creators,
-        type: meta.type,
-        interfaces: uniqInterfaces(meta.interfaces),
-        imageUri: meta.imageUri,
-        // Use placeholder for views to keep operation size small
-        views: '0x00',
-      };
-
-      const headerBytes = `0x${char2Bytes('tezos-storage:content')}`;
-      let bodyBytes;
-      try {
-        if (typeof window !== 'undefined' && window.Worker) {
-          const worker = new Worker(new URL('../workers/originate.worker.js', import.meta.url), {
-            type: 'module',
-          });
-          const taskId = Date.now();
-          bodyBytes = await new Promise((resolve, reject) => {
-            worker.onmessage = ({ data }) => {
-              if (data.progress !== undefined) setPct((data.progress / 100) * 0.25);
-              if (data.body) resolve(data.body);
-              if (data.error) reject(new Error(data.error));
-            };
-            worker.postMessage({ meta: orderedMeta, taskId });
-          });
-          worker.terminate();
-        } else {
-          bodyBytes = utf8ToHex(JSON.stringify(orderedMeta), (p) => setPct(p / 4));
-        }
-      } catch (e) {
-        setErr(`Metadata compression failed: ${e.message || String(e)}`);
-        return;
-      }
-
-      /* forge storage */
-      setStep(1);
-      setLabel('Preparing wallet origination');
-      setPct(0.25);
-
-      const md = new MichelsonMap();
-      md.set('', headerBytes);
-      md.set('content', bodyBytes);
-
-      // Originate via wallet
+    } catch (e) {
+      setErr(`Metadata compression failed: ${e.message || String(e)}`);
+      return;
+    }
+    setStep(1);
+    setLabel('Preparing origination (1/2)');
+    setPct(0.25);
+    const md = new MichelsonMap();
+    md.set('', headerBytes);
+    md.set('content', bodyMin);
+    try {
       const origOp = await toolkit.wallet.originate({
         code: contractCode,
         storage: { ...STORAGE_TEMPLATE, admin: address, metadata: md },
       });
-
       setStep(2);
-      setLabel('Waiting for wallet signature');
+      setLabel('Waiting for wallet signature (1/2)');
       setPct(0.4);
-
       const op = await origOp.send();
-
       setStep(3);
-      setLabel('Confirming on-chain');
+      setLabel('Confirming origination');
       setPct(0.6);
       setOpHash(op.opHash);
-
-      // Wait for confirmation
       await op.confirmation();
-
-      // The wallet provides contractAddress immediately after confirmation
       const contractAddr = op.contractAddress;
       setKt1(contractAddr);
-      setPct(0.9);
-
-      // Optional: poll TzKT for deeper info
+      setPct(0.8);
+      // poll TzKT (optional) for final confirmation
       for (let i = 0; i < 20; i++) {
         await sleep(3000);
         try {
@@ -228,16 +320,26 @@ export default function DeployPage() {
             setKt1(opInfo.originatedContracts[0].address);
             break;
           }
-        } catch {
-          /* ignore polling errors */
-        }
+        } catch {}
       }
-
       setStep(4);
-      setLabel('Deployment complete');
-      setPct(1);
+      setLabel('Origination complete – preparing patch');
+      setPct(0.85);
+      // build full metadata and store for resume
+      const fullJson = await buildFullMeta(meta);
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(LS_KT1, contractAddr);
+        localStorage.setItem(LS_META, fullJson);
+      }
+      setResumeMeta(fullJson);
+      // initiate patch immediately
+      await patchMetadata(fullJson, contractAddr);
     } catch (e) {
-      setErr(e.message || String(e));
+      if (/Receiving end does not exist/i.test(e.message)) {
+        setErr('Temple connection failed. Restart browser/extension.');
+      } else {
+        setErr(e.message || String(e));
+      }
     }
   }
 
@@ -256,7 +358,12 @@ export default function DeployPage() {
           err={err}
           opHash={opHash}
           kt1={kt1}
-          onRetry={reset}
+          current={step}
+          total={resumeMeta ? 2 : 2}
+          onRetry={() => {
+            if (resumeMeta && kt1) patchMetadata(resumeMeta, kt1);
+            else reset();
+          }}
           onCancel={reset}
         />
       )}
@@ -265,12 +372,13 @@ export default function DeployPage() {
 }
 
 /* What changed & why:
-   • Replaced forge/inject logic with `toolkit.wallet.originate`.
-   • Added placeholder views ('0x00') in metadata to keep the
-     origination payload small, which prevents Temple extension
-     connection failures.
-   • Reintroduced matrixNodes disabling in WalletContext to
-     enforce extension-based communication.
-   • The wallet still handles estimation, forging, signing and
-     injection, eliminating manual forge/inject flows.
+   • Introduced dual‑stage origination to work around Temple’s
+     message size limits: minimal metadata in stage 1, then full
+     metadata patched via edit_contract_metadata in stage 2.
+   • Added localStorage resume logic to ensure interrupted
+     deployments can continue with the metadata patch without
+     re-originating the contract.
+   • Enhanced OperationOverlay interaction: displays signature
+     progress (1/2, 2/2) and handles retries appropriately.
+   • Updated revision and summary accordingly.
 */

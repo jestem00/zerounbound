@@ -143,10 +143,10 @@ const List = styled.ul.attrs((p)=>({$n:p.$n}))`
   @media (prefers-reduced-motion:reduce){ animation:none; }
 `;
 
-// Reduced stage list for simplified flow
-const STAGES = [
-  'PACK', 'WALLET', 'CONFIRM',
-];
+// Stage labels are no longer hard‑coded.  Deployment steps
+// convey their own status via the `status` prop.  We keep
+// STAGES as an empty array for backwards compatibility.
+const STAGES = [];
 
 /*════════ component ════════════════════════════════════*/
 export default function OperationOverlay({
@@ -157,12 +157,8 @@ export default function OperationOverlay({
   onCancel = () => {},
 }){
   /* progress calc */
-  const cur  = Number.isFinite(current) ? current
-             : Number.isFinite(step)    ? step
-             : 1;
-  const prog = (progressProp !== undefined)
-              ? progressProp
-              : (total > 0 ? (cur - 1) / total : 0);
+  const cur  = Number.isFinite(step)    ? step : 0;
+  const prog = progressProp ?? 0;
 
   /* wheel lock */
   const panelRef = useRef(null);
@@ -253,9 +249,14 @@ export default function OperationOverlay({
   }
 
   /*──────── progress / error branch ─────*/
-  const caption = error ? status : (status||STAGES[cur-1]||'Preparing request…');
+  const caption = error ? status : (status || 'Preparing request…');
   const walletHint = /wallet/i.test(caption)&&!error;
-  const showSig    = total>1 && !error;
+  // Determine whether to show a signature counter: stage 2 (first sig) or stage 6 (second sig)
+  let sigIndex = null;
+  if (!error) {
+    if (cur === 2) sigIndex = 1;
+    if (cur === 6) sigIndex = 2;
+  }
   const isTimeout = /timeout|took more time/i.test(caption);
   const isBeaconInvalid = /parameters invalid|beacon/i.test(caption);
   const isTempleConn = /receiving end does not exist|temple/i.test(caption);
@@ -269,9 +270,9 @@ export default function OperationOverlay({
           ? <Gif src="/sprites/loading48x48.gif" alt="loading" onError={()=>setGifOk(false)}/>
           : <Ring />}
 
-        {showSig && (
+        {sigIndex && (
           <h3 style={{margin:'.25rem 0 .4rem',fontSize:'1rem'}}>
-            Signature {cur} of {total}
+            Signature {sigIndex} of 2
           </h3>
         )}
 

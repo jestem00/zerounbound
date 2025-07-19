@@ -1,9 +1,9 @@
-/*─────────────────────────────────────────────────────────────────
+/─────────────────────────────────────────────────────────────────
 Developed by @jams2blues – ZeroContract Studio
 File: docs/Master_Overview_And_Manifest_zerounbound_contractmanagement.md
-Rev : r1012 2025‑07‑18 UTC
-Summary: add dual‑stage origination (FAST_ORIGIN) & backend forging/injection; new invariant I118; update map
-──────────────────────────────────────────────────────────────────*/
+Rev : r1013 2025‑07‑19 UTC
+Summary: simplify origination — remove dual‑stage and backend forging; update manifest accordingly.
+──────────────────────────────────────────────────────────────────/
 
 ════════════════════════════════════════════════════════════════
 ZERO UNBOUND v4 — MASTER OVERVIEW & SOURCE‑FILE MANIFEST
@@ -102,7 +102,7 @@ I16 [E] Jest coverage ≥ 90 %.
 I17 [E] (retired) legacy 3 M‑block back‑scan.
 I18 [E] RPC fail‑over after 5 errors.
 I19 [F] SSR‑safe: hooks never touch window during render.
-I20 [F] Exactly one _document.js.
+I20 [F] Exactly one document.js.
 I21 [I] Corepack pins Yarn 4.9.1.
 I22 [F] ESLint bans em‑dash.
 I23 [F] Styled‑components factory import invariant.
@@ -146,14 +146,14 @@ I59 [F] Silent session restore on mount.
 I60 [F,E] Resumable Slice Uploads — Mint, Append & Repair
 ───────────────────────────────────────────────────────────────
 • Oversize writes are chunked (32 768 B – 1 024 head-room); first slice inside
-the mint, the rest via append_* in strict order.
+the mint, the rest via append* in strict order.
 • Each chunk persists a checkpoint in
 localStorage.zuSliceCache.<network>[<contract>:<tokenId>:<label>]:
 
 python
 Copy
-  { tokenId:nat, label:"artifactUri"|…, total:nat, next:nat,
-    chunkSize:32768, hash:"sha256:<hex>", updated:<unix-ms> }
+{ tokenId:nat, label:"artifactUri"|…, total:nat, next:nat,
+chunkSize:32768, hash:"sha256:<hex>", updated:<unix-ms> }
 • Upload resumes at next, clears cache once confirmed next===total,
 and is idempotent — repeating slices can’t corrupt bytes.
 • RepairUri rebuilds on-chain dataURI, byte-diffs against re-upload, aborts
@@ -235,25 +235,25 @@ inherit the layout strategy pioneered in src/ui/Entrypoints/ EditTokenMetadata.j
 
 pgsql
 Copy
-  • A `GridWrap` with `grid-template-columns:repeat(12,1fr)` and
-    breakpoint collapse to single column at ≤ 1100 px.  
-  • An inner `FormGrid` using `auto‑fit minmax(240px,1fr)` (220 px on
-    ultra‑wide ≥ 1800 px).  
-  • GlobalStyle `Break700` patch that lifts any hard‑coded 700 px
-    max‑width constraints inside third‑party components.  
-  • All <PixelInput/PixelButton> elements arranged so the form remains
-    fully usable on a 320 px viewport **and** scales gracefully on
-    ≥ 4 K monitors (columns tighten gap from 1.6 → 1.2 rem at ≥ 1800 px).  
-  • CTA row stacks vertically with `.flex-direction:column` on mobile
-    and surfaces a `<ul>` error list whenever validation fails.  
-  • No media query may introduce horizontal scrolling; use intrinsic
-    grid re‑flow only.  
-  • Any future module diverging from these specs must add its own
-    “Break*” GlobalStyle helper and document exceptions inline.
+• A GridWrap with grid-template-columns:repeat(12,1fr) and
+breakpoint collapse to single column at ≤ 1100 px.
+• An inner FormGrid using auto‑fit minmax(240px,1fr) (220 px on
+ultra‑wide ≥ 1800 px).
+• GlobalStyle Break700 patch that lifts any hard‑coded 700 px
+max‑width constraints inside third‑party components.
+• All <PixelInput/PixelButton> elements arranged so the form remains
+fully usable on a 320 px viewport and scales gracefully on
+≥ 4 K monitors (columns tighten gap from 1.6 → 1.2 rem at ≥ 1800 px).
+• CTA row stacks vertically with .flex-direction:column on mobile
+and surfaces a <ul> error list whenever validation fails.
+• No media query may introduce horizontal scrolling; use intrinsic
+grid re‑flow only.
+• Any future module diverging from these specs must add its own
+“Break*” GlobalStyle helper and document exceptions inline.
 
-  *Rationale:* guarantees identical ergonomics across the admin suite,
-  eliminates copy‑paste drift, and codifies the proven pattern that
-  already passed WCAG AA + LCP audits. 
+Rationale: guarantees identical ergonomics across the admin suite,
+eliminates copy‑paste drift, and codifies the proven pattern that
+already passed WCAG AA + LCP audits.
 I103 [F] Token‑metadata legacy alias artists is accepted read‑only;
         UI maps it to authors, never writes this key.
 I104 [F,C] Contract‑level metadata must include a symbol key
@@ -299,9 +299,8 @@ I112 [F,E] Marketplace dialogs (buy/list/offer) must call feeEstimator.js and di
 I113 [F] Unified Consent Management — all consent decisions use useConsent hook with standardized keys: 'nsfw' (for content), 'flash' (for flashing), 'scripts:{contractAddress}' (per‑contract script execution). Consent state syncs across components via CustomEvent broadcasting and always requires explicit user acknowledgment through PixelConfirmDialog with checkbox agreement to terms.
 I114 [F] Portal‑Based Draggable Windows — draggable preview windows use createPortal(component, document.body) for z‑index isolation. Draggable state managed through useRef pattern with randomized start positions (60 + Math.random()*30) to prevent stacking. SSR compatibility: typeof document === 'undefined' ? body : createPortal(body, document.body).
 I115 [F] Hazard Detection & Content Protection — all media rendering components must call detectHazards(metadata) before display. Hazard types: { nsfw, flashing, scripts }. Script hazards detect HTML MIME types, JavaScript URIs, SVG with <script> tags. Obfuscation overlays block content until explicit user consent with age verification (18+) for NSFW.
-I116 [F] Debounced Form State Pattern — form components maintain local state mirroring parent props with upward change propagation via useEffect. Input sanitization applied at component level. Unique id attributes use index pattern: id={\tid-${index}`}. I117 [F] **Script Security Model** — script execution requires both hazard detection AND user consent. Script consent persists per contract address. EnableScriptsOverlayprovides inline consent,EnableScriptsToggle` provides permanent toggle. Terms agreement checkbox required for all script consent flows.
-
-I118 [E] Dual‑Stage Origination — when FAST_ORIGIN=true the origination flow must store a placeholder views pointer and then automatically call update_contract_metadata within the same UI session to patch the real metadata; failure to patch is critical (I118).
+I116 [F] Debounced Form State Pattern — form components maintain local state mirroring parent props with upward change propagation via useEffect. Input sanitization applied at component level. Unique id attributes use index pattern: id={\tid-${index}}. 
+I117 [F] **Script Security Model** — script execution requires both hazard detection AND user consent. Script consent persists per contract address. EnableScriptsOverlayprovides inline consent,EnableScriptsToggle provides permanent toggle. Terms agreement checkbox required for all script consent flows.
 
 /──────────────────────────────────────────────────────────────────────────────
 3 · reserved for future research notes
@@ -450,7 +449,7 @@ zerounbound/src/ui/MAINTokenMetaPanel.jsx – enhanced token metadata panel with
 ╭── src/ui/operation & misc ─────────────────────────────────────────────────╮
 zerounbound/src/ui/AdminTools.jsx – dynamic entry‑point modal; Imports: react,WalletContext; Exports: AdminTools
 zerounbound/src/ui/OperationConfirmDialog.jsx – tx summary dialog; Imports: react,PixelConfirmDialog; Exports: OperationConfirmDialog
-zerounbound/src/ui/OperationOverlay.jsx – progress overlay with dual‑stage hints and Temple prompts; Imports: react,useWheelTunnel,LoadingSpinner,CanvasFireworks,PixelButton; Exports: OperationOverlay
+zerounbound/src/ui/OperationOverlay.jsx – progress overlay with status updates and Temple prompts; Imports: react,useWheelTunnel,LoadingSpinner,CanvasFireworks,PixelButton; Exports: OperationOverlay
 zerounbound/src/ui/ContractCarousels.jsx – live contract cards; Imports: react,jFetch,countTokens; Exports: ContractCarousels
 zerounbound/src/ui/ContractMetaPanel.jsx – contract stats card; Imports: react,styled-components; Exports: ContractMetaPanel
 zerounbound/src/ui/ContractMetaPanelContracts.jsx – banner panel on /contracts; Imports: React,RenderMedia; Exports: ContractMetaPanelContracts
@@ -557,9 +556,9 @@ The same script creates a .yarn_state marker so subsequent
 yarn lint / build / test stages find the workspace ready.
 ### Vercel
 
-Project     	 Build Command                         	 Domains                
-ghostnet    	 yarn set:ghostnet && yarn build     	ghostnet.zerounbound.art
-mainnet     	 yarn set:mainnet  && yarn build     	zerounbound.art, www.* 
+Project       Build Command                           Domains                
+ghostnet      yarn set:ghostnet && yarn build      ghostnet.zerounbound.art
+mainnet       yarn set:mainnet  && yarn build      zerounbound.art, www.* 
 
 No environment variables; scripts/setTarget.js rewrites deployTarget.js.
 
@@ -568,123 +567,107 @@ No environment variables; scripts/setTarget.js rewrites deployTarget.js.
 ───────────────────────────────────────────────────────────────/
 A. hashMatrix.json, contains all the typeHashes' generated by tzkt used in filtering and labeling contract versions and more:
 {
-  "-543526052":  "v1",
-  "-1889653220": "v2a",
-  "943737041":   "v2b",
-  "-1513923773": "v2c",
-  "-1835576114": "v2d",
-  "1529857708":  "v2e",
-  "862045731":   "v3",
-  "-255216182":  "v4",
-  "-1665803695": "v4a",
-  "617511430":   "v4b",
-  "-1275828732": "v4c",
-  "-2032598074": "v4d"
+"-543526052": "v1",
+"-1889653220": "v2a",
+"943737041": "v2b",
+"-1513923773": "v2c",
+"-1835576114": "v2d",
+"1529857708": "v2e",
+"862045731": "v3",
+"-255216182": "v4",
+"-1665803695": "v4a",
+"617511430": "v4b",
+"-1275828732": "v4c"
 }
 
 B. entrypointRegistry.json, contains all Entrypoints used across our supported v1-v4c contracts:
 {
-  "common": [
-    "transfer",
-    "balance_of",
-    "update_operators"
-  ],
+"common": [
+"transfer",
+"balance_of",
+"update_operators"
+],
 
-  "v1": {
-    "$extends": "common",
-    "mint":  ["nat","map(string,bytes)","address"],
-    "burn":  ["nat","nat"]
-  },
+"v1": {
+"$extends": "common",
+"mint": ["nat","map(string,bytes)","address"],
+"burn": ["nat","nat"]
+},
 
-  "v2a": {
-    "$extends": "v1",
-    "add_parent":  ["address"],
-    "remove_parent": ["address"],
-    "add_child":   ["address"],
-    "remove_child": ["address"],
-    "lock_metadata": []
-  },
-  "v2b": { "$extends": "v2a", "lock_metadata": false },
-  "v2c": { "$extends": "v2a", "lock_metadata": false },
-  "v2d": { "$extends": "v2a", "lock_metadata": false },
-  "v2e": { "$extends": "v2a", "lock_metadata": false },
+"v2a": {
+"$extends": "v1",
+"add_parent": ["address"],
+"remove_parent": ["address"],
+"add_child": ["address"],
+"remove_child": ["address"],
+"lock_metadata": []
+},
+"v2b": { "$extends": "v2a", "lock_metadata": false },
+"v2c": { "$extends": "v2a", "lock_metadata": false },
+"v2d": { "$extends": "v2a", "lock_metadata": false },
+"v2e": { "$extends": "v2a", "lock_metadata": false },
 
-  "v3": {
-    "$extends": "v2a",
-    "add_collaborator":   ["address"],
-    "remove_collaborator": ["address"],
-    "lock_metadata": false
-  },
+"v3": {
+"$extends": "v2a",
+"add_collaborator": ["address"],
+"remove_collaborator": ["address"],
+"lock_metadata": false
+},
 
-  "v4": {
-    "$extends": "v3",
-    "destroy": ["nat"],
-    "burn":    false,
-    "append_artifact_uri": ["nat","bytes"],
-    "append_extrauri":     ["string","string","string","nat","bytes"],
-    "clear_uri":           ["nat","string"],
-    "edit_contract_metadata": ["bytes"],
-    "edit_token_metadata":    ["map(string,bytes)","nat"],
-    "lock_metadata": false,
-    "repair_uri":   false
-  },
+"v4": {
+"$extends": "v3",
+"destroy": ["nat"],
+"burn": false,
+"append_artifact_uri": ["nat","bytes"],
+"append_extrauri": ["string","string","string","nat","bytes"],
+"clear_uri": ["nat","string"],
+"edit_contract_metadata": ["bytes"],
+"edit_token_metadata": ["map(string,bytes)","nat"],
+"lock_metadata": false,
+"repair_uri": false
+},
 
-  "v4a": {
-    "$extends": "v3",
-    "burn":                  ["nat","nat"],
-    "append_token_metadata": ["string","nat","bytes"],
-    "update_contract_metadata": ["bytes"],
-    "update_token_metadata":    ["map(string,bytes)","nat"],
-    "add_collaborators":     ["set<address>"],
-    "remove_collaborators":  ["set<address>"],
-    "add_collaborator":   false,
-    "remove_collaborator":false,
-    "add_parent":  false,
-    "remove_parent":false,
-    "add_child":   false,
-    "remove_child":false,
-    "lock_metadata": false,
-    "repair_uri":   false
-  },
+"v4a": {
+"$extends": "v3",
+"burn": ["nat","nat"],
+"append_token_metadata": ["string","nat","bytes"],
+"update_contract_metadata": ["bytes"],
+"update_token_metadata": ["map(string,bytes)","nat"],
+"add_collaborators": ["set<address>"],
+"remove_collaborators": ["set<address>"],
+"add_collaborator": false,
+"remove_collaborator":false,
+"add_parent": false,
+"remove_parent":false,
+"add_child": false,
+"remove_child":false,
+"lock_metadata": false,
+"repair_uri": false
+},
 
-  "v4b": {
-    "$extends": "v4",
-    "add_collaborator":   false,
-    "remove_collaborator":false,
-    "add_collaborators":  false,
-    "remove_collaborators": false
-  },
+"v4b": {
+"$extends": "v4",
+"add_collaborator": false,
+"remove_collaborator":false,
+"add_collaborators": false,
+"remove_collaborators": false
+},
 
-  "v4c": {
-    "$extends": "v4a",
-    "add_collaborators": false,
-    "remove_collaborators": false,
-    "add_collaborator": false,
-    "remove_collaborator": false,
-    "update_contract_metadata": false
-  },
-
-  "v4d": {
-    "$extends": "v3",
-    "burn":                  ["nat","nat"],
-    "append_token_metadata": ["string","nat","bytes"],
-    "update_contract_metadata": ["bytes"],
-    "update_token_metadata":    ["map(string,bytes)","nat"],
-    "add_collaborators":     ["set<address>"],
-    "remove_collaborators":  ["set<address>"],
-    "add_parent":  false,
-    "remove_parent":false,
-    "add_child":   false,
-    "remove_child":false,
-    "lock_metadata": false,
-    "repair_uri":   false
-  }
+"v4c": {
+"$extends": "v4a",
+"add_collaborators": false,
+"remove_collaborators": false,
+"add_collaborator": false,
+"remove_collaborator": false,
+"update_contract_metadata": false
+}
 }
 
 /──────────────────────────────────────────────────────────────
 CHANGELOG
 ──────────────────────────────────────────────────────────────/
 • r1012 2025‑07‑18 UTC — added dual‑stage origination environment flags, serverless forge/inject endpoints and invariant I118; updated manifest accordingly.
+• r1013 2025‑07‑19 UTC — removed dual‑stage origination and backend forging; deprecated USE_BACKEND and FAST_ORIGIN flags; updated manifest and invariants to reflect single‑stage origination via wallet.originate.
 • r865 2025‑07‑16 UTC — countTokens.js now fetches /tokens/count for
 reliable totals; manifest entry updated accordingly.
 ...

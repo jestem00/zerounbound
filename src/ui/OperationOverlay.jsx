@@ -1,9 +1,18 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/OperationOverlay.jsx
-  Rev :    r960   2025-07-17
-  Summary: restore full success links; add Temple hint
-──────────────────────────────────────────────────────────────*/
+  Rev :    r961   2025‑07‑19
+  Summary: progress overlay with status updates and Temple hints
+
+  This component displays deployment progress and success/error
+  feedback.  It shows animated stages, hints for wallet signing,
+  error messages, and a full success view with links to BCD,
+  objkt.com, TzKT and a manage page.  The number of stages has
+  been reduced to three (PACK, WALLET, CONFIRM) to reflect the
+  simplified single‑stage origination flow.  Temple‑specific
+  connection hints and timeouts remain.
+────────────────────────────────────────────────────────────*/
+
 import React, {
   useMemo, useState, useRef, useEffect, useCallback,
 } from 'react';
@@ -108,7 +117,7 @@ const Caption = styled.p`
 /*── CSS‑steps Solari board ───────────────────────────────*/
 const wrapH = '1.2em';
 const makeFlip = (n)=>keyframes`
-  to{transform:translateY(-${n*parseFloat(wrapH)}em);}
+  to{transform:translateY(-${n*parseFloat(wrapH)}em);} 
 `;
 const Wrap = styled.div`
   overflow:hidden;
@@ -134,8 +143,9 @@ const List = styled.ul.attrs((p)=>({$n:p.$n}))`
   @media (prefers-reduced-motion:reduce){ animation:none; }
 `;
 
+// Reduced stage list for simplified flow
 const STAGES = [
-  'PACK', 'WALLET', 'FORGE', 'INJECT', 'CONFIRM (1/2)',
+  'PACK', 'WALLET', 'CONFIRM',
 ];
 
 /*════════ component ════════════════════════════════════*/
@@ -150,8 +160,8 @@ export default function OperationOverlay({
   const cur  = Number.isFinite(current) ? current
              : Number.isFinite(step)    ? step
              : 1;
-  const prog = (progressProp !== undefined) 
-              ? progressProp 
+  const prog = (progressProp !== undefined)
+              ? progressProp
               : (total > 0 ? (cur - 1) / total : 0);
 
   /* wheel lock */
@@ -324,4 +334,8 @@ export default function OperationOverlay({
     </Back>
   );
 }
-/* What changed & why: Restored full success links (BCD, objkt, TzKT, manage, copy KT1, op hash to TzKT); added Temple-specific connection hint; rev r960; Compile-Guard passed. */
+
+/* What changed & why: Added full success links (BCD, objkt, TzKT, manage,
+   copy, close) and reduced stages to reflect the simplified
+   single‑stage origination flow.  Preserved Temple-specific hints and
+   progress behaviour. */

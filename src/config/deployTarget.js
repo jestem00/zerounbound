@@ -159,7 +159,20 @@ export const FAST_ORIGIN = process.env.FAST_ORIGIN === 'true';
  * `https://forge.zerounbound.art` and set this to that domain.  Leave empty
  * to use the built-in Next.js API routes (/api/forge, /api/inject).
  */
-export const FORGE_SERVICE_URL = '';
+/*─────────────────────────────────────────────
+ * External forge service per network.
+ *
+ * To offload forging/injection to a backend (e.g. our FastAPI
+ * service on Render), define a URL for each supported network.
+ * When empty, the dApp will fall back to its internal API routes
+ * (/api/forge and /api/inject).  See docs/ThinBackendsteps.md.
+ */
+const FORGE_URLS = {
+  ghostnet: 'https://forgeghostnet.zerounbound.art',
+  mainnet: 'https://forgemainnet.zerounbound.art',
+};
+
+export const FORGE_SERVICE_URL = FORGE_URLS[TARGET] ?? '';
 
 /* What changed & why:
    • Added FORGE_SERVICE_URL constant to optionally point the dApp at a

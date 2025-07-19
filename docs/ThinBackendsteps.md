@@ -1,5 +1,5 @@
 /Developed by @jams2blues – ZeroContract Studio
-File: docs/OriginationAccelerationPlan.md
+File: docs/ThinBackendsteps.md
 Rev : r3 2025‑07‑19 UTC
 Summary: simplify origination plan — remove forge/inject helpers
 and dual‑stage flow; rely exclusively on wallet.originate. Update

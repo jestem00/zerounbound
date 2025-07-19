@@ -30,8 +30,8 @@ Step‑by‑Step Implementation (💎 = quick win, 🛠 = code change,
   (views.json bytes × 2 + 2).  
 
 ### 2 Dual‑Tx “Slim Originate” Flow (🛠🧪📚)
-2.1 Introduce `FAST_ORIGIN=true` flag in  
-  `src/config/deployTarget.js`.  
+2.1 Set `FAST_ORIGIN=true` in the environment and
+  flip the flag in `src/config/deployTarget.js`.
 2.2 If flag set, origination payload stores `"views":"0x00"`.  
 2.3 Upon first confirmation, auto‑dispatch
   `update_contract_metadata` with the real viewsHex.  

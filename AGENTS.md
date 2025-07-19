@@ -20,10 +20,8 @@ Summary: first Codex‑aware contributor guide
 ---
 
 ## 2 · Local / Codex Dev Bootstrap
-
 corepack enable && corepack prepare yarn@4.9.1 --activate
 yarn install --immutable
-
 # pick network before dev / build
 yarn set:ghostnet   # or yarn set:mainnet
 yarn dev            # http://localhost:3000

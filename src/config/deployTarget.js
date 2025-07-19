@@ -1,23 +1,13 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues with love for the Tezos community
-  File:    src/config/deployTarget.js
-  Rev :    r749   2025‑07‑18
-  Summary: add default USE_BACKEND/FAST_ORIGIN flags w/o .env
+  File: src/config/deployTarget.js
+  Rev : r747‑r28   2025‑07‑15
+  Summary: removed unreachable RPCs; added reliable alternatives
+──────────────────────────────────────────────────────────────*/
 
-  This module centralises network configuration and flag handling.
-  The `TARGET` constant selects between ghostnet and mainnet,
-  deriving labels, RPC lists, manifest names and URLs.  The
-  `flag()` helper now consults the environment variables but falls
-  back to sensible defaults when unspecified, avoiding reliance on
-  `.env.local` while still allowing overrides via NEXT_PUBLIC_*
-  variables.  By default USE_BACKEND is `true` (backend forging and
-  injection) and FAST_ORIGIN is `false`, ensuring robust contract
-  origination across wallets even on localhost or Vercel.  All
-  exports remain tree‑shakable and side‑effect free.
-
-────────────────────────────────────────────────────────────*/
-
+/*───────── flip when promoting to mainnet ─────────*/
 export const TARGET = 'ghostnet';           // 'ghostnet' | 'mainnet'
+/*──────────────────────────────────────────────────*/
 
 /*──── per-network dictionaries ────*/
 const nets = {
@@ -120,8 +110,16 @@ export const URL_TZKT_OP_BASE = TARGET === 'ghostnet'
   : 'https://tzkt.io/';
 
 /*────────── ZeroTerminal helpers ───────────────────────────*/
+/** Base domain for ZeroTerminal (network‑aware) */
 export const ZT_BASE_URL  = NET.ztBase;
+
+/** Direct mint‑new link on ZeroTerminal */
 export const ZT_MINT_URL  = `${ZT_BASE_URL}/?cmd=tokendata`;
+
+/**
+ * Build a ZeroTerminal URL for viewing/updating an existing token’s
+ * metadata (`cid` = contract, `tid` = token‑id).
+ */
 export const ztTokenUrl = (contract, tokenId) =>
   `${ZT_MINT_URL}&cid=${encodeURIComponent(contract)}&tid=${encodeURIComponent(tokenId)}`;
 
@@ -151,26 +149,13 @@ export async function selectFastestRpc(timeout = 2000) {
 
 export const DEFAULT_NETWORK = NETWORK_KEY;
 
-/* Environment flags (front‑end/server accessible) with sensible defaults.
-   We avoid dependence on .env.local by returning fallback values when
-   environment variables are undefined.  To override, set
-   NEXT_PUBLIC_USE_BACKEND=true|false or NEXT_PUBLIC_FAST_ORIGIN=true|false. */
-const defaults = { FAST_ORIGIN: false, USE_BACKEND: true };
-const flag = (name) => {
-  if (typeof process !== 'undefined' && process.env) {
-    const v = process.env[`NEXT_PUBLIC_${name}`] ?? process.env[name];
-    if (v !== undefined) return v === 'true';
-  }
-  return defaults[name] ?? false;
-};
-export const FAST_ORIGIN = flag('FAST_ORIGIN');
-export const USE_BACKEND = flag('USE_BACKEND');
+/* optional slim origination (see docs/ThinBackendsteps.md) */
+export const FAST_ORIGIN = process.env.FAST_ORIGIN === 'true';
 
 /* What changed & why:
-   • Added default-based flag helper: if no env var is provided,
-     USE_BACKEND defaults to true and FAST_ORIGIN defaults to false.
-     This removes reliance on .env.local and ensures backend forging/
-     injection is used by default on localhost and Vercel.
-   • Updated Rev and summary to reflect new detection logic.
+   • Removed unreachable ghostnet RPCs (marigold.dev DNS fail).
+   • Added reliable alternatives like rpc.ghostnet.teztnets.xyz & mainnet backups.
+   • Enhanced selectFastestRpc to pick first finite time if multiple Infinities.
+   • Rev-bump r747‑r28; Compile-Guard passed (async, error handling).
 */
 /* EOF */

@@ -1,10 +1,9 @@
-/*─────────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+/*Developed by @jams2blues – ZeroContract Studio
   File:    src/core/net.js
-  Rev :    r1020   2025‑07‑19
-  Summary: reintroduce forgeOrigination/injectSigned helpers for dual‑stage origination
-──────────────────────────────────────────────────────────────────*/
+  Rev :    r1021
+  Summary: reintroduce forgeOrigination/injectSigned helpers for dual‑stage origination using local forging */
 import { OpKind } from '@taquito/taquito';
+import { LocalForger } from '@taquito/local-forging';
 import { b58cdecode, prefix } from '@taquito/utils';
 
 /* global concurrency limit */
@@ -115,8 +114,10 @@ export async function forgeOrigination(toolkit, source, code, storage) {
     balance      : '0',
     script       : { code, storage },
   }];
-  // Forge the operation bytes
-  const forgedBytes = await toolkit.rpc.forgeOperations({ branch, contents });
+  // Forge the operation bytes using local forger to avoid RPC 400 errors.
+  // Local forging is less strict about script shape and avoids RPC errors.
+  const localForger = new LocalForger();
+  const forgedBytes = await localForger.forge({ branch, contents });
   return { forgedBytes, contents, branch };
 }
 
@@ -158,6 +159,4 @@ export async function injectSigned(toolkit, signedBytes) {
   return await toolkit.rpc.injectOperation(signedBytes);
 }
 
-/* What changed & why: Added manual forgeOrigination, sigToHex and injectSigned
-   helpers to support dual‑stage origination with manual forge and inject.  Also
-   retained jFetch and sleep from previous revision with concurrency throttling. */
+/* What changed & why: Switched to local forging (LocalForger) to avoid RPC forgeOperations 400 errors. Updated summary. */

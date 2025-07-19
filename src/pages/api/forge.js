@@ -1,7 +1,7 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/api/forge.js
-  Rev :    r3   2025‑07‑19
+  Rev :    r4   2025‑07‑19
   Summary: serverless API to forge an origination operation.  It
            imports RPC_URLS from deployTarget.js to select a
            battle‑tested RPC without relying on environment
@@ -9,8 +9,10 @@
            falls back to generous defaults on failure, and
            returns the forged bytes to the client.  Works in both
            local yarn dev and Vercel environments without any
-           configuration.  Expects a POST body with `code`,
-           `storage` and `source` (tz1/KT1 address).
+           configuration.  Increases the request body size limit
+           to 1 MB to accommodate large contracts.  Expects a
+           POST body with `code`, `storage` and `source` (tz1/KT1
+           address).
 ──────────────────────────────────────────────────────────────*/
 
 import { TezosToolkit } from '@taquito/taquito';
@@ -66,6 +68,18 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: err.message || 'Forge failed' });
   }
 }
+
+// Increase the request body size limit to 1 MB to accommodate large
+// Michelson code and storage payloads.  Without this, Next.js API
+// routes may reject requests with `413 Payload Too Large` errors
+// when forging big contracts on Ghostnet/Mainnet.
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '1mb',
+    },
+  },
+};
 
 /* What changed & why: Added a new serverless function to offload
    operation forging to Vercel.  It uses Taquito to estimate gas

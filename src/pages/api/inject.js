@@ -1,14 +1,15 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/api/inject.js
-  Rev :    r3   2025‑07‑19
+  Rev :    r4   2025‑07‑19
   Summary: serverless API to inject a signed operation.  It
            imports RPC_URLS from deployTarget.js to select a
            battle‑tested RPC without relying on environment
            variables.  The endpoint accepts a POST body with
            `signedBytes` and returns the operation hash after
            injection.  Works in both local yarn dev and Vercel
-           environments without any configuration.
+           environments without any configuration.  Increases the
+           request body size limit to 512 KB for signed bytes.
 ──────────────────────────────────────────────────────────────*/
 
 import { TezosToolkit } from '@taquito/taquito';
@@ -35,6 +36,17 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: err.message || 'Inject failed' });
   }
 }
+
+// Increase the request body size limit to 0.5 MB for signed bytes.  Although
+// signed operations are typically small (<10 KB), this ensures the
+// API route never rejects injection requests due to body size limits.
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '512kb',
+    },
+  },
+};
 
 /* What changed & why: Added a new serverless function to offload
    operation injection to Vercel.  It uses Taquito to inject a

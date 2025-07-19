@@ -19,6 +19,11 @@ import { b58cdecode, prefix } from '@taquito/utils';
 // we instantiate our own LocalForger below.  See:
 // https://tezostaquito.io/docs/forger for details.
 import { LocalForger } from '@taquito/local-forging';
+// Parser from michel-codec is used to convert plain Michelson (.tz) source
+// into Micheline JSON when forging locally.  Without this conversion,
+// passing a raw string into estimate.originate or forge may throw an
+// error.  Parsing is performed on-demand in forgeOrigination.
+import { Parser } from '@taquito/michel-codec';
 
 /* global concurrency limit */
 const LIMIT = 4;
@@ -163,11 +168,25 @@ export async function forgeOrigination(toolkit, source, code, storage) {
    * estimation.  Users will only pay the actual resources consumed
    * when the operation is applied.
    */
+  // If the provided code is a raw Michelson string, parse it into
+  // Micheline JSON using the Parser.  This allows Taquito to
+  // estimate and forge the contract.  If code is already a JSON
+  // Michelson array, leave it unchanged.
+  let parsedCode = code;
+  if (typeof code === 'string') {
+    try {
+      const parser = new Parser();
+      const parsed = parser.parseScript(code);
+      if (parsed) parsedCode = parsed;
+    } catch (errParse) {
+      throw new Error('Invalid Michelson code: ' + errParse.message);
+    }
+  }
   let feeMutez      = '200000';    // 0.2 ꜩ
   let gasLimit      = '1040000';   // ~1 million gas
   let storageLimit  = '60000';     // 60 k bytes
   try {
-    const estimate = await toolkit.estimate.originate({ code, storage, balance: '0' });
+    const estimate = await toolkit.estimate.originate({ code: parsedCode, storage, balance: '0' });
     feeMutez      = estimate.suggestedFeeMutez.toString();
     gasLimit      = estimate.gasLimit.toString();
     storageLimit  = estimate.storageLimit.toString();
@@ -189,7 +208,7 @@ export async function forgeOrigination(toolkit, source, code, storage) {
     gas_limit    : gasLimit,
     storage_limit: storageLimit,
     balance      : '0',
-    script       : { code, storage },
+    script       : { code: parsedCode, storage },
   }];
   // Forge the operation bytes using a dedicated LocalForger.  Although
   // Taquito can be configured with a local forger, we explicitly
@@ -245,12 +264,11 @@ export async function injectSigned(toolkit, signedBytes) {
   return await toolkit.rpc.injectOperation(signedBytes);
 }
 
-/* What changed & why: Added backend forging/injection support.
-   When USE_BACKEND is true, the origination flow offloads forging
-   and injection to the serverless endpoints (`/api/forge` and
-   `/api/inject`), avoiding client‑side payload limits.  When
-   USE_BACKEND is false, the existing manual gas/storage/fee
-   fallback remains in place: if toolkit.estimate.originate fails
-   we use generous defaults (gas_limit = 1 040 000, storage_limit =
-   60 k, fee = 0.2 ꜩ) and forge locally via LocalForger.  Updated
+/* What changed & why: Removed USE_BACKEND import and moved the
+   responsibility of choosing backend vs. local forging to the
+   caller.  net.js now always forges and injects locally with a
+   manual gas/storage/fee fallback, while exposing forgeViaBackend
+   and injectViaBackend for external use.  This avoids build
+   errors when deployTarget.js does not export USE_BACKEND and
+   centralises the decision logic in deploy.js.  Updated
    revision and summary accordingly. */

@@ -17,6 +17,14 @@
 
 import { TezosToolkit } from '@taquito/taquito';
 import { LocalForger } from '@taquito/local-forging';
+// The michel-codec package exposes a Parser class that can convert
+// plain Michelson source code into JSON Micheline (Michelson AST).  When
+// the client sends a `.tz` file as a raw string, we must convert it
+// into JSON before passing it to the RPC estimator.  Without this
+// conversion the RPC will reject the origination request with a 500
+// error.  See taquito docs on Parser.parseScript for details.  If
+// code is already a JSON array, the parser will not be invoked.
+import { Parser } from '@taquito/michel-codec';
 import { RPC_URLS } from '../../config/deployTarget.js';
 
 export default async function handler(req, res) {
@@ -25,9 +33,23 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method Not Allowed' });
     }
   try {
-    const { code, storage, source } = req.body;
+    let { code, storage, source } = req.body;
     if (!code || !storage || !source) {
       return res.status(400).json({ error: 'Missing code, storage or source' });
+    }
+    // If the code is provided as a Michelson string, convert it to
+    // Micheline JSON using the Parser.  Taquito expects JSON Michelson
+    // when estimating and forging contracts.  Without this step the RPC
+    // throws and the API returns a 500 error.  Storage is usually
+    // already JSON (MichelsonMap) so we leave it unchanged.
+    try {
+      if (typeof code === 'string') {
+        const parser = new Parser();
+        const parsed = parser.parseScript(code);
+        if (parsed) code = parsed;
+      }
+    } catch (errParse) {
+      return res.status(400).json({ error: 'Invalid Michelson code: ' + errParse.message });
     }
     // Use the first RPC from the network config.  No environment
     // variables are required; deployTarget.js centralises network

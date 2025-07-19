@@ -1,25 +1,28 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/deploy.js
-  Rev :    r1019   2025‑07‑19
-  Summary: dual‑stage origination with metadata patch
+  Rev :    r1020   2025‑07‑19
+  Summary: dual‑stage origination via manual forge/inject; resume support
 
   This page implements a two‑stage collection origination to
   accommodate Temple Wallet’s strict payload limits.  Stage 1
-  originates the contract with minimal metadata (placeholder
-  views and a tiny placeholder image) via `wallet.originate`.  After
-  confirmation, Stage 2 compresses the full metadata (including
-  off‑chain views and the real image) and calls the
+  forges the origination operation client‑side, asks the wallet
+  to sign the forged bytes, and injects the signed operation via
+  `injectSigned` to originate the contract with minimal
+  metadata (placeholder views and a tiny placeholder image).
+  After confirmation, Stage 2 compresses the full metadata
+  (including off‑chain views and the real image) and calls the
   `edit_contract_metadata` entrypoint to patch the contract.
   Progress and errors are displayed via OperationOverlay with
   signature 1/2 and 2/2 indicators.  State is persisted in
   localStorage to resume the patch if the page reloads or the
   transaction fails.
-────────────────────────────────────────────────────────────*/
+─────────────────────────────────────────────────────────────*/
 
 import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { MichelsonMap } from '@taquito/michelson-encoder';
 import { char2Bytes } from '@taquito/utils';
+import { SigningType } from '@airgap/beacon-sdk';
 
 import DeployCollectionForm from '../ui/DeployCollectionForm.jsx';
 import PixelHeading from '../ui/PixelHeading.jsx';
@@ -27,7 +30,13 @@ import CRTFrame from '../ui/CRTFrame.jsx';
 import OperationOverlay from '../ui/OperationOverlay.jsx';
 import { useWallet } from '../contexts/WalletContext.js';
 import { TZKT_API } from '../config/deployTarget.js';
-import { jFetch, sleep } from '../core/net.js';
+import {
+  jFetch,
+  sleep,
+  forgeOrigination,
+  sigToHex,
+  injectSigned,
+} from '../core/net.js';
 import contractCode from '../../contracts/Zero_Contract_V4.tz';
 import viewsHex from '../constants/views.hex.js';
 
@@ -254,7 +263,7 @@ export default function DeployPage() {
       version     : 'ZeroContractV4',
       license     : meta.license.trim(),
       authors     : meta.authors,
-      homepage    : meta.homepage.trim() || undefined,
+      homepage    : undefined, // omit optional fields to minimise payload
       authoraddress: meta.authoraddress,
       creators    : meta.creators,
       type        : meta.type,
@@ -287,41 +296,71 @@ export default function DeployPage() {
       setErr(`Metadata compression failed: ${e.message || String(e)}`);
       return;
     }
-    setStep(1);
-    setLabel('Preparing origination (1/2)');
-    setPct(0.25);
+    // prepare storage with minimal metadata
     const md = new MichelsonMap();
     md.set('', headerBytes);
     md.set('content', bodyMin);
+    const storage = { ...STORAGE_TEMPLATE, admin: address, metadata: md };
+    setStep(1);
+    setLabel('Preparing origination (1/2)');
+    setPct(0.25);
     try {
-      const origOp = await toolkit.wallet.originate({
-        code: contractCode,
-        storage: { ...STORAGE_TEMPLATE, admin: address, metadata: md },
-      });
+      // forge the origination operation
+      const { forgedBytes } = await forgeOrigination(toolkit, address, contractCode, storage);
       setStep(2);
       setLabel('Waiting for wallet signature (1/2)');
       setPct(0.4);
-      const op = await origOp.send();
+      // ask the wallet to sign the forged bytes
+      const signResp = await wallet.client.requestSignPayload({
+        signingType : SigningType.OPERATION,
+        payload     : '03' + forgedBytes,
+        sourceAddress: address,
+      });
+      const sigHex = sigToHex(signResp.signature);
+      const signedBytes = forgedBytes + sigHex;
+      setStep(3);
+      setLabel('Injecting origination');
+      setPct(0.5);
+      const hash = await injectSigned(toolkit, signedBytes);
+      setOpHash(hash);
       setStep(3);
       setLabel('Confirming origination');
       setPct(0.6);
-      setOpHash(op.opHash);
-      await op.confirmation();
-      const contractAddr = op.contractAddress;
-      setKt1(contractAddr);
-      setPct(0.8);
-      // poll TzKT (optional) for final confirmation
+      // poll TzKT (optional) for final confirmation and KT address
+      let contractAddr = '';
       for (let i = 0; i < 20; i++) {
         await sleep(3000);
         try {
-          const ops = await jFetch(`${TZKT_API}/v1/operations/${op.opHash}`);
-          const opInfo = ops.find((o) => o.hash === op.opHash && o.status === 'applied');
+          const ops = await jFetch(`${TZKT_API}/v1/operations/${hash}`);
+          const opInfo = ops.find((o) => o.hash === hash && o.status === 'applied');
           if (opInfo?.originatedContracts?.length) {
-            setKt1(opInfo.originatedContracts[0].address);
+            contractAddr = opInfo.originatedContracts[0].address;
             break;
           }
         } catch {}
       }
+      // fallback: attempt to fetch contract from toolkit if not found
+      if (!contractAddr) {
+        try {
+          const block = await toolkit.rpc.getBlock();
+          // search internal operations for origination
+          for (const opGroup of block.operations.flat()) {
+            if (opGroup.hash === hash) {
+              const result = opGroup.contents.find((c) => c.kind === 'origination');
+              if (result?.metadata?.operation_result?.originated_contracts?.length) {
+                contractAddr = result.metadata.operation_result.originated_contracts[0];
+                break;
+              }
+            }
+          }
+        } catch {}
+      }
+      if (!contractAddr) {
+        setErr('Could not resolve contract address after origination.');
+        return;
+      }
+      setKt1(contractAddr);
+      setPct(0.8);
       setStep(4);
       setLabel('Origination complete – preparing patch');
       setPct(0.85);
@@ -346,20 +385,21 @@ export default function DeployPage() {
   /*──────── render ───────────────────────────────────────*/
   return (
     <>
-      <PixelHeading level={2}>Deploy New Collection</PixelHeading>
+      <PixelHeading as="h1">Deploy New Collection</PixelHeading>
       <CRTFrame>
-        <DeployCollectionForm onDeploy={originate} />
+        <DeployCollectionForm
+          onDeploy={originate}
+        />
       </CRTFrame>
       {(step !== -1 || err) && (
         <OperationOverlay
           status={label}
-          step={step}
-          pct={pct}
-          err={err}
-          opHash={opHash}
+          progress={pct}
+          error={err}
           kt1={kt1}
-          current={step}
-          total={resumeMeta ? 2 : 2}
+          opHash={opHash}
+          step={step}
+          total={8}
           onRetry={() => {
             if (resumeMeta && kt1) patchMetadata(resumeMeta, kt1);
             else reset();
@@ -372,13 +412,13 @@ export default function DeployPage() {
 }
 
 /* What changed & why:
-   • Introduced dual‑stage origination to work around Temple’s
-     message size limits: minimal metadata in stage 1, then full
-     metadata patched via edit_contract_metadata in stage 2.
-   • Added localStorage resume logic to ensure interrupted
-     deployments can continue with the metadata patch without
-     re-originating the contract.
-   • Enhanced OperationOverlay interaction: displays signature
-     progress (1/2, 2/2) and handles retries appropriately.
-   • Updated revision and summary accordingly.
-*/
+   • Switched stage 1 origination to manual forging and injection using
+     forgeOrigination, sigToHex and injectSigned from net.js.  This
+     reduces the payload sent to Temple by signing only the forged
+     operation bytes (prefix 03) and bypasses wallet.originate.
+   • Minimal metadata now omits optional fields like homepage to
+     further reduce payload size; views and imageUri are placeholders.
+   • Added polling fallback via TzKT and toolkit RPC to resolve the
+     originated KT1 address after injection.
+   • Stage 2 patch logic remains unchanged; includes resume support
+     via localStorage.  Updated revision and summary accordingly. */

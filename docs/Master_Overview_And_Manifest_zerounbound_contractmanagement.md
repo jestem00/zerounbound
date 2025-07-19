@@ -301,7 +301,20 @@ I114 [F] Portal‑Based Draggable Windows — draggable preview windows use crea
 I115 [F] Hazard Detection & Content Protection — all media rendering components must call detectHazards(metadata) before display. Hazard types: { nsfw, flashing, scripts }. Script hazards detect HTML MIME types, JavaScript URIs, SVG with <script> tags. Obfuscation overlays block content until explicit user consent with age verification (18+) for NSFW.
 I116 [F] Debounced Form State Pattern — form components maintain local state mirroring parent props with upward change propagation via useEffect. Input sanitization applied at component level. Unique id attributes use index pattern: id={\tid-${index}}. I117 [F] **Script Security Model** — script execution requires both hazard detection AND user consent. Script consent persists per contract address. EnableScriptsOverlayprovides inline consent,EnableScriptsToggle provides permanent toggle. Terms agreement checkbox required for all script consent flows.
 
-I118 [E] Dual‑Stage Origination — when FAST_ORIGIN=true the origination flow must store a placeholder views pointer and then automatically call update_contract_metadata within the same UI session to patch the real metadata; failure to patch is critical (I118).
+I118 [E] Dual‑Stage Origination — when FAST_ORIGIN=true the origination flow must store a placeholder views pointer and then automatically call edit_contract_metadata (v4) within the same UI session to patch the real metadata; failure to patch is critical and must trigger resume logic.
+/*
+Note: Invariant I118 is newly reintroduced in this revision. Previous releases
+adopted a single‑stage origination via wallet.originate, but this proved
+incompatible with Temple wallet and other browser extensions due to
+payload size limits. Dual‑stage origination reduces the initial
+operation payload by omitting heavy fields such as off‑chain view
+definitions and high‑resolution images. After the contract is
+originated with minimal metadata, a subsequent transaction updates the
+%metadata big‑map with the full JSON (views array and real imageUri) via
+edit_contract_metadata or update_contract_metadata. The UI tracks
+progress across both operations and provides resume support via
+localStorage. See src/pages/deploy.js for implementation details.
+*/
 
 /──────────────────────────────────────────────────────────────────────────────
 3 · reserved for future research notes

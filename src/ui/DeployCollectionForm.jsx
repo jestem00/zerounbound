@@ -13,7 +13,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import styledPkg from 'styled-components';
 import { char2Bytes } from '@taquito/utils';
-import viewsJson from '../contracts/metadata/views/Zero_Contract_v4_views.json';
+import viewsJson from '../../contracts/metadata/views/Zero_Contract_v4_views.json';
 
 import MintUpload    from './Entrypoints/MintUpload.jsx';
 import MintPreview   from './Entrypoints/MintPreview.jsx';

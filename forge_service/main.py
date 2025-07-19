@@ -190,3 +190,17 @@ async def inject_operation(req: InjectRequest) -> InjectResponse:
         return InjectResponse(opHash=op_hash)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# -----------------------------------------------------------------------------
+# Health check endpoint
+#
+# Render (and many other PaaS providers) require a health check path to
+# determine whether the service is up.  Without a dedicated endpoint,
+# Render defaults to calling `/healthz`.  Since FastAPI returns a 404 for
+# unspecified routes, deployments will be marked as unhealthy.  This simple
+# endpoint returns a JSON object and HTTP 200 to satisfy those checks.
+@app.get("/healthz")
+async def health_check() -> Dict[str, str]:
+    """Return a simple OK status for health checks."""
+    return {"status": "ok"}

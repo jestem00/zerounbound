@@ -185,15 +185,19 @@ using the formats described in the AI Collaboration Contract.
 repositories, use the browser tool to search and fetch files via
 the API. Use the installed accounts list to find accessible
 organisations. Always check for branch and tag names.
-• Network & flags — by default the project targets the
-Ghostnet test network. Use yarn set:mainnet to target
-mainnet. The flags FAST_ORIGIN and USE_BACKEND control the
-origination pipeline. When FAST_ORIGIN=true, perform dual‑stage
-origination: store minimal metadata (views pointer = 0x00) and
-patch with edit_contract_metadata after confirmation. When
-USE_BACKEND=true, route forging and injection through the
-serverless endpoints. Otherwise use src/core/net.js which
-performs client‑side forging with a manual gas/storage/fee fallback.
+• Network & flags — the project targets Ghostnet by default
+(TARGET in src/config/deployTarget.js). Use yarn set:mainnet
+to switch networks. Deployment flags live in
+deployTarget.js and require no .env files. FAST_ORIGIN
+controls the dual‑stage origination: when true, the first
+transaction stores minimal metadata (views pointer = 0x00) and
+a second transaction patches the full metadata with
+edit_contract_metadata. USE_BACKEND controls backend
+forging/injection: when true (default), the front‑end offloads
+forging and injection to /api/forge and /api/inject.
+When USE_BACKEND is false, the front‑end uses
+src/core/net.js to forge locally and inject via Taquito with
+manual gas/storage/fee defaults.
 • Authentication — for sites requiring login (e.g. Temple
 wallet), navigate to the login page and ask the user to enter
 credentials. Never request or type passwords yourself.

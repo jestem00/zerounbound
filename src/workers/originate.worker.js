@@ -2,7 +2,10 @@
   Developed by @jams2blues – ZeroContract Studio
   File:    src/workers/originate.worker.js
   Rev :    r10   2025-07-19
-  Summary: emit placeholder or full metadata bytes; support fast flag
+  Summary: build hex‑encoded metadata for origination; emits
+           placeholder views and imageUri when the `fast` flag is
+           true.  Used in dual‑stage origination and backend
+           forging flows.  Supports progress callbacks.
 ──────────────────────────────────────────────────────────────*/
 import viewsHex from '../constants/views.hex.js';
 

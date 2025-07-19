@@ -1,11 +1,13 @@
 /*─────────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/core/net.js
-  Rev :    r1024   2025‑07‑19
-  Summary: dual‑stage origination helpers; use LocalForger and
-           fallback to manual gas/storage/fee when RPC estimation
-           fails.  Ensures stage‑1 origination never stalls during
-           preparation.
+  Rev :    r1025   2025‑07‑19
+  Summary: dual‑stage origination helpers; support backend
+           forging/injection via serverless API when USE_BACKEND
+           is true, otherwise use LocalForger with manual
+           gas/storage/fee fallback.  Ensures stage‑1 origination
+           never stalls during preparation and avoids payload
+           limits.
 ──────────────────────────────────────────────────────────────────*/
 import { OpKind } from '@taquito/taquito';
 import { b58cdecode, prefix } from '@taquito/utils';
@@ -17,6 +19,7 @@ import { b58cdecode, prefix } from '@taquito/utils';
 // we instantiate our own LocalForger below.  See:
 // https://tezostaquito.io/docs/forger for details.
 import { LocalForger } from '@taquito/local-forging';
+import { USE_BACKEND } from '../config/deployTarget.js';
 
 /* global concurrency limit */
 const LIMIT = 4;
@@ -92,6 +95,46 @@ export function jFetch(url, opts = {}, tries) {
 ─────────────────────────────────────────────────────────────*/
 
 /**
+ * Forge an origination operation via backend API.  Sends a POST
+ * request to /api/forge with the code, storage and source.  The
+ * server returns forged bytes.  This mirrors SmartPy’s backend
+ * behaviour and avoids browser payload limits.
+ *
+ * @param {any[]} code Michelson code array
+ * @param {any} storage Initial storage (MichelsonMap or compatible)
+ * @param {string} source tz1/KT1 address initiating the origination
+ * @returns {Promise<string>} forged bytes
+ */
+async function forgeViaBackend(code, storage, source) {
+  const res = await jFetch('/api/forge', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code, storage, source }),
+  });
+  if (res && res.forgedBytes) return res.forgedBytes;
+  throw new Error('Backend forge failed');
+}
+
+/**
+ * Inject a signed operation via backend API.  Sends a POST
+ * request to /api/inject with the signed bytes.  Returns the
+ * operation hash from the response.  When using the backend,
+ * this avoids browser injection limits.
+ *
+ * @param {string} signedBytes Hex string of the signed operation
+ * @returns {Promise<string>} operation hash
+ */
+async function injectViaBackend(signedBytes) {
+  const res = await jFetch('/api/inject', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ signedBytes }),
+  });
+  if (res && (res.opHash || res.hash)) return res.opHash || res.hash;
+  throw new Error('Backend inject failed');
+}
+
+/**
  * Forge an origination operation locally.
  * Estimates gas/fee and builds the operation contents with the given code and storage.
  * Returns the forged bytes which must be signed externally.
@@ -103,6 +146,17 @@ export function jFetch(url, opts = {}, tries) {
  * @returns {Promise<{ forgedBytes: string, contents: any[], branch: string }>}
  */
 export async function forgeOrigination(toolkit, source, code, storage) {
+  // When USE_BACKEND is enabled, offload origination forging to the
+  // serverless API.  This mirrors SmartPy’s backend behaviour: the
+  // browser never attempts to estimate or forge large payloads
+  // locally.  Instead, we pass only the code, storage and source
+  // address to the `/api/forge` endpoint and receive a forged
+  // bytestring in return.  No contents or branch are returned
+  // because the client does not need them when using the backend.
+  if (USE_BACKEND) {
+    const forgedBytes = await forgeViaBackend(code, storage, source);
+    return { forgedBytes };
+  }
   /*
    * Attempt to estimate gas, storage and fee via the RPC.  On some
    * networks the RPC returns 400 or fails to simulate large
@@ -189,14 +243,23 @@ export function sigToHex(signature) {
  * @returns {Promise<string>} Operation hash
  */
 export async function injectSigned(toolkit, signedBytes) {
+  // When USE_BACKEND is enabled, send the signed bytes to the
+  // serverless injection endpoint.  This prevents the browser
+  // from hitting RPC injection size limits and matches SmartPy’s
+  // backend workflow.  When USE_BACKEND is false, fall back to
+  // Taquito’s RPC injectOperation.
+  if (USE_BACKEND) {
+    return await injectViaBackend(signedBytes);
+  }
   return await toolkit.rpc.injectOperation(signedBytes);
 }
 
-/* What changed & why: Added manual gas/storage/fee fallback to
-   forgeOrigination.  When toolkit.estimate.originate throws or
-   times out, the function now falls back to generous defaults
-   (gas_limit = 1 040 000, storage_limit = 60 k, fee = 0.2 ꜩ).  This
-   prevents Stage‑1 origination from failing during the “Preparing
-   origination” step.  We retain the explicit LocalForger to avoid
-   RPC forging and 400 errors.  Updated revision and summary
-   accordingly. */
+/* What changed & why: Added backend forging/injection support.
+   When USE_BACKEND is true, the origination flow offloads forging
+   and injection to the serverless endpoints (`/api/forge` and
+   `/api/inject`), avoiding client‑side payload limits.  When
+   USE_BACKEND is false, the existing manual gas/storage/fee
+   fallback remains in place: if toolkit.estimate.originate fails
+   we use generous defaults (gas_limit = 1 040 000, storage_limit =
+   60 k, fee = 0.2 ꜩ) and forge locally via LocalForger.  Updated
+   revision and summary accordingly. */

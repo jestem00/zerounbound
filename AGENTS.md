@@ -39,15 +39,19 @@ minimal metadata. After confirmation, the UI automatically calls
 edit_contract_metadata with the full JSON. Resume support via
 localStorage is mandatory.
 
-USE_BACKEND=true offloads forging and injection to our serverless
-endpoints (/api/forge and /api/inject). When false (default),
-origination uses the front‑end helper in src/core/net.js. This helper
-forges operations locally and falls back to generous gas/storage/fee
-defaults when RPC estimation fails.
+USE_BACKEND controls whether origination is offloaded to our
+serverless endpoints (/api/forge and /api/inject). When true
+(the default), the UI sends only the contract code, storage and
+source address to the backend, receives forged bytes, signs them in
+the wallet, and injects via the backend. This mirrors SmartPy’s
+deployment and avoids browser payload limits. When false, the
+front‑end uses src/core/net.js to forge locally and inject via
+Taquito, with manual gas/storage/fee defaults.
 
-Do not set .env.local for origination. Backend forging/injection APIs
-remain for backward compatibility with legacy flows but are not used
-when deploying collections unless USE_BACKEND=true.
+Do not set .env.local for origination. All configuration (network
+selection, FAST_ORIGIN, USE_BACKEND) resides in
+src/config/deployTarget.js. The backend APIs are the preferred
+deployment path.
 
 3 · Validating Changes
 All code changes must pass the following gates:

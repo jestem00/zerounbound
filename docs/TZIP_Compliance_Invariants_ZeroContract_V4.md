@@ -3,7 +3,8 @@
 Developed by @jams2blues – ZeroContract Studio
 File: docs/TZIP_Compliance_Invariants_ZeroContract_V4.md
 Rev : r5 2025-07-19 UTC
-Summary: clarify dual‑stage origination guidance and placeholder usage; align with manual forging fallback and resume support.
+Summary: clarify dual‑stage origination guidance, placeholder usage and backend
+forging/injection; align with manual forging fallback and resume support.
 ──────────────────────────────────────────────────────────────/
 
 TZIP_Compliance_Invariants_ZeroContract_V4.md

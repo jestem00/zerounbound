@@ -1,8 +1,10 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/deploy.js
-  Rev :    r1021   2025‑07‑19
-  Summary: dual‑stage origination via manual forge/inject with fast flag; resume support
+  Rev :    r1022   2025‑07‑19
+  Summary: dual‑stage origination via manual or backend forge/inject
+           using FAST_ORIGIN and USE_BACKEND flags.  Resume support
+           and automatic metadata patch included.
 
   This page implements a two‑stage collection origination to
   accommodate Temple Wallet’s strict payload limits.  Stage 1
@@ -29,7 +31,7 @@ import PixelHeading from '../ui/PixelHeading.jsx';
 import CRTFrame from '../ui/CRTFrame.jsx';
 import OperationOverlay from '../ui/OperationOverlay.jsx';
 import { useWallet } from '../contexts/WalletContext.js';
-import { TZKT_API } from '../config/deployTarget.js';
+import { TZKT_API, FAST_ORIGIN, USE_BACKEND } from '../config/deployTarget.js';
 import {
   jFetch,
   sleep,
@@ -286,12 +288,12 @@ export default function DeployPage() {
             if (data.body) resolve(data.body);
             if (data.error) reject(new Error(data.error));
           };
-          // Pass fast:true so the worker emits placeholder views (0x00) instead of
-          // the full off‑chain views. Without this flag the worker will
-          // overwrite our minimal `views: '0x00'` and reintroduce the full
-          // metadata array, causing the origination payload to exceed Temple's
-          // limits. See originate.worker.js for details on the fast flag.
-          worker.postMessage({ meta: minimal, taskId, fast: true });
+          // Pass `fast` controlled by FAST_ORIGIN so the worker emits
+          // placeholder views (0x00) instead of the full off‑chain views
+          // when dual‑stage origination is enabled. If FAST_ORIGIN is
+          // false, the worker will include the full views array. See
+          // originate.worker.js for details on the fast flag.
+          worker.postMessage({ meta: minimal, taskId, fast: FAST_ORIGIN });
         });
         worker.terminate();
       } else {
@@ -310,15 +312,39 @@ export default function DeployPage() {
     setLabel('Preparing origination (1/2)');
     setPct(0.25);
     try {
-      // forge the origination operation
-      const { forgedBytes } = await forgeOrigination(toolkit, address, contractCode, storage);
+      // Forge the origination operation.  Use backend when USE_BACKEND is true.
+      let forgedBytes;
+      const useBackend = USE_BACKEND;
+      if (useBackend) {
+        try {
+          const resp = await fetch('/api/forge', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code: contractCode, storage, source: address }),
+          });
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data.error || 'Forge API error');
+          forgedBytes = data.forgedBytes;
+        } catch (e) {
+          setErr(e.message || String(e));
+          return;
+        }
+      } else {
+        const { forgedBytes: localBytes } = await forgeOrigination(
+          toolkit,
+          address,
+          contractCode,
+          storage,
+        );
+        forgedBytes = localBytes;
+      }
       setStep(2);
       setLabel('Waiting for wallet signature (1/2)');
       setPct(0.4);
       // ask the wallet to sign the forged bytes
       const signResp = await wallet.client.requestSignPayload({
-        signingType : SigningType.OPERATION,
-        payload     : '03' + forgedBytes,
+        signingType: SigningType.OPERATION,
+        payload: '03' + forgedBytes,
         sourceAddress: address,
       });
       const sigHex = sigToHex(signResp.signature);
@@ -326,7 +352,24 @@ export default function DeployPage() {
       setStep(3);
       setLabel('Injecting origination');
       setPct(0.5);
-      const hash = await injectSigned(toolkit, signedBytes);
+      let hash;
+      if (useBackend) {
+        try {
+          const resp = await fetch('/api/inject', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ signedBytes }),
+          });
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data.error || 'Inject API error');
+          hash = data.opHash;
+        } catch (e) {
+          setErr(e.message || String(e));
+          return;
+        }
+      } else {
+        hash = await injectSigned(toolkit, signedBytes);
+      }
       setOpHash(hash);
       setStep(3);
       setLabel('Confirming origination');
@@ -417,17 +460,18 @@ export default function DeployPage() {
 }
 
 /* What changed & why:
-   • Switched stage 1 origination to manual forging and injection using
-     forgeOrigination, sigToHex and injectSigned from net.js.  This
-     reduces the payload sent to Temple by signing only the forged
-     operation bytes (prefix 03) and bypasses wallet.originate.
-   • Minimal metadata now omits optional fields like homepage to
-     further reduce payload size; views and imageUri are placeholders.
-   • Stage 1 now passes `fast:true` to originate.worker.js, ensuring
-     the worker emits placeholder views (`0x00`) instead of the full
-     off‑chain view array. This prevents the worker from overwriting
-     our minimal metadata and reintroducing a large payload.
-   • Added polling fallback via TzKT and toolkit RPC to resolve the
-     originated KT1 address after injection.
-   • Stage 2 patch logic remains unchanged; includes resume support
-     via localStorage.  Updated revision and summary accordingly. */
+   • Enhanced stage 1 origination to support backend forging and
+     injection.  When USE_BACKEND is true, the UI sends code,
+     storage and source to `/api/forge`, signs the forged bytes, and
+     injects via `/api/inject`.  When false, it falls back to
+     forgeOrigination/injectSigned from net.js.
+   • Minimal metadata continues to omit optional fields (homepage) and
+     uses placeholder views and imageUri.  The worker now receives
+     the `fast` flag driven by FAST_ORIGIN rather than hard‑coding
+     `true`.
+   • Added import of FAST_ORIGIN and USE_BACKEND from
+     deployTarget.js for consistency; removed environment variable
+     checks.
+   • Polling fallback via TzKT and toolkit RPC remains to resolve
+     originated KT1 address.  Resume support via localStorage is
+     unchanged.  Updated revision and summary accordingly. */

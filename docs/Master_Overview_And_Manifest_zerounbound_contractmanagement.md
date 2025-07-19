@@ -3,7 +3,7 @@
 Developed by @jams2blues – ZeroContract Studio
 File: docs/Master_Overview_And_Manifest_zerounbound_contractmanagement.md
 Rev : r1014 2025‑07‑19 UTC
-Summary: restore dual‑stage origination and manual forging fallback; update manifest accordingly.
+Summary: restore dual‑stage origination, manual forging fallback and serverless forging/inject endpoints; update manifest accordingly.
 ──────────────────────────────────────────────────────────────────/
 
 ════════════════════════════════════════════════════════════════
@@ -315,6 +315,17 @@ originated with minimal metadata, a subsequent transaction updates the
 edit_contract_metadata or update_contract_metadata. The UI tracks
 progress across both operations and provides resume support via
 localStorage. See src/pages/deploy.js for implementation details.
+/
+/ New in this revision: Backend forging/injection. The flags
+FAST_ORIGIN and USE_BACKEND reside in src/config/deployTarget.js.
+When USE_BACKEND=true (default), the front‑end sends only the
+contract code, storage and source address to the serverless
+endpoints /api/forge and /api/inject. These functions run
+Taquito on the server to estimate limits (falling back to safe
+defaults), forge the operation and inject it. The wallet signs
+a small payload (the forged bytes) rather than the full
+operation. When USE_BACKEND=false, client‑side forging via
+src/core/net.js is used with a manual gas/storage/fee fallback.
 */
 
 /──────────────────────────────────────────────────────────────────────────────
@@ -682,6 +693,7 @@ B. entrypointRegistry.json, contains all Entrypoints used across our supported v
 CHANGELOG
 ──────────────────────────────────────────────────────────────/
 • r1014 2025‑07‑19 UTC — restored dual‑stage origination and manual forging fallback; updated invariants and environment flag guidance accordingly.
+• r1014 2025‑07‑19 UTC — restored dual‑stage origination, manual forging fallback and serverless forging/inject endpoints; updated invariants and environment flag guidance accordingly.
 • r1012 2025‑07‑18 UTC — added dual‑stage origination environment flags, serverless forge/inject endpoints and invariant I118; updated manifest accordingly.
 • r1013 2025‑07‑19 UTC — removed dual‑stage origination and backend forging; deprecated USE_BACKEND and FAST_ORIGIN flags; updated manifest and invariants to reflect single‑stage origination via wallet.originate.
 • r865 2025‑07‑16 UTC — countTokens.js now fetches /tokens/count for

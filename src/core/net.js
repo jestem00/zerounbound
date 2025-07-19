@@ -1,13 +1,13 @@
 /*─────────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/core/net.js
-  Rev :    r1025   2025‑07‑19
-  Summary: dual‑stage origination helpers; support backend
-           forging/injection via serverless API when USE_BACKEND
-           is true, otherwise use LocalForger with manual
-           gas/storage/fee fallback.  Ensures stage‑1 origination
-           never stalls during preparation and avoids payload
-           limits.
+  Rev :    r1026   2025‑07‑19
+  Summary: dual‑stage origination helpers.  Provides helpers to
+           forge and inject operations locally (with manual
+           gas/storage/fee fallback) and exposes forgeViaBackend
+           and injectViaBackend for callers that wish to offload
+           those steps to serverless endpoints.  net.js itself
+           always uses local forging/injection.
 ──────────────────────────────────────────────────────────────────*/
 import { OpKind } from '@taquito/taquito';
 import { b58cdecode, prefix } from '@taquito/utils';
@@ -19,7 +19,6 @@ import { b58cdecode, prefix } from '@taquito/utils';
 // we instantiate our own LocalForger below.  See:
 // https://tezostaquito.io/docs/forger for details.
 import { LocalForger } from '@taquito/local-forging';
-import { USE_BACKEND } from '../config/deployTarget.js';
 
 /* global concurrency limit */
 const LIMIT = 4;
@@ -134,6 +133,12 @@ async function injectViaBackend(signedBytes) {
   throw new Error('Backend inject failed');
 }
 
+// Export backend helpers so that callers (e.g. src/pages/deploy.js)
+// can explicitly offload forging and injection to the serverless
+// API endpoints.  net.js itself always performs local forging and
+// injection by default.
+export { forgeViaBackend, injectViaBackend };
+
 /**
  * Forge an origination operation locally.
  * Estimates gas/fee and builds the operation contents with the given code and storage.
@@ -146,17 +151,6 @@ async function injectViaBackend(signedBytes) {
  * @returns {Promise<{ forgedBytes: string, contents: any[], branch: string }>}
  */
 export async function forgeOrigination(toolkit, source, code, storage) {
-  // When USE_BACKEND is enabled, offload origination forging to the
-  // serverless API.  This mirrors SmartPy’s backend behaviour: the
-  // browser never attempts to estimate or forge large payloads
-  // locally.  Instead, we pass only the code, storage and source
-  // address to the `/api/forge` endpoint and receive a forged
-  // bytestring in return.  No contents or branch are returned
-  // because the client does not need them when using the backend.
-  if (USE_BACKEND) {
-    const forgedBytes = await forgeViaBackend(code, storage, source);
-    return { forgedBytes };
-  }
   /*
    * Attempt to estimate gas, storage and fee via the RPC.  On some
    * networks the RPC returns 400 or fails to simulate large
@@ -243,14 +237,11 @@ export function sigToHex(signature) {
  * @returns {Promise<string>} Operation hash
  */
 export async function injectSigned(toolkit, signedBytes) {
-  // When USE_BACKEND is enabled, send the signed bytes to the
-  // serverless injection endpoint.  This prevents the browser
-  // from hitting RPC injection size limits and matches SmartPy’s
-  // backend workflow.  When USE_BACKEND is false, fall back to
-  // Taquito’s RPC injectOperation.
-  if (USE_BACKEND) {
-    return await injectViaBackend(signedBytes);
-  }
+  // Inject the signed operation via the RPC.  Front‑end callers
+  // may choose to offload this to a serverless API (see
+  // forgeViaBackend/injectViaBackend), but this function always
+  // performs the local injection.  The caller should handle
+  // fallback logic.
   return await toolkit.rpc.injectOperation(signedBytes);
 }
 

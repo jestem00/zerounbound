@@ -31,7 +31,7 @@ import PixelHeading from '../ui/PixelHeading.jsx';
 import CRTFrame from '../ui/CRTFrame.jsx';
 import OperationOverlay from '../ui/OperationOverlay.jsx';
 import { useWallet } from '../contexts/WalletContext.js';
-import { TZKT_API, FAST_ORIGIN, USE_BACKEND } from '../config/deployTarget.js';
+import { TZKT_API, FAST_ORIGIN } from '../config/deployTarget.js';
 import {
   jFetch,
   sleep,
@@ -312,31 +312,34 @@ export default function DeployPage() {
     setLabel('Preparing origination (1/2)');
     setPct(0.25);
     try {
-      // Forge the origination operation.  Use backend when USE_BACKEND is true.
+      // Forge the origination operation.  Always attempt backend
+      // forging first; fallback to local forging on failure.  This
+      // mirrors SmartPy’s backend workflow while preserving a
+      // client‑side fallback.
       let forgedBytes;
-      const useBackend = USE_BACKEND;
-      if (useBackend) {
+      try {
+        const resp = await fetch('/api/forge', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: contractCode, storage, source: address }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || 'Forge API error');
+        forgedBytes = data.forgedBytes;
+      } catch (e) {
+        // Fallback: forge locally via net.js
         try {
-          const resp = await fetch('/api/forge', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ code: contractCode, storage, source: address }),
-          });
-          const data = await resp.json();
-          if (!resp.ok) throw new Error(data.error || 'Forge API error');
-          forgedBytes = data.forgedBytes;
-        } catch (e) {
-          setErr(e.message || String(e));
+          const { forgedBytes: localBytes } = await forgeOrigination(
+            toolkit,
+            address,
+            contractCode,
+            storage,
+          );
+          forgedBytes = localBytes;
+        } catch (err2) {
+          setErr(err2.message || String(err2));
           return;
         }
-      } else {
-        const { forgedBytes: localBytes } = await forgeOrigination(
-          toolkit,
-          address,
-          contractCode,
-          storage,
-        );
-        forgedBytes = localBytes;
       }
       setStep(2);
       setLabel('Waiting for wallet signature (1/2)');
@@ -353,22 +356,23 @@ export default function DeployPage() {
       setLabel('Injecting origination');
       setPct(0.5);
       let hash;
-      if (useBackend) {
+      try {
+        const resp = await fetch('/api/inject', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ signedBytes }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || 'Inject API error');
+        hash = data.opHash;
+      } catch (e) {
+        // Fallback: inject via Taquito
         try {
-          const resp = await fetch('/api/inject', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ signedBytes }),
-          });
-          const data = await resp.json();
-          if (!resp.ok) throw new Error(data.error || 'Inject API error');
-          hash = data.opHash;
-        } catch (e) {
-          setErr(e.message || String(e));
+          hash = await injectSigned(toolkit, signedBytes);
+        } catch (err2) {
+          setErr(err2.message || String(err2));
           return;
         }
-      } else {
-        hash = await injectSigned(toolkit, signedBytes);
       }
       setOpHash(hash);
       setStep(3);

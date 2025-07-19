@@ -1,15 +1,16 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues with love for the Tezos community
   File:    src/contexts/WalletContext.js
-  Rev :    r530   2025‑07‑19
-  Summary: enable default P2P matrix nodes (fix Temple wallet)
+  Rev :    r531   2025‑07‑19
+  Summary: disable P2P matrix nodes to stabilise Temple wallet
 
-  A simplified wallet context for ZeroUnbound.  It removes the
-  explicit matrixNodes override, allowing Beacon to select the
-  appropriate transport (extension or matrix relay).  The context
-  manages the TezosToolkit and BeaconWallet instances, restores
-  existing sessions, and exposes connect/disconnect and reveal
-  helpers.  No secret‑key override is supported.
+  A simplified wallet context for ZeroUnbound.  We explicitly
+  disable P2P transports by setting `matrixNodes: []` when
+  constructing the BeaconWallet.  This forces Beacon to
+  communicate via the browser extension, fixing Temple’s
+  “Receiving end does not exist” error.  The context manages the
+  TezosToolkit and BeaconWallet instances, restores existing
+  sessions, and exposes connect/disconnect and reveal helpers.
 ────────────────────────────────────────────────────────────*/
 
 import React, {
@@ -82,6 +83,13 @@ export function WalletProvider({ children, initialNetwork = DEFAULT_NETWORK }) {
         name            : APP_NAME,
         preferredNetwork: network,
         colorMode       : 'dark',
+        // Disable P2P transports for Temple wallet.  When
+        // matrixNodes is an empty array, Beacon attempts to
+        // communicate exclusively with browser extensions via
+        // postMessage.  This prevents “Could not establish
+        // connection” errors and ensures the extension handles
+        // large origination requests properly.
+        matrixNodes     : [],
       });
       // no metrics
       walletRef.current.client.sendMetrics = async () => {};
@@ -166,7 +174,8 @@ export function WalletProvider({ children, initialNetwork = DEFAULT_NETWORK }) {
 
 export default WalletProvider;
 
-/* What changed & why: Removed matrixNodes override to allow Beacon’s
-   default transport selection (P2P or extension).  This fixes
-   Temple Wallet injection errors.  Simplified the provider for
-   clarity and updated revision. */
+/* What changed & why: Reintroduced `matrixNodes: []` to disable
+   Beacon’s P2P transports and rely solely on browser extension
+   communication.  This resolves Temple’s “Could not establish
+   connection” error during origination.  Updated revision and
+   summary accordingly. */

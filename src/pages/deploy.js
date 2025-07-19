@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/deploy.js
-  Rev :    r1017   2025‑07‑19
-  Summary: use wallet.originate; remove manual forge/inject flows
+  Rev :    r1018   2025‑07‑19
+  Summary: placeholder views in metadata; reduce Temple payload
 
   This page now performs contract origination exclusively via the
   Beacon wallet.  It compresses metadata, builds the Michelson
@@ -133,6 +133,15 @@ export default function DeployPage() {
       setLabel('Compressing metadata');
       setPct(0);
 
+      // Build collection metadata.  We intentionally omit the
+      // full views list for Temple compatibility: including the
+      // entire views array in the contract metadata makes the
+      // resulting operation extremely large, which causes Temple
+      // extension to drop the request with “Could not establish
+      // connection”.  Instead, we store a placeholder ('0x00'),
+      // relying on the contract code to contain the views.  Other
+      // wallets (Kukai, Umami) handle this fine, and Temple has
+      // no issue once the contract is deployed.
       const orderedMeta = {
         name: meta.name.trim(),
         symbol: meta.symbol.trim(),
@@ -146,7 +155,8 @@ export default function DeployPage() {
         type: meta.type,
         interfaces: uniqInterfaces(meta.interfaces),
         imageUri: meta.imageUri,
-        views: JSON.parse(hexToString(viewsHex)).views,
+        // Use placeholder for views to keep operation size small
+        views: '0x00',
       };
 
       const headerBytes = `0x${char2Bytes('tezos-storage:content')}`;
@@ -256,8 +266,11 @@ export default function DeployPage() {
 
 /* What changed & why:
    • Replaced forge/inject logic with `toolkit.wallet.originate`.
-   • Removed secret-key override and associated helpers/imports.
-   • Added metadata compression step and progress indicators.
-   • The wallet now handles estimation, forging, signing and injection,
-     resolving Temple/Kukai injection failures.
+   • Added placeholder views ('0x00') in metadata to keep the
+     origination payload small, which prevents Temple extension
+     connection failures.
+   • Reintroduced matrixNodes disabling in WalletContext to
+     enforce extension-based communication.
+   • The wallet still handles estimation, forging, signing and
+     injection, eliminating manual forge/inject flows.
 */

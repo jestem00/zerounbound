@@ -1,0 +1,15 @@
+{
+  "name": "forge-service-node",
+  "version": "1.0.0",
+  "description": "Tezos origination forge/inject API (Node)",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "@taquito/rpc": "^19.2.0",
+    "@taquito/michel-codec": "^19.2.0"
+  }
+}

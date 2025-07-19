@@ -1,5 +1,0 @@
-
-fastapi==0.110.0
-uvicorn==0.29.0
-pytezos==3.7.1
-pydantic==1.10.14

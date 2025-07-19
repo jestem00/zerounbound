@@ -1,8 +1,9 @@
+/──────── docs/Master_Overview_And_Manifest_zerounbound_contractmanagement.md ────────/
 /─────────────────────────────────────────────────────────────────
 Developed by @jams2blues – ZeroContract Studio
 File: docs/Master_Overview_And_Manifest_zerounbound_contractmanagement.md
-Rev : r1013 2025‑07‑19 UTC
-Summary: simplify origination — remove dual‑stage and backend forging; update manifest accordingly.
+Rev : r1014 2025‑07‑19 UTC
+Summary: restore dual‑stage origination and manual forging fallback; update manifest accordingly.
 ──────────────────────────────────────────────────────────────────/
 
 ════════════════════════════════════════════════════════════════
@@ -299,7 +300,7 @@ I112 [F,E] Marketplace dialogs (buy/list/offer) must call feeEstimator.js and di
 I113 [F] Unified Consent Management — all consent decisions use useConsent hook with standardized keys: 'nsfw' (for content), 'flash' (for flashing), 'scripts:{contractAddress}' (per‑contract script execution). Consent state syncs across components via CustomEvent broadcasting and always requires explicit user acknowledgment through PixelConfirmDialog with checkbox agreement to terms.
 I114 [F] Portal‑Based Draggable Windows — draggable preview windows use createPortal(component, document.body) for z‑index isolation. Draggable state managed through useRef pattern with randomized start positions (60 + Math.random()*30) to prevent stacking. SSR compatibility: typeof document === 'undefined' ? body : createPortal(body, document.body).
 I115 [F] Hazard Detection & Content Protection — all media rendering components must call detectHazards(metadata) before display. Hazard types: { nsfw, flashing, scripts }. Script hazards detect HTML MIME types, JavaScript URIs, SVG with <script> tags. Obfuscation overlays block content until explicit user consent with age verification (18+) for NSFW.
-I116 [F] Debounced Form State Pattern — form components maintain local state mirroring parent props with upward change propagation via useEffect. Input sanitization applied at component level. Unique id attributes use index pattern: id={\tid-${index}}. I117 [F] **Script Security Model** — script execution requires both hazard detection AND user consent. Script consent persists per contract address. EnableScriptsOverlayprovides inline consent,EnableScriptsToggle provides permanent toggle. Terms agreement checkbox required for all script consent flows.
+I116 [F] Debounced Form State Pattern — form components maintain local state mirroring parent props with upward change propagation via useEffect. Input sanitization applied at component level. Unique id attributes use index pattern: id={\tid-${index}}. I117 [F] Script Security Model — script execution requires both hazard detection AND user consent. Script consent persists per contract address. EnableScriptsOverlayprovides inline consent,EnableScriptsToggle provides permanent toggle. Terms agreement checkbox required for all script consent flows.
 
 I118 [E] Dual‑Stage Origination — when FAST_ORIGIN=true the origination flow must store a placeholder views pointer and then automatically call edit_contract_metadata (v4) within the same UI session to patch the real metadata; failure to patch is critical and must trigger resume logic.
 /*
@@ -680,6 +681,7 @@ B. entrypointRegistry.json, contains all Entrypoints used across our supported v
 /──────────────────────────────────────────────────────────────
 CHANGELOG
 ──────────────────────────────────────────────────────────────/
+• r1014 2025‑07‑19 UTC — restored dual‑stage origination and manual forging fallback; updated invariants and environment flag guidance accordingly.
 • r1012 2025‑07‑18 UTC — added dual‑stage origination environment flags, serverless forge/inject endpoints and invariant I118; updated manifest accordingly.
 • r1013 2025‑07‑19 UTC — removed dual‑stage origination and backend forging; deprecated USE_BACKEND and FAST_ORIGIN flags; updated manifest and invariants to reflect single‑stage origination via wallet.originate.
 • r865 2025‑07‑16 UTC — countTokens.js now fetches /tokens/count for

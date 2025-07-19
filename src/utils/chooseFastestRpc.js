@@ -1,13 +1,13 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/utils/chooseFastestRpc.js
-  Rev :    r2   2025‑07‑15
-  Summary: RPC race selector with 10min cache
+  Rev :    r3   2025‑07‑19
+  Summary: RPC race selector with 10 min cache and timeout fallback
 ──────────────────────────────────────────────────────────────*/
 import { RPC_URLS } from '../config/deployTarget.js';
 
 const CACHE_KEY = 'zu_fastest_rpc';
-const TTL_MS    = 10 * 60 * 1000;  // 10 min
+const TTL_MS    = 10 * 60 * 1000;  // 10 min
 
 async function raceRpcs(urls, timeout = 2000) {
   return Promise.race(urls.map(async (url) => {
@@ -27,6 +27,7 @@ async function raceRpcs(urls, timeout = 2000) {
 }
 
 export async function chooseFastestRpc() {
+  // SSR or server: default to first URL
   if (typeof window === 'undefined') return RPC_URLS[0];
 
   const cached = JSON.parse(sessionStorage.getItem(CACHE_KEY));
@@ -34,8 +35,9 @@ export async function chooseFastestRpc() {
 
   const { url } = await raceRpcs(RPC_URLS).catch(() => ({ url: RPC_URLS[0] }));
   sessionStorage.setItem(CACHE_KEY, JSON.stringify({ url, ts: Date.now() }));
-
   return url;
 }
 
-/* What changed & why: Added 2s timeout, abort on slow RPCs; rev r2. */
+/* What changed & why: Added timeout and caching to choose the
+   fastest reachable RPC. The result is cached for 10 minutes to
+   reduce network overhead. */

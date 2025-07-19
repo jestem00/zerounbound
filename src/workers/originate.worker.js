@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/workers/originate.worker.js
-  Rev :    r9   2025-09-06
-  Summary: fast mode w/ placeholder views
+  Rev :    r10   2025-07-19
+  Summary: emit placeholder or full metadata bytes; support fast flag
 ──────────────────────────────────────────────────────────────*/
 import viewsHex from '../constants/views.hex.js';
 
@@ -80,5 +80,3 @@ self.onmessage = ({ data }) => {
   }
 };
 /* EOF */
-
-/* What changed & why: Added fast flag to emit placeholder views; rev r9. */

@@ -1,69 +1,231 @@
-/*───────────────────────────────────────────────────────────────
+/───────────────────────────────────────────────────────────────
 Developed by @jams2blues – ZeroContract Studio
-File:    docs/AI_CUSTOM_INSTRUCTIONS.md
-Rev :    r2    2025-07-18 UTC
-Summary: updated custom instructions for Codex & ChatGPT; include
-local/back-end origination flags and dual-stage flow
-──────────────────────────────────────────────────────────────*/
+File: docs/AI_CUSTOM_INSTRUCTIONS.md
+Rev : r4 2025-07-19 UTC
+Summary: universal collaboration guidelines for Codex & ChatGPT; document
+core principles, output format, workflow, memory, quality,
+environment flags and dual‑stage origination. Aligns with
+AI_SYSTEM_INSTRUCTIONS.txt and extends them to the Zero Unbound
+platform. Supersedes all earlier revisions.
+──────────────────────────────────────────────────────────────/
 
-### AI Custom Instructions — Zero Unbound v4
+AI Custom Instructions — Zero Unbound
+Purpose — These guidelines unify the collaboration rules for all
+assistant models (Codex and ChatGPT) working on the Zero Unbound
+project. They complement the AI Collaboration Contract and apply
+across the entire codebase — frontend, engine, contracts and infra.
+Follow them to produce reliable, reproducible and on‑chain‑ready
+artefacts.
 
-**Mission**  Fix bugs, refactor, and extend the fully on-chain NFT suite. All
-rules below override defaults.
+0 · Core Principles
+Obey the latest explicit user message. Never infer hidden
+intent; ask targeted questions when uncertain. In case of
+conflicting instructions, the most recent user message takes
+precedence.
 
-#### 1 · Environment
-- Repo root: `/workspace/zerounbound`.
-- Node 22 + Yarn 4.9.1. `scripts/codex-setup.sh` already ran.
-- Tests → `yarn test`, lint → `yarn lint`, build → `yarn build`.
-- Flags: set `USE_BACKEND=true` to offload forging/injecting to
-  `/api/forge` & `/api/inject`; set `FAST_ORIGIN=true` for dual-stage
-  origination (see Invariant I118).
+Default to full output. When modifying a file, return the
+complete, compile‑ready content (from header to trailing /* What changed… */ EOF). Use computer.sync_file to deliver large files
+or multiple files. When the user requests MODE: ANNOTATED, wrap
+additions with // BEGIN ADD / // END ADD and deletions with
+// BEGIN DEL / // END DEL.
 
-#### 2 · Ground Rules
-1. **Data URI only**: never introduce IPFS/HTTP media (I24).
-2. **Case-sensitive paths**: CI enforces casing (I11/I28).
-3. **Scope**: only modify files under `zerounbound/**`; Manifest stays
-   append-only.
-4. **Commands**: after edits run:
-   ```bash
-   yarn lint && yarn test && yarn build
-   ```
-All must pass before a PR is raised.
-5. One jFetch: all HTTP calls go through our jFetch helper.
-6. Local signing: signing payloads must start with watermark 03.
-When USE_BACKEND=true the front-end only signs and never forges
-bytes itself.
-7. Dual-stage flow: when FAST_ORIGIN=true, origination stores a
-placeholder views pointer and a second TX updates metadata. The UI
-must call update_contract_metadata after confirmation.
+Impacted‑Files List & Progress Ledger. Every assistant reply
+must begin with an alphabetical list of all files you will read or
+modify. It must end with a Progress‑Ledger row summarising the
+revision id, success state, impacted files and outcome. Use the
+ledger to track open tasks and mark them complete (✅) as you
+progress.
 
-3 · Output Format
-Produce a single PR with:
+Path & Casing Checkpoint™. Verify the existence and case of
+each path before editing. If any file is missing, pause and ask
+the user (Missing‑File Guard). Maintain the repo’s case‑exact
+structure.
 
-Conventional commit header: type(scope): title ≤ 72 chars.
+Context refresh. After every three replies or any tree‑wide
+change, reload this document, the Manifest, AGENTS.md and the
+last ≥10 user turns. Log a “Context refresh” in the ledger and
+summarise your own actions when tokens are tight (never summarise
+user text).
 
-Body: motive → change list → Manifest refs → notes on invariants.
+Revision tracking. Update file headers (Developed by,
+File, Rev, Summary) and footers (“What changed & why”) on
+every change. Keep summaries ≤80 chars and bump revision numbers
+consistently across related files.
 
-Add a Progress‑Ledger row at end (| rev | ✔/⚠ | files | outcome |).
+Flag awareness. Honour environment flags (e.g. network
+selection, FAST_ORIGIN, USE_BACKEND). When a flag changes,
+update the relevant docs in the same reply (Manifest, custom
+instructions, AGENTS.md) and describe the new behaviour.
 
-4 · Execution Hints
-Ask mode: use ripgrep/grep -R to locate definitions. Avoid
-assumptions; ask for missing context.
+Security. Never expose secrets or internal IDs. Follow
+security best practices for web3 (no IPFS or off‑chain media
+unless explicitly allowed, guard against re‑entrancy, XSS, etc.).
 
-Code mode: keep diff small. If you need to touch more than 6
-files, ask the user to split the task.
+1 · Output & Fencing Rules
+• FULL — return the entire file. When editing multiple files,
+deliver each as a separate fenced block with its own header and
+footer. If a file exceeds 200 lines or you modify more than three
+files, use computer.sync_file to provide download links rather
+than inline content.
 
-To switch network: yarn set:ghostnet or yarn set:mainnet.
+• ANNOTATED — used only when the user writes MODE: ANNOTATED.
+Mark additions and deletions with // BEGIN ADD/// END ADD and
+// BEGIN DEL/// END DEL. Do not include unchanged text outside
+of the edited region.
 
-Bundles: if views.json changed, run yarn bundle and commit
-outputs in summarized_files/.
+• Impacted‑Files List — always list touched files before any
+code blocks. Do not mention files that remain untouched.
 
-5 · Safety
-Never store or leak secrets.
+2 · Workflow
+Context refresh — as described above, reload docs and user
+instructions regularly. Use the ledger to log the refresh.
 
-Do not execute shell commands on untrusted input.
+Import graph — determine which modules or files the task
+affects. Build a dependency graph to avoid missing indirect
+references. Include this graph in the Impacted‑Files List when
+helpful.
 
-No license-restricted assets.
+Missing‑File Guard — if a path or dependency is unclear,
+stop and ask the user for clarification. Do not create files
+blindly unless instructed.
 
-/* What changed & why: clarified environment flags, dual-stage flow,
-automation requirements, and condensed instructions to <2 KB */
+Draft solution — mentally lint and plan your edits. Preserve
+existing code style and comment structures. Use dummy data
+sparingly; prefer deterministic values.
+
+Compile‑Guard — reason about whether the code will build or
+run. If unsure, run unit tests or ask the user to run them.
+
+Emit solution — provide your edits in FULL mode, one fenced
+block per file. Use computer.sync_file for large files or
+multiple files. Do not interleave different files in the same
+block.
+
+Ledger & tasks — append a Progress‑Ledger row summarising the
+revision, impacted files and outcome. Use numbered Next/Pending
+tasks to track follow‑ups and close them (✅ #n) when resolved.
+
+Review — double‑check that file headers and footers are
+updated, the Impacted‑Files List is sorted and complete, and all
+invariants and flags are respected.
+
+3 · Context, Memory & Tokens
+• Self‑Watch Tick — every ≤3 turns, verify contract adherence and
+log “🕒 OK” or any issues in the ledger.
+• Persistent memory — summarise your own actions and decisions
+(not the user’s) in the ledger. Use this to recall previous
+tasks, open questions and resolutions.
+• Token efficiency — use computer.sync_file for large files to
+keep replies concise. Only open the interactive browser when
+necessary (forms, dynamic content, real‑time data). Use the
+textual browser for documentation and API lookups.
+• Numbered tasks — track Next/Pending items numerically (e.g.
+1. Update manifest summary, 2. Run tests). Close them with
+✅ #n when done. This helps maintain continuity across long
+sessions.
+
+4 · Quality, Security & Compliance
+• Zero‑iteration goal — aim to deliver fully functional,
+compile‑ready code on the first attempt. When complexity
+suggests multiple iterations, inform the user and break the task
+into smaller units.
+• Deterministic outputs — avoid randomness. Validate
+JSON/YAML/ABI and other structured data. Do not produce
+placeholder images or data URIs containing uncontrolled content.
+• On‑chain media — store all media on‑chain via data: URIs.
+Do not introduce IPFS or external HTTP links unless explicitly
+permitted by the user. See Manifest invariants I24 and I99 for
+details.
+• Security — guard against re‑entrancy, XSS and SQL injection.
+Escape inputs and avoid eval. Respect security guidelines of
+Next.js, Taquito and other frameworks used in the project.
+• Styled‑Components — import from styledPkg and create
+wrappers like styled('tag'); never pass stray props to DOM nodes
+(Invariant I25).
+• Base64 blobs — avoid embedding large base64 data in source
+unless it is a legitimate data: URI. Large assets should be
+stored in /public and imported as needed.
+
+5 · UX & Performance
+• Mobile‑first — design components without horizontal scroll at
+≤320 px (Invariant I06). Use responsive grids and flexible
+layouts.
+• Performance — ensure Largest Contentful Paint (LCP) ≤2 s on
+mid‑range devices. Animated backgrounds must idle at ≤4 % CPU
+(Invariants I47–I48). Use chunk splitting and lazy imports to
+keep the JavaScript bundle ≤2 MiB (Invariant I26).
+• Accessibility — comply with WCAG 2.2 AA. Persist the theme
+per wallet via IndexedDB (Invariant I08). Validate form inputs
+and show helpful error messages.
+• PWA & Offline — ensure the service worker caches static assets
+via Workbox 7. Validate caching strategy for static and dynamic
+content (Invariant I09).
+• Royalty UI — enforce a maximum 25 % royalty split and
+surface royalty totals live (Invariant I50).
+
+6 · Self‑Correction
+If you breach a rule or produce incomplete output:
+
+Apologise concisely.
+
+Provide the corrected output in the appropriate mode (FULL or
+ANNOTATED).
+
+Add a ledger row noting the breach and the fix applied.
+
+Reaffirm adherence to this contract and log a new Self‑Watch Tick.
+
+7 · Tools & Environment
+• Browsing & data tools — use the browser tool to read
+documentation, APIs and static sites. Use the visual
+computer tool only when interacting with dynamic content (forms,
+calendars, etc.) or when needing to view images. Cite sources
+using the formats described in the AI Collaboration Contract.
+• GitHub connector — when the user asks you to access GitHub
+repositories, use the browser tool to search and fetch files via
+the API. Use the installed accounts list to find accessible
+organisations. Always check for branch and tag names.
+• Network & flags — by default the project targets the
+Ghostnet test network. Use yarn set:mainnet to target
+mainnet. The flags FAST_ORIGIN and USE_BACKEND control the
+origination pipeline. When FAST_ORIGIN=true, perform dual‑stage
+origination: store minimal metadata (views pointer = 0x00) and
+patch with edit_contract_metadata after confirmation. When
+USE_BACKEND=true, route forging and injection through the
+serverless endpoints. Otherwise use src/core/net.js which
+performs client‑side forging with a manual gas/storage/fee fallback.
+• Authentication — for sites requiring login (e.g. Temple
+wallet), navigate to the login page and ask the user to enter
+credentials. Never request or type passwords yourself.
+• File sync — always call computer.sync_file after writing a
+file that the user should download (e.g. updated source files,
+reports, images). Use the returned file_id to embed links or
+images in your responses.
+
+8 · Glossary
+• Path & Casing Checkpoint™ — verify that a referenced file
+exists and that the path is spelled with the correct case. Case
+mismatches cause CI failures.
+• Compile‑Guard — reason about whether your edits will compile
+and run. When uncertain, ask the user to run tests or rely on
+prior knowledge of the build system.
+• Self‑Watch Tick — periodic check (every ≤3 replies) to ensure
+your outputs adhere to these instructions. Log the result in the
+Progress‑Ledger.
+• FAST_ORIGIN — environment flag enabling dual‑stage
+origination; stores minimal metadata on the first operation and
+patches full metadata in a second operation. See Invariant I118.
+• USE_BACKEND — environment flag that routes origination through
+serverless forge and inject APIs. When false, the front‑end
+uses client‑side forging via src/core/net.js.
+• Progress‑Ledger — a table appended to every assistant reply
+summarising revision, impacted files and outcomes. It serves as
+a persistent memory and audit trail.
+
+/* What changed & why: Created a universal AI custom instructions file
+consolidating the core principles, output rules, workflow,
+memory management, quality & security, UX, self‑correction and
+tooling guidance. Added detailed definitions for environment
+flags (FAST_ORIGIN and USE_BACKEND) and described dual‑stage
+origination and manual forging fallback. Updated revision and
+summary accordingly. */

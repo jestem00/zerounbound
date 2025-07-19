@@ -1,16 +1,17 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/OperationOverlay.jsx
-  Rev :    r962   2025‑07‑19
-  Summary: progress overlay with status updates and Temple hints
+  Rev :    r963   2025‑07‑19
+  Summary: progress overlay for dual‑stage origination; shows status updates,
+           wallet hints, errors and success with explorer links
 
   This component displays deployment progress and success/error
-  feedback.  It shows animated stages, hints for wallet signing,
-  error messages, and a full success view with links to BCD,
-  objkt.com, TzKT and a manage page.  The number of stages has
-  been reduced to three (PACK, WALLET, CONFIRM) to reflect the
-  simplified single‑stage origination flow.  Temple‑specific
-  connection hints and timeouts remain.
+  feedback during the dual‑stage collection origination.  It shows
+  animated status updates, hints for wallet signing, error messages,
+  and a full success view with links to BCD, objkt.com, TzKT and the
+  manage page.  Stage labels are not hard‑coded; instead, the
+  `status` prop conveys the current step.  Temple‑specific connection
+  hints and timeouts remain.
 ────────────────────────────────────────────────────────────*/
 
 import React, {

@@ -1,8 +1,9 @@
+/──────── docs/TZIP_Compliance_Invariants_ZeroContract_V4.md ────────/
 /─────────────────────────────────────────────────────────────────
 Developed by @jams2blues – ZeroContract Studio
 File: docs/TZIP_Compliance_Invariants_ZeroContract_V4.md
-Rev : r4 2025-07-19 UTC
-Summary: reintroduce dual‑stage origination guidance and clarify placeholder views/image usage.
+Rev : r5 2025-07-19 UTC
+Summary: clarify dual‑stage origination guidance and placeholder usage; align with manual forging fallback and resume support.
 ──────────────────────────────────────────────────────────────/
 
 TZIP_Compliance_Invariants_ZeroContract_V4.md
@@ -126,4 +127,4 @@ Implementations MUST provide resume support: if the patch transaction fails or t
 ──────────────────────────────────────────────────────────────────────────────
 END OF TZIP_Compliance_Invariants_ZeroContract_V4.md
 ──────────────────────────────────────────────────────────────────────────────
-/* What changed & why: Reintroduced dual‑stage origination guidance, specifying the use of placeholder views and imageUri in stage 1 and patching the real metadata via edit_contract_metadata in stage 2. Added a new section (4) explaining resume support. Updated revision id and summary. */
+/* What changed & why: Clarified dual‑stage origination guidance, emphasising placeholder views ("0x00") and 1×1 pixel image usage in stage 1. Aligned contract invariants with manual forging fallback and detailed resume support. Updated revision and summary accordingly. */

@@ -4,11 +4,11 @@
   Rev :    r961   2025‑07‑19
   Summary: remove secret-key override; rely on wallet connect
 
-  This form collects metadata for a new collection.  The
+  This form collects metadata for a new collection. The
   “Private key override” field has been removed, as the app now
-  always uses the connected Beacon wallet for origination.  The
+  always uses the connected Beacon wallet for origination. The
   deployment button remains disabled until a wallet is connected.
-────────────────────────────────────────────────────────────*/
+─────────────────────────────────────────────────────────────*/
 
 import React, { useEffect, useMemo, useState } from 'react';
 import styledPkg from 'styled-components';

@@ -1,9 +1,20 @@
-/*Developed by @jams2blues – ZeroContract Studio
+/*─────────────────────────────────────────────────────────────────
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/core/net.js
-  Rev :    r1022   2025‑07‑19
-  Summary: dual‑stage origination helpers using toolkit.forger (local forging default) */
+  Rev :    r1023   2025‑07‑19
+  Summary: dual‑stage origination helpers using an explicit LocalForger
+           to ensure client‑side forging and avoid RPC 400 errors
+──────────────────────────────────────────────────────────────────*/
 import { OpKind } from '@taquito/taquito';
 import { b58cdecode, prefix } from '@taquito/utils';
+// Explicitly import the local forger.  While Taquito may configure
+// a local forger by default, our testing has shown that the
+// toolkit.forger can still invoke the RPC forger on some
+// configurations.  To guarantee that origination bytes are forged
+// entirely client‑side (avoiding the RPC /forge/operations endpoint),
+// we instantiate our own LocalForger below.  See:
+// https://tezostaquito.io/docs/forger for details.
+import { LocalForger } from '@taquito/local-forging';
 
 /* global concurrency limit */
 const LIMIT = 4;
@@ -113,10 +124,14 @@ export async function forgeOrigination(toolkit, source, code, storage) {
     balance      : '0',
     script       : { code, storage },
   }];
-  // Forge the operation bytes using the toolkit's forger provider. Since
-  // Taquito v12 the default forger is LocalForger, which performs local
-  // forging and avoids RPC 400 errors.
-  const forgedBytes = await toolkit.forger.forge({ branch, contents });
+  // Forge the operation bytes using a dedicated LocalForger.  Although
+  // Taquito can be configured with a local forger, we explicitly
+  // instantiate one here to ensure that forging never falls back to
+  // the RPC forger (which would POST to /forge/operations and may
+  // return 400 errors for large scripts).  The LocalForger accepts
+  // the same input shape as the RPC forger.
+  const localForger = new LocalForger();
+  const forgedBytes  = await localForger.forge({ branch, contents });
   return { forgedBytes, contents, branch };
 }
 
@@ -158,7 +173,11 @@ export async function injectSigned(toolkit, signedBytes) {
   return await toolkit.rpc.injectOperation(signedBytes);
 }
 
-/* What changed & why: Adjusted forgeOrigination to use toolkit.forger.forge
-   (local forging) instead of RPC or explicit LocalForger import. This avoids
-   RPC 400 errors and removes dependency on @taquito/local-forging. Retained
-   sigToHex, injectSigned, jFetch and sleep from previous revision. */
+/* What changed & why: Switched forgeOrigination to instantiate its own
+   LocalForger for client‑side forging.  Although Taquito may set a
+   local forger by default, we observed remote RPC calls to
+   /forge/operations, causing 400 errors for large origination
+   payloads.  Importing LocalForger from @taquito/local-forging and
+   forging with new LocalForger().forge() guarantees that all
+   operations are forged locally.  Updated revision and summary to
+   reflect this change. */

@@ -3171,6 +3171,17 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@taquito/local-forging@npm:^22.0.0":
+  version: 22.0.0
+  resolution: "@taquito/local-forging@npm:22.0.0"
+  dependencies:
+    "@taquito/core": "npm:^22.0.0"
+    "@taquito/utils": "npm:^22.0.0"
+    bignumber.js: "npm:^9.1.2"
+  checksum: 10c0/2c136a0b871586d16f785b5364694270cb57d01f603fcd1fdb2722e82b29fc9d41de477cec2ef54405f7b1715cae072280985e63fd070bdbbdba592a47209c2c
+  languageName: node
+  linkType: hard
+
 "@taquito/michel-codec@npm:^21.0.4, @taquito/michel-codec@npm:^21.0.5":
   version: 21.0.5
   resolution: "@taquito/michel-codec@npm:21.0.5"
@@ -3329,6 +3340,24 @@ __metadata:
     elliptic: "npm:^6.6.1"
     typedarray-to-buffer: "npm:^4.0.0"
   checksum: 10c0/2a7ee4d2531056e85fe42009d227885abd7cddeb5e5df6f699012517e54fff02f8ecfd5ee0595fe5a5dbce3c02233052d83ed5e9191776193ab7b422cf82d217
+  languageName: node
+  linkType: hard
+
+"@taquito/utils@npm:^22.0.0":
+  version: 22.0.0
+  resolution: "@taquito/utils@npm:22.0.0"
+  dependencies:
+    "@stablelib/blake2b": "npm:^1.0.1"
+    "@stablelib/ed25519": "npm:^1.0.3"
+    "@taquito/core": "npm:^22.0.0"
+    "@types/bs58check": "npm:^2.1.2"
+    bignumber.js: "npm:^9.1.2"
+    blakejs: "npm:^1.2.1"
+    bs58check: "npm:^3.0.1"
+    buffer: "npm:^6.0.3"
+    elliptic: "npm:^6.6.1"
+    typedarray-to-buffer: "npm:^4.0.0"
+  checksum: 10c0/433636d321c5bf09c4a1b49c8327e22415aed5462fabfa42d03bf91332e0270f5bead2f5c46fee832defca3309817c83b7066a74d9dc2a2e2315a14426c51142
   languageName: node
   linkType: hard
 
@@ -12499,6 +12528,7 @@ __metadata:
     "@stablelib/utf8": "npm:1.0.2"
     "@stablelib/x25519-session": "npm:1.0.4"
     "@taquito/beacon-wallet": "npm:21.0.4"
+    "@taquito/local-forging": "npm:^22.0.0"
     "@taquito/michel-codec": "npm:^22.0.0"
     "@taquito/signer": "npm:21.0.4"
     "@taquito/taquito": "npm:21.0.4"

@@ -4,9 +4,10 @@ WORKDIR /app
 # Copy requirements file first to leverage Docker layer caching
 COPY requirements.txt ./
 
-# Install system build tools required for native extensions (e.g. pysha3, fastecdsa, pyblake2).
-# Then upgrade pip, pin wcwidth, and install requirements. After installation,
-# purge build tools to reduce image size.
+# Install system build tools required for native extensions (e.g. pysha3,
+# fastecdsa, pyblake2).  We install build-essential (gcc, make) then
+# upgrade pip and pin wcwidth before installing requirements.  After
+# installation, we purge build tools to reduce image size.
 RUN apt-get update -y \
     && apt-get install -y --no-install-recommends build-essential \
     && python -m pip install --upgrade pip \

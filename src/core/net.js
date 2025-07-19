@@ -1,29 +1,29 @@
 /*─────────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
-  File:    src/core/net.js
-  Rev :    r1026   2025‑07‑19
-  Summary: dual‑stage origination helpers.  Provides helpers to
-           forge and inject operations locally (with manual
-           gas/storage/fee fallback) and exposes forgeViaBackend
-           and injectViaBackend for callers that wish to offload
-           those steps to serverless endpoints.  net.js itself
-           always uses local forging/injection.
-──────────────────────────────────────────────────────────────────*/
+      Developed by @jams2blues – ZeroContract Studio
+      File:    src/core/net.js
+      Rev :    r1029   2025‑07‑19
+      Summary: dual‑stage origination helpers.  Provides helpers to
+               forge and inject operations locally (with manual
+               gas/storage/fee fallback) and exposes forgeViaBackend
+               and injectViaBackend for callers that wish to offload
+               those steps to an external forge service.  The forge
+               service URL is configurable via FORGE_SERVICE_URL in
+               deployTarget.js.  net.js defaults to local forging
+               and injection if remote calls fail.
+    ─────────────────────────────────────────────────────────────────*/
+
 import { OpKind } from '@taquito/taquito';
 import { b58cdecode, prefix } from '@taquito/utils';
-// Explicitly import the local forger.  While Taquito may configure
-// a local forger by default, our testing has shown that the
-// toolkit.forger can still invoke the RPC forger on some
-// configurations.  To guarantee that origination bytes are forged
-// entirely client‑side (avoiding the RPC /forge/operations endpoint),
-// we instantiate our own LocalForger below.  See:
-// https://tezostaquito.io/docs/forger for details.
 import { LocalForger } from '@taquito/local-forging';
 // Parser from michel-codec is used to convert plain Michelson (.tz) source
 // into Micheline JSON when forging locally.  Without this conversion,
 // passing a raw string into estimate.originate or forge may throw an
 // error.  Parsing is performed on-demand in forgeOrigination.
 import { Parser } from '@taquito/michel-codec';
+// Import forge service URL from deployTarget so that remote calls can
+// be routed to an external host.  When FORGE_SERVICE_URL is empty,
+// backend helpers fall back to /api endpoints within Next.js.
+import { FORGE_SERVICE_URL } from '../config/deployTarget.js';
 
 /* global concurrency limit */
 const LIMIT = 4;
@@ -95,79 +95,96 @@ export function jFetch(url, opts = {}, tries) {
 }
 
 /*─────────────────────────────────────────────────────────────
-  Manual forge and inject helpers
+  Backend forge and inject helpers
 ─────────────────────────────────────────────────────────────*/
 
 /**
+ * Determine the full URL for the forge API.  If FORGE_SERVICE_URL
+ * is non-empty, append `/forge`; otherwise fall back to the local
+ * Next.js API route.  This indirection allows deployments to swap
+ * between a remote service and in-process API routes without
+ * changing the call sites.
+ */
+function forgeEndpoint() {
+  return FORGE_SERVICE_URL ? `${FORGE_SERVICE_URL.replace(/\/$/, '')}/forge` : '/api/forge';
+}
+
+/**
+ * Determine the full URL for the inject API.  Same logic as
+ * forgeEndpoint().
+ */
+function injectEndpoint() {
+  return FORGE_SERVICE_URL ? `${FORGE_SERVICE_URL.replace(/\/$/, '')}/inject` : '/api/inject';
+}
+
+/**
  * Forge an origination operation via backend API.  Sends a POST
- * request to /api/forge with the code, storage and source.  The
- * server returns forged bytes.  This mirrors SmartPy’s backend
- * behaviour and avoids browser payload limits.
+ * request to the configured forge endpoint with the code, storage
+ * and source address.  The server returns forged bytes.  When
+ * FORGE_SERVICE_URL is set this will call the external service; when
+ * empty it uses the built-in Next.js API (/api/forge).  Callers
+ * should catch errors and fall back to local forging via
+ * forgeOrigination.
  *
- * @param {any[]} code Michelson code array
+ * @param {any[]} code Michelson code array or raw string
  * @param {any} storage Initial storage (MichelsonMap or compatible)
  * @param {string} source tz1/KT1 address initiating the origination
  * @returns {Promise<string>} forged bytes
  */
-async function forgeViaBackend(code, storage, source) {
-  const res = await jFetch('/api/forge', {
+export async function forgeViaBackend(code, storage, source) {
+  const url = forgeEndpoint();
+  const res = await jFetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ code, storage, source }),
   });
-  if (res && res.forgedBytes) return res.forgedBytes;
+  if (res && (res.forgedBytes || res.forgedbytes)) {
+    return res.forgedBytes || res.forgedbytes;
+  }
   throw new Error('Backend forge failed');
 }
 
 /**
  * Inject a signed operation via backend API.  Sends a POST
- * request to /api/inject with the signed bytes.  Returns the
- * operation hash from the response.  When using the backend,
- * this avoids browser injection limits.
+ * request to the configured inject endpoint with the signed bytes.
+ * Returns the operation hash from the response.  When
+ * FORGE_SERVICE_URL is set this will call the external service; when
+ * empty it uses the built-in Next.js API (/api/inject).  Callers
+ * should catch errors and fall back to local injection via
+ * injectSigned().
  *
  * @param {string} signedBytes Hex string of the signed operation
  * @returns {Promise<string>} operation hash
  */
-async function injectViaBackend(signedBytes) {
-  const res = await jFetch('/api/inject', {
+export async function injectViaBackend(signedBytes) {
+  const url = injectEndpoint();
+  const res = await jFetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ signedBytes }),
   });
-  if (res && (res.opHash || res.hash)) return res.opHash || res.hash;
+  if (res && (res.opHash || res.hash)) {
+    return res.opHash || res.hash;
+  }
   throw new Error('Backend inject failed');
 }
 
-// Export backend helpers so that callers (e.g. src/pages/deploy.js)
-// can explicitly offload forging and injection to the serverless
-// API endpoints.  net.js itself always performs local forging and
-// injection by default.
-export { forgeViaBackend, injectViaBackend };
+/*─────────────────────────────────────────────────────────────
+  Local forge and inject helpers
+─────────────────────────────────────────────────────────────*/
 
 /**
  * Forge an origination operation locally.
- * Estimates gas/fee and builds the operation contents with the given code and storage.
- * Returns the forged bytes which must be signed externally.
+ * Estimates gas/fee and builds the operation contents with the given code
+ * and storage.  Returns the forged bytes which must be signed externally.
  *
  * @param {TezosToolkit} toolkit Taquito toolkit instance
  * @param {string} source The originating address (tz1/KT1)
- * @param {any[]} code Michelson code array
+ * @param {any[]} code Michelson code array or raw Michelson string
  * @param {any} storage Initial storage object (MichelsonMap or compatible)
  * @returns {Promise<{ forgedBytes: string, contents: any[], branch: string }>}
  */
 export async function forgeOrigination(toolkit, source, code, storage) {
-  /*
-   * Attempt to estimate gas, storage and fee via the RPC.  On some
-   * networks the RPC returns 400 or fails to simulate large
-   * contracts, which in turn aborts the entire origination.  To
-   * guard against this, we wrap the call in a try/catch and fall
-   * back to conservative defaults when estimation fails.  These
-   * defaults are intentionally generous: 1.04 million gas, 60 k
-   * storage, and a 0.2 ꜩ fee.  They ensure that the forged
-   * operation is accepted by the chain even without prior
-   * estimation.  Users will only pay the actual resources consumed
-   * when the operation is applied.
-   */
   // If the provided code is a raw Michelson string, parse it into
   // Micheline JSON using the Parser.  This allows Taquito to
   // estimate and forge the contract.  If code is already a JSON
@@ -264,11 +281,14 @@ export async function injectSigned(toolkit, signedBytes) {
   return await toolkit.rpc.injectOperation(signedBytes);
 }
 
-/* What changed & why: Removed USE_BACKEND import and moved the
-   responsibility of choosing backend vs. local forging to the
-   caller.  net.js now always forges and injects locally with a
-   manual gas/storage/fee fallback, while exposing forgeViaBackend
-   and injectViaBackend for external use.  This avoids build
-   errors when deployTarget.js does not export USE_BACKEND and
-   centralises the decision logic in deploy.js.  Updated
-   revision and summary accordingly. */
+/* What changed & why:
+   • Imported FORGE_SERVICE_URL from deployTarget.js and added helper
+     functions forgeEndpoint() and injectEndpoint() to dynamically
+     choose between external and internal API routes.
+   • Updated forgeViaBackend and injectViaBackend to use those
+     endpoints and return only the forged bytes or operation hash.
+   • Added explicit exports for forgeViaBackend and injectViaBackend
+     so that callers can offload heavy origination steps to an
+     external FastAPI service while preserving local fallback.
+   • Revision bumped to r1029 to reflect these changes.
+*/

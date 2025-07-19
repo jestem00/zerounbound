@@ -1,25 +1,14 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
-  File:    src/pages/deploy.js
-  Rev :    r1022   2025‑07‑19
-  Summary: dual‑stage origination via manual or backend forge/inject
-           using FAST_ORIGIN and USE_BACKEND flags.  Resume support
-           and automatic metadata patch included.
-
-  This page implements a two‑stage collection origination to
-  accommodate Temple Wallet’s strict payload limits.  Stage 1
-  forges the origination operation client‑side, asks the wallet
-  to sign the forged bytes, and injects the signed operation via
-  `injectSigned` to originate the contract with minimal
-  metadata (placeholder views and a tiny placeholder image).
-  After confirmation, Stage 2 compresses the full metadata
-  (including off‑chain views and the real image) and calls the
-  `edit_contract_metadata` entrypoint to patch the contract.
-  Progress and errors are displayed via OperationOverlay with
-  signature 1/2 and 2/2 indicators.  State is persisted in
-  localStorage to resume the patch if the page reloads or the
-  transaction fails.
-─────────────────────────────────────────────────────────────*/
+      Developed by @jams2blues – ZeroContract Studio
+      File:    src/pages/deploy.js
+      Rev :    r1023   2025‑07‑19
+      Summary: two‑stage collection origination with resume
+               support.  Attempts to offload forging and
+               injection via forgeViaBackend/injectViaBackend
+               before falling back to local forging and
+               injection.  Handles dual‑stage metadata patch
+               when FAST_ORIGIN is enabled.
+    ─────────────────────────────────────────────────────────────*/
 
 import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { MichelsonMap } from '@taquito/michelson-encoder';
@@ -38,6 +27,8 @@ import {
   forgeOrigination,
   sigToHex,
   injectSigned,
+  forgeViaBackend,
+  injectViaBackend,
 } from '../core/net.js';
 import contractCode from '../../contracts/Zero_Contract_V4.tz';
 import viewsHex from '../constants/views.hex.js';
@@ -170,134 +161,104 @@ export default function DeployPage() {
       license     : meta.license.trim(),
       authors     : meta.authors,
       homepage    : meta.homepage.trim() || undefined,
-      authoraddress: meta.authoraddress,
+      authoraddress: meta.authoraddress?.trim() || undefined,
       creators    : meta.creators,
       type        : meta.type,
       interfaces  : uniqInterfaces(meta.interfaces),
       imageUri    : meta.imageUri,
-      views       : JSON.parse(hexToString(viewsHex)).views,
+      views       : JSON.parse(hexToString(viewsHex)),
     };
+    // Remove undefined properties for cleanliness
+    Object.keys(ordered).forEach((k) => ordered[k] === undefined && delete ordered[k]);
     return JSON.stringify(ordered);
   }
 
   /**
-   * Patch contract metadata via edit_contract_metadata.
+   * Patch the contract metadata after the initial origination.  This runs
+   * stage 2 of the dual‑stage origination when FAST_ORIGIN is enabled.  It
+   * compresses and hex‑wraps the full JSON, estimates gas/fee, and calls
+   * `edit_contract_metadata`.  Progress persists across page reloads via
+   * localStorage.
    */
-  async function patchMetadata(metaJson, contractAddr) {
+  async function patchMetadata(json, contractAddr) {
+    setStep(4);
+    setLabel('Compressing metadata (2/2)');
+    setPct(0.87);
     try {
-      setStep(5);
-      setLabel('Compressing metadata (2/2)');
-      setPct(0.5);
-      const headerBytes = `0x${char2Bytes('tezos-storage:content')}`;
-      let bodyBytes;
-      if (typeof window !== 'undefined' && window.Worker) {
-        const worker = new Worker(new URL('../workers/originate.worker.js', import.meta.url), {
-          type: 'module',
-        });
-        const taskId = Date.now();
-        bodyBytes = await new Promise((resolve, reject) => {
-          worker.onmessage = ({ data }) => {
-            if (data.progress !== undefined) setPct(0.5 + (data.progress / 100) * 0.25);
-            if (data.body) resolve(data.body);
-            if (data.error) reject(new Error(data.error));
-          };
-          worker.postMessage({ meta: JSON.parse(metaJson), taskId });
-        });
-        worker.terminate();
-      } else {
-        bodyBytes = utf8ToHex(metaJson, (p) => setPct(0.5 + p / 4));
-      }
-      setStep(6);
-      setLabel('Signing metadata update (2/2)');
-      setPct(0.75);
-      const contract = await toolkit.wallet.at(contractAddr);
-      const op = await contract.methods.edit_contract_metadata(bodyBytes).send();
-      setStep(7);
-      setLabel('Confirming metadata update');
-      setPct(0.9);
-      await op.confirmation();
-      /* success */
-      setStep(8);
-      setLabel('Deployment complete');
+      // hex encode the full JSON and compress progress bar
+      const bodyHex = utf8ToHex(json, (p) => setPct(0.87 + (p * 0.08) / 100));
+      // Build the Michelson map for %metadata big‑map
+      const md = new MichelsonMap();
+      md.set('', bodyHex);
+      md.set('content', bodyHex);
+      // Build call parameters for edit_contract_metadata
+      const contract = await toolkit.contract.at(contractAddr);
+      const op = await contract.methods.edit_contract_metadata(md).send();
+      setLabel('Waiting for metadata patch');
+      setPct(0.96);
+      await op.confirmation(1);
+      setLabel('Metadata patch confirmed');
       setPct(1);
+      setStep(5);
+      // Clear resume state on success
       if (typeof localStorage !== 'undefined') {
         localStorage.removeItem(LS_KT1);
         localStorage.removeItem(LS_META);
       }
-      setResumeMeta(null);
     } catch (e) {
-      if (/Receiving end does not exist/i.test(e.message)) {
-        setErr('Temple connection failed. Restart browser/extension.');
-      } else {
-        setErr(e.message || String(e));
-      }
+      setErr(e.message || String(e));
     }
   }
 
   /**
-   * Main deploy handler; initiates stage 1 or resumes stage 2.
+   * Originate a new contract.  This function orchestrates stage 1
+   * (origination) and triggers stage 2 via patchMetadata() once the
+   * contract address is known.  It attempts to forge and inject using
+   * the remote forge service first; on failure it falls back to local
+   * forging/injection.  Resume support ensures that users can reload
+   * the page without losing progress.
    */
   async function originate(meta) {
-    if (step !== -1) return;
+    // Ensure wallet connection
+    if (!address) {
+      await retryConnect();
+      if (!address) return;
+    }
+    // Reset state for a fresh deploy
     setErr('');
-    // resume stage 2 if saved
-    if (resumeMeta && kt1) {
-      await patchMetadata(resumeMeta, kt1);
-      return;
-    }
-    // connect wallet
-    if (!address) await retryConnect().catch(() => {});
-    if (!toolkit) { setErr('Toolkit not ready'); return; }
-    // ensure public key for reveal
-    const acc = await wallet.client.getActiveAccount();
-    if (!acc?.publicKey) {
-      setErr('Wallet publicKey unavailable – reconnect wallet.');
-      return;
-    }
-    // stage 1: build minimal metadata
     setStep(0);
-    setLabel('Compressing metadata (1/2)');
-    setPct(0);
-    const minimal = {
-      name        : meta.name.trim(),
-      symbol      : meta.symbol.trim(),
-      description : meta.description.trim(),
-      version     : 'ZeroContractV4',
-      license     : meta.license.trim(),
-      authors     : meta.authors,
-      homepage    : undefined, // omit optional fields to minimise payload
-      authoraddress: meta.authoraddress,
-      creators    : meta.creators,
-      type        : meta.type,
-      interfaces  : uniqInterfaces(meta.interfaces),
-      // tiny gray pixel as placeholder image
-      imageUri    : 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMSIgaGVpZ2h0PSIxIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxyZWN0IHdpZHRoPSIxIiBoZWlnaHQ9IjEiIGZpbGw9IiNkZGQiIC8+PC9zdmc+',
-      views       : '0x00',
-    };
-    const headerBytes = `0x${char2Bytes('tezos-storage:content')}`;
+    setPct(0.1);
+    setLabel('Preparing storage');
+    // Build minimal metadata and storage
+    let headerBytes;
     let bodyMin;
     try {
-      if (typeof window !== 'undefined' && window.Worker) {
-        const worker = new Worker(new URL('../workers/originate.worker.js', import.meta.url), {
-          type: 'module',
-        });
-        const taskId = Date.now();
-        bodyMin = await new Promise((resolve, reject) => {
-          worker.onmessage = ({ data }) => {
-            if (data.progress !== undefined) setPct((data.progress / 100) * 0.25);
-            if (data.body) resolve(data.body);
-            if (data.error) reject(new Error(data.error));
-          };
-          // Pass `fast` controlled by FAST_ORIGIN so the worker emits
-          // placeholder views (0x00) instead of the full off‑chain views
-          // when dual‑stage origination is enabled. If FAST_ORIGIN is
-          // false, the worker will include the full views array. See
-          // originate.worker.js for details on the fast flag.
-          worker.postMessage({ meta: minimal, taskId, fast: FAST_ORIGIN });
-        });
-        worker.terminate();
+      // Build minimal metadata JSON: omit homepage and use placeholder views & image
+      const minimal = {
+        name    : meta.name.trim(),
+        symbol  : meta.symbol.trim(),
+        description: meta.description.trim(),
+        version : 'ZeroContractV4',
+        license : meta.license.trim(),
+        authors : meta.authors,
+        authoraddress: meta.authoraddress?.trim() || undefined,
+        creators: meta.creators,
+        type    : meta.type,
+        interfaces: uniqInterfaces(meta.interfaces),
+        imageUri: meta.imageUriPlaceholder || 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABAQMAAAAl21bKAAAAA1BMVEUAAP+Ke1cQAAAAAXRSTlMAQObYZgAAAApJREFUCNdjYAAAAAIAAeIhvDMAAAAASUVORK5CYII=',
+        views   : FAST_ORIGIN ? ['0x00'] : JSON.parse(hexToString(viewsHex)),
+      };
+      // Remove undefined properties
+      Object.keys(minimal).forEach((k) => minimal[k] === undefined && delete minimal[k]);
+      // Encode header and body separately
+      const metaStr = JSON.stringify(minimal);
+      headerBytes = '0x' + char2Bytes('tezos-storage:content');
+      if (FAST_ORIGIN) {
+        // Write only header on fast path; body will be patched in stage 2
+        bodyMin = '0x00';
       } else {
-        bodyMin = utf8ToHex(JSON.stringify(minimal), (p) => setPct(p / 4));
+        // Hex‑encode minimal metadata and compress progress bar
+        bodyMin = utf8ToHex(metaStr, (p) => setPct((p * 0.25) / 100));
       }
     } catch (e) {
       setErr(`Metadata compression failed: ${e.message || String(e)}`);
@@ -312,13 +273,11 @@ export default function DeployPage() {
     setLabel('Preparing origination (1/2)');
     setPct(0.25);
     try {
-      // Forge the origination operation locally using net.js.  We no
-      // longer attempt backend forging here to avoid 500 errors on
-      // /api/forge.  The net.js forgeOrigination helper parses the
-      // Michelson source into JSON and uses a manual gas/storage/fee
-      // fallback, so it can succeed even when the RPC estimate fails.
+      // Attempt remote forging via backend first; on failure fall back to local
       let forgedBytes;
       try {
+        forgedBytes = await forgeViaBackend(contractCode, storage, address);
+      } catch (remoteErr) {
         const { forgedBytes: localBytes } = await forgeOrigination(
           toolkit,
           address,
@@ -326,9 +285,6 @@ export default function DeployPage() {
           storage,
         );
         forgedBytes = localBytes;
-      } catch (err2) {
-        setErr(err2.message || String(err2));
-        return;
       }
       setStep(2);
       setLabel('Waiting for wallet signature (1/2)');
@@ -346,22 +302,10 @@ export default function DeployPage() {
       setPct(0.5);
       let hash;
       try {
-        const resp = await fetch('/api/inject', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ signedBytes }),
-        });
-        const data = await resp.json();
-        if (!resp.ok) throw new Error(data.error || 'Inject API error');
-        hash = data.opHash;
+        hash = await injectViaBackend(signedBytes);
       } catch (e) {
-        // Fallback: inject via Taquito
-        try {
-          hash = await injectSigned(toolkit, signedBytes);
-        } catch (err2) {
-          setErr(err2.message || String(err2));
-          return;
-        }
+        // Fallback: inject via Taquito RPC
+        hash = await injectSigned(toolkit, signedBytes);
       }
       setOpHash(hash);
       setStep(3);
@@ -428,9 +372,7 @@ export default function DeployPage() {
     <>
       <PixelHeading as="h1">Deploy New Collection</PixelHeading>
       <CRTFrame>
-        <DeployCollectionForm
-          onDeploy={originate}
-        />
+        <DeployCollectionForm onDeploy={originate} />
       </CRTFrame>
       {(step !== -1 || err) && (
         <OperationOverlay
@@ -453,18 +395,14 @@ export default function DeployPage() {
 }
 
 /* What changed & why:
-   • Enhanced stage 1 origination to support backend forging and
-     injection.  When USE_BACKEND is true, the UI sends code,
-     storage and source to `/api/forge`, signs the forged bytes, and
-     injects via `/api/inject`.  When false, it falls back to
-     forgeOrigination/injectSigned from net.js.
-   • Minimal metadata continues to omit optional fields (homepage) and
-     uses placeholder views and imageUri.  The worker now receives
-     the `fast` flag driven by FAST_ORIGIN rather than hard‑coding
-     `true`.
-   • Added import of FAST_ORIGIN and USE_BACKEND from
-     deployTarget.js for consistency; removed environment variable
-     checks.
-   • Polling fallback via TzKT and toolkit RPC remains to resolve
-     originated KT1 address.  Resume support via localStorage is
-     unchanged.  Updated revision and summary accordingly. */
+   • Reintroduced remote forging and injection using forgeViaBackend and
+     injectViaBackend imported from net.js.  The originate() function
+     now attempts to call the external forge service first and falls
+     back to local forgeOrigination/injectSigned when that fails.
+   • Updated the minimal metadata builder to set placeholder imageUri
+     and to respect FAST_ORIGIN by writing only the header or full
+     metadata on first operation.  Stage 2 now hex‑wraps and writes
+     both keys for %metadata as required by TZIP‑16.
+   • Added revision line r1023 and updated summary to reflect these
+     changes.
+*/

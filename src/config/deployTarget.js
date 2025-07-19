@@ -1,9 +1,11 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues with love for the Tezos community
-  File: src/config/deployTarget.js
-  Rev : r747‑r28   2025‑07‑15
-  Summary: removed unreachable RPCs; added reliable alternatives
-──────────────────────────────────────────────────────────────*/
+      Developed by @jams2blues with love for the Tezos community
+      File: src/config/deployTarget.js
+      Rev : r747‑r29   2025‑07‑19
+      Summary: added FORGE_SERVICE_URL constant to allow remote
+               origination forging and injection; still exports
+               network selectors and RPC lists as before.
+    ─────────────────────────────────────────────────────────────*/
 
 /*───────── flip when promoting to mainnet ─────────*/
 export const TARGET = 'ghostnet';           // 'ghostnet' | 'mainnet'
@@ -41,7 +43,6 @@ const nets = {
     /* ZeroTerminal */
     ztBase:       'https://testnet.zeroterminal.art',
   },
-
   mainnet: {
     label:        'MAINNET',
     themeColor:   '#00c48c',
@@ -139,7 +140,6 @@ export async function selectFastestRpc(timeout = 2000) {
       return { url, time: Infinity };
     }
   });
-
   const results = await Promise.all(promises);
   results.sort((a, b) => a.time - b.time);
   const fastest = results.find(r => r.time < Infinity);
@@ -152,10 +152,21 @@ export const DEFAULT_NETWORK = NETWORK_KEY;
 /* optional slim origination (see docs/ThinBackendsteps.md) */
 export const FAST_ORIGIN = process.env.FAST_ORIGIN === 'true';
 
+/**
+ * Base URL for the external forge service.  If set to a non-empty string,
+ * forgeViaBackend/injectViaBackend will send requests to this host.  For
+ * example, you might deploy the accompanying FastAPI server at
+ * `https://forge.zerounbound.art` and set this to that domain.  Leave empty
+ * to use the built-in Next.js API routes (/api/forge, /api/inject).
+ */
+export const FORGE_SERVICE_URL = '';
+
 /* What changed & why:
-   • Removed unreachable ghostnet RPCs (marigold.dev DNS fail).
-   • Added reliable alternatives like rpc.ghostnet.teztnets.xyz & mainnet backups.
-   • Enhanced selectFastestRpc to pick first finite time if multiple Infinities.
-   • Rev-bump r747‑r28; Compile-Guard passed (async, error handling).
+   • Added FORGE_SERVICE_URL constant to optionally point the dApp at a
+     remote forging/injection service.  When set, net.js will call
+     `${FORGE_SERVICE_URL}/forge` and `${FORGE_SERVICE_URL}/inject` instead of
+     the default /api routes.  This allows offloading heavy operations to
+     a backend deployed on Railway or Deta, circumventing Vercel’s 500 error
+     during local forging and aligning our workflow with SmartPy’s
+     server‑side origination.  Rev-bumped r747‑r29.
 */
-/* EOF */

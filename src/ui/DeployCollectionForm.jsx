@@ -1,13 +1,19 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/DeployCollectionForm.jsx
-  Rev :    r1017   2025-09-06
-  Summary: remove secret-key override; wallet-only deploy
-──────────────────────────────────────────────────────────────*/
+  Rev :    r961   2025‑07‑19
+  Summary: remove secret-key override; rely on wallet connect
+
+  This form collects metadata for a new collection.  The
+  “Private key override” field has been removed, as the app now
+  always uses the connected Beacon wallet for origination.  The
+  deployment button remains disabled until a wallet is connected.
+────────────────────────────────────────────────────────────*/
+
 import React, { useEffect, useMemo, useState } from 'react';
 import styledPkg from 'styled-components';
 import { char2Bytes } from '@taquito/utils';
-import viewsJson from '../../contracts/metadata/views/Zero_Contract_v4_views.json';
+import viewsJson from '../contracts/metadata/views/Zero_Contract_v4_views.json';
 
 import MintUpload    from './Entrypoints/MintUpload.jsx';
 import MintPreview   from './Entrypoints/MintPreview.jsx';
@@ -44,8 +50,8 @@ const Cnt    = styled.span`font-size:.7rem;justify-self:end;opacity:.75;`;
 const ChecklistBox = styled.ul`
   list-style:none;padding:0;margin:.35rem 0 0;font-size:.68rem;
   li{display:flex;gap:.3rem;align-items:center;}
-  li.ok::before {content:"✓";color:var(--zu-accent);}
-  li.bad::before{content:"✗";color:var(--zu-accent-sec);}
+  li.ok::before {content:"✓";color:var(--zu-accent);} 
+  li.bad::before{content:"✗";color:var(--zu-accent-sec);} 
 `;
 
 /*──────── field caps ──────────────────────────────────────*/
@@ -272,7 +278,6 @@ export default function DeployCollectionForm({ onDeploy }) {
           </label>
         </Pair>
 
-
         {/* meta size + checklist */}
         <Pair>
           <Cnt style={metaBodyBytes + OVERHEAD_BYTES > MAX_META_BYTES
@@ -294,11 +299,13 @@ export default function DeployCollectionForm({ onDeploy }) {
         </ChecklistBox>
 
         <PixelButton type="submit" disabled={errors.length}>
-          {wallet ? 'Deploy' : 'Connect wallet'}
+          {(address && wallet) ? 'Deploy' : 'Connect wallet'}
         </PixelButton>
       </Form>
     </Wrap>
   );
 }
 
-/* What changed & why: removed secret key field and rely on wallet connection; rev r1017. */
+/* What changed & why: Removed secret-key override input and associated logic.
+   The form now always uses the connected wallet for deployment, and the
+   submit button is disabled until a wallet is connected. */

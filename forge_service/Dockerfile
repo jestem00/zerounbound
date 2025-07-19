@@ -1,15 +1,20 @@
-FROM python:3.10-slim
+FROM python:3.10-slim-bullseye
 WORKDIR /app
 
 # Copy requirements file first to leverage Docker layer caching
 COPY requirements.txt ./
 
-# Upgrade pip to avoid packaging bugs (e.g. wcwidth invalid wheel) and
-# pin wcwidth to a known good version before installing dependencies.  See
-# Render build logs for details: older pip versions mis-handle certain wheels.
-RUN python -m pip install --upgrade pip \
+# Install system build tools required for native extensions (e.g. pysha3, fastecdsa, pyblake2).
+# Then upgrade pip, pin wcwidth, and install requirements. After installation,
+# purge build tools to reduce image size.
+RUN apt-get update -y \
+    && apt-get install -y --no-install-recommends build-essential \
+    && python -m pip install --upgrade pip \
     && pip install --no-cache-dir wcwidth==0.2.6 \
-    && pip install --no-cache-dir -r requirements.txt
+    && pip install --no-cache-dir -r requirements.txt \
+    && apt-get purge -y build-essential \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY main.py ./
 EXPOSE 8000

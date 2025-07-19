@@ -1,7 +1,7 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/OperationOverlay.jsx
-  Rev :    r961   2025‑07‑19
+  Rev :    r962   2025‑07‑19
   Summary: progress overlay with status updates and Temple hints
 
   This component displays deployment progress and success/error
@@ -310,7 +310,7 @@ export default function OperationOverlay({
 
         {error && total>1 && (
           <p style={{fontSize:'.8rem',opacity:.8,marginTop:4}}>
-            Already‑confirmed slices won’t be resent on retry.
+            Progress will resume from the last confirmed step on retry.
           </p>
         )}
 
@@ -336,7 +336,7 @@ export default function OperationOverlay({
   );
 }
 
-/* What changed & why: Added full success links (BCD, objkt, TzKT, manage,
-   copy, close) and reduced stages to reflect the simplified
-   single‑stage origination flow.  Preserved Temple-specific hints and
-   progress behaviour. */
+/* What changed & why: Adjusted the error retry message to a generic
+   statement that progress resumes from the last confirmed step, rather
+   than referring to “slices”, since dual‑stage origination doesn’t
+   involve slice uploads.  Updated revision and summary accordingly. */

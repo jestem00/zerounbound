@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/deploy.js
-  Rev :    r1020   2025‑07‑19
-  Summary: dual‑stage origination via manual forge/inject; resume support
+  Rev :    r1021   2025‑07‑19
+  Summary: dual‑stage origination via manual forge/inject with fast flag; resume support
 
   This page implements a two‑stage collection origination to
   accommodate Temple Wallet’s strict payload limits.  Stage 1
@@ -286,7 +286,12 @@ export default function DeployPage() {
             if (data.body) resolve(data.body);
             if (data.error) reject(new Error(data.error));
           };
-          worker.postMessage({ meta: minimal, taskId });
+          // Pass fast:true so the worker emits placeholder views (0x00) instead of
+          // the full off‑chain views. Without this flag the worker will
+          // overwrite our minimal `views: '0x00'` and reintroduce the full
+          // metadata array, causing the origination payload to exceed Temple's
+          // limits. See originate.worker.js for details on the fast flag.
+          worker.postMessage({ meta: minimal, taskId, fast: true });
         });
         worker.terminate();
       } else {
@@ -418,6 +423,10 @@ export default function DeployPage() {
      operation bytes (prefix 03) and bypasses wallet.originate.
    • Minimal metadata now omits optional fields like homepage to
      further reduce payload size; views and imageUri are placeholders.
+   • Stage 1 now passes `fast:true` to originate.worker.js, ensuring
+     the worker emits placeholder views (`0x00`) instead of the full
+     off‑chain view array. This prevents the worker from overwriting
+     our minimal metadata and reintroducing a large payload.
    • Added polling fallback via TzKT and toolkit RPC to resolve the
      originated KT1 address after injection.
    • Stage 2 patch logic remains unchanged; includes resume support

@@ -312,34 +312,23 @@ export default function DeployPage() {
     setLabel('Preparing origination (1/2)');
     setPct(0.25);
     try {
-      // Forge the origination operation.  Always attempt backend
-      // forging first; fallback to local forging on failure.  This
-      // mirrors SmartPy’s backend workflow while preserving a
-      // client‑side fallback.
+      // Forge the origination operation locally using net.js.  We no
+      // longer attempt backend forging here to avoid 500 errors on
+      // /api/forge.  The net.js forgeOrigination helper parses the
+      // Michelson source into JSON and uses a manual gas/storage/fee
+      // fallback, so it can succeed even when the RPC estimate fails.
       let forgedBytes;
       try {
-        const resp = await fetch('/api/forge', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: contractCode, storage, source: address }),
-        });
-        const data = await resp.json();
-        if (!resp.ok) throw new Error(data.error || 'Forge API error');
-        forgedBytes = data.forgedBytes;
-      } catch (e) {
-        // Fallback: forge locally via net.js
-        try {
-          const { forgedBytes: localBytes } = await forgeOrigination(
-            toolkit,
-            address,
-            contractCode,
-            storage,
-          );
-          forgedBytes = localBytes;
-        } catch (err2) {
-          setErr(err2.message || String(err2));
-          return;
-        }
+        const { forgedBytes: localBytes } = await forgeOrigination(
+          toolkit,
+          address,
+          contractCode,
+          storage,
+        );
+        forgedBytes = localBytes;
+      } catch (err2) {
+        setErr(err2.message || String(err2));
+        return;
       }
       setStep(2);
       setLabel('Waiting for wallet signature (1/2)');

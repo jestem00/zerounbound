@@ -1,16 +1,17 @@
 /*─────────────────────────────────────────────────────────────────
       Developed by @jams2blues – ZeroContract Studio
       File:    src/core/net.js
-      Rev :    r1101   2025‑07‑21
+      Rev :    r1102   2025‑07‑21
       Summary: unified single‑stage origination helpers with storage encoding
                and signature tagging.  Added sigHexWithTag() to convert
-               edsig/spsig/p2sig signatures to hex and append a curve tag
-               byte (00 for Ed25519, 01 for secp256k1, 02 for P‑256).  This
-               tag is required by Tezos RPC when injecting operations; its
-               absence previously caused phantom hashes and parse errors.
-               forgeViaBackend() continues to encode storage before
-               sending it to the backend; the remainder of net.js remains
-               unchanged.
+               edsig/spsig/p2sig signatures to hex and append a curve tag.
+               Updated forgeViaBackend() to accept an optional publicKey
+               for reveal support, and enhanced forgeOrigination() to
+               encode high‑level storage, detect unrevealed accounts and
+               prepend a reveal operation.  RPC forging is attempted
+               before falling back to LocalForger.  These updates
+               resolve injection parsing errors when accounts are
+               unrevealed or storage is complex.
 ────────────────────────────────────────────────────────────────*/
 
 import { OpKind } from '@taquito/taquito';
@@ -179,14 +180,19 @@ export function encodeStorageForForge(code, storage) {
  * @param {string} source tz1/KT1 address initiating the origination
  * @returns {Promise } forged bytes
  */
-export async function forgeViaBackend(code, storage, source) {
+export async function forgeViaBackend(code, storage, source, publicKey) {
   const url = forgeEndpoint();
   // Encode storage into Micheline before sending to backend forge.
   const encodedStorage = encodeStorageForForge(code, storage);
+  // Include publicKey when provided to allow the backend to prepend a
+  // reveal operation if the source account is unrevealed.  The
+  // backend expects this property and will ignore it if not needed.
+  const payload = { code, storage: encodedStorage, source };
+  if (publicKey) payload.publicKey = publicKey;
   const res = await jFetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code, storage: encodedStorage, source }),
+    body: JSON.stringify(payload),
   });
   if (res && (res.forgedBytes || res.forgedbytes)) {
     return res.forgedBytes || res.forgedbytes;
@@ -234,11 +240,10 @@ export async function injectViaBackend(signedBytes) {
  * @param {any} storage Initial storage object (MichelsonMap or compatible)
  * @returns {Promise<{ forgedBytes: string, contents: any[], branch: string }>}
  */
-export async function forgeOrigination(toolkit, source, code, storage) {
-  // If the provided code is a raw Michelson string, parse it into
-  // Micheline JSON using the Parser.  This allows Taquito to
-  // estimate and forge the contract.  If code is already a JSON
-  // Michelson array, leave it unchanged.
+export async function forgeOrigination(toolkit, source, code, storage, publicKey) {
+  // Parse the Michelson code into Micheline if necessary.  This
+  // conversion is required for estimation and forging.  If parsing
+  // fails, throw an error to signal invalid code.
   let parsedCode = code;
   if (typeof code === 'string') {
     try {
@@ -249,25 +254,62 @@ export async function forgeOrigination(toolkit, source, code, storage) {
       throw new Error('Invalid Michelson code: ' + errParse.message);
     }
   }
-  let feeMutez      = '200000';    // 0.2 ꜩ
-  let gasLimit      = '1040000';   // ~1 million gas
-  let storageLimit  = '60000';     // 60 k bytes
+  // Encode high‑level storage into Micheline using Schema.  This
+  // ensures that complex types (e.g. MichelsonMaps) are correctly
+  // represented during forging.  If encoding fails, fallback to
+  // the original storage value.
+  const encodedStorage = encodeStorageForForge(parsedCode, storage);
+  // Determine whether the source account needs a reveal.  Query
+  // the manager key via RPC; if it is undefined or errors, we
+  // assume that a reveal operation must precede the origination.
+  let needsReveal = false;
+  if (publicKey) {
+    try {
+      const mgrKey = await toolkit.rpc.getManagerKey(source);
+      if (!mgrKey) needsReveal = true;
+    } catch (e) {
+      needsReveal = true;
+    }
+  }
+  // Fetch branch and counter for forging.  The counter is
+  // incremented manually for each operation (reveal + origination).
+  const blockHeader = await toolkit.rpc.getBlockHeader();
+  const branch = blockHeader.hash;
+  const contractInfo = await toolkit.rpc.getContract(source);
+  let counter = parseInt(contractInfo.counter, 10) + 1;
+  const contents = [];
+  // If reveal is needed, prepend a reveal operation using the
+  // provided publicKey.  Fee/gas/storage values follow typical
+  // defaults and may be adjusted by the caller if desired.
+  if (needsReveal && publicKey) {
+    contents.push({
+      kind         : OpKind.REVEAL,
+      source       : source,
+      fee          : '1300',
+      counter      : counter.toString(),
+      gas_limit    : '10000',
+      storage_limit: '0',
+      public_key   : publicKey,
+    });
+    counter += 1;
+  }
+  // Estimate fee/gas/storage for the origination.  Wrap in try/catch
+  // and fall back to conservative defaults if estimation fails.
+  let feeMutez     = '200000';   // 0.2 ꜩ
+  let gasLimit     = '200000';   // default gas for origination
+  let storageLimit = '60000';    // default storage limit (~60 kB)
   try {
-    const estimate = await toolkit.estimate.originate({ code: parsedCode, storage, balance: '0' });
+    const estimate = await toolkit.estimate.originate({ code: parsedCode, storage: encodedStorage, balance: '0' });
     feeMutez      = estimate.suggestedFeeMutez.toString();
     gasLimit      = estimate.gasLimit.toString();
     storageLimit  = estimate.storageLimit.toString();
   } catch (e) {
-    // Swallow estimation errors and proceed with manual values.
+    // estimation errors are ignored; defaults remain in effect
   }
-  // Fetch current branch for forging
-  const block = await toolkit.rpc.getBlockHeader();
-  const branch = block.hash;
-  // Fetch current counter and increment
-  const contractInfo = await toolkit.rpc.getContract(source);
-  const counter     = parseInt(contractInfo.counter, 10) + 1;
-  // Build contents array for origination
-  const contents = [{
+  // Append the origination operation to the contents.  Use the
+  // encodedStorage for the script to ensure proper Micheline
+  // representation.
+  contents.push({
     kind         : OpKind.ORIGINATION,
     source       : source,
     fee          : feeMutez,
@@ -275,16 +317,24 @@ export async function forgeOrigination(toolkit, source, code, storage) {
     gas_limit    : gasLimit,
     storage_limit: storageLimit,
     balance      : '0',
-    script       : { code: parsedCode, storage },
-  }];
-  // Forge the operation bytes using a dedicated LocalForger.  Although
-  // Taquito can be configured with a local forger, we explicitly
-  // instantiate one here to ensure that forging never falls back to
-  // the RPC forger (which would POST to /forge/operations and may
-  // return 400 errors for large scripts).  The LocalForger accepts
-  // the same input shape as the RPC forger.
-  const localForger = new LocalForger();
-  const forgedBytes  = await localForger.forge({ branch, contents });
+    script       : { code: parsedCode, storage: encodedStorage },
+  });
+  // Forge the operation bytes.  Attempt RPC forging first, which may
+  // produce more compact bytes and is the preferred method.  On
+  // failure (e.g. due to RPC parse errors with large scripts), fall
+  // back to the LocalForger.  Return the forged bytes along with
+  // the contents and branch.
+  let forgedBytes;
+  try {
+    forgedBytes = await toolkit.rpc.forgeOperations({ branch, contents });
+  } catch (rpcErr) {
+    try {
+      const localForger = new LocalForger();
+      forgedBytes = await localForger.forge({ branch, contents });
+    } catch (localErr) {
+      throw new Error(`Forge failed: ${rpcErr.message || localErr.message}`);
+    }
+  }
   return { forgedBytes, contents, branch };
 }
 
@@ -359,10 +409,15 @@ export async function injectSigned(toolkit, signedBytes) {
 }
 
 /* What changed & why:
-   • Bumped revision to r1101 and updated summary to reflect the unified
-     single‑stage origination helpers with signature tagging.
-   • Added sigHexWithTag() after sigToHex(), which converts a base58
-     signature into hex and appends the curve tag byte (00/01/02).  This
-     tag is required by Tezos RPC to correctly parse signed operations.
-   • Left the rest of net.js unchanged aside from header/footer updates.
+   • Bumped revision to r1102 and expanded forge capabilities.  forgeViaBackend()
+     now accepts an optional publicKey parameter and includes it in the
+     request payload, allowing the backend to insert reveal operations.
+   • Enhanced forgeOrigination() to encode high‑level storage via
+     encodeStorageForForge(), detect unrevealed accounts and prepend a
+     reveal operation using the provided publicKey.  Branch and counter
+     handling now increment counters appropriately for reveal + origination.
+   • Added RPC forging with fallback to LocalForger and updated gas/fee
+     estimation with safe defaults.  These changes address prevalidation
+     errors observed when accounts were unrevealed or storage encoding
+     mismatched network expectations.
 */

@@ -193,11 +193,7 @@
         "docs/Master_Overview_And_Manifest_zerounbound_contractmanagement.md",
         "docs/TZIP_Compliance_Invariants_ZeroContract_V4.md",
         "AGENTS.md",
-        "src/workers/originate.worker.js",
-        "src/utils/chooseFastestRpc.js",
-        "src/ui/DeployCollectionForm.jsx",
-        "src/pages/deploy.js",
-        "src/ui/OperationOverlay.jsx"
+        "forge_service_node/README.md"
       ]
     },
     

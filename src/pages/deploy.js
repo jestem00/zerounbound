@@ -1,16 +1,17 @@
 /*─────────────────────────────────────────────────────────────
       Developed by @jams2blues – ZeroContract Studio
       File:    src/pages/deploy.js
-      Rev :    r1102   2025‑07‑21
+      Rev :    r1103   2025‑07‑21
       Summary: single‑stage origination for collections.  Builds
                full metadata up front and forges the contract and
                metadata in one transaction without requiring a second
                patch.  Retrieves the wallet publicKey to allow the
                backend to insert a reveal operation when necessary and
                falls back to local forging/injection on failure.  This
-               revision keeps the UI layout from r1032 (CRTFrame,
-               PixelHeading and OperationOverlay props) while still
-               using sigHexWithTag for signature tagging.
+               revision retains the CRTFrame/PixHeading layout and
+               updates forging calls to pass the publicKey to both
+               forgeViaBackend() and forgeOrigination(), enabling
+               reveal insertion and storage encoding via net.js r1102.
      ─────────────────────────────────────────────────────────────*/
 
 import React, { useRef, useState, useCallback, useEffect } from 'react';
@@ -268,16 +269,23 @@ export default function DeployPage() {
       // Attempt remote forging via backend first; on failure fall back to local
       let forgedBytes;
       try {
-        // Retrieve publicKey from the active account and pass to backend
+        // Retrieve publicKey from the active account and pass to the backend so
+        // that the backend may insert a reveal operation when necessary.
         const activeAccount = await wallet.client.getActiveAccount();
         const publicKey     = activeAccount?.publicKey;
         forgedBytes = await forgeViaBackend(contractCode, storage, address, publicKey);
       } catch (remoteErr) {
+        // Fall back to local forging when the backend fails.  Pass
+        // publicKey so that forgeOrigination() can prepend a reveal
+        // operation and encode storage appropriately.
+        const activeAccount = await wallet.client.getActiveAccount();
+        const publicKey     = activeAccount?.publicKey;
         const { forgedBytes: localBytes } = await forgeOrigination(
           toolkit,
           address,
           contractCode,
           storage,
+          publicKey,
         );
         forgedBytes = localBytes;
       }
@@ -383,12 +391,12 @@ export default function DeployPage() {
 }
 
 /* What changed & why:
-   • Bumped revision to r1102 and restored the UI structure from
-     revision r1032: the heading and form are wrapped in CRTFrame,
-     and OperationOverlay props are reverted to status/progress/error
-     along with onRetry/onCancel callbacks.  This fixes off‑center
-     styling and the onDeploy TypeError caused by incorrect prop names.
-   • Continued to use sigHexWithTag() for signing operations, ensuring
-     the correct curve tag is appended.  Preserved all logic from
-     r1101 regarding single‑stage origination and reveal detection.
+   • Bumped revision to r1103 and refined the deploy workflow.  The UI
+     remains aligned with r1032 (CRTFrame + PixelHeading), but the
+     forging phase now passes the wallet publicKey to both
+     forgeViaBackend() and forgeOrigination(), allowing the backend and
+     local helpers to prepend reveal operations and encode storage as
+     needed.  This change complements net.js r1102.
+   • Kept sigHexWithTag() for signature tagging and restored the
+     OperationOverlay props to status/progress/error with onRetry/onCancel.
 */

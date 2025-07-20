@@ -1,25 +1,24 @@
 /*─────────────────────────────────────────────────────────────────
       Developed by @jams2blues – ZeroContract Studio
       File:    src/core/net.js
-      Rev :    r1029   2025‑07‑19
-      Summary: dual‑stage origination helpers.  Provides helpers to
-               forge and inject operations locally (with manual
-               gas/storage/fee fallback) and exposes forgeViaBackend
-               and injectViaBackend for callers that wish to offload
-               those steps to an external forge service.  The forge
-               service URL is configurable via FORGE_SERVICE_URL in
-               deployTarget.js.  net.js defaults to local forging
-               and injection if remote calls fail.
-    ─────────────────────────────────────────────────────────────────*/
+      Rev :    r1030   2025‑07‑20
+      Summary: dual‑stage origination helpers with storage encoding.  Added
+               encodeStorageForForge() to convert high-level storage into
+               Micheline via Schema and Parser before remote forging.  forgeViaBackend
+               now encodes storage automatically prior to POSTing.  Updated
+               header and footer.
+─────────────────────────────────────────────────────────────────*/
 
 import { OpKind } from '@taquito/taquito';
 import { b58cdecode, prefix } from '@taquito/utils';
 import { LocalForger } from '@taquito/local-forging';
 // Parser from michel-codec is used to convert plain Michelson (.tz) source
-// into Micheline JSON when forging locally.  Without this conversion,
-// passing a raw string into estimate.originate or forge may throw an
-// error.  Parsing is performed on-demand in forgeOrigination.
+// into Micheline JSON when forging locally and for extracting the storage
+// type for encoding.  Without this conversion, passing a raw string into
+// estimate.originate or forge may throw an error.  Parsing is performed
+// on-demand in forgeOrigination and encodeStorageForForge.
 import { Parser } from '@taquito/michel-codec';
+import { Schema } from '@taquito/michelson-encoder';
 // Import forge service URL from deployTarget so that remote calls can
 // be routed to an external host.  When FORGE_SERVICE_URL is empty,
 // backend helpers fall back to /api endpoints within Next.js.
@@ -106,7 +105,8 @@ export function jFetch(url, opts = {}, tries) {
  * changing the call sites.
  */
 function forgeEndpoint() {
-  return FORGE_SERVICE_URL ? `${FORGE_SERVICE_URL.replace(/\/$/, '')}/forge` : '/api/forge';
+  return FORGE_SERVICE_URL ? `${FORGE_SERVICE_URL.replace(/\/$/, '')}/forge`
+ : '/api/forge';
 }
 
 /**
@@ -114,7 +114,51 @@ function forgeEndpoint() {
  * forgeEndpoint().
  */
 function injectEndpoint() {
-  return FORGE_SERVICE_URL ? `${FORGE_SERVICE_URL.replace(/\/$/, '')}/inject` : '/api/inject';
+  return FORGE_SERVICE_URL ? `${FORGE_SERVICE_URL.replace(/\/$/, '')}/inject` 
+: '/api/inject';
+}
+
+/**
+ * Encode a high-level storage object into Micheline using the contract's
+ * storage type.  If the provided code is a raw Michelson string, it is
+ * parsed into Micheline via the Parser.  The storage type is extracted
+ * from the `storage` section's first argument.  On success, the encoded
+ * Micheline is returned; on failure, the original storage object is
+ * returned unchanged.
+ *
+ * This helper centralises the conversion required by Tezos RPC
+ * forgeOperations and ensures that remote forge calls receive valid
+ * Micheline.  Local forging functions accept high-level storage, so
+ * encoding is only necessary for the backend path.
+ *
+ * @param {any} code Raw Michelson string or Micheline array
+ * @param {any} storage High-level storage object (MichelsonMap or plain)
+ * @returns {any} Micheline representation of storage, or the original value
+ */
+export function encodeStorageForForge(code, storage) {
+  try {
+    let script = code;
+    if (typeof code === 'string') {
+      const parser = new Parser();
+      script = parser.parseScript(code);
+    }
+    // script is expected to be an array of declarations; find the storage
+    let storageExpr = null;
+    if (Array.isArray(script)) {
+      storageExpr = script.find(ex => ex.prim === 'storage');
+    } else if (script && script.prim === 'storage') {
+      storageExpr = script;
+    }
+    if (storageExpr && Array.isArray(storageExpr.args) && storageExpr.args.length) {
+      const storageType = storageExpr.args[0];
+      const schema = new Schema(storageType);
+      const encoded = schema.Encode(storage);
+      return encoded;
+    }
+  } catch (err) {
+    // swallow errors; fallback to original storage
+  }
+  return storage;
 }
 
 /**
@@ -133,10 +177,12 @@ function injectEndpoint() {
  */
 export async function forgeViaBackend(code, storage, source) {
   const url = forgeEndpoint();
+  // Encode storage into Micheline before sending to backend forge.
+  const encodedStorage = encodeStorageForForge(code, storage);
   const res = await jFetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code, storage, source }),
+    body: JSON.stringify({ code, storage: encodedStorage, source }),
   });
   if (res && (res.forgedBytes || res.forgedbytes)) {
     return res.forgedBytes || res.forgedbytes;
@@ -282,13 +328,14 @@ export async function injectSigned(toolkit, signedBytes) {
 }
 
 /* What changed & why:
-   • Imported FORGE_SERVICE_URL from deployTarget.js and added helper
-     functions forgeEndpoint() and injectEndpoint() to dynamically
-     choose between external and internal API routes.
-   • Updated forgeViaBackend and injectViaBackend to use those
-     endpoints and return only the forged bytes or operation hash.
-   • Added explicit exports for forgeViaBackend and injectViaBackend
-     so that callers can offload heavy origination steps to an
-     external FastAPI service while preserving local fallback.
-   • Revision bumped to r1029 to reflect these changes.
+   • Bumped revision to r1030 and updated summary to reflect the new storage
+     encoding helper for remote forging.
+   • Added Schema import and implemented encodeStorageForForge(), which
+     extracts the storage type from the contract script and uses Schema.Encode
+     to convert high-level storage into Micheline.  This helper returns the
+     original storage on error.
+   • forgeViaBackend() now calls encodeStorageForForge() and sends the
+     encoded storage to the backend, ensuring that RPC.forgeOperations
+     receives valid Micheline and eliminating 400 errors.
+   • The rest of net.js remains unchanged.
 */

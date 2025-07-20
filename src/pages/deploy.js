@@ -1,17 +1,13 @@
 /*─────────────────────────────────────────────────────────────
       Developed by @jams2blues – ZeroContract Studio
       File:    src/pages/deploy.js
-      Rev :    r1027   2025‑07‑20
-      Summary: two‑stage collection origination with resume
-               support.  Remote forge/inject helpers are
-               reinstated.  High‑level storage is now
-               converted to Micheline via Taquito’s Schema
-               encoding (with fallback flattening) before
-               sending to the remote forge, preventing
-               500 errors.  Robust fallback to local forge
-               remains.  Metadata builders handle arrays and
-               views pointer correctly.
-    ─────────────────────────────────────────────────────────────*/
+      Rev :    r1028   2025‑07‑20
+      Summary: two‑stage collection origination with resume support.  Storage
+               encoding is now handled centrally in net.js via
+               encodeStorageForForge(), so this file no longer imports Parser
+               or Schema nor flattens maps.  Remote forge calls rely on net.js
+               to encode storage automatically.
+─────────────────────────────────────────────────────────────*/
 
 import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { MichelsonMap } from '@taquito/michelson-encoder';
@@ -34,16 +30,6 @@ import {
   injectViaBackend,
 } from '../core/net.js';
 import contractCode from '../../contracts/Zero_Contract_V4.tz';
-
-// Additional imports to support conversion of high‑level storage (with
-// MichelsonMap instances) into Micheline before sending to the
-// remote forge service.  Parser and Schema come from Taquito’s
-// michelson codec and encoder packages.  These imports are safe
-// because both packages are already dependencies of ZeroUnbound and
-// are used elsewhere in the project (e.g. net.js).  See
-// https://taquito.io/docs/michelsonencoder for API details.
-import { Parser } from '@taquito/michel-codec';
-import { Schema } from '@taquito/michelson-encoder';
 import viewsHex from '../constants/views.hex.js';
 
 /*──────── helpers ───────────────────────────────────────────*/
@@ -102,40 +88,6 @@ export const STORAGE_TEMPLATE = {
   token_metadata   : blank(),
   total_supply     : blank(),
 };
-
-/*───────────────────────── sanitization helpers ──────────────────────────*/
-/**
- * Sanitize a high‑level storage object by converting all MichelsonMap
- * instances (recursively) into standard JavaScript objects.  This
- * function preserves arrays and primitive values.  Note that this
- * simple conversion only flattens the maps; it does not produce
- * proper Micheline (annotated Michelson).  It is intended as a
- * fallback when Schema encoding fails.
- */
-function mapToObject(map) {
-  const obj = {};
-  for (const [k, v] of map.entries()) {
-    obj[k] = v instanceof MichelsonMap ? mapToObject(v) : v;
-  }
-  return obj;
-}
-
-function sanitizeStorage(value) {
-  if (value instanceof MichelsonMap) {
-    return mapToObject(value);
-  }
-  if (Array.isArray(value)) {
-    return value.map((el) => sanitizeStorage(el));
-  }
-  if (value !== null && typeof value === 'object') {
-    const res = {};
-    for (const [k, v] of Object.entries(value)) {
-      res[k] = sanitizeStorage(v);
-    }
-    return res;
-  }
-  return value;
-}
 
 /*──────── component ────────────────────────────────────────*/
 export default function DeployPage() {
@@ -275,12 +227,10 @@ export default function DeployPage() {
   /**
    * Originate a new contract.  This function orchestrates stage 1
    * (origination) and triggers stage 2 via patchMetadata() once the
-   * contract address is known.  It first attempts to forge and
-   * inject using the remote forge service (configured via
-   * FORGE_SERVICE_URL in deployTarget.js).  When remote calls
-   * fail due to network errors or invalid inputs, it gracefully
-   * falls back to local forging and injection.  Resume support
-   * ensures that users can reload the page without losing progress.
+   * contract address is known.  It attempts to forge and inject using
+   * the remote forge service first; on failure it falls back to local
+   * forging/injection.  Resume support ensures that users can reload
+   * the page without losing progress.
    */
   async function originate(meta) {
     // Ensure wallet connection
@@ -339,45 +289,16 @@ export default function DeployPage() {
     md.set('', headerBytes);
     md.set('content', bodyMin);
     const storage = { ...STORAGE_TEMPLATE, admin: address, metadata: md };
-
-    // Convert high‑level storage (containing MichelsonMap) into a form
-    // suitable for remote forging.  The remote forge service expects
-    // storage either as Micheline (Michelson JSON) or as a plain
-    // object without Taquito maps.  We first attempt to use the
-    // contract’s storage type and Schema to encode the high‑level
-    // storage into Micheline.  If that fails (e.g. due to a
-    // mis‑match in the storage layout), we fall back to recursively
-    // flattening MichelsonMap instances into plain objects.
-    let storageForForge = storage;
-    try {
-      const parser = new Parser();
-      // The contract code may be a string; parse it into Micheline JSON.
-      const script = parser.parseScript(contractCode);
-      // Find the storage declaration in the script.  The script is
-      // expected to have the form { parameter: ..., storage: ..., code: ... }.
-      const storageExpr = script.find((ex) => ex.prim === 'storage');
-      if (storageExpr) {
-        const schema = new Schema(storageExpr);
-        storageForForge = schema.Encode(storage);
-      }
-    } catch (convErr) {
-      // Fallback: flatten the storage by converting maps to plain objects
-      storageForForge = sanitizeStorage(storage);
-    }
+    // Set up forging/injection
     setStep(1);
     setLabel('Preparing origination (1/2)');
     setPct(0.25);
     try {
-      // Attempt remote forging via backend first.  If the
-      // remote forge service returns an error (HTTP ≥400 or
-      // JSON error), fall back to local forging via
-      // forgeOrigination().
+      // Attempt remote forging via backend first; on failure fall back to local
       let forgedBytes;
       try {
-        // Use the encoded/sanitised storage when forging via the backend.
-        forgedBytes = await forgeViaBackend(contractCode, storageForForge, address);
+        forgedBytes = await forgeViaBackend(contractCode, storage, address);
       } catch (remoteErr) {
-        // Fallback: use the original high‑level storage for local forging.
         const { forgedBytes: localBytes } = await forgeOrigination(
           toolkit,
           address,
@@ -400,13 +321,11 @@ export default function DeployPage() {
       setStep(3);
       setLabel('Injecting origination');
       setPct(0.5);
-      // Attempt remote injection via backend first.  If the
-      // remote inject service returns an error, fall back to
-      // local injection via injectSigned().
+      // Attempt remote injection via backend first; fallback to local RPC
       let hash;
       try {
         hash = await injectViaBackend(signedBytes);
-      } catch (injErr) {
+      } catch (e) {
         hash = await injectSigned(toolkit, signedBytes);
       }
       setOpHash(hash);
@@ -497,18 +416,13 @@ export default function DeployPage() {
 }
 
 /* What changed & why:
-   • Bumped revision to r1027 and updated summary.  Added imports
-     for Parser and Schema from Taquito.  Implemented sanitization
-     helpers that flatten MichelsonMap instances into plain
-     objects when encoding fails.
-   • In originate(), storage is now converted to Micheline using
-     Schema.Encode() before sending it to the remote forge.  If
-     encoding throws, we fall back to flattening maps.  The
-     remote forge call now passes this encoded/sanitised
-     storage, preventing HTTP 500 errors from the backend.
-   • Metadata builder improvements from r1024 remain: array
-     fields are trimmed and preserved, empty arrays are removed,
-     and the views pointer uses a string ('0x00') when
-     FAST_ORIGIN is true.  This continues to prevent runtime
-     errors during metadata preparation and storage construction.
+   • Bumped revision to r1028 and updated summary.  Removed Parser/Schema
+     imports and sanitization helpers; storage encoding is now delegated
+     to net.js via encodeStorageForForge(), so this file no longer
+     attempts to convert or flatten MichelsonMap instances.
+   • The remote forge call now passes the high-level storage directly;
+     net.js encodes it before POSTing.  Local forging/injection remains
+     unchanged.
+   • Kept all metadata builder improvements and view-pointer fixes
+     introduced in r1024–r1027.
 */

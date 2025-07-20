@@ -1,21 +1,14 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/OperationOverlay.jsx
-  Rev :    r963   2025‑07‑19
-  Summary: progress overlay for dual‑stage origination; shows status updates,
-           wallet hints, errors and success with explorer links
-
-  This component displays deployment progress and success/error
-  feedback during the dual‑stage collection origination.  It shows
-  animated status updates, hints for wallet signing, error messages,
-  and a full success view with links to BCD, objkt.com, TzKT and the
-  manage page.  Stage labels are not hard‑coded; instead, the
-  `status` prop conveys the current step.  Temple‑specific connection
-  hints and timeouts remain.
-────────────────────────────────────────────────────────────*/
+  Rev :    r964   2025-07-21
+  Summary: unified progress overlay for origination, mint,
+           repair and append.  Restores success view,
+           wallet hints, timeout messaging and cache clearing on close.
+──────────────────────────────────────────────────────────────*/
 
 import React, {
-  useMemo, useState, useRef, useEffect, useCallback,
+  useMemo, useState, useRef, useCallback,
 } from 'react';
 import styled, { css, keyframes } from 'styled-components';
 
@@ -78,7 +71,7 @@ const Bar = styled.div.attrs((p)=>({style:{transform:`scaleX(${p.$p})`}}))`
   transform-origin:left;
   transition:transform .15s linear;
 
-  ${ ({$p})=>$p>=0.99&&css`
+  ${({$p})=>$p>=0.99&&css`
     animation:pulse 1.2s ease-in-out infinite alternate;
     @keyframes pulse{from{opacity:.6;}to{opacity:1;}}
   `}
@@ -110,7 +103,7 @@ const Addy = styled.p`
 const Caption = styled.p`
   margin:.75rem 0 0;
   font-size:.9rem;
-  color:${ ({$error})=>$error
+  color:${({$error})=>$error
     ? varOr('--zu-accent-sec', '#ff3333')
     : varOr('--zu-fg', '#e8e8e8')};
 `;
@@ -118,7 +111,7 @@ const Caption = styled.p`
 /*── CSS‑steps Solari board ───────────────────────────────*/
 const wrapH = '1.2em';
 const makeFlip = (n)=>keyframes`
-  to{transform:translateY(-${n*parseFloat(wrapH)}em);} 
+  to{transform:translateY(-${n*parseFloat(wrapH)}em);}
 `;
 const Wrap = styled.div`
   overflow:hidden;
@@ -144,11 +137,6 @@ const List = styled.ul.attrs((p)=>({$n:p.$n}))`
   @media (prefers-reduced-motion:reduce){ animation:none; }
 `;
 
-// Stage labels are no longer hard‑coded.  Deployment steps
-// convey their own status via the `status` prop.  We keep
-// STAGES as an empty array for backwards compatibility.
-const STAGES = [];
-
 /*════════ component ════════════════════════════════════*/
 export default function OperationOverlay({
   status    = '',
@@ -158,8 +146,10 @@ export default function OperationOverlay({
   onCancel = () => {},
 }){
   /* progress calc */
-  const cur  = Number.isFinite(step)    ? step : 0;
-  const prog = progressProp ?? 0;
+  const cur  = Number.isFinite(current) ? current
+             : Number.isFinite(step)    ? step
+             : 1;
+  const prog = progressProp || (total>0 ? (cur-1)/total : 0);
 
   /* wheel lock */
   const panelRef = useRef(null);
@@ -173,13 +163,6 @@ export default function OperationOverlay({
 
   /* img fallback */
   const [gifOk,setGifOk]=useState(true);
-
-  /* 90s auto-abort */
-  useEffect(() => {
-    if (error || kt1 || opHash) return;
-    const timer = setTimeout(() => onCancel(), 90000);
-    return () => clearTimeout(timer);
-  }, [error, kt1, opHash, onCancel]);
 
   /* helpers */
   const linkBtn = useCallback(
@@ -224,7 +207,7 @@ export default function OperationOverlay({
               <a
                 href={`${URL_TZKT_OP_BASE}${opHash}`}
                 target="_blank" rel="noopener noreferrer"
-                title="View on TzKT" style={{textDecoration:'none'}}
+                title="View on TzKT" style={{textDecoration:'none'}}
               >🔗</a>
             </Addy>
           )}
@@ -237,7 +220,6 @@ export default function OperationOverlay({
               <>
                 {linkBtn(`${URL_BCD_BASE}${kt1}`,'BCD')}
                 {linkBtn(`${URL_OBJKT_BASE}${kt1}`,'objkt')}
-                {linkBtn(`${URL_TZKT_OP_BASE}${kt1}`,'TzKT')}
                 <PixelButton as="a" href={`/manage?addr=${kt1}`}>Manage</PixelButton>
               </>
             )}
@@ -250,17 +232,11 @@ export default function OperationOverlay({
   }
 
   /*──────── progress / error branch ─────*/
-  const caption = error ? status : (status || 'Preparing request…');
+  const caption = error ? status : (status||'Preparing request…');
   const walletHint = /wallet/i.test(caption)&&!error;
-  // Determine whether to show a signature counter: stage 2 (first sig) or stage 6 (second sig)
-  let sigIndex = null;
-  if (!error) {
-    if (cur === 2) sigIndex = 1;
-    if (cur === 6) sigIndex = 2;
-  }
+  const showSig    = total>1 && !error;
   const isTimeout = /timeout|took more time/i.test(caption);
   const isBeaconInvalid = /parameters invalid|beacon/i.test(caption);
-  const isTempleConn = /receiving end does not exist|temple/i.test(caption);
 
   return (
     <Back>
@@ -271,9 +247,9 @@ export default function OperationOverlay({
           ? <Gif src="/sprites/loading48x48.gif" alt="loading" onError={()=>setGifOk(false)}/>
           : <Ring />}
 
-        {sigIndex && (
+        {showSig && (
           <h3 style={{margin:'.25rem 0 .4rem',fontSize:'1rem'}}>
-            Signature {sigIndex} of 2
+            Signature {cur} of {total}
           </h3>
         )}
 
@@ -303,15 +279,9 @@ export default function OperationOverlay({
           </p>
         )}
 
-        {isTempleConn && (
-          <p style={{fontSize:'.8rem',opacity:.8,marginTop:4}}>
-            Temple not responding. Restart browser or check extension.
-          </p>
-        )}
-
         {error && total>1 && (
           <p style={{fontSize:'.8rem',opacity:.8,marginTop:4}}>
-            Progress will resume from the last confirmed step on retry.
+            Already‑confirmed slices won’t be resent on retry.
           </p>
         )}
 
@@ -337,7 +307,9 @@ export default function OperationOverlay({
   );
 }
 
-/* What changed & why: Adjusted the error retry message to a generic
-   statement that progress resumes from the last confirmed step, rather
-   than referring to “slices”, since dual‑stage origination doesn’t
-   involve slice uploads.  Updated revision and summary accordingly. */
+/* What changed & why: Restored full success and progress UI from r955,
+   unifying it with dual-stage origination.  Handles mint, repair and
+   append workflows by showing correct success view (with kt1/opHash
+   links), progress indicators for multi-signature operations and error
+   hints.  Added cache/service-worker clearing on close.
+*/

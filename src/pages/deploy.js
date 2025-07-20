@@ -1,22 +1,17 @@
-/*─────────────────────────────────────────────────────────────
-      Developed by @jams2blues – ZeroContract Studio
-      File:    src/pages/deploy.js
-      Rev :    r1105   2025‑07‑21
-      Summary: production‑grade deploy page for ZeroContract collections.
-               This revision abandons manual forging entirely and
-               leverages the wallet’s originate API.  Metadata is
-               assembled on the client, encoded as a big‑map, and
-               passed directly to `TezosToolkit.wallet.originate()`,
-               ensuring protocol‑correct encoding and reveal handling.
-               Off‑chain views are imported directly from their JSON
-               descriptor.  This avoids the double‑nesting bug seen
-               when decoding from hex.  Progress feedback mirrors the
-               legacy UI without depending on backend forge services.
-               Use this page for single‑stage origination; patching
-               flows remain unaffected elsewhere.
+/*Developed by @jams2blues – ZeroContract Studio
+  File:    src/pages/deploy.js
+  Rev :    r1107   2025‑07‑21
+  Summary: Deploy page with adaptive origination.  Full metadata
+           is always constructed on the client.  For wallets
+           capable of signing large payloads (e.g. Kukai/Umami),
+           the contract is originated via `wallet.originate()` in
+           a single operation.  For Temple wallet users, the
+           deployment falls back to the remote forge service to
+           minimise payload size while retaining a single‑stage
+           origination.  Off‑chain views are imported from JSON
+           to ensure indexers recognise them.
 ─────────────────────────────────────────────────────────────*/
-
-import React, { useRef, useState, useCallback, useEffect } from 'react';
+import React, { useRef, useState, useCallback } from 'react';
 import { MichelsonMap } from '@taquito/michelson-encoder';
 import { char2Bytes } from '@taquito/utils';
 
@@ -29,20 +24,22 @@ import OperationOverlay     from '../ui/OperationOverlay.jsx';
 // Wallet context
 import { useWallet } from '../contexts/WalletContext.js';
 
-// Contract sources and view definitions
-import contractCode  from '../../contracts/Zero_Contract_V4.tz';
-// Import the off‑chain views definition as a hex string.  This file
-// exports a hex‑encoded JSON payload containing the contract’s
-// views.  It is parsed into an object via hexToString() below.
-// Import the off‑chain views definition directly from JSON.  The
-// file exports an object with a `views` array.  Using JSON avoids
-// the double‑nesting bug observed when decoding from hex.  Ensure
-// that the `contracts/metadata/views/Zero_Contract_v4_views.json` file
-// is present in your repository.
-import viewsJson     from '../../contracts/metadata/views/Zero_Contract_v4_views.json' assert { type: 'json' };
+// Contract source and view definitions
+import contractCode from '../../contracts/Zero_Contract_V4.tz';
+import viewsJson    from '../../contracts/metadata/views/Zero_Contract_v4_views.json' assert { type: 'json' };
+
+// Network helpers for forging via backend or locally
+import {
+  forgeViaBackend,
+  injectViaBackend,
+  sigHexWithTag,
+  injectSigned,
+  sleep,
+} from '../core/net.js';
+// Signing type constant from Beacon
+import { SigningType } from '@airgap/beacon-sdk';
 
 /*──────── helpers ───────────────────────────────────────────*/
-
 /**
  * Normalise and deduplicate interface strings.  Always includes
  * TZIP‑012 and TZIP‑016, trimming user‑supplied values and
@@ -88,26 +85,9 @@ const utf8ToHex = (str, cb) => {
   return `0x${hex}`;
 };
 
-/**
- * Convert a hex string (optionally prefixed with 0x) back to a UTF‑8
- * string.  Used to decode the embedded views JSON from viewsHex.
- *
- * @param {string} hex Hex string with or without 0x prefix
- * @returns {string} Decoded UTF‑8 string
- */
-const hexToString = (hex) => {
-  const h = hex.startsWith('0x') ? hex.slice(2) : hex;
-  const len = h.length;
-  const bytes = new Uint8Array(len / 2);
-  for (let i = 0; i < len; i += 2) bytes[i / 2] = parseInt(h.slice(i, i + 2), 16);
-  return new TextDecoder().decode(bytes);
-};
-
 /*──────── constants ─────────────────────────────────────────*/
-
 // Burn address constant used by the ZeroContract storage
 const BURN = 'tz1burnburnburnburnburnburnburjAYjjX';
-
 // Template for initial storage fields; metadata and admin will be set
 export const STORAGE_TEMPLATE = {
   active_tokens    : [],
@@ -129,14 +109,13 @@ export const STORAGE_TEMPLATE = {
 };
 
 /*──────── component ───────────────────────────────────────*/
-
 /**
  * DeployPage orchestrates the origination of a new ZeroContract
- * collection.  It builds on‑chain metadata, requests a signature
- * through the connected wallet, and monitors the operation until
- * confirmation.  Progress and error states are reported via an
- * overlay.  This component does not perform manual forging; all
- * encoding and reveal management are delegated to the wallet.
+ * collection.  It selects the origination path based on the
+ * connected wallet: Temple users use the remote forge service to
+ * minimise payload size, while other wallets originate directly via
+ * Taquito’s wallet API.  Progress and error states are reported via
+ * an overlay.
  */
 export default function DeployPage() {
   const { toolkit, address, connect, wallet } = useWallet();
@@ -161,9 +140,6 @@ export default function DeployPage() {
     setErr('');
     cancelAnimationFrame(rafRef.current);
   };
-
-  // Single‑stage origination does not support resuming, so effect is empty
-  useEffect(() => {}, []);
 
   /**
    * Attempt to connect the wallet.  Captures common errors and
@@ -221,15 +197,15 @@ export default function DeployPage() {
   }
 
   /**
-   * Originate a new ZeroContract collection via wallet.originate().  This
-   * method builds the metadata, encodes it into a Michelson map, and
-   * submits the origination.  Progress is reported through the
-   * component’s state.  All forging and reveal logic is handled by
-   * Taquito/Beacon internally, ensuring compatibility with Tezos RPC.
+   * Single‑stage origination.  Builds the full metadata JSON and
+   * encodes it into a big‑map, then calls wallet.originate() to
+   * originate the contract.  This path should be used only when the
+   * wallet can handle large payloads (e.g. Kukai, Umami).  Progress
+   * and error states are updated via setStep, setLabel, setPct.
    *
-   * @param {Object} meta Metadata from form
+   * @param {Object} meta Raw metadata from form
    */
-  async function originate(meta) {
+  async function originateSingleStage(meta) {
     // Ensure wallet connection before starting
     if (!address) {
       await retryConnect();
@@ -241,11 +217,10 @@ export default function DeployPage() {
     }
     setErr('');
 
-    // Stage 0: compress metadata
+    // Stage 0: compress full metadata
     setStep(0);
     setLabel('Compressing metadata');
     setPct(0);
-
     let header;
     let body;
     try {
@@ -267,7 +242,7 @@ export default function DeployPage() {
     setLabel('Check wallet & sign');
     setPct(0.25);
 
-    // Animate progress while the wallet modal is open and operation is sent
+    // Animate progress while the wallet modal is open
     const tick = () => {
       setPct((p) => Math.min(0.45, p + 0.002));
       rafRef.current = requestAnimationFrame(tick);
@@ -275,28 +250,22 @@ export default function DeployPage() {
     tick();
 
     try {
-      // Originate via wallet API.  Beacon/Temple will prompt the user to
-      // sign, handle reveals, and inject the operation.  The returned
-      // operation includes the hash and contractAddress.
       const op = await toolkit.wallet.originate({
         code   : contractCode,
         storage: { ...STORAGE_TEMPLATE, admin: address, metadata: md },
         balance: '0',
       }).send();
-
       // Stop the progress animation and update stage
       cancelAnimationFrame(rafRef.current);
       setStep(2);
       setLabel('Forging & injecting');
       setPct(0.5);
-
-      // Wait for at least two confirmations to consider the origination final
+      // Wait for at least two confirmations
       await op.confirmation(2);
       setStep(3);
       setLabel('Confirming on-chain');
       setPct(0.9);
-
-      // Attempt to resolve the originated contract address
+      // Resolve contract address
       let adr = op.contractAddress;
       if (!adr) {
         try {
@@ -308,7 +277,7 @@ export default function DeployPage() {
         adr = op.results[0]?.metadata?.operation_result?.originated_contracts?.[0];
       }
       if (!adr) {
-        setErr('Originated contract address not found');
+      setErr('Originated contract address not found');
         return;
       }
       setKt1(adr);
@@ -325,15 +294,155 @@ export default function DeployPage() {
     }
   }
 
+  /**
+   * Originate a new contract using the remote forge service.  This path
+   * is used when the connected wallet (e.g. Temple) cannot handle
+   * large payloads.  The metadata is fully included in the
+   * origination, but forging and injection are handled by the
+   * backend to reduce the payload size seen by the wallet.
+   *
+   * @param {Object} meta Raw metadata from form
+   */
+  async function originateViaForgeService(meta) {
+    // Ensure wallet connection
+    if (!address) {
+      await retryConnect();
+      if (!address) return;
+    }
+    if (!toolkit) {
+      setErr('Toolkit not ready');
+      return;
+    }
+    setErr('');
+
+    // Step 0: build and encode full metadata
+    setStep(0);
+    setLabel('Preparing metadata');
+    setPct(0);
+    let headerBytes;
+    let bodyHex;
+    try {
+      const metaObj = buildMetaObject(meta);
+      headerBytes = '0x' + char2Bytes('tezos-storage:content');
+      bodyHex = utf8ToHex(JSON.stringify(metaObj), (p) => setPct((p * 0.25) / 100));
+    } catch (e) {
+      setErr(`Metadata encoding failed: ${e.message || String(e)}`);
+      return;
+    }
+    // Build metadata big‑map
+    const md = new MichelsonMap();
+    md.set('', headerBytes);
+    md.set('content', bodyHex);
+    // Build storage object
+    const storage = { ...STORAGE_TEMPLATE, admin: address, metadata: md };
+    // Step 1: forge via backend
+    setStep(1);
+    setLabel('Forging operation');
+    setPct(0.25);
+    let forgedBytes;
+    try {
+      // Retrieve public key for reveal support
+      const activeAcc = await wallet.client.getActiveAccount();
+      const publicKey = activeAcc?.publicKey;
+      forgedBytes = await forgeViaBackend(contractCode, storage, address, publicKey);
+    } catch (e) {
+      setErr(e.message || String(e));
+      return;
+    }
+    // Step 2: request wallet signature
+    setStep(2);
+    setLabel('Waiting for wallet signature');
+    setPct(0.40);
+    try {
+      const signResp = await wallet.client.requestSignPayload({
+        signingType: SigningType.OPERATION,
+        payload    : '03' + forgedBytes,
+        sourceAddress: address,
+      });
+      const sigHex = sigHexWithTag(signResp.signature);
+      const signedBytes = forgedBytes + sigHex;
+      // Step 3: inject via backend
+      setStep(3);
+      setLabel('Injecting operation');
+      setPct(0.55);
+      let opHash;
+      try {
+        opHash = await injectViaBackend(signedBytes);
+      } catch (injErr) {
+        // fallback to local injection if backend fails
+        opHash = await injectSigned(toolkit, signedBytes);
+      }
+      // Step 4: confirmation
+      setStep(4);
+      setLabel('Confirming origination');
+      setPct(0.70);
+      // Attempt to resolve contract address via toolkit RPC
+      let contractAddr = '';
+      // Poll until contract address is available or timeout
+      for (let i = 0; i < 15; i++) {
+        await sleep(3000);
+        try {
+          const block = await toolkit.rpc.getBlock();
+          for (const opGroup of block.operations.flat()) {
+            if (opGroup.hash === opHash) {
+              const result = opGroup.contents.find((c) => c.kind === 'origination');
+              if (result?.metadata?.operation_result?.originated_contracts?.length) {
+                contractAddr = result.metadata.operation_result.originated_contracts[0];
+                break;
+              }
+            }
+          }
+        } catch {}
+        if (contractAddr) break;
+      }
+      if (!contractAddr) {
+        setErr('Could not resolve contract address after origination.');
+        return;
+      }
+      setKt1(contractAddr);
+      setPct(1);
+      setStep(5);
+      setLabel('Origination confirmed');
+    } catch (e) {
+      setErr(e.message || String(e));
+    }
+  }
+
+  /**
+   * Originate a new contract.  Chooses between the remote forge
+   * service and direct wallet origination based on the connected
+   * wallet’s capabilities.  Temple wallet users will use the
+   * backend forge to reduce payload size; others will originate
+   * directly via Taquito’s wallet API.
+   *
+   * @param {Object} meta Metadata from form
+   */
+  async function originate(meta) {
+    // Attempt to detect the wallet name via Beacon.  If Temple is
+    // detected, use the backend forge service; otherwise, use
+    // single‑stage origination via wallet.originate().
+    let useBackend = false;
+    try {
+      const info = await wallet.client.getWalletInfo();
+      const name = (info?.name || '').toLowerCase();
+      if (name.includes('temple')) {
+        useBackend = true;
+      }
+    } catch {}
+    if (useBackend) {
+      await originateViaForgeService(meta);
+    } else {
+      await originateSingleStage(meta);
+    }
+  }
+
   /*──────── render ─────────────────────────────────────────*/
   return (
     <>
-      {/* Centre the form inside a CRTFrame with a PixelHeading */}
       <CRTFrame>
         <PixelHeading>Deploy&nbsp;New&nbsp;Collection</PixelHeading>
         <DeployCollectionForm onDeploy={originate} />
       </CRTFrame>
-      {/* Overlay for progress and errors */}
       {(step !== -1 || err) && (
         <OperationOverlay
           status={label}
@@ -350,18 +459,14 @@ export default function DeployPage() {
     </>
   );
 }
-
 /* What changed & why:
-   • r1105 reimplements the deploy page using wallet.originate() and
-     removes all manual forging, injection and signature tagging.
-     This mirrors the older, more reliable pipeline which leaves
-     encoding and reveal logic to Taquito and the connected wallet.
-     Metadata is built on the client and encoded into a big‑map
-     with both the pointer and content stored as hex.  Off‑chain
-     views are imported directly from their JSON file instead of
-     decoding a hex constant; this prevents the double‑nesting of
-     the `views` property.  Progress feedback matches legacy
-     behaviour without relying on backend forge services.  The UI
-     remains centred inside CRTFrame with PixelHeading, and errors
-     are surfaced via OperationOverlay.
+   • r1107 removes the dual‑stage pipeline and introduces adaptive
+     origination.  Wallets are detected via Beacon, and Temple users
+     automatically use the remote forge service to minimise payload
+     size while maintaining a single‑stage origination.  Other
+     wallets originate directly via Taquito’s wallet API.  Remote
+     forging leverages sigHexWithTag(), forgeViaBackend() and
+     injectViaBackend() to handle reveal and injection.  The views
+     import remains JSON‑based to ensure indexers show the views
+     tab.
 */

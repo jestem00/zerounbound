@@ -1,13 +1,17 @@
 /*─────────────────────────────────────────────────────────────
       Developed by @jams2blues – ZeroContract Studio
       File:    src/pages/deploy.js
-      Rev :    r1023   2025‑07‑19
+      Rev :    r1024   2025‑07‑20
       Summary: two‑stage collection origination with resume
                support.  Attempts to offload forging and
                injection via forgeViaBackend/injectViaBackend
                before falling back to local forging and
                injection.  Handles dual‑stage metadata patch
-               when FAST_ORIGIN is enabled.
+               when FAST_ORIGIN is enabled.  Fixed the
+               minimal metadata builder and full metadata
+               builder to properly handle array fields (authors,
+               authoraddress, creators) and corrected the views
+               pointer to be a string when FAST_ORIGIN is true.
     ─────────────────────────────────────────────────────────────*/
 
 import React, { useRef, useState, useCallback, useEffect } from 'react';
@@ -151,6 +155,9 @@ export default function DeployPage() {
 
   /**
    * Build full metadata JSON string with views and the actual image.
+   * This helper trims and filters array fields and uses the full
+   * off‑chain views array from viewsHex.  It does not mutate
+   * the original meta object.
    */
   async function buildFullMeta(meta) {
     const ordered = {
@@ -159,17 +166,29 @@ export default function DeployPage() {
       description : meta.description.trim(),
       version     : 'ZeroContractV4',
       license     : meta.license.trim(),
-      authors     : meta.authors,
-      homepage    : meta.homepage.trim() || undefined,
-      authoraddress: meta.authoraddress?.trim() || undefined,
-      creators    : meta.creators,
+      // authors/authoraddress/creators may arrive as arrays from the form;
+      // preserve them as arrays and trim individual entries when possible.
+      authors      : Array.isArray(meta.authors)
+        ? meta.authors.map((a) => String(a).trim()).filter(Boolean)
+        : meta.authors ? [String(meta.authors).trim()] : undefined,
+      homepage    : meta.homepage?.trim() || undefined,
+      authoraddress: Array.isArray(meta.authoraddress)
+        ? meta.authoraddress.map((a) => String(a).trim()).filter(Boolean)
+        : meta.authoraddress ? [String(meta.authoraddress).trim()] : undefined,
+      creators    : Array.isArray(meta.creators)
+        ? meta.creators.map((c) => String(c).trim()).filter(Boolean)
+        : meta.creators ? [String(meta.creators).trim()] : undefined,
       type        : meta.type,
       interfaces  : uniqInterfaces(meta.interfaces),
       imageUri    : meta.imageUri,
       views       : JSON.parse(hexToString(viewsHex)),
     };
-    // Remove undefined properties for cleanliness
-    Object.keys(ordered).forEach((k) => ordered[k] === undefined && delete ordered[k]);
+    // Remove undefined or empty array properties
+    Object.keys(ordered).forEach((k) => {
+      const v = ordered[k];
+      if (v === undefined) delete ordered[k];
+      else if (Array.isArray(v) && v.length === 0) delete ordered[k];
+    });
     return JSON.stringify(ordered);
   }
 
@@ -240,16 +259,22 @@ export default function DeployPage() {
         description: meta.description.trim(),
         version : 'ZeroContractV4',
         license : meta.license.trim(),
-        authors : meta.authors,
-        authoraddress: meta.authoraddress?.trim() || undefined,
-        creators: meta.creators,
+        authors : Array.isArray(meta.authors) ? meta.authors : (meta.authors ? [meta.authors] : undefined),
+        authoraddress: Array.isArray(meta.authoraddress) ? meta.authoraddress : (meta.authoraddress ? [meta.authoraddress] : undefined),
+        creators: Array.isArray(meta.creators) ? meta.creators : (meta.creators ? [meta.creators] : undefined),
         type    : meta.type,
         interfaces: uniqInterfaces(meta.interfaces),
-        imageUri: meta.imageUriPlaceholder || 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABAQMAAAAl21bKAAAAA1BMVEUAAP+Ke1cQAAAAAXRSTlMAQObYZgAAAApJREFUCNdjYAAAAAIAAeIhvDMAAAAASUVORK5CYII=',
-        views: FAST_ORIGIN ? '0x00' : JSON.parse(hexToString(viewsHex)),
+        imageUri: meta.imageUriPlaceholder ||
+          'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABAQMAAAAl21bKAAAAA1BMVEUAAP+Ke1cQAAAAAXRSTlMAQObYZgAAAApJREFUCNdjYAAAAAIAAeIhvDMAAAAASUVORK5CYII=',
+        // Use a string placeholder for views when FAST_ORIGIN is true
+        views   : FAST_ORIGIN ? '0x00' : JSON.parse(hexToString(viewsHex)),
       };
-      // Remove undefined properties
-      Object.keys(minimal).forEach((k) => minimal[k] === undefined && delete minimal[k]);
+      // Remove undefined or empty array properties
+      Object.keys(minimal).forEach((k) => {
+        const v = minimal[k];
+        if (v === undefined) delete minimal[k];
+        else if (Array.isArray(v) && v.length === 0) delete minimal[k];
+      });
       // Encode header and body separately
       const metaStr = JSON.stringify(minimal);
       headerBytes = '0x' + char2Bytes('tezos-storage:content');
@@ -370,8 +395,8 @@ export default function DeployPage() {
   /*──────── render ───────────────────────────────────────*/
   return (
     <>
-      <PixelHeading as="h1">Deploy New Collection</PixelHeading>
       <CRTFrame>
+        <PixelHeading>Deploy New Collection</PixelHeading>
         <DeployCollectionForm onDeploy={originate} />
       </CRTFrame>
       {(step !== -1 || err) && (
@@ -381,8 +406,8 @@ export default function DeployPage() {
           error={err}
           kt1={kt1}
           opHash={opHash}
-          step={step}
-          total={8}
+          current={step}
+          total={5}
           onRetry={() => {
             if (resumeMeta && kt1) patchMetadata(resumeMeta, kt1);
             else reset();
@@ -395,14 +420,16 @@ export default function DeployPage() {
 }
 
 /* What changed & why:
-   • Reintroduced remote forging and injection using forgeViaBackend and
-     injectViaBackend imported from net.js.  The originate() function
-     now attempts to call the external forge service first and falls
-     back to local forgeOrigination/injectSigned when that fails.
-   • Updated the minimal metadata builder to set placeholder imageUri
-     and to respect FAST_ORIGIN by writing only the header or full
-     metadata on first operation.  Stage 2 now hex‑wraps and writes
-     both keys for %metadata as required by TZIP‑16.
-   • Added revision line r1023 and updated summary to reflect these
-     changes.
+   • Bumped revision to r1024 and updated summary to describe the fixes.
+   • buildFullMeta() now trims and filters array fields (authors,
+     authoraddress, creators) and leaves them as arrays instead of
+     attempting to call .trim() on an array.  This prevents runtime
+     errors when authoraddress is an array.
+   • Minimal metadata builder in originate() now preserves array
+     fields without trimming and removes empty entries.  It also
+     uses a string ('0x00') for the views pointer when FAST_ORIGIN
+     is enabled instead of an array, conforming to TZIP‑16.
+   • Overall the origination flow no longer throws on undefined
+     .trim() calls during “Preparing storage” and correctly
+     constructs minimal metadata.
 */

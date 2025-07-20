@@ -8,12 +8,12 @@
                assembled on the client, encoded as a big‑map, and
                passed directly to `TezosToolkit.wallet.originate()`,
                ensuring protocol‑correct encoding and reveal handling.
-               Off‑chain views are imported as a hex string and
-               decoded into JSON at runtime.  Progress feedback
-               mirrors the legacy UI without depending on backend
-               forge services.  Use this page for single‑stage
-               origination; patching flows remain unaffected
-               elsewhere.
+               Off‑chain views are imported directly from their JSON
+               descriptor.  This avoids the double‑nesting bug seen
+               when decoding from hex.  Progress feedback mirrors the
+               legacy UI without depending on backend forge services.
+               Use this page for single‑stage origination; patching
+               flows remain unaffected elsewhere.
 ─────────────────────────────────────────────────────────────*/
 
 import React, { useRef, useState, useCallback, useEffect } from 'react';
@@ -31,7 +31,15 @@ import { useWallet } from '../contexts/WalletContext.js';
 
 // Contract sources and view definitions
 import contractCode  from '../../contracts/Zero_Contract_V4.tz';
-import viewsHex      from '../constants/views.hex.js';
+// Import the off‑chain views definition as a hex string.  This file
+// exports a hex‑encoded JSON payload containing the contract’s
+// views.  It is parsed into an object via hexToString() below.
+// Import the off‑chain views definition directly from JSON.  The
+// file exports an object with a `views` array.  Using JSON avoids
+// the double‑nesting bug observed when decoding from hex.  Ensure
+// that the `contracts/metadata/views/Zero_Contract_v4_views.json` file
+// is present in your repository.
+import viewsJson     from '../../contracts/metadata/views/Zero_Contract_v4_views.json' assert { type: 'json' };
 
 /*──────── helpers ───────────────────────────────────────────*/
 
@@ -128,7 +136,7 @@ export const STORAGE_TEMPLATE = {
  * through the connected wallet, and monitors the operation until
  * confirmation.  Progress and error states are reported via an
  * overlay.  This component does not perform manual forging; all
- * encoding and reveal logic are delegated to the wallet.
+ * encoding and reveal management are delegated to the wallet.
  */
 export default function DeployPage() {
   const { toolkit, address, connect, wallet } = useWallet();
@@ -202,7 +210,7 @@ export default function DeployPage() {
       type        : meta.type,
       interfaces  : uniqInterfaces(meta.interfaces),
       imageUri    : meta.imageUri,
-      views       : JSON.parse(hexToString(viewsHex)),
+      views       : viewsJson.views,
     };
     Object.keys(ordered).forEach((k) => {
       const v = ordered[k];
@@ -216,7 +224,7 @@ export default function DeployPage() {
    * Originate a new ZeroContract collection via wallet.originate().  This
    * method builds the metadata, encodes it into a Michelson map, and
    * submits the origination.  Progress is reported through the
-   * component’s state.  All forging and reveal logic are handled by
+   * component’s state.  All forging and reveal logic is handled by
    * Taquito/Beacon internally, ensuring compatibility with Tezos RPC.
    *
    * @param {Object} meta Metadata from form
@@ -346,11 +354,14 @@ export default function DeployPage() {
 /* What changed & why:
    • r1105 reimplements the deploy page using wallet.originate() and
      removes all manual forging, injection and signature tagging.
+     This mirrors the older, more reliable pipeline which leaves
+     encoding and reveal logic to Taquito and the connected wallet.
      Metadata is built on the client and encoded into a big‑map
      with both the pointer and content stored as hex.  Off‑chain
-     views are imported as a hex string and decoded at runtime.
-     Progress feedback matches legacy behaviour without relying on
-     backend forge services.  The UI remains centred inside
-     CRTFrame with PixelHeading, and errors are surfaced via
-     OperationOverlay.
+     views are imported directly from their JSON file instead of
+     decoding a hex constant; this prevents the double‑nesting of
+     the `views` property.  Progress feedback matches legacy
+     behaviour without relying on backend forge services.  The UI
+     remains centred inside CRTFrame with PixelHeading, and errors
+     are surfaced via OperationOverlay.
 */

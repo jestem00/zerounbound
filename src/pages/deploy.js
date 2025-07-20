@@ -1,17 +1,16 @@
 /*─────────────────────────────────────────────────────────────
       Developed by @jams2blues – ZeroContract Studio
       File:    src/pages/deploy.js
-      Rev :    r1101   2025‑07‑21
+      Rev :    r1102   2025‑07‑21
       Summary: single‑stage origination for collections.  Builds
                full metadata up front and forges the contract and
                metadata in one transaction without requiring a second
                patch.  Retrieves the wallet publicKey to allow the
                backend to insert a reveal operation when necessary and
                falls back to local forging/injection on failure.  This
-               revision replaces sigToHex with sigHexWithTag when
-               constructing the signed operation bytes to append the
-               appropriate curve tag for Ed25519/sec256k1/P‑256,
-               addressing prevalidation parsing errors during injection.
+               revision keeps the UI layout from r1032 (CRTFrame,
+               PixelHeading and OperationOverlay props) while still
+               using sigHexWithTag for signature tagging.
      ─────────────────────────────────────────────────────────────*/
 
 import React, { useRef, useState, useCallback, useEffect } from 'react';
@@ -358,20 +357,25 @@ export default function DeployPage() {
   /*──────── render ───────────────────────────────────────*/
   return (
     <>
-      {/* Title */}
-      <PixelHeading className="text-center mb-4">Deploy&nbsp;New&nbsp;Collection</PixelHeading>
-      {/* Form */}
-      <DeployCollectionForm onSubmit={originate} onReset={reset} />
-      {/* Overlay for progress and errors */}
+      {/* Main container wrapped in CRTFrame to center content */}
+      <CRTFrame>
+        {/* Page heading using PixelHeading; keep simple title like original */}
+        <PixelHeading>Deploy New Collection</PixelHeading>
+        {/* Form for entering collection metadata; uses onDeploy callback */}
+        <DeployCollectionForm onDeploy={originate} />
+      </CRTFrame>
+      {/* Overlay for progress and errors; uses original prop names */}
       {(step !== -1 || err) && (
         <OperationOverlay
-          step={step}
-          pct={pct}
-          label={label}
-          err={err}
+          status={label}
+          progress={pct}
+          error={err}
           kt1={kt1}
           opHash={opHash}
-          onReset={reset}
+          current={step}
+          total={1}
+          onRetry={reset}
+          onCancel={reset}
         />
       )}
     </>
@@ -379,13 +383,12 @@ export default function DeployPage() {
 }
 
 /* What changed & why:
-   • Bumped revision to r1101 and updated summary to reflect the use
-     of sigHexWithTag() when signing operations.  This ensures a curve
-     tag is appended to the signature (00 for Ed25519, 01 for secp256k1,
-     02 for P‑256), resolving injection parse errors observed on Tezos
-     RPC.
-   • Replaced the import of sigToHex with sigHexWithTag and updated
-     the code that builds signedBytes accordingly.
-   • Added a basic title and retained the OperationOverlay and form
-     rendering unchanged.
+   • Bumped revision to r1102 and restored the UI structure from
+     revision r1032: the heading and form are wrapped in CRTFrame,
+     and OperationOverlay props are reverted to status/progress/error
+     along with onRetry/onCancel callbacks.  This fixes off‑center
+     styling and the onDeploy TypeError caused by incorrect prop names.
+   • Continued to use sigHexWithTag() for signing operations, ensuring
+     the correct curve tag is appended.  Preserved all logic from
+     r1101 regarding single‑stage origination and reveal detection.
 */

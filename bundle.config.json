@@ -174,8 +174,6 @@
         "src/config/deployTarget.js",
         "contracts/metadata/views/Zero_Contract_v4_views.json",
         "src/constants/views.hex.js",
-        "src/pages/api/forge.js",
-        "src/pages/api/inject.js",
         "forge_service_node/Dockerfile",
         "forge_service_node/index.js",
         "forge_service_node/package.json",

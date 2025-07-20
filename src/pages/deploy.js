@@ -246,7 +246,7 @@ export default function DeployPage() {
         type    : meta.type,
         interfaces: uniqInterfaces(meta.interfaces),
         imageUri: meta.imageUriPlaceholder || 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABAQMAAAAl21bKAAAAA1BMVEUAAP+Ke1cQAAAAAXRSTlMAQObYZgAAAApJREFUCNdjYAAAAAIAAeIhvDMAAAAASUVORK5CYII=',
-        views   : FAST_ORIGIN ? ['0x00'] : JSON.parse(hexToString(viewsHex)),
+        views: FAST_ORIGIN ? '0x00' : JSON.parse(hexToString(viewsHex)),
       };
       // Remove undefined properties
       Object.keys(minimal).forEach((k) => minimal[k] === undefined && delete minimal[k]);

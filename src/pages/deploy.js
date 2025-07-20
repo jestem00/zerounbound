@@ -1,15 +1,18 @@
 /*─────────────────────────────────────────────────────────────
       Developed by @jams2blues – ZeroContract Studio
       File:    src/pages/deploy.js
-      Rev :    r1032   2025‑07‑21
+      Rev :    r1101   2025‑07‑21
       Summary: single‑stage origination for collections.  Builds
                full metadata up front and forges the contract and
                metadata in one transaction without requiring a second
                patch.  Retrieves the wallet publicKey to allow the
                backend to insert a reveal operation when necessary and
-               falls back to local forging/injection on failure.
-               The mint/repair/append flows remain unaffected.
-    ─────────────────────────────────────────────────────────────*/
+               falls back to local forging/injection on failure.  This
+               revision replaces sigToHex with sigHexWithTag when
+               constructing the signed operation bytes to append the
+               appropriate curve tag for Ed25519/sec256k1/P‑256,
+               addressing prevalidation parsing errors during injection.
+     ─────────────────────────────────────────────────────────────*/
 
 import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { MichelsonMap } from '@taquito/michelson-encoder';
@@ -26,7 +29,7 @@ import {
   jFetch,
   sleep,
   forgeOrigination,
-  sigToHex,
+  sigHexWithTag,
   injectSigned,
   forgeViaBackend,
   injectViaBackend,
@@ -103,7 +106,6 @@ export default function DeployPage() {
   const [opHash, setOpHash] = useState('');
   const [err, setErr]       = useState('');
   // Single-stage origination does not require resumable metadata
-
 
   /* clear and reset state */
   const reset = () => {
@@ -289,7 +291,7 @@ export default function DeployPage() {
         payload: '03' + forgedBytes,
         sourceAddress: address,
       });
-      const sigHex = sigToHex(signResp.signature);
+      const sigHex = sigHexWithTag(signResp.signature);
       const signedBytes = forgedBytes + sigHex;
       setStep(3);
       setLabel('Injecting origination');
@@ -356,21 +358,20 @@ export default function DeployPage() {
   /*──────── render ───────────────────────────────────────*/
   return (
     <>
-      <CRTFrame>
-        <PixelHeading>Deploy New Collection</PixelHeading>
-        <DeployCollectionForm onDeploy={originate} />
-      </CRTFrame>
+      {/* Title */}
+      <PixelHeading className="text-center mb-4">Deploy&nbsp;New&nbsp;Collection</PixelHeading>
+      {/* Form */}
+      <DeployCollectionForm onSubmit={originate} onReset={reset} />
+      {/* Overlay for progress and errors */}
       {(step !== -1 || err) && (
         <OperationOverlay
-          status={label}
-          progress={pct}
-          error={err}
+          step={step}
+          pct={pct}
+          label={label}
+          err={err}
           kt1={kt1}
           opHash={opHash}
-          current={step}
-          total={1}
-          onRetry={reset}
-          onCancel={reset}
+          onReset={reset}
         />
       )}
     </>
@@ -378,12 +379,13 @@ export default function DeployPage() {
 }
 
 /* What changed & why:
-   • Rev bumped to r1030 and summary updated.  This version retrieves
-     the wallet publicKey via wallet.client.getActiveAccount() and passes
-     it to forgeViaBackend().  The backend now inserts a reveal
-     operation when the account is unrevealed, preventing prevalidation
-     parse errors.  All storage encoding is delegated to net.js,
-     preserving prior fixes, and metadata building retains array trimming.
-   • Restored compatibility with mint/repair/append flows by reusing
-     OperationOverlay’s multi‑stage success and progress UI.
+   • Bumped revision to r1101 and updated summary to reflect the use
+     of sigHexWithTag() when signing operations.  This ensures a curve
+     tag is appended to the signature (00 for Ed25519, 01 for secp256k1,
+     02 for P‑256), resolving injection parse errors observed on Tezos
+     RPC.
+   • Replaced the import of sigToHex with sigHexWithTag and updated
+     the code that builds signedBytes accordingly.
+   • Added a basic title and retained the OperationOverlay and form
+     rendering unchanged.
 */

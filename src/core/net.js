@@ -1,13 +1,17 @@
 /*─────────────────────────────────────────────────────────────────
       Developed by @jams2blues – ZeroContract Studio
       File:    src/core/net.js
-      Rev :    r1030   2025‑07‑20
-      Summary: dual‑stage origination helpers with storage encoding.  Added
-               encodeStorageForForge() to convert high-level storage into
-               Micheline via Schema and Parser before remote forging.  forgeViaBackend
-               now encodes storage automatically prior to POSTing.  Updated
-               header and footer.
-─────────────────────────────────────────────────────────────────*/
+      Rev :    r1101   2025‑07‑21
+      Summary: unified single‑stage origination helpers with storage encoding
+               and signature tagging.  Added sigHexWithTag() to convert
+               edsig/spsig/p2sig signatures to hex and append a curve tag
+               byte (00 for Ed25519, 01 for secp256k1, 02 for P‑256).  This
+               tag is required by Tezos RPC when injecting operations; its
+               absence previously caused phantom hashes and parse errors.
+               forgeViaBackend() continues to encode storage before
+               sending it to the backend; the remainder of net.js remains
+               unchanged.
+────────────────────────────────────────────────────────────────*/
 
 import { OpKind } from '@taquito/taquito';
 import { b58cdecode, prefix } from '@taquito/utils';
@@ -95,7 +99,7 @@ export function jFetch(url, opts = {}, tries) {
 
 /*─────────────────────────────────────────────────────────────
   Backend forge and inject helpers
-─────────────────────────────────────────────────────────────*/
+────────────────────────────────────────────────────────────*/
 
 /**
  * Determine the full URL for the forge API.  If FORGE_SERVICE_URL
@@ -115,7 +119,7 @@ function forgeEndpoint() {
  */
 function injectEndpoint() {
   return FORGE_SERVICE_URL ? `${FORGE_SERVICE_URL.replace(/\/$/, '')}/inject` 
-: '/api/inject';
+ : '/api/inject';
 }
 
 /**
@@ -173,7 +177,7 @@ export function encodeStorageForForge(code, storage) {
  * @param {any[]} code Michelson code array or raw string
  * @param {any} storage Initial storage (MichelsonMap or compatible)
  * @param {string} source tz1/KT1 address initiating the origination
- * @returns {Promise<string>} forged bytes
+ * @returns {Promise } forged bytes
  */
 export async function forgeViaBackend(code, storage, source) {
   const url = forgeEndpoint();
@@ -200,7 +204,7 @@ export async function forgeViaBackend(code, storage, source) {
  * injectSigned().
  *
  * @param {string} signedBytes Hex string of the signed operation
- * @returns {Promise<string>} operation hash
+ * @returns {Promise } operation hash
  */
 export async function injectViaBackend(signedBytes) {
   const url = injectEndpoint();
@@ -217,7 +221,7 @@ export async function injectViaBackend(signedBytes) {
 
 /*─────────────────────────────────────────────────────────────
   Local forge and inject helpers
-─────────────────────────────────────────────────────────────*/
+────────────────────────────────────────────────────────────*/
 
 /**
  * Forge an origination operation locally.
@@ -313,10 +317,37 @@ export function sigToHex(signature) {
 }
 
 /**
+ * Convert a base58 signature to hex and append the appropriate curve tag.
+ * Tezos RPC requires that the signed operation bytes end with an 8‑bit tag
+ * identifying the curve used for the signature: 00 for Ed25519 (edsig),
+ * 01 for secp256k1 (spsig1), and 02 for P‑256 (p2sig).  Without this
+ * suffix the RPC may return a phantom operation hash or parsing error.
+ *
+ * @param {string} signature Base58 encoded signature from wallet.client.requestSignPayload
+ * @returns {string} Hex string of signature bytes followed by a curve tag byte
+ */
+export function sigHexWithTag(signature) {
+  const hex = sigToHex(signature);
+  // Determine curve tag based on signature prefix
+  let tag = '00'; // default to Ed25519
+  if (signature.startsWith('spsig1')) {
+    tag = '01';
+  } else if (signature.startsWith('p2sig')) {
+    tag = '02';
+  } else if (signature.startsWith('edsig')) {
+    tag = '00';
+  } else {
+    // unknown prefixes default to Ed25519 tag
+    tag = '00';
+  }
+  return hex + tag;
+}
+
+/**
  * Inject a signed operation bytes string and return the operation hash.
  * @param {TezosToolkit} toolkit Taquito toolkit instance
  * @param {string} signedBytes Hex string of the signed operation (forgedBytes + signature)
- * @returns {Promise<string>} Operation hash
+ * @returns {Promise } Operation hash
  */
 export async function injectSigned(toolkit, signedBytes) {
   // Inject the signed operation via the RPC.  Front‑end callers
@@ -328,14 +359,10 @@ export async function injectSigned(toolkit, signedBytes) {
 }
 
 /* What changed & why:
-   • Bumped revision to r1030 and updated summary to reflect the new storage
-     encoding helper for remote forging.
-   • Added Schema import and implemented encodeStorageForForge(), which
-     extracts the storage type from the contract script and uses Schema.Encode
-     to convert high-level storage into Micheline.  This helper returns the
-     original storage on error.
-   • forgeViaBackend() now calls encodeStorageForForge() and sends the
-     encoded storage to the backend, ensuring that RPC.forgeOperations
-     receives valid Micheline and eliminating 400 errors.
-   • The rest of net.js remains unchanged.
+   • Bumped revision to r1101 and updated summary to reflect the unified
+     single‑stage origination helpers with signature tagging.
+   • Added sigHexWithTag() after sigToHex(), which converts a base58
+     signature into hex and appends the curve tag byte (00/01/02).  This
+     tag is required by Tezos RPC to correctly parse signed operations.
+   • Left the rest of net.js unchanged aside from header/footer updates.
 */

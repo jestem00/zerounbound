@@ -150,9 +150,22 @@ app.post('/forge', async (req, res) => {
         storage: encodedStorage,
       },
     });
-    // Forge the operation using LocalForger
-    const forger      = new LocalForger();
-    const forgedBytes = await forger.forge({ branch, contents });
+    // Forge the operation.  First attempt RPC forging via the network; if
+    // that fails (e.g. due to parse errors on complex scripts), fall back
+    // to the LocalForger.  RPC forging typically produces smaller
+    // signatures and aligns with the network’s expectations.
+    let forgedBytes;
+    try {
+      forgedBytes = await rpc.forgeOperations({ branch, contents });
+    } catch (forgeErr) {
+      try {
+        const forger = new LocalForger();
+        forgedBytes = await forger.forge({ branch, contents });
+      } catch (localErr) {
+        console.error('Forge failed:', forgeErr, localErr);
+        return res.status(500).json({ error: forgeErr.message || localErr.message });
+      }
+    }
     return res.status(200).json({ forgedBytes });
   } catch (err) {
     console.error('Error in /forge:', err);

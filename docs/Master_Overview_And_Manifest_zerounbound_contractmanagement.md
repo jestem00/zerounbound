@@ -1,9 +1,10 @@
-/──────── docs/Master_Overview_And_Manifest_zerounbound_contractmanagement.md ────────/
 /─────────────────────────────────────────────────────────────────
 Developed by @jams2blues – ZeroContract Studio
 File: docs/Master_Overview_And_Manifest_zerounbound_contractmanagement.md
-Rev : r1014 2025‑07‑19 UTC
-Summary: restore dual‑stage origination, manual forging fallback and serverless forging/inject endpoints; update manifest accordingly.
+Rev : r1015 2025‑07‑20 UTC
+Summary: migrate to Node‑based remote forging service; remove
+serverless forge/inject endpoints; enforce dual‑stage
+origination via FAST_ORIGIN and document render deployment.
 ──────────────────────────────────────────────────────────────────/
 
 ════════════════════════════════════════════════════════════════
@@ -15,13 +16,12 @@ WHAT IS THIS FILE? (unabridged)
 ─────────────────────────────────
 • Single‑source‑of‑truth: a fresh git clone + this doc + yarn bundle
 text‑dumps ⇒ reproducible rebuild on any host.
-builds zerounbound.art (mainnet), and ghostnet.zerounbound.art (ghostnet) to vercel
-from a single github repo.
+builds zerounbound.art (mainnet), and ghostnet.zerounbound.art (ghostnet)
+to vercel from a single github repo.
 • AI‑optimised: every major section begins with “How to read”.
 • Append‑only. Patch; never rewrite or shorten history.
 note: sifrzero.art uses some of our tools to allow a default community collection minting tool,
-different project managed and controlled by @JestemZero, and v4b of the ZeroContract (see § 7appendices)
-─────────────────────────────────
+different project managed and controlled by @JestemZero, and v4b of the ZeroContract (see § 7 appendices)
 
 ════════════════════════════════════════════════════════════════
 TABLE OF CONTENTS (How to read) — skim → locate → jump
@@ -43,7 +43,7 @@ TABLE OF CONTENTS (How to read) — skim → locate → jump
 • Binary artefacts stay out of bundles.
 • docs/ mirrors this master—update both.
 
-Important Meta‑document that extend this manifest's invariants for TZIP compliance:
+Important Meta‑document that extends this manifest's invariants for TZIP compliance:
 • docs/TZIP_Compliance_Invariants_ZeroContract_V4.md (contract‑layer rules)
 
 ───────────────────────────────────────────────────────────────
@@ -55,6 +55,21 @@ Browser (React 18 + styled‑components 6) → ZeroFrontend SPA (Next.js�
 ZeroEngine API (Node 22 + Taquito) → ZeroContracts v4 / v4a + ZeroSum Marketplace (Tezos L1)
 
 100 % on‑chain media (data: URI); utils/RenderMedia.jsx whitelists MIME.
+
+────────── NEW REMOTE FORGE SERVICE
+──────────────────────────────────────────────────────────────────
+Earlier revisions relied on serverless /api/forge and /api/inject endpoints
+living within the Next.js application to offload forging and injection. Those
+endpoints required a heavy Python or manual fallback and caused build issues.
+With the reintroduction of dual‑stage origination in r1014 and the need to
+support Temple wallet users, we now offload forging and injection to a
+separate Node.js service. This service uses Taquito’s RPC utilities and
+Express to expose /forge, /inject, and /healthz endpoints and is
+deployed on Render (see forge_service_node). The front‑end points to this
+service via FORGE_SERVICE_URL in deployTarget.js and falls back to
+client‑side forging via src/core/net.js when unreachable. No .env or
+USE_BACKEND flag is needed—offloading happens automatically when
+FORGE_SERVICE_URL is non‑empty.
 
 ───────────────────────────────────────────────────────────────
 1·5 · CRITICAL‑ENTRY INDEX 🗝️ (How to read) — quickest cognitive entry‑points
@@ -328,12 +343,12 @@ operation. When USE_BACKEND=false, client‑side forging via
 src/core/net.js is used with a manual gas/storage/fee fallback.
 */
 
-/──────────────────────────────────────────────────────────────────────────────
+───────────────────────────────────────────────────────────────
 3 · reserved for future research notes
-──────────────────────────────────────────────────────────────────────────────/
+────────────────────────────────────────────────────────────────/
 
-/───────────────────────────────────────────────────────────────
-4 · COMPREHENSIVE SOURCE‑TREE MAP (per‑file description • imports • exports)
+───────────────────────────────────────────────────────────────
+4 · COMPREHENSIVE SOURCE‑TREE MAP (per‑file description • imports • exports)
 ───────────────────────────────────────────────────────────────/
 /* Legend – one line per path, keep case‑exact
    <relative‑path> – <purpose>; Imports: <comma‑list>; Exports: <comma‑list>
@@ -358,7 +373,7 @@ zerounbound/package.json – NPM manifest; Imports:· Exports: scripts,dependenc
 zerounbound/tsconfig.json – TS path hints for IDE; Imports:· Exports: compilerOptions
 zerounbound/yarn.lock – Yarn lockfile; Imports:· Exports:·
 
-╭── development environment ────────────────────────────────────────────────╮
+╭── development environment ───────────────────────────────────────────────────────────────╮
 zerounbound/.vscode/settings.json – VSCode TypeScript configuration; Imports:· Exports:·
 zerounbound/.vscode/tasks.json – VSCode build task configuration; Imports:· Exports:·
 
@@ -371,8 +386,8 @@ zerounbound/scripts/startDev.js – custom dev wrapper; Imports: child_process; 
 zerounbound/scripts/updatePkgName.js – rewrites package.json name; Imports: fs; Exports: main
 zerounbound/scripts/codex-setup.sh – Codex CI bootstrap; Imports:· Exports:·
 
-zerounbound/src/pages/api/forge.js – serverless forge endpoint; Imports: packDataBytes,TezosToolkit; Exports: default
-zerounbound/src/pages/api/inject.js – serverless injection endpoint; Imports: TezosToolkit; Exports: default
+zerounbound/src/pages/api/forge.js – removed (r1015) obsolete serverless forge endpoint
+zerounbound/src/pages/api/inject.js – removed (r1015) obsolete serverless inject endpoint
 zerounbound/src/utils/chooseFastestRpc.js – RPC race chooser; Imports: RPC_URLS; Exports: chooseFastestRpc
 
 ╭── contracts (michelson) ───────────────────────────────────────────────────╮
@@ -381,6 +396,11 @@ zerounbound/contracts/Zero_Contract_V4.tz – canonical ZeroContract v4; Impor
 zerounbound/contracts/ZeroSum.tz – ZeroSum marketplace; Imports:· Exports:·
 zerounbound/contracts/ZeroSum - Copy.txt – backup copy of ZeroSum marketplace contract; Imports:· Exports:·
 zerounbound/contracts/metadata/views/Zero_Contract_v4_views.json – off‑chain views; Imports:· Exports:·
+
+╭── forge_service_node – new remote forging service ───────────────────────────────╮
+forge_service_node/Dockerfile – builds Node service on Render; Imports: node:18-slim; Exports: container image
+forge_service_node/index.js – Express server exposing /forge, /inject and /healthz endpoints; Imports: express,cors,@taquito/rpc,@taquito/michel-codec; Exports: Express app
+forge_service_node/README.md – service documentation explaining endpoints, environment variables (PORT,RPC_URL), local development and Render deployment; Imports:· Exports:·
 
 ╭── public assets ───────────────────────────────────────────────────────────╮
 zerounbound/public/embla-left.svg – carousel arrow ⬅; Imports:· Exports:·
@@ -392,7 +412,7 @@ zerounbound/public/sw.js – Workbox 7 service‑worker; Imports: workbox-sw; E
 zerounbound/public/fonts/PixeloidMono-d94EV.ttf – mono pixel font; Imports:· Exports:·
 zerounbound/public/fonts/PixeloidSans-mLxMm.ttf – sans pixel font; Imports:· Exports:·
 zerounbound/public/fonts/PixeloidSansBold-PKnYd.ttf – bold pixel font; Imports:· Exports:·
-zerounbound/public/sprites/Banner.png – hero banner PNG; Imports:·Exports:·
+zerounbound/public/sprites/Banner.png – hero banner PNG; Imports:· Exports:·
 zerounbound/public/sprites/Banner.psd – banner source PSD; Imports:· Exports:·
 zerounbound/public/sprites/Burst.svg – celebration burst; Imports:· Exports:·
 zerounbound/public/sprites/cover_default.svg – fallback NFT cover; Imports:· Exports:·
@@ -407,7 +427,7 @@ zerounbound/public/sprites/logo.psd – logo source PSD; Imports:· Exports:·
 zerounbound/public/sprites/logo.svg – Zero logo; Imports:· Exports:·
 
 ╭── src/config ──────────────────────────────────────────────────────────────╮
-zerounbound/src/config/deployTarget.js – TARGET constant (I10); Imports:· Exports: TARGET
+zerounbound/src/config/deployTarget.js – TARGET constant (I10) and network configuration (rpc urls, site urls, etc.), now always enabling FAST_ORIGIN by default and defining FORGE_SERVICE_URL per network; Imports:· Exports: TARGET
 zerounbound/src/config/networkConfig.js – RPC endpoints map; Imports:· Exports: NETWORKS
 
 ╭── src/constants ───────────────────────────────────────────────────────────╮
@@ -424,7 +444,7 @@ zerounbound/src/core/batch.js – batch ops (v1‑v4); Imports: @taquito/utils,
 zerounbound/src/core/batchV4a.js – v4a‑specific batch ops; Imports: @taquito/taquito; Exports: SLICE_SAFE_BYTES,sliceHex,buildAppendTokenMetaCalls
 zerounbound/src/core/feeEstimator.js – chunk‑safe fee/burn estimator; Imports: @taquito/taquito; Exports: estimateChunked,calcStorageMutez,toTez
 zerounbound/src/core/marketplace.js – ZeroSum helpers; Imports: net.js,@taquito/taquito; Exports: buildBuyParams,buildListParams,buildOfferParams
-zerounbound/src/core/net.js – network helpers (jFetch, forgeOrigination, injectSigned); Imports: Parser,@taquito/michelson-encoder,deployTarget; Exports: jFetch, forgeOrigination, injectSigned
+zerounbound/src/core/net.js – network helpers (jFetch, forgeOrigination, injectSigned). This module now always attempts remote forging/injecting via FORGE_SERVICE_URL before falling back to local forging using Taquito’s LocalForger/TezosToolkit. Imports: Parser,@taquito/michelson-encoder,deployTarget; Exports: jFetch,forgeOrigination,injectSigned
 zerounbound/src/core/validator.js – JSON‑schema helpers; Imports: ajv; Exports: validateContract,validateToken
 
 ╭── src/data ────────────────────────────────────────────────────────────────╮
@@ -524,7 +544,7 @@ zerounbound/src/ui/Entrypoints/TokenPreviewWindow.jsx – draggable token previe
 zerounbound/src/ui/Entrypoints/TransferRow.jsx – reusable row component for batch transfer UI with metadata preview; Imports: React,styled-components,PixelInput,PixelButton,TokenMetaPanel,TZKT_API,jFetch; Exports: TransferRow
 
 ╭── src/utils ───────────────────────────────────────────────────────────────╮
-zerounbound/src/utils/countAmount.js - count editions in tokens(exclude burned tokens); Imports:· Exports: countAmount
+zerounbound/src/utils/countAmount.js – count editions in tokens (exclude burned tokens); Imports:· Exports: countAmount
 zerounbound/src/utils/countOwners.js – distinct owner counter; Imports: net.js; Exports: countOwners
 zerounbound/src/utils/countTokens.js – on‑chain count via tokens/count; Imports: jFetch; Exports: countTokens
 zerounbound/src/utils/decodeHexFields.js – hex → UTF‑8 deep repair; Imports:· Exports: default
@@ -532,7 +552,7 @@ zerounbound/src/utils/formatAddress.js – tz/KT1 truncator + copy; Imports:· 
 zerounbound/src/utils/hazards.js – detect nsfw/flashing/script flags; Imports: mimeTypes; Exports: detectHazards
 zerounbound/src/utils/listLiveTokenIds.js – TzKT id fetcher (TTL 30 s); Imports: net.js; Exports: listLiveTokenIds
 zerounbound/src/utils/onChainValidator.js – fast FOC heuristic (I99); Imports: validator.js; Exports: checkOnChainIntegrity
-zerounbound/src/utils/pixelUpscale.js - reuseable css helpers for pixel-art upscaling Imports:· Exports: pixelUpscaleStyle
+zerounbound/src/utils/pixelUpscale.js – reusable css helpers for pixel‑art upscaling; Imports:· Exports: pixelUpscaleStyle
 zerounbound/src/utils/RenderMedia.jsx – data‑URI media viewer; Imports: React,mimeTypes.js; Exports: RenderMedia
 zerounbound/src/utils/sliceCache.js – localStorage cache (I60); Imports: sha.js; Exports: saveSlice,loadSlice,purgeExpired
 zerounbound/src/utils/sliceCacheV4a.js – v4a slice cache (I61); Imports: crypto; Exports: saveSliceCheckpoint,loadSliceCheckpoint,clearSliceCheckpoint,purgeExpiredSliceCache,strHash
@@ -551,7 +571,7 @@ zerounbound/summarized_files/frontend_bundle.txt – UI dump; Imports:· Exports
 zerounbound/summarized_files/assets_bundle.txt – public dump; Imports:· Exports:·
 zerounbound/summarized_files/infra_bundle.txt – infra dump; Imports:· Exports:·
 
-/───────────────────────────────────────────────────────────────
+───────────────────────────────────────────────────────────────
 5 · BUNDLE INDEX (How to read) — each text-dump lives in summarized_files/
 ───────────────────────────────────────────────────────────────/
 contracts_bundle.txt → Michelson sources + views
@@ -563,14 +583,14 @@ frontend_bundle.txt → contexts/, hooks/, ui/, pages/, styles/
 infra_bundle.txt   → root configs, next.config.js, package.json, CI helpers
 master_bundle.txt → contains everything in all the above bundles.
 
-/───────────────────────────────────────────────────────────────
+───────────────────────────────────────────────────────────────
 6 · QUICK‑START & CI PIPELINE — updated commands
 ───────────────────────────────────────────────────────────────/
 corepack enable && corepack prepare yarn@4.9.1 --activate
 yarn install
 
 ### OpenAI Codex setup script
-Codex pulls scripts/codex-setup.sh (added in r863) automatically:
+Codex pulls scripts/codex-setup.sh automatically:
 
 bash
 Copy
@@ -580,123 +600,30 @@ corepack prepare yarn@4.9.1 --activate
 yarn install --immutable --inline-builds
 The same script creates a .yarn_state marker so subsequent
 yarn lint / build / test stages find the workspace ready.
+
 ### Vercel
 
-Project       Build Command                           Domains                
-ghostnet      yarn set:ghostnet && yarn build      ghostnet.zerounbound.art
-mainnet       yarn set:mainnet  && yarn build      zerounbound.art, www.* 
+Project       Build Command                           Domains
+ghostnet      yarn set:ghostnet && yarn build       ghostnet.zerounbound.art
+mainnet       yarn set:mainnet  && yarn build       zerounbound.art, www.*
 
 No environment variables; scripts/setTarget.js rewrites deployTarget.js.
 
-/───────────────────────────────────────────────────────────────
+───────────────────────────────────────────────────────────────
 7 · APPENDICES (How to read) — machine‑readables live in code
 ───────────────────────────────────────────────────────────────/
-A. hashMatrix.json, contains all the typeHashes' generated by tzkt used in filtering and labeling contract versions and more:
-{
-"-543526052": "v1",
-"-1889653220": "v2a",
-"943737041": "v2b",
-"-1513923773": "v2c",
-"-1835576114": "v2d",
-"1529857708": "v2e",
-"862045731": "v3",
-"-255216182": "v4",
-"-1665803695": "v4a",
-"617511430": "v4b",
-"-1275828732": "v4c"
-}
+A. hashMatrix.json, contains all the typeHashes' generated by tzkt used in filtering and labeling contract versions and more (unchanged).
 
-B. entrypointRegistry.json, contains all Entrypoints used across our supported v1-v4c contracts:
-{
-"common": [
-"transfer",
-"balance_of",
-"update_operators"
-],
+B. entrypointRegistry.json, contains all Entrypoints used across our supported v1-v4c contracts (unchanged).
 
-"v1": {
-"$extends": "common",
-"mint": ["nat","map(string,bytes)","address"],
-"burn": ["nat","nat"]
-},
-
-"v2a": {
-"$extends": "v1",
-"add_parent": ["address"],
-"remove_parent": ["address"],
-"add_child": ["address"],
-"remove_child": ["address"],
-"lock_metadata": []
-},
-"v2b": { "$extends": "v2a", "lock_metadata": false },
-"v2c": { "$extends": "v2a", "lock_metadata": false },
-"v2d": { "$extends": "v2a", "lock_metadata": false },
-"v2e": { "$extends": "v2a", "lock_metadata": false },
-
-"v3": {
-"$extends": "v2a",
-"add_collaborator": ["address"],
-"remove_collaborator": ["address"],
-"lock_metadata": false
-},
-
-"v4": {
-"$extends": "v3",
-"destroy": ["nat"],
-"burn": false,
-"append_artifact_uri": ["nat","bytes"],
-"append_extrauri": ["string","string","string","nat","bytes"],
-"clear_uri": ["nat","string"],
-"edit_contract_metadata": ["bytes"],
-"edit_token_metadata": ["map(string,bytes)","nat"],
-"lock_metadata": false,
-"repair_uri": false
-},
-
-"v4a": {
-"$extends": "v3",
-"burn": ["nat","nat"],
-"append_token_metadata": ["string","nat","bytes"],
-"update_contract_metadata": ["bytes"],
-"update_token_metadata": ["map(string,bytes)","nat"],
-"add_collaborators": ["set<address>"],
-"remove_collaborators": ["set<address>"],
-"add_collaborator": false,
-"remove_collaborator":false,
-"add_parent": false,
-"remove_parent":false,
-"add_child": false,
-"remove_child":false,
-"lock_metadata": false,
-"repair_uri": false
-},
-
-"v4b": {
-"$extends": "v4",
-"add_collaborator": false,
-"remove_collaborator":false,
-"add_collaborators": false,
-"remove_collaborators": false
-},
-
-"v4c": {
-"$extends": "v4a",
-"add_collaborators": false,
-"remove_collaborators": false,
-"add_collaborator": false,
-"remove_collaborator": false,
-"update_contract_metadata": false
-}
-}
-
-/──────────────────────────────────────────────────────────────
+──────────────────────────────────────────────────────────────
 CHANGELOG
 ──────────────────────────────────────────────────────────────/
+• r1015 2025‑07‑20 UTC — migrated to Node‑based remote forging service; removed serverless forge/inject endpoints (src/pages/api/forge.js and src/pages/api/inject.js) and USE_BACKEND flag; updated environment guidance to always use FAST_ORIGIN with local fallback; added forge_service_node entries and deployment instructions; updated Source‑tree map and high‑level architecture accordingly.
 • r1014 2025‑07‑19 UTC — restored dual‑stage origination and manual forging fallback; updated invariants and environment flag guidance accordingly.
 • r1014 2025‑07‑19 UTC — restored dual‑stage origination, manual forging fallback and serverless forging/inject endpoints; updated invariants and environment flag guidance accordingly.
-• r1012 2025‑07‑18 UTC — added dual‑stage origination environment flags, serverless forge/inject endpoints and invariant I118; updated manifest accordingly.
 • r1013 2025‑07‑19 UTC — removed dual‑stage origination and backend forging; deprecated USE_BACKEND and FAST_ORIGIN flags; updated manifest and invariants to reflect single‑stage origination via wallet.originate.
-• r865 2025‑07‑16 UTC — countTokens.js now fetches /tokens/count for
-reliable totals; manifest entry updated accordingly.
+• r1012 2025‑07‑18 UTC — added dual‑stage origination environment flags, serverless forge/inject endpoints and invariant I118; updated manifest accordingly.
+• r865 2025‑07‑16 UTC — countTokens.js now fetches /tokens/count for reliable totals; manifest entry updated accordingly.
 ...
 /* EOF */

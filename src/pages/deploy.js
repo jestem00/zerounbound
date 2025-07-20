@@ -1,12 +1,9 @@
 /*─────────────────────────────────────────────────────────────
       Developed by @jams2blues – ZeroContract Studio
       File:    src/pages/deploy.js
-      Rev :    r1028   2025‑07‑20
-      Summary: two‑stage collection origination with resume support.  Storage
-               encoding is now handled centrally in net.js via
-               encodeStorageForForge(), so this file no longer imports Parser
-               or Schema nor flattens maps.  Remote forge calls rely on net.js
-               to encode storage automatically.
+      Rev :    r1029   2025‑07‑21
+      Summary: fetches wallet publicKey and passes it to forgeViaBackend;
+               ensures origination can include reveal when needed.
 ─────────────────────────────────────────────────────────────*/
 
 import React, { useRef, useState, useCallback, useEffect } from 'react';
@@ -238,16 +235,13 @@ export default function DeployPage() {
       await retryConnect();
       if (!address) return;
     }
-    // Reset state for a fresh deploy
     setErr('');
     setStep(0);
     setPct(0.1);
     setLabel('Preparing storage');
-    // Build minimal metadata and storage
     let headerBytes;
     let bodyMin;
-    try {
-      // Build minimal metadata JSON: omit homepage and use placeholder views & image
+    try {      // Build minimal metadata JSON: omit homepage and use placeholder views & image
       const minimal = {
         name    : meta.name.trim(),
         symbol  : meta.symbol.trim(),
@@ -281,23 +275,23 @@ export default function DeployPage() {
         bodyMin = utf8ToHex(metaStr, (p) => setPct((p * 0.25) / 100));
       }
     } catch (e) {
-      setErr(`Metadata compression failed: ${e.message || String(e)}`);
-      return;
+    setErr(`Metadata compression failed: ${e.message || String(e)}`);
+    return;
     }
-    // prepare storage with minimal metadata
     const md = new MichelsonMap();
     md.set('', headerBytes);
     md.set('content', bodyMin);
     const storage = { ...STORAGE_TEMPLATE, admin: address, metadata: md };
-    // Set up forging/injection
     setStep(1);
     setLabel('Preparing origination (1/2)');
     setPct(0.25);
     try {
-      // Attempt remote forging via backend first; on failure fall back to local
       let forgedBytes;
       try {
-        forgedBytes = await forgeViaBackend(contractCode, storage, address);
+        // Retrieve publicKey from the active account and pass to backend
+        const activeAccount = await wallet.client.getActiveAccount();
+        const publicKey     = activeAccount?.publicKey;
+        forgedBytes = await forgeViaBackend(contractCode, storage, address, publicKey);
       } catch (remoteErr) {
         const { forgedBytes: localBytes } = await forgeOrigination(
           toolkit,
@@ -416,13 +410,9 @@ export default function DeployPage() {
 }
 
 /* What changed & why:
-   • Bumped revision to r1028 and updated summary.  Removed Parser/Schema
-     imports and sanitization helpers; storage encoding is now delegated
-     to net.js via encodeStorageForForge(), so this file no longer
-     attempts to convert or flatten MichelsonMap instances.
-   • The remote forge call now passes the high-level storage directly;
-     net.js encodes it before POSTing.  Local forging/injection remains
-     unchanged.
-   • Kept all metadata builder improvements and view-pointer fixes
-     introduced in r1024–r1027.
+   • Rev bumped to r1029; originate() now retrieves the publicKey from
+     wallet.client.getActiveAccount() and passes it to forgeViaBackend().
+     This allows the backend to insert a reveal operation for unrevealed
+     accounts, eliminating injection parse errors.
+   • All other logic remains as in previous revisions.
 */

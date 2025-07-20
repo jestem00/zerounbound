@@ -1,13 +1,8 @@
-/───────────────────────────────────────────────────────────────
-Developed by @jams2blues – ZeroContract Studio
-File: docs/AI_CUSTOM_INSTRUCTIONS.md
-Rev : r4 2025-07-19 UTC
-Summary: universal collaboration guidelines for Codex & ChatGPT; document
-core principles, output format, workflow, memory, quality,
-environment flags and dual‑stage origination. Aligns with
-AI_SYSTEM_INSTRUCTIONS.txt and extends them to the Zero Unbound
-platform. Supersedes all earlier revisions.
-──────────────────────────────────────────────────────────────/
+/*Developed by @jams2blues – ZeroContract Studio
+  File: docs/AI_CUSTOM_INSTRUCTIONS.md
+  Rev : r5 2025‑07‑20 UTC
+  Summary: refine environment flags; remove USE_BACKEND flag; document
+remote forge service and dual‑stage origination usage. */
 
 AI Custom Instructions — Zero Unbound
 Purpose — These guidelines unify the collaboration rules for all
@@ -53,9 +48,9 @@ every change. Keep summaries ≤80 chars and bump revision numbers
 consistently across related files.
 
 Flag awareness. Honour environment flags (e.g. network
-selection, FAST_ORIGIN, USE_BACKEND). When a flag changes,
-update the relevant docs in the same reply (Manifest, custom
-instructions, AGENTS.md) and describe the new behaviour.
+selection and FAST_ORIGIN). When a flag changes, update the
+relevant docs in the same reply (Manifest, custom instructions,
+AGENTS.md) and describe the new behaviour.
 
 Security. Never expose secrets or internal IDs. Follow
 security best practices for web3 (no IPFS or off‑chain media
@@ -120,7 +115,8 @@ keep replies concise. Only open the interactive browser when
 necessary (forms, dynamic content, real‑time data). Use the
 textual browser for documentation and API lookups.
 • Numbered tasks — track Next/Pending items numerically (e.g.
-1. Update manifest summary, 2. Run tests). Close them with
+
+Update manifest summary, 2. Run tests). Close them with
 ✅ #n when done. This helps maintain continuity across long
 sessions.
 
@@ -192,12 +188,11 @@ deployTarget.js and require no .env files. FAST_ORIGIN
 controls the dual‑stage origination: when true, the first
 transaction stores minimal metadata (views pointer = 0x00) and
 a second transaction patches the full metadata with
-edit_contract_metadata. USE_BACKEND controls backend
-forging/injection: when true (default), the front‑end offloads
-forging and injection to /api/forge and /api/inject.
-When USE_BACKEND is false, the front‑end uses
-src/core/net.js to forge locally and inject via Taquito with
-manual gas/storage/fee defaults.
+edit_contract_metadata. Origination always offloads forging
+and injection to the external forge service configured via
+FORGE_SERVICE_URL. If the service is unreachable the
+front‑end falls back to client‑side forging via src/core/net.js
+with manual gas/storage/fee defaults.
 • Authentication — for sites requiring login (e.g. Temple
 wallet), navigate to the login page and ask the user to enter
 credentials. Never request or type passwords yourself.
@@ -219,17 +214,12 @@ Progress‑Ledger.
 • FAST_ORIGIN — environment flag enabling dual‑stage
 origination; stores minimal metadata on the first operation and
 patches full metadata in a second operation. See Invariant I118.
-• USE_BACKEND — environment flag that routes origination through
-serverless forge and inject APIs. When false, the front‑end
-uses client‑side forging via src/core/net.js.
 • Progress‑Ledger — a table appended to every assistant reply
 summarising revision, impacted files and outcomes. It serves as
 a persistent memory and audit trail.
 
-/* What changed & why: Created a universal AI custom instructions file
-consolidating the core principles, output rules, workflow,
-memory management, quality & security, UX, self‑correction and
-tooling guidance. Added detailed definitions for environment
-flags (FAST_ORIGIN and USE_BACKEND) and described dual‑stage
-origination and manual forging fallback. Updated revision and
-summary accordingly. */
+/* What changed & why: Removed the USE_BACKEND flag throughout the
+instructions and updated environment flag guidance to state that
+forging and injection always use the remote forge service set in
+FORGE_SERVICE_URL, with local fallback. Updated revision and summary
+accordingly. */

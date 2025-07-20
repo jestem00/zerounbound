@@ -174,12 +174,17 @@
         "src/config/deployTarget.js",
         "contracts/metadata/views/Zero_Contract_v4_views.json",
         "src/constants/views.hex.js",
+        "src/pages/api/forge.js",
+        "src/pages/api/inject.js",
+        "forge_service_node/Dockerfile",
+        "forge_service_node/index.js",
+        "forge_service_node/package.json",
         "src/utils/chooseFastestRpc.js",
         "jest.config.cjs",
         "next.config.js",
         "package.json",
         "tsconfig.json",
-        ".eslintrc.cjs"      
+        ".eslintrc.cjs"     
       ]
     },
     

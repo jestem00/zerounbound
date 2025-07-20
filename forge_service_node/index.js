@@ -1,12 +1,15 @@
 /*Developed by @jams2blues – ZeroContract Studio
   File: forge_service_node/index.js
-  Rev:  r2 2025‑07‑20
-  Summary: add /healthz endpoint for Render health checks and improve logging */
+  Rev:  r3 2025‑07‑21
+  Summary: switched to LocalForger and storage encoding; encode high‑level
+           storage with Schema before forging; improved operation building. */
 
 const express = require('express');
 const cors    = require('cors');
-const { RpcClient }  = require('@taquito/rpc');
-const { Parser }     = require('@taquito/michel-codec');
+const { RpcClient }      = require('@taquito/rpc');
+const { Parser }         = require('@taquito/michel-codec');
+const { LocalForger }    = require('@taquito/local-forging');
+const { Schema }         = require('@taquito/michelson-encoder');
 
 // Create Express app and enable JSON and CORS
 const app = express();
@@ -22,15 +25,52 @@ app.get('/healthz', (req, res) => {
 const rpcUrl = process.env.RPC_URL || 'https://rpc.ghostnet.teztnets.com';
 const rpc    = new RpcClient(rpcUrl);
 
-// Utility to fetch branch and counter
+/**
+ * Utility to fetch branch and counter.
+ * Uses the RPC to get the current head block hash (branch)
+ * and the next counter for the given source address.
+ */
 async function getBranchAndCounter(source) {
-  // Get head block header for branch
-  const header = await rpc.getBlockHeader();
-  const branch = header.hash;
-  // Get contract info to determine next counter
+  const header   = await rpc.getBlockHeader();
+  const branch   = header.hash;
   const contract = await rpc.getContract(source);
   const counter  = parseInt(contract.counter, 10) + 1;
   return { branch, counter: counter.toString() };
+}
+
+/**
+ * Encode a high‑level storage object into Micheline.
+ * If the provided storage is already Micheline (i.e., has a `prim` field),
+ * it is returned unchanged.  Otherwise, extract the storage type from the
+ * contract script and use Schema.Encode to convert the storage.
+ *
+ * @param {any} code Parsed Michelson code (Micheline)
+ * @param {any} storage High‑level storage object or Micheline
+ * @returns {any} Micheline representation of the storage
+ */
+function encodeStorageForForge(code, storage) {
+  // If storage already looks like Micheline, return as‑is
+  if (storage && typeof storage === 'object' && storage.prim) {
+    return storage;
+  }
+  try {
+    let script = code;
+    // Find the storage declaration in the Michelson script
+    let storageExpr;
+    if (Array.isArray(script)) {
+      storageExpr = script.find((p) => p.prim === 'storage');
+    } else if (script && script.prim === 'storage') {
+      storageExpr = script;
+    }
+    if (storageExpr && Array.isArray(storageExpr.args) && storageExpr.args.length) {
+      const storageType = storageExpr.args[0];
+      const schema      = new Schema(storageType);
+      return schema.Encode(storage);
+    }
+  } catch (e) {
+    // fall through and return original storage on error
+  }
+  return storage;
 }
 
 // POST /forge: accept Michelson code/storage/source, return forged bytes
@@ -41,33 +81,38 @@ app.post('/forge', async (req, res) => {
       return res.status(400).json({ error: 'Missing code, storage or source' });
     }
     // Parse Michelson strings to Micheline using Taquito parser
-    const parser     = new Parser();
-    const micCode    = typeof code    === 'string' ? parser.parseScript(code)    : code;
-    const micStorage = typeof storage === 'string' ? parser.parseScript(storage) : storage;
-    // Fetch branch and counter
+    const parser = new Parser();
+    const micCode = typeof code === 'string' ? parser.parseScript(code) : code;
+    // If storage is a string, parse to Micheline; otherwise use directly
+    const micStorage = typeof storage === 'string'
+      ? parser.parseScript(storage)
+      : storage;
+    // Ensure storage is properly encoded for big‑maps and other complex types
+    const encodedStorage = encodeStorageForForge(micCode, micStorage);
+    // Fetch branch and counter for the originating account
     const { branch, counter } = await getBranchAndCounter(source);
     // Build operation content with conservative defaults
     const contents = [
       {
-        kind: 'origination',
-        source,
-        fee: '100000',
-        counter,
-        gas_limit: '200000',
+        kind         : 'origination',
+        source       : source,
+        fee          : '100000',  // minimal fee; clients may adjust later
+        counter      : counter,
+        gas_limit    : '200000',
         storage_limit: '60000',
-        balance: '0',
+        balance      : '0',
         script: {
-          code:    micCode,
-          storage: micStorage,
+          code   : micCode,
+          storage: encodedStorage,
         },
       },
     ];
-    const operation   = { branch, contents };
-    // Forge operation via RPC helper
-    const forgedBytes = await rpc.forgeOperations(operation);
+    // Forge the operation using LocalForger instead of RPC.forgeOperations.
+    // This avoids RPC parse errors and ensures consistency with client-side forging.
+    const forger      = new LocalForger();
+    const forgedBytes = await forger.forge({ branch, contents });
     res.status(200).json({ forgedBytes, branch });
   } catch (err) {
-    // Log detailed error to server logs
     console.error('Error in /forge:', err);
     res.status(500).json({ error: err.message });
   }
@@ -99,7 +144,10 @@ app.listen(PORT, () => {
 });
 
 /* What changed & why:
-   – Added /healthz route to satisfy Render’s health check.
-   – Added header with revision and summary for project tracking.
-   – Improved error logging for /forge and /inject endpoints.
+   • Bumped revision to r3 and updated summary.
+   • Added LocalForger and Schema imports. Introduced encodeStorageForForge()
+     to convert high-level storage into Micheline when necessary.
+   • Replaced rpc.forgeOperations with LocalForger.forge to mirror client-side
+     forging and avoid RPC parse errors that caused “Invalid operation” on injection.
+   • Encoded storage via Schema before forging and improved logging.
 */

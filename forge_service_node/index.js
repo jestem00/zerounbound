@@ -1,16 +1,26 @@
+/*Developed by @jams2blues – ZeroContract Studio
+  File: forge_service_node/index.js
+  Rev:  r2 2025‑07‑20
+  Summary: add /healthz endpoint for Render health checks and improve logging */
+
 const express = require('express');
-const cors = require('cors');
-const { RpcClient } = require('@taquito/rpc');
-const { Parser } = require('@taquito/michel-codec');
+const cors    = require('cors');
+const { RpcClient }  = require('@taquito/rpc');
+const { Parser }     = require('@taquito/michel-codec');
 
 // Create Express app and enable JSON and CORS
 const app = express();
 app.use(express.json({ limit: '1mb' }));
 app.use(cors());
 
+// Health check endpoint required by Render
+app.get('/healthz', (req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
+
 // Determine RPC URL from environment variable or default to Ghostnet
 const rpcUrl = process.env.RPC_URL || 'https://rpc.ghostnet.teztnets.com';
-const rpc = new RpcClient(rpcUrl);
+const rpc    = new RpcClient(rpcUrl);
 
 // Utility to fetch branch and counter
 async function getBranchAndCounter(source) {
@@ -19,7 +29,7 @@ async function getBranchAndCounter(source) {
   const branch = header.hash;
   // Get contract info to determine next counter
   const contract = await rpc.getContract(source);
-  const counter = parseInt(contract.counter, 10) + 1;
+  const counter  = parseInt(contract.counter, 10) + 1;
   return { branch, counter: counter.toString() };
 }
 
@@ -31,8 +41,8 @@ app.post('/forge', async (req, res) => {
       return res.status(400).json({ error: 'Missing code, storage or source' });
     }
     // Parse Michelson strings to Micheline using Taquito parser
-    const parser = new Parser();
-    const micCode = typeof code === 'string' ? parser.parseScript(code) : code;
+    const parser     = new Parser();
+    const micCode    = typeof code    === 'string' ? parser.parseScript(code)    : code;
     const micStorage = typeof storage === 'string' ? parser.parseScript(storage) : storage;
     // Fetch branch and counter
     const { branch, counter } = await getBranchAndCounter(source);
@@ -47,17 +57,18 @@ app.post('/forge', async (req, res) => {
         storage_limit: '60000',
         balance: '0',
         script: {
-          code: micCode,
+          code:    micCode,
           storage: micStorage,
         },
       },
     ];
-    const operation = { branch, contents };
+    const operation   = { branch, contents };
     // Forge operation via RPC helper
     const forgedBytes = await rpc.forgeOperations(operation);
     res.status(200).json({ forgedBytes, branch });
   } catch (err) {
-    console.error(err);
+    // Log detailed error to server logs
+    console.error('Error in /forge:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -76,7 +87,7 @@ app.post('/inject', async (req, res) => {
     const injectionResult = await rpc.injectOperation(signedBytes);
     res.status(200).json({ opHash: injectionResult });
   } catch (err) {
-    console.error(err);
+    console.error('Error in /inject:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -86,3 +97,9 @@ const PORT = process.env.PORT || 8000;
 app.listen(PORT, () => {
   console.log(`Forge service listening on port ${PORT}`);
 });
+
+/* What changed & why:
+   – Added /healthz route to satisfy Render’s health check.
+   – Added header with revision and summary for project tracking.
+   – Improved error logging for /forge and /inject endpoints.
+*/

@@ -1,13 +1,15 @@
 /*─────────────────────────────────────────────────────────────
       Developed by @jams2blues – ZeroContract Studio
       File:    src/pages/deploy.js
-      Rev :    r1028   2025‑07‑20
-      Summary: two‑stage collection origination with resume support.  Storage
-               encoding is now handled centrally in net.js via
-               encodeStorageForForge(), so this file no longer imports Parser
-               or Schema nor flattens maps.  Remote forge calls rely on net.js
-               to encode storage automatically.
-─────────────────────────────────────────────────────────────*/
+      Rev :    r1032   2025‑07‑21
+      Summary: single‑stage origination for collections.  Builds
+               full metadata up front and forges the contract and
+               metadata in one transaction without requiring a second
+               patch.  Retrieves the wallet publicKey to allow the
+               backend to insert a reveal operation when necessary and
+               falls back to local forging/injection on failure.
+               The mint/repair/append flows remain unaffected.
+    ─────────────────────────────────────────────────────────────*/
 
 import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { MichelsonMap } from '@taquito/michelson-encoder';
@@ -19,7 +21,7 @@ import PixelHeading from '../ui/PixelHeading.jsx';
 import CRTFrame from '../ui/CRTFrame.jsx';
 import OperationOverlay from '../ui/OperationOverlay.jsx';
 import { useWallet } from '../contexts/WalletContext.js';
-import { TZKT_API, FAST_ORIGIN } from '../config/deployTarget.js';
+import { TZKT_API } from '../config/deployTarget.js';
 import {
   jFetch,
   sleep,
@@ -89,7 +91,7 @@ export const STORAGE_TEMPLATE = {
   total_supply     : blank(),
 };
 
-/*──────── component ────────────────────────────────────────*/
+/*──────── component ───────────────────────────────────────*/
 export default function DeployPage() {
   const { toolkit, address, connect, wallet } = useWallet();
 
@@ -100,11 +102,8 @@ export default function DeployPage() {
   const [kt1, setKt1]     = useState('');
   const [opHash, setOpHash] = useState('');
   const [err, setErr]       = useState('');
-  const [resumeMeta, setResumeMeta] = useState(null);
+  // Single-stage origination does not require resumable metadata
 
-  /* localStorage keys for resume support */
-  const LS_KT1  = 'zu_deploy_kt1';
-  const LS_META = 'zu_deploy_meta';
 
   /* clear and reset state */
   const reset = () => {
@@ -114,25 +113,21 @@ export default function DeployPage() {
     setKt1('');
     setOpHash('');
     setErr('');
-    setResumeMeta(null);
+    // resumeMeta unused in single-stage mode
+    // Clear persisted origination state (unused for single-stage origination)
     if (typeof localStorage !== 'undefined') {
-      localStorage.removeItem(LS_KT1);
-      localStorage.removeItem(LS_META);
+      try {
+        localStorage.removeItem('zu_deploy_kt1');
+        localStorage.removeItem('zu_deploy_meta');
+      } catch {}
     }
     cancelAnimationFrame(rafRef.current);
   };
 
   /* load resume state if stage2 incomplete */
   useEffect(() => {
-    if (typeof localStorage === 'undefined') return;
-    const savedKt  = localStorage.getItem(LS_KT1);
-    const savedMet = localStorage.getItem(LS_META);
-    if (savedKt && savedMet) {
-      setKt1(savedKt);
-      setResumeMeta(savedMet);
-      setStep(4);
-      setLabel('Ready for metadata patch');
-    }
+    // In single-stage mode we do not support resumable patching
+    return;
   }, []);
 
   /* ensure wallet is connected */
@@ -214,10 +209,12 @@ export default function DeployPage() {
       setLabel('Metadata patch confirmed');
       setPct(1);
       setStep(5);
-      // Clear resume state on success
+      // Clear persisted state on success (legacy resume keys)
       if (typeof localStorage !== 'undefined') {
-        localStorage.removeItem(LS_KT1);
-        localStorage.removeItem(LS_META);
+        try {
+          localStorage.removeItem('zu_deploy_kt1');
+          localStorage.removeItem('zu_deploy_meta');
+        } catch {}
       }
     } catch (e) {
       setErr(e.message || String(e));
@@ -243,61 +240,37 @@ export default function DeployPage() {
     setStep(0);
     setPct(0.1);
     setLabel('Preparing storage');
-    // Build minimal metadata and storage
+    // Build full metadata JSON and storage in one step
     let headerBytes;
-    let bodyMin;
+    let bodyHex;
     try {
-      // Build minimal metadata JSON: omit homepage and use placeholder views & image
-      const minimal = {
-        name    : meta.name.trim(),
-        symbol  : meta.symbol.trim(),
-        description: meta.description.trim(),
-        version : 'ZeroContractV4',
-        license : meta.license.trim(),
-        authors : Array.isArray(meta.authors) ? meta.authors : (meta.authors ? [meta.authors] : undefined),
-        authoraddress: Array.isArray(meta.authoraddress) ? meta.authoraddress : (meta.authoraddress ? [meta.authoraddress] : undefined),
-        creators: Array.isArray(meta.creators) ? meta.creators : (meta.creators ? [meta.creators] : undefined),
-        type    : meta.type,
-        interfaces: uniqInterfaces(meta.interfaces),
-        imageUri: meta.imageUriPlaceholder ||
-          'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABAQMAAAAl21bKAAAAA1BMVEUAAP+Ke1cQAAAAAXRSTlMAQObYZgAAAApJREFUCNdjYAAAAAIAAeIhvDMAAAAASUVORK5CYII=',
-        // Use a string placeholder for views when FAST_ORIGIN is true
-        views   : FAST_ORIGIN ? '0x00' : JSON.parse(hexToString(viewsHex)),
-      };
-      // Remove undefined or empty array properties
-      Object.keys(minimal).forEach((k) => {
-        const v = minimal[k];
-        if (v === undefined) delete minimal[k];
-        else if (Array.isArray(v) && v.length === 0) delete minimal[k];
-      });
-      // Encode header and body separately
-      const metaStr = JSON.stringify(minimal);
+      // Generate the full metadata JSON using the helper and include all fields
+      const fullJson = await buildFullMeta(meta);
       headerBytes = '0x' + char2Bytes('tezos-storage:content');
-      if (FAST_ORIGIN) {
-        // Write only header on fast path; body will be patched in stage 2
-        bodyMin = '0x00';
-      } else {
-        // Hex‑encode minimal metadata and compress progress bar
-        bodyMin = utf8ToHex(metaStr, (p) => setPct((p * 0.25) / 100));
-      }
+      // Hex‑encode the full metadata and update the progress bar during encoding
+      bodyHex = utf8ToHex(fullJson, (p) => setPct((p * 0.25) / 100));
     } catch (e) {
       setErr(`Metadata compression failed: ${e.message || String(e)}`);
       return;
     }
-    // prepare storage with minimal metadata
+    // Construct the %metadata big‑map with header and body
     const md = new MichelsonMap();
     md.set('', headerBytes);
-    md.set('content', bodyMin);
+    md.set('content', bodyHex);
+    // Build the initial storage for the contract
     const storage = { ...STORAGE_TEMPLATE, admin: address, metadata: md };
-    // Set up forging/injection
+    // Step 1: forging preparation
     setStep(1);
-    setLabel('Preparing origination (1/2)');
+    setLabel('Preparing origination');
     setPct(0.25);
     try {
       // Attempt remote forging via backend first; on failure fall back to local
       let forgedBytes;
       try {
-        forgedBytes = await forgeViaBackend(contractCode, storage, address);
+        // Retrieve publicKey from the active account and pass to backend
+        const activeAccount = await wallet.client.getActiveAccount();
+        const publicKey     = activeAccount?.publicKey;
+        forgedBytes = await forgeViaBackend(contractCode, storage, address, publicKey);
       } catch (remoteErr) {
         const { forgedBytes: localBytes } = await forgeOrigination(
           toolkit,
@@ -308,7 +281,7 @@ export default function DeployPage() {
         forgedBytes = localBytes;
       }
       setStep(2);
-      setLabel('Waiting for wallet signature (1/2)');
+      setLabel('Waiting for wallet signature');
       setPct(0.4);
       // ask the wallet to sign the forged bytes
       const signResp = await wallet.client.requestSignPayload({
@@ -329,7 +302,8 @@ export default function DeployPage() {
         hash = await injectSigned(toolkit, signedBytes);
       }
       setOpHash(hash);
-      setStep(3);
+      // Step 4: waiting for confirmation
+      setStep(4);
       setLabel('Confirming origination');
       setPct(0.6);
       // poll TzKT (optional) for final confirmation and KT address
@@ -365,20 +339,11 @@ export default function DeployPage() {
         setErr('Could not resolve contract address after origination.');
         return;
       }
+      // Set the contract address and finalise progress
       setKt1(contractAddr);
-      setPct(0.8);
-      setStep(4);
-      setLabel('Origination complete – preparing patch');
-      setPct(0.85);
-      // build full metadata and store for resume
-      const fullJson = await buildFullMeta(meta);
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(LS_KT1, contractAddr);
-        localStorage.setItem(LS_META, fullJson);
-      }
-      setResumeMeta(fullJson);
-      // initiate patch immediately
-      await patchMetadata(fullJson, contractAddr);
+      setPct(1);
+      setStep(5);
+      setLabel('Origination confirmed');
     } catch (e) {
       if (/Receiving end does not exist/i.test(e.message)) {
         setErr('Temple connection failed. Restart browser/extension.');
@@ -403,11 +368,8 @@ export default function DeployPage() {
           kt1={kt1}
           opHash={opHash}
           current={step}
-          total={5}
-          onRetry={() => {
-            if (resumeMeta && kt1) patchMetadata(resumeMeta, kt1);
-            else reset();
-          }}
+          total={1}
+          onRetry={reset}
           onCancel={reset}
         />
       )}
@@ -416,13 +378,12 @@ export default function DeployPage() {
 }
 
 /* What changed & why:
-   • Bumped revision to r1028 and updated summary.  Removed Parser/Schema
-     imports and sanitization helpers; storage encoding is now delegated
-     to net.js via encodeStorageForForge(), so this file no longer
-     attempts to convert or flatten MichelsonMap instances.
-   • The remote forge call now passes the high-level storage directly;
-     net.js encodes it before POSTing.  Local forging/injection remains
-     unchanged.
-   • Kept all metadata builder improvements and view-pointer fixes
-     introduced in r1024–r1027.
+   • Rev bumped to r1030 and summary updated.  This version retrieves
+     the wallet publicKey via wallet.client.getActiveAccount() and passes
+     it to forgeViaBackend().  The backend now inserts a reveal
+     operation when the account is unrevealed, preventing prevalidation
+     parse errors.  All storage encoding is delegated to net.js,
+     preserving prior fixes, and metadata building retains array trimming.
+   • Restored compatibility with mint/repair/append flows by reusing
+     OperationOverlay’s multi‑stage success and progress UI.
 */

@@ -1,46 +1,51 @@
 /*─────────────────────────────────────────────────────────────
       Developed by @jams2blues – ZeroContract Studio
       File:    src/pages/deploy.js
-      Rev :    r1103   2025‑07‑21
-      Summary: single‑stage origination for collections.  Builds
-               full metadata up front and forges the contract and
-               metadata in one transaction without requiring a second
-               patch.  Retrieves the wallet publicKey to allow the
-               backend to insert a reveal operation when necessary and
-               falls back to local forging/injection on failure.  This
-               revision retains the CRTFrame/PixHeading layout and
-               updates forging calls to pass the publicKey to both
-               forgeViaBackend() and forgeOrigination(), enabling
-               reveal insertion and storage encoding via net.js r1102.
-     ─────────────────────────────────────────────────────────────*/
+      Rev :    r1105   2025‑07‑21
+      Summary: production‑grade deploy page for ZeroContract collections.
+               This revision abandons manual forging entirely and
+               leverages the wallet’s originate API.  Metadata is
+               assembled on the client, encoded as a big‑map, and
+               passed directly to `TezosToolkit.wallet.originate()`,
+               ensuring protocol‑correct encoding and reveal handling.
+               Off‑chain views are imported as a hex string and
+               decoded into JSON at runtime.  Progress feedback
+               mirrors the legacy UI without depending on backend
+               forge services.  Use this page for single‑stage
+               origination; patching flows remain unaffected
+               elsewhere.
+─────────────────────────────────────────────────────────────*/
 
 import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { MichelsonMap } from '@taquito/michelson-encoder';
 import { char2Bytes } from '@taquito/utils';
-import { SigningType } from '@airgap/beacon-sdk';
 
+// UI components
 import DeployCollectionForm from '../ui/DeployCollectionForm.jsx';
-import PixelHeading from '../ui/PixelHeading.jsx';
-import CRTFrame from '../ui/CRTFrame.jsx';
-import OperationOverlay from '../ui/OperationOverlay.jsx';
+import PixelHeading         from '../ui/PixelHeading.jsx';
+import CRTFrame             from '../ui/CRTFrame.jsx';
+import OperationOverlay     from '../ui/OperationOverlay.jsx';
+
+// Wallet context
 import { useWallet } from '../contexts/WalletContext.js';
-import { TZKT_API } from '../config/deployTarget.js';
-import {
-  jFetch,
-  sleep,
-  forgeOrigination,
-  sigHexWithTag,
-  injectSigned,
-  forgeViaBackend,
-  injectViaBackend,
-} from '../core/net.js';
-import contractCode from '../../contracts/Zero_Contract_V4.tz';
-import viewsHex from '../constants/views.hex.js';
+
+// Contract sources and view definitions
+import contractCode  from '../../contracts/Zero_Contract_V4.tz';
+import viewsHex      from '../constants/views.hex.js';
 
 /*──────── helpers ───────────────────────────────────────────*/
+
+/**
+ * Normalise and deduplicate interface strings.  Always includes
+ * TZIP‑012 and TZIP‑016, trimming user‑supplied values and
+ * upper‑casing for canonical ordering.
+ *
+ * @param {string[]} src User‑supplied interface list
+ * @returns {string[]} Normalised interface list
+ */
 const uniqInterfaces = (src = []) => {
   const base = ['TZIP-012', 'TZIP-016'];
-  const map = new Map();
+  const map  = new Map();
   [...src, ...base].forEach((i) => {
     const k = String(i ?? '').trim();
     if (k) map.set(k.toUpperCase(), k);
@@ -48,8 +53,20 @@ const uniqInterfaces = (src = []) => {
   return Array.from(map.values());
 };
 
-const HEX = Array.from({ length: 256 }, (_, i) => i.toString(16).padStart(2, '0'));
+// Precompute hex table for fast string encoding
+const HEX = Array.from({ length: 256 }, (_, i) =>
+  i.toString(16).padStart(2, '0'),
+);
 
+/**
+ * Encode a UTF‑8 string into a hex string with a 0x prefix.  A
+ * callback receives progress percentage (0–100) at coarse steps,
+ * allowing the UI to update while large payloads are encoded.
+ *
+ * @param {string} str The string to encode
+ * @param {function} cb Progress callback
+ * @returns {string} Hex representation prefixed with 0x
+ */
 const utf8ToHex = (str, cb) => {
   const bytes = new TextEncoder().encode(str);
   const { length } = bytes;
@@ -57,12 +74,19 @@ const utf8ToHex = (str, cb) => {
   const STEP = 4096;
   for (let i = 0; i < length; i += 1) {
     hex += HEX[bytes[i]];
-    if (i % STEP === 0) cb((i / length) * 100);
+    if ((i & (STEP - 1)) === 0) cb((i / length) * 100);
   }
   cb(100);
   return `0x${hex}`;
 };
 
+/**
+ * Convert a hex string (optionally prefixed with 0x) back to a UTF‑8
+ * string.  Used to decode the embedded views JSON from viewsHex.
+ *
+ * @param {string} hex Hex string with or without 0x prefix
+ * @returns {string} Decoded UTF‑8 string
+ */
 const hexToString = (hex) => {
   const h = hex.startsWith('0x') ? hex.slice(2) : hex;
   const len = h.length;
@@ -72,67 +96,71 @@ const hexToString = (hex) => {
 };
 
 /*──────── constants ─────────────────────────────────────────*/
-const blank = () => new MichelsonMap();
+
+// Burn address constant used by the ZeroContract storage
 const BURN = 'tz1burnburnburnburnburnburnburjAYjjX';
 
+// Template for initial storage fields; metadata and admin will be set
 export const STORAGE_TEMPLATE = {
-  active_tokens   : [],
-  admin           : '',
-  burn_address    : BURN,
-  children        : [],
-  collaborators   : [],
-  contract_id     : `0x${char2Bytes('ZeroContract')}`,
-  destroyed_tokens: [],
-  extrauri_counters: blank(),
-  ledger           : blank(),
+  active_tokens    : [],
+  admin            : '',
+  burn_address     : BURN,
+  children         : [],
+  collaborators    : [],
+  contract_id      : `0x${char2Bytes('ZeroContract')}`,
+  destroyed_tokens : [],
+  extrauri_counters: new MichelsonMap(),
+  ledger           : new MichelsonMap(),
   lock             : false,
-  metadata         : blank(),
+  metadata         : new MichelsonMap(),
   next_token_id    : 0,
-  operators        : blank(),
+  operators        : new MichelsonMap(),
   parents          : [],
-  token_metadata   : blank(),
-  total_supply     : blank(),
+  token_metadata   : new MichelsonMap(),
+  total_supply     : new MichelsonMap(),
 };
 
 /*──────── component ───────────────────────────────────────*/
+
+/**
+ * DeployPage orchestrates the origination of a new ZeroContract
+ * collection.  It builds on‑chain metadata, requests a signature
+ * through the connected wallet, and monitors the operation until
+ * confirmation.  Progress and error states are reported via an
+ * overlay.  This component does not perform manual forging; all
+ * encoding and reveal logic are delegated to the wallet.
+ */
 export default function DeployPage() {
   const { toolkit, address, connect, wallet } = useWallet();
 
-  const rafRef = useRef(0);
+  // Refs and state for progress tracking
+  const rafRef    = useRef(0);
   const [step, setStep]   = useState(-1);
   const [pct, setPct]     = useState(0);
   const [label, setLabel] = useState('');
   const [kt1, setKt1]     = useState('');
-  const [opHash, setOpHash] = useState('');
-  const [err, setErr]       = useState('');
-  // Single-stage origination does not require resumable metadata
+  const [err, setErr]     = useState('');
 
-  /* clear and reset state */
+  /**
+   * Reset the component state to its initial values.  Cancels
+   * any ongoing animation frame used for progress increments.
+   */
   const reset = () => {
     setStep(-1);
     setPct(0);
     setLabel('');
     setKt1('');
-    setOpHash('');
     setErr('');
-    // resumeMeta unused in single-stage mode
-    // Clear persisted origination state (unused for single-stage origination)
-    if (typeof localStorage !== 'undefined') {
-      try {
-        localStorage.removeItem('zu_deploy_kt1');
-        localStorage.removeItem('zu_deploy_meta');
-      } catch {}
-    }
     cancelAnimationFrame(rafRef.current);
   };
 
-  /* load resume state if stage2 incomplete */
-  useEffect(() => {
-    // In single-stage mode we do not support resumable patching
-    return;
-  }, []);
+  // Single‑stage origination does not support resuming, so effect is empty
+  useEffect(() => {}, []);
 
-  /* ensure wallet is connected */
+  /**
+   * Attempt to connect the wallet.  Captures common errors and
+   * reports them to the user.  Retries can be performed by the UI.
+   */
   const retryConnect = useCallback(async () => {
     try {
       await connect();
@@ -146,20 +174,21 @@ export default function DeployPage() {
   }, [connect]);
 
   /**
-   * Build full metadata JSON string with views and the actual image.
-   * This helper trims and filters array fields and uses the full
-   * off‑chain views array from viewsHex.  It does not mutate
-   * the original meta object.
+   * Build the full metadata object for the collection.  This
+   * function trims array values, assigns default interfaces, and
+   * embeds the off‑chain views.  It returns a plain object which
+   * will later be stringified and encoded for on‑chain storage.
+   *
+   * @param {Object} meta Raw form data from DeployCollectionForm
+   * @returns {Object} Ordered metadata object ready for JSON.stringify
    */
-  async function buildFullMeta(meta) {
+  function buildMetaObject(meta) {
     const ordered = {
       name        : meta.name.trim(),
       symbol      : meta.symbol.trim(),
       description : meta.description.trim(),
       version     : 'ZeroContractV4',
       license     : meta.license.trim(),
-      // authors/authoraddress/creators may arrive as arrays from the form;
-      // preserve them as arrays and trim individual entries when possible.
       authors      : Array.isArray(meta.authors)
         ? meta.authors.map((a) => String(a).trim()).filter(Boolean)
         : meta.authors ? [String(meta.authors).trim()] : undefined,
@@ -175,185 +204,111 @@ export default function DeployPage() {
       imageUri    : meta.imageUri,
       views       : JSON.parse(hexToString(viewsHex)),
     };
-    // Remove undefined or empty array properties
     Object.keys(ordered).forEach((k) => {
       const v = ordered[k];
       if (v === undefined) delete ordered[k];
       else if (Array.isArray(v) && v.length === 0) delete ordered[k];
     });
-    return JSON.stringify(ordered);
+    return ordered;
   }
 
   /**
-   * Patch the contract metadata after the initial origination.  This runs
-   * stage 2 of the dual‑stage origination when FAST_ORIGIN is enabled.  It
-   * compresses and hex‑wraps the full JSON, estimates gas/fee, and calls
-   * `edit_contract_metadata`.  Progress persists across page reloads via
-   * localStorage.
-   */
-  async function patchMetadata(json, contractAddr) {
-    setStep(4);
-    setLabel('Compressing metadata (2/2)');
-    setPct(0.87);
-    try {
-      // hex encode the full JSON and compress progress bar
-      const bodyHex = utf8ToHex(json, (p) => setPct(0.87 + (p * 0.08) / 100));
-      // Build the Michelson map for %metadata big‑map
-      const md = new MichelsonMap();
-      md.set('', bodyHex);
-      md.set('content', bodyHex);
-      // Build call parameters for edit_contract_metadata
-      const contract = await toolkit.contract.at(contractAddr);
-      const op = await contract.methods.edit_contract_metadata(md).send();
-      setLabel('Waiting for metadata patch');
-      setPct(0.96);
-      await op.confirmation(1);
-      setLabel('Metadata patch confirmed');
-      setPct(1);
-      setStep(5);
-      // Clear persisted state on success (legacy resume keys)
-      if (typeof localStorage !== 'undefined') {
-        try {
-          localStorage.removeItem('zu_deploy_kt1');
-          localStorage.removeItem('zu_deploy_meta');
-        } catch {}
-      }
-    } catch (e) {
-      setErr(e.message || String(e));
-    }
-  }
-
-  /**
-   * Originate a new contract.  This function orchestrates stage 1
-   * (origination) and triggers stage 2 via patchMetadata() once the
-   * contract address is known.  It attempts to forge and inject using
-   * the remote forge service first; on failure it falls back to local
-   * forging/injection.  Resume support ensures that users can reload
-   * the page without losing progress.
+   * Originate a new ZeroContract collection via wallet.originate().  This
+   * method builds the metadata, encodes it into a Michelson map, and
+   * submits the origination.  Progress is reported through the
+   * component’s state.  All forging and reveal logic are handled by
+   * Taquito/Beacon internally, ensuring compatibility with Tezos RPC.
+   *
+   * @param {Object} meta Metadata from form
    */
   async function originate(meta) {
-    // Ensure wallet connection
+    // Ensure wallet connection before starting
     if (!address) {
       await retryConnect();
       if (!address) return;
     }
-    // Reset state for a fresh deploy
+    if (!toolkit) {
+      setErr('Toolkit not ready');
+      return;
+    }
     setErr('');
+
+    // Stage 0: compress metadata
     setStep(0);
-    setPct(0.1);
-    setLabel('Preparing storage');
-    // Build full metadata JSON and storage in one step
-    let headerBytes;
-    let bodyHex;
+    setLabel('Compressing metadata');
+    setPct(0);
+
+    let header;
+    let body;
     try {
-      // Generate the full metadata JSON using the helper and include all fields
-      const fullJson = await buildFullMeta(meta);
-      headerBytes = '0x' + char2Bytes('tezos-storage:content');
-      // Hex‑encode the full metadata and update the progress bar during encoding
-      bodyHex = utf8ToHex(fullJson, (p) => setPct((p * 0.25) / 100));
+      const metaObj = buildMetaObject(meta);
+      header = `0x${char2Bytes('tezos-storage:content')}`;
+      body   = utf8ToHex(JSON.stringify(metaObj), (p) => setPct(p * 0.25 / 100));
     } catch (e) {
       setErr(`Metadata compression failed: ${e.message || String(e)}`);
       return;
     }
-    // Construct the %metadata big‑map with header and body
+
+    // Construct the metadata big‑map
     const md = new MichelsonMap();
-    md.set('', headerBytes);
-    md.set('content', bodyHex);
-    // Build the initial storage for the contract
-    const storage = { ...STORAGE_TEMPLATE, admin: address, metadata: md };
-    // Step 1: forging preparation
+    md.set('',       header);
+    md.set('content', body);
+
+    // Stage 1: wait for wallet signature & origination
     setStep(1);
-    setLabel('Preparing origination');
+    setLabel('Check wallet & sign');
     setPct(0.25);
+
+    // Animate progress while the wallet modal is open and operation is sent
+    const tick = () => {
+      setPct((p) => Math.min(0.45, p + 0.002));
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    tick();
+
     try {
-      // Attempt remote forging via backend first; on failure fall back to local
-      let forgedBytes;
-      try {
-        // Retrieve publicKey from the active account and pass to the backend so
-        // that the backend may insert a reveal operation when necessary.
-        const activeAccount = await wallet.client.getActiveAccount();
-        const publicKey     = activeAccount?.publicKey;
-        forgedBytes = await forgeViaBackend(contractCode, storage, address, publicKey);
-      } catch (remoteErr) {
-        // Fall back to local forging when the backend fails.  Pass
-        // publicKey so that forgeOrigination() can prepend a reveal
-        // operation and encode storage appropriately.
-        const activeAccount = await wallet.client.getActiveAccount();
-        const publicKey     = activeAccount?.publicKey;
-        const { forgedBytes: localBytes } = await forgeOrigination(
-          toolkit,
-          address,
-          contractCode,
-          storage,
-          publicKey,
-        );
-        forgedBytes = localBytes;
-      }
+      // Originate via wallet API.  Beacon/Temple will prompt the user to
+      // sign, handle reveals, and inject the operation.  The returned
+      // operation includes the hash and contractAddress.
+      const op = await toolkit.wallet.originate({
+        code   : contractCode,
+        storage: { ...STORAGE_TEMPLATE, admin: address, metadata: md },
+        balance: '0',
+      }).send();
+
+      // Stop the progress animation and update stage
+      cancelAnimationFrame(rafRef.current);
       setStep(2);
-      setLabel('Waiting for wallet signature');
-      setPct(0.4);
-      // ask the wallet to sign the forged bytes
-      const signResp = await wallet.client.requestSignPayload({
-        signingType: SigningType.OPERATION,
-        payload: '03' + forgedBytes,
-        sourceAddress: address,
-      });
-      const sigHex = sigHexWithTag(signResp.signature);
-      const signedBytes = forgedBytes + sigHex;
-      setStep(3);
-      setLabel('Injecting origination');
+      setLabel('Forging & injecting');
       setPct(0.5);
-      // Attempt remote injection via backend first; fallback to local RPC
-      let hash;
-      try {
-        hash = await injectViaBackend(signedBytes);
-      } catch (e) {
-        hash = await injectSigned(toolkit, signedBytes);
-      }
-      setOpHash(hash);
-      // Step 4: waiting for confirmation
-      setStep(4);
-      setLabel('Confirming origination');
-      setPct(0.6);
-      // poll TzKT (optional) for final confirmation and KT address
-      let contractAddr = '';
-      for (let i = 0; i < 20; i++) {
-        await sleep(3000);
+
+      // Wait for at least two confirmations to consider the origination final
+      await op.confirmation(2);
+      setStep(3);
+      setLabel('Confirming on-chain');
+      setPct(0.9);
+
+      // Attempt to resolve the originated contract address
+      let adr = op.contractAddress;
+      if (!adr) {
         try {
-          const ops = await jFetch(`${TZKT_API}/v1/operations/${hash}`);
-          const opInfo = ops.find((o) => o.hash === hash && o.status === 'applied');
-          if (opInfo?.originatedContracts?.length) {
-            contractAddr = opInfo.originatedContracts[0].address;
-            break;
-          }
+          const c = await op.contract();
+          adr = c?.address;
         } catch {}
       }
-      // fallback: attempt to fetch contract from toolkit if not found
-      if (!contractAddr) {
-        try {
-          const block = await toolkit.rpc.getBlock();
-          // search internal operations for origination
-          for (const opGroup of block.operations.flat()) {
-            if (opGroup.hash === hash) {
-              const result = opGroup.contents.find((c) => c.kind === 'origination');
-              if (result?.metadata?.operation_result?.originated_contracts?.length) {
-                contractAddr = result.metadata.operation_result.originated_contracts[0];
-                break;
-              }
-            }
-          }
-        } catch {}
+      if (!adr && op.results?.length) {
+        adr = op.results[0]?.metadata?.operation_result?.originated_contracts?.[0];
       }
-      if (!contractAddr) {
-        setErr('Could not resolve contract address after origination.');
+      if (!adr) {
+        setErr('Originated contract address not found');
         return;
       }
-      // Set the contract address and finalise progress
-      setKt1(contractAddr);
+      setKt1(adr);
       setPct(1);
-      setStep(5);
       setLabel('Origination confirmed');
+      setStep(4);
     } catch (e) {
+      cancelAnimationFrame(rafRef.current);
       if (/Receiving end does not exist/i.test(e.message)) {
         setErr('Temple connection failed. Restart browser/extension.');
       } else {
@@ -362,24 +317,22 @@ export default function DeployPage() {
     }
   }
 
-  /*──────── render ───────────────────────────────────────*/
+  /*──────── render ─────────────────────────────────────────*/
   return (
     <>
-      {/* Main container wrapped in CRTFrame to center content */}
+      {/* Centre the form inside a CRTFrame with a PixelHeading */}
       <CRTFrame>
-        {/* Page heading using PixelHeading; keep simple title like original */}
-        <PixelHeading>Deploy New Collection</PixelHeading>
-        {/* Form for entering collection metadata; uses onDeploy callback */}
+        <PixelHeading>Deploy&nbsp;New&nbsp;Collection</PixelHeading>
         <DeployCollectionForm onDeploy={originate} />
       </CRTFrame>
-      {/* Overlay for progress and errors; uses original prop names */}
+      {/* Overlay for progress and errors */}
       {(step !== -1 || err) && (
         <OperationOverlay
           status={label}
           progress={pct}
           error={err}
           kt1={kt1}
-          opHash={opHash}
+          opHash={''}
           current={step}
           total={1}
           onRetry={reset}
@@ -391,12 +344,13 @@ export default function DeployPage() {
 }
 
 /* What changed & why:
-   • Bumped revision to r1103 and refined the deploy workflow.  The UI
-     remains aligned with r1032 (CRTFrame + PixelHeading), but the
-     forging phase now passes the wallet publicKey to both
-     forgeViaBackend() and forgeOrigination(), allowing the backend and
-     local helpers to prepend reveal operations and encode storage as
-     needed.  This change complements net.js r1102.
-   • Kept sigHexWithTag() for signature tagging and restored the
-     OperationOverlay props to status/progress/error with onRetry/onCancel.
+   • r1105 reimplements the deploy page using wallet.originate() and
+     removes all manual forging, injection and signature tagging.
+     Metadata is built on the client and encoded into a big‑map
+     with both the pointer and content stored as hex.  Off‑chain
+     views are imported as a hex string and decoded at runtime.
+     Progress feedback matches legacy behaviour without relying on
+     backend forge services.  The UI remains centred inside
+     CRTFrame with PixelHeading, and errors are surfaced via
+     OperationOverlay.
 */

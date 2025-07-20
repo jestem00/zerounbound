@@ -1,10 +1,9 @@
 /*─────────────────────────────────────────────────────────────
       Developed by @jams2blues with love for the Tezos community
       File: src/config/deployTarget.js
-      Rev : r747‑r29   2025‑07‑19
-      Summary: added FORGE_SERVICE_URL constant to allow remote
-               origination forging and injection; still exports
-               network selectors and RPC lists as before.
+      Rev : r747‑r30   2025‑07‑20
+      Summary: default FAST_ORIGIN to true on testnets; retain
+               forge service support for remote forging and injection.
     ─────────────────────────────────────────────────────────────*/
 
 /*───────── flip when promoting to mainnet ─────────*/
@@ -150,36 +149,36 @@ export async function selectFastestRpc(timeout = 2000) {
 export const DEFAULT_NETWORK = NETWORK_KEY;
 
 /* optional slim origination (see docs/ThinBackendsteps.md) */
-export const FAST_ORIGIN = process.env.FAST_ORIGIN === 'true';
+/**
+ * Determine whether to use dual‑stage origination (FAST_ORIGIN).
+ * When enabled, the dApp originates the collection with a minimal
+ * metadata header and patches the full metadata in a second step.
+ * This reduces the size of the first operation and avoids parsing
+ * the huge views.json on the client.  Users can override via
+ * the FAST_ORIGIN environment variable.  If FAST_ORIGIN is
+ * undefined, we default to true on testnets (i.e. non‑mainnet).
+ */
+export const FAST_ORIGIN =
+  process.env.FAST_ORIGIN === 'true' ||
+  (!process.env.FAST_ORIGIN && TARGET !== 'mainnet');
 
 /**
  * Base URL for the external forge service.  If set to a non-empty string,
  * forgeViaBackend/injectViaBackend will send requests to this host.  For
- * example, you might deploy the accompanying FastAPI server at
- * `https://forge.zerounbound.art` and set this to that domain.  Leave empty
- * to use the built-in Next.js API routes (/api/forge, /api/inject).
- */
-/*─────────────────────────────────────────────
- * External forge service per network.
- *
- * To offload forging/injection to a backend (e.g. our FastAPI
- * service on Render), define a URL for each supported network.
- * When empty, the dApp will fall back to its internal API routes
- * (/api/forge and /api/inject).  See docs/ThinBackendsteps.md.
+ * example, you might deploy the accompanying forge service at
+ * `https://forgeghostnet.zerounbound.art` and set this to that domain.
+ * Leave empty to use the built-in Next.js API routes (/api/forge, /api/inject).
  */
 const FORGE_URLS = {
   ghostnet: 'https://forgeghostnet.zerounbound.art',
-  mainnet: 'https://forgemainnet.zerounbound.art',
+  mainnet : 'https://forgemainnet.zerounbound.art',
 };
 
 export const FORGE_SERVICE_URL = FORGE_URLS[TARGET] ?? '';
 
 /* What changed & why:
-   • Added FORGE_SERVICE_URL constant to optionally point the dApp at a
-     remote forging/injection service.  When set, net.js will call
-     `${FORGE_SERVICE_URL}/forge` and `${FORGE_SERVICE_URL}/inject` instead of
-     the default /api routes.  This allows offloading heavy operations to
-     a backend deployed on Railway or Deta, circumventing Vercel’s 500 error
-     during local forging and aligning our workflow with SmartPy’s
-     server‑side origination.  Rev-bumped r747‑r29.
-*/
+   • Default FAST_ORIGIN to true on non‑mainnet when the environment variable
+     is unset, to avoid heavy views parsing during storage preparation.
+   • Updated header (r747‑r30) and summary to reflect the change, and retained
+     remote forging support via FORGE_SERVICE_URL.
+ */

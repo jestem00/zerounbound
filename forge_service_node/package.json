@@ -1,6 +1,6 @@
 {
   "name": "forge-service-node",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Tezos origination forge/inject API (Node)",
   "main": "index.js",
   "scripts": {
@@ -20,6 +20,7 @@
     "@taquito/tzip16": "21.0.4",
     "@walletconnect/core": "^2.20.2",
     "@walletconnect/jsonrpc-ws-connection": "^1.0.16",
-    "@walletconnect/keyvaluestorage": "^1.1.1"
+    "@walletconnect/keyvaluestorage": "^1.1.1",
+    "@taquito/michelson-encoder": "^22.0.0"
   }
 }

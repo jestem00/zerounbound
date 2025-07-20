@@ -92,6 +92,7 @@ self.onmessage = ({ data }) => {
     self.postMessage({ taskId, error: error.stack || String(error) });
   }
 };
+
 /* What changed & why:
    • Bumped revision to r11 and updated summary.
    • authors, authoraddress and creators fields now accept both arrays

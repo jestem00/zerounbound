@@ -1,12 +1,14 @@
 /*─────────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    forge_service_node/index.js
-  Rev :    r5   2025‑07‑21
-  Summary: Express backend for remote forging and injection.  Uses
-           Taquito's RpcClient and LocalForger to construct operations.
-           Automatically encodes high‑level storage via Schema and
-           prepends a reveal operation when the manager key is not
-           revealed.  Supports both ghostnet and mainnet via RPC_URL.
+  Rev :    r6   2025‑07‑21
+  Summary: Refactored remote forge service for Tezos origination.
+           Uses Taquito’s TezosToolkit to estimate gas/fee/storage
+           and LocalForger for deterministic forging.  Handles
+           reveal operations when needed.  Returns forged bytes
+           only; injection should be handled client‑side via
+           injectSigned() to avoid RPC 500 errors.  Supports
+           ghostnet and mainnet via RPC_URL environment variable.
 ──────────────────────────────────────────────────────────────────*/
 
 const express = require('express');
@@ -15,6 +17,7 @@ const { RpcClient }   = require('@taquito/rpc');
 const { LocalForger } = require('@taquito/local-forging');
 const { Parser }      = require('@taquito/michel-codec');
 const { Schema }      = require('@taquito/michelson-encoder');
+const { TezosToolkit, OpKind } = require('@taquito/taquito');
 
 // Create Express app and enable JSON and CORS
 const app = express();
@@ -26,9 +29,12 @@ app.get('/healthz', (req, res) => {
   res.status(200).json({ status: 'ok' });
 });
 
-// Determine RPC URL from environment variable or default to Ghostnet
+// Determine RPC URL from environment variable or default to Ghostnet.  We
+// construct both a low-level RpcClient (for branch/counter queries) and
+// a TezosToolkit instance (for fee/gas/storage estimation).
 const rpcUrl = process.env.RPC_URL || 'https://rpc.ghostnet.teztnets.com';
 const rpc    = new RpcClient(rpcUrl);
+const Tezos  = new TezosToolkit(rpcUrl);
 
 /**
  * Utility to fetch branch and counter for a given source address.
@@ -88,13 +94,31 @@ function encodeStorageForForge(code, storage) {
 }
 
 /**
+ * Determine whether a reveal operation is required for the given source.
+ * Queries the manager key; if undefined or errors, returns true.  A
+ * publicKey must be provided by the caller for the reveal operation.
+ *
+ * @param {string} source tz address
+ * @returns {Promise<boolean>} true if reveal is required
+ */
+async function needsReveal(source) {
+  try {
+    const mgrKey = await rpc.getManagerKey(source);
+    return !mgrKey;
+  } catch (err) {
+    return true;
+  }
+}
+
+/**
  * POST /forge
  * Accepts a contract code, storage, source address and optional
  * publicKey from the client.  Encodes storage, checks if the source
  * account needs a reveal operation and constructs the contents array
- * accordingly.  Uses LocalForger to forge the operation bytes and
- * returns them in the response.  Clients should handle signing and
- * injection separately.
+ * accordingly.  Uses TezosToolkit to estimate gas/fee/storage and
+ * LocalForger to forge the operation bytes.  Returns the bytes in
+ * the response.  Clients should handle signing and injection
+ * separately (via injectSigned()).
  */
 app.post('/forge', async (req, res) => {
   try {
@@ -102,33 +126,32 @@ app.post('/forge', async (req, res) => {
     if (!code || !storage || !source) {
       return res.status(400).json({ error: 'Missing code, storage or source' });
     }
-    // Parse code and storage into Micheline if necessary
-    const parser = new Parser();
-    const micCode    = typeof code === 'string' ? parser.parseScript(code) : code;
-    const micStorage = typeof storage === 'string' ? parser.parseScript(storage) : storage;
-    // Encode high‑level storage for complex types
-    const encodedStorage = encodeStorageForForge(micCode, micStorage);
-    // Fetch branch and initial counter for the source
+    // Parse code if provided as a string
+    let parsedCode = code;
+    if (typeof code === 'string') {
+      try {
+        const parser = new Parser();
+        parsedCode = parser.parseScript(code);
+      } catch (errParse) {
+        return res.status(400).json({ error: 'Invalid contract code: ' + errParse.message });
+      }
+    }
+    // Encode storage
+    const encodedStorage = encodeStorageForForge(parsedCode, storage);
+    // Fetch branch and initial counter
     const { branch, counter } = await getBranchAndCounter(source);
     let nextCounter = parseInt(counter, 10);
     const contents = [];
-    // Check if reveal is required by inspecting manager key
-    let needsReveal = false;
+    // Determine if reveal is needed
+    let revealNeeded = false;
     if (publicKey) {
-      try {
-        const mgrKey = await rpc.getManagerKey(source);
-        if (!mgrKey) needsReveal = true;
-      } catch (err) {
-        // If manager key lookup fails, assume reveal is required
-        needsReveal = true;
-      }
+      revealNeeded = await needsReveal(source);
     }
-    // If reveal is needed, prepend reveal operation
-    if (needsReveal && publicKey) {
+    if (revealNeeded && publicKey) {
       contents.push({
-        kind         : 'reveal',
+        kind         : OpKind.REVEAL,
         source       : source,
-        fee          : '1300',      // typical fee for reveal
+        fee          : '1300',
         counter      : nextCounter.toString(),
         gas_limit    : '10000',
         storage_limit: '0',
@@ -136,40 +159,39 @@ app.post('/forge', async (req, res) => {
       });
       nextCounter += 1;
     }
-    // Append origination operation
-    contents.push({
-      kind         : 'origination',
-      source       : source,
-      fee          : '100000',      // conservative fee; clients may override
-      counter      : nextCounter.toString(),
-      gas_limit    : '200000',
-      storage_limit: '60000',
-      balance      : '0',
-      script: {
-        code   : micCode,
-        storage: encodedStorage,
-      },
-    });
-    // Forge the operation.  First attempt RPC forging via the network; if
-    // that fails (e.g. due to parse errors on complex scripts), fall back
-    // to the LocalForger.  RPC forging typically produces smaller
-    // signatures and aligns with the network’s expectations.
-    let forgedBytes;
+    // Estimate fee/gas/storage for the origination
+    let feeMutez     = '200000';
+    let gasLimit     = '200000';
+    let storageLimit = '60000';
     try {
-      forgedBytes = await rpc.forgeOperations({ branch, contents });
-    } catch (forgeErr) {
-      try {
-        const forger = new LocalForger();
-        forgedBytes = await forger.forge({ branch, contents });
-      } catch (localErr) {
-        console.error('Forge failed:', forgeErr, localErr);
-        return res.status(500).json({ error: forgeErr.message || localErr.message });
-      }
+      const estimate = await Tezos.estimate.originate({ code: parsedCode, storage: encodedStorage, balance: '0' });
+      feeMutez     = estimate.suggestedFeeMutez.toString();
+      gasLimit     = estimate.gasLimit.toString();
+      storageLimit = estimate.storageLimit.toString();
+    } catch (e) {
+      // If estimation fails, leave defaults
     }
-    return res.status(200).json({ forgedBytes });
+    contents.push({
+      kind         : OpKind.ORIGINATION,
+      source       : source,
+      fee          : feeMutez,
+      counter      : nextCounter.toString(),
+      gas_limit    : gasLimit,
+      storage_limit: storageLimit,
+      balance      : '0',
+      script       : { code: parsedCode, storage: encodedStorage },
+    });
+    // Forge using LocalForger (avoid RPC forging to sidestep node parsing)
+    try {
+      const forger = new LocalForger();
+      const forgedBytes = await forger.forge({ branch, contents });
+      return res.status(200).json({ forgedBytes });
+    } catch (forgeErr) {
+      return res.status(500).json({ error: forgeErr.message || 'Forge failed' });
+    }
   } catch (err) {
     console.error('Error in /forge:', err);
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message || String(err) });
   }
 });
 
@@ -192,7 +214,7 @@ app.post('/inject', async (req, res) => {
     return res.status(200).json({ opHash });
   } catch (err) {
     console.error('Error in /inject:', err);
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message || String(err) });
   }
 });
 
@@ -203,13 +225,16 @@ app.listen(PORT, () => {
 });
 
 /* What changed & why:
-   • Introduced LocalForger and Schema-based storage encoding to avoid RPC
-     forging errors.  Added encodeStorageForForge() helper to encode
-     high‑level storage types via Schema.  Ensured code and storage are
-     parsed via Parser.
-   • Added reveal support: if the source account has no manager key and
-     a publicKey is provided, a reveal operation is prepended.  Counter
-     handling ensures sequential counters for reveal and origination.
-   • Added optional publicKey parameter for /forge to support reveal
-     logic.  Maintained environment-based RPC selection for ghostnet and
-     mainnet deployments.  Added extensive error handling and logging. */
+   • Introduced TezosToolkit to estimate gas/fee/storage, ensuring the
+     origination has adequate limits for large contracts.  This
+     prevents underestimation and prevalidation failures.
+   • Added needsReveal() helper to determine reveal operations based
+     on manager key.  Prepend reveal with typical fee/gas.
+   • Refactored /forge to build contents using reveal + origination,
+     estimate limits, and use LocalForger exclusively.  Returns
+     forgedBytes only; injection is moved to client to avoid
+     backend 500 errors.  This addresses malformed payloads and
+     mismatched dependencies.
+   • Added TezosToolkit dependency; removed RPC forging fallback; updated
+     comments and header.  Rev bumped to r6.
+*/

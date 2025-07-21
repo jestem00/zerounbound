@@ -1,6 +1,6 @@
 {
   "name": "forge-service-node",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Tezos origination forge/inject API (Node)",
   "main": "index.js",
   "scripts": {
@@ -9,18 +9,10 @@
   "dependencies": {
     "express": "^4.18.2",
     "cors": "^2.8.5",
-    "@taquito/rpc": "^19.2.0",
-    "@taquito/michel-codec": "^19.2.0",
-    "@airgap/beacon-sdk": "4.5.2",
-    "@taquito/beacon-wallet": "21.0.4",
+    "@taquito/rpc": "21.0.4",
     "@taquito/local-forging": "^22.0.0",
-    "@taquito/signer": "21.0.4",
     "@taquito/taquito": "21.0.4",
-    "@taquito/tzip12": "21.0.4",
-    "@taquito/tzip16": "21.0.4",
-    "@walletconnect/core": "^2.20.2",
-    "@walletconnect/jsonrpc-ws-connection": "^1.0.16",
-    "@walletconnect/keyvaluestorage": "^1.1.1",
+    "@taquito/michel-codec": "^19.2.0",
     "@taquito/michelson-encoder": "^22.0.0"
   }
 }

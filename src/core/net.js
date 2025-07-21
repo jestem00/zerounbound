@@ -1,16 +1,16 @@
 /*─────────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/core/net.js
-  Rev :    r1104   2025‑07‑21
+  Rev :    r1105   2025‑07‑21
   Summary: unified single‑stage origination helpers for ZeroContract.
-           Updated forgeViaBackend() to support a CLI‑based forge
-           service (Octez).  The helper passes high‑level storage
-           directly to the backend, avoiding double encoding.  The
-           injectViaBackend() function has been deprecated: the
-           backend no longer injects operations, so callers should
-           use injectSigned() for all injections.  Local forging
-           remains available via forgeOrigination() and falls back
-           to LocalForger when RPC forging fails.
+           Updated forgeViaBackend() to encode storage via
+           Schema.Encode() before sending it to the CLI-based forge
+           service.  This avoids misaligned expression errors when
+           the backend invokes `octez-client` with a high-level
+           storage object.  The helper still supports remote
+           forging via Octez and retains fallback to local forging
+           for Kukai/Umami.  injectViaBackend() remains deprecated;
+           clients should always inject via injectSigned().
 ──────────────────────────────────────────────────────────────────*/
 
 import { OpKind } from '@taquito/taquito';
@@ -162,23 +162,30 @@ export function encodeStorageForForge(code, storage) {
  */
 export async function forgeViaBackend(code, storage, source, publicKey) {
   const url = forgeEndpoint();
-  // Pass high‑level storage directly; the backend (Octez) will
-  // handle encoding and estimation.  Including the publicKey does
-  // not affect forging for Octez but is kept for backward
-  // compatibility with potential future implementations.
-  const payload = { code, storage, source };
+  /**
+   * Encode the provided storage into Micheline before sending it
+   * to the backend forge service.  Octez’s `originate ... --init` expects
+   * a properly typed Micheline value, not a high‑level JavaScript object.
+   * Failing to encode the storage results in misaligned expression
+   * errors from `octez-client` during parsing.  We reuse the same
+   * logic as forgeOrigination() to ensure compatibility.
+   */
+  let encodedStorage;
+  try {
+    encodedStorage = encodeStorageForForge(code, storage);
+  } catch {
+    encodedStorage = storage;
+  }
+  const payload = { code, storage: encodedStorage, source };
   if (publicKey) payload.publicKey = publicKey;
   const res = await jFetch(url, {
     method : 'POST',
     headers: { 'Content-Type': 'application/json' },
     body   : JSON.stringify(payload),
   });
-  // If the backend returns the property forgedBytes (case-insensitive),
-  // return it.  Otherwise throw an error to signal failure.
   if (res && (res.forgedBytes || res.forgedbytes)) {
     return res.forgedBytes || res.forgedbytes;
   }
-  // Some backends may return an error field; surface it if present.
   if (res && res.error) {
     throw new Error(res.error);
   }

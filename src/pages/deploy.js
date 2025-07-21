@@ -1,3 +1,4 @@
+/*──────── src/pages/deploy.js ────────*/
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/deploy.js
@@ -17,6 +18,13 @@ import { char2Bytes } from '@taquito/utils';
 // UI components
 import DeployCollectionForm from '../ui/DeployCollectionForm.jsx';
 import OperationOverlay     from '../ui/OperationOverlay.jsx';
+
+// Import FAST_ORIGIN flag.  When true, Temple‑wallet originations
+// will omit large on‑chain view definitions and instead embed a
+// minimal placeholder.  This reduces the operation size to avoid
+// Temple’s signing limits.  Kukai/Umami and other wallets are
+// unaffected and still originate with full metadata.
+import { FAST_ORIGIN } from '../config/deployTarget.js';
 
 // Styled container – centre the page content and provide an opaque
 // background.  Without this wrapper the deploy form would sit
@@ -221,6 +229,26 @@ export default function DeployPage() {
     });
     return obj;
   }
+
+  /**
+   * Build a minimal metadata object for fast originations.  This
+   * helper calls buildMetaObject() to assemble the full metadata
+   * and then overrides the views property with a placeholder (0x00).
+   * Use this when FAST_ORIGIN is enabled to reduce the size of the
+   * origination operation for Temple wallet users.  All other
+   * properties remain unchanged.
+   *
+   * @param {Object} meta Raw form data from DeployCollectionForm
+   * @returns {Object} Minimal metadata object
+   */
+  function buildFastMetaObject(meta) {
+    const obj = buildMetaObject(meta);
+    // Replace views with a minimal placeholder.  The contract’s
+    // edit_contract_metadata entrypoint can later be used to set
+    // full views once the contract is originated.
+    obj.views = '0x00';
+    return obj;
+  }
   /**
    * Perform a single-stage origination via the wallet API.  This is
    * used for Kukai/Umami and other wallets that handle large payloads.
@@ -295,14 +323,17 @@ export default function DeployPage() {
       return;
     }
     setErr('');
-    // Step 0: build and encode full metadata
+    // Step 0: build and encode metadata.  If FAST_ORIGIN is enabled
+    // (dual‑stage origination) and we are using Temple (via backend),
+    // build a minimal metadata object to reduce payload size.  The
+    // full views can be applied later via edit_contract_metadata.
     setStep(0);
     setLabel('Preparing metadata');
     setPct(0);
     let headerBytes;
     let bodyHex;
     try {
-      const metaObj = buildMetaObject(meta);
+      const metaObj = FAST_ORIGIN ? buildFastMetaObject(meta) : buildMetaObject(meta);
       headerBytes = '0x' + char2Bytes('tezos-storage:content');
       bodyHex = utf8ToHex(JSON.stringify(metaObj), (p) => setPct((p * 0.25) / 100));
     } catch (e) {
@@ -492,3 +523,4 @@ export default function DeployPage() {
      wallet.originate()), and off‑chain views continue to be
      loaded from JSON to avoid misaligned expression errors.
 */
+

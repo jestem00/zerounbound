@@ -101,3 +101,4 @@ self.onmessage = ({ data }) => {
    • Retained existing placeholder views logic for fast mode and hex‑encoding
      of metadata.
 */
+

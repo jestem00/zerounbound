@@ -182,7 +182,8 @@
         "next.config.js",
         "package.json",
         "tsconfig.json",
-        ".eslintrc.cjs"     
+        ".eslintrc.cjs",
+        "contracts/Zero_Contract_V4.tz"    
       ]
     },
     
@@ -222,7 +223,7 @@
         "src/utils/countAmount.js",
         "src/utils/countOwners.js",
         "Src/utils,countTokens.js",
-        "src/utils/formatAddress.js"   
+        "src/utils/formatAddress.js" 
       ]
     }
   ]

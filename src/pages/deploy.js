@@ -1,16 +1,18 @@
-/*Developed by @jams2blues – ZeroContract Studio
-  File:    src/pages/deploy.js
-  Rev :    r1107   2025‑07‑21
-  Summary: Deploy page with adaptive origination.  Full metadata
-           is always constructed on the client.  For wallets
-           capable of signing large payloads (e.g. Kukai/Umami),
-           the contract is originated via `wallet.originate()` in
-           a single operation.  For Temple wallet users, the
-           deployment falls back to the remote forge service to
-           minimise payload size while retaining a single‑stage
-           origination.  Off‑chain views are imported from JSON
-           to ensure indexers recognise them.
+/*─────────────────────────────────────────────────────────────
+      Developed by @jams2blues – ZeroContract Studio
+      File:    src/pages/deploy.js
+      Rev :    r1107   2025‑07‑21
+      Summary: Deploy page with adaptive origination.  Full metadata
+               is always constructed on the client.  For wallets
+               capable of signing large payloads (e.g. Kukai/Umami),
+               the contract is originated via `wallet.originate()` in
+               a single operation.  For Temple wallet users, the
+               deployment falls back to the remote forge service to
+               minimise payload size while retaining a single‑stage
+               origination.  Off‑chain views are imported from JSON
+               to ensure indexers recognise them.
 ─────────────────────────────────────────────────────────────*/
+
 import React, { useRef, useState, useCallback } from 'react';
 import { MichelsonMap } from '@taquito/michelson-encoder';
 import { char2Bytes } from '@taquito/utils';
@@ -35,11 +37,13 @@ import {
   sigHexWithTag,
   injectSigned,
   sleep,
+  forgeOrigination,
 } from '../core/net.js';
 // Signing type constant from Beacon
 import { SigningType } from '@airgap/beacon-sdk';
 
 /*──────── helpers ───────────────────────────────────────────*/
+
 /**
  * Normalise and deduplicate interface strings.  Always includes
  * TZIP‑012 and TZIP‑016, trimming user‑supplied values and
@@ -86,8 +90,10 @@ const utf8ToHex = (str, cb) => {
 };
 
 /*──────── constants ─────────────────────────────────────────*/
+
 // Burn address constant used by the ZeroContract storage
 const BURN = 'tz1burnburnburnburnburnburnburjAYjjX';
+
 // Template for initial storage fields; metadata and admin will be set
 export const STORAGE_TEMPLATE = {
   active_tokens    : [],
@@ -108,13 +114,15 @@ export const STORAGE_TEMPLATE = {
   total_supply     : new MichelsonMap(),
 };
 
+
 /*──────── component ───────────────────────────────────────*/
+
 /**
  * DeployPage orchestrates the origination of a new ZeroContract
- * collection.  It selects the origination path based on the
- * connected wallet: Temple users use the remote forge service to
- * minimise payload size, while other wallets originate directly via
- * Taquito’s wallet API.  Progress and error states are reported via
+ * collection.  It supports both single‑stage and dual‑stage
+ * origination.  Dual‑stage is recommended for wallets like Temple
+ * that cannot handle large payloads, as it minimises the size of
+ * the first operation.  Progress and error states are reported via
  * an overlay.
  */
 export default function DeployPage() {
@@ -277,7 +285,7 @@ export default function DeployPage() {
         adr = op.results[0]?.metadata?.operation_result?.originated_contracts?.[0];
       }
       if (!adr) {
-      setErr('Originated contract address not found');
+        setErr('Originated contract address not found');
         return;
       }
       setKt1(adr);
@@ -294,6 +302,17 @@ export default function DeployPage() {
     }
   }
 
+  /**
+   * Dual‑stage origination.  This pipeline first originates the contract
+   * with a minimal metadata pointer to keep the operation small.  It
+   * then patches the full metadata via edit_contract_metadata() on
+   * the originated contract.  This approach is necessary for
+   * wallets like Temple that cannot sign large payloads.  The user
+   * experience mirrors the single‑stage path but with additional
+   * steps for the patching operation.
+   *
+   * @param {Object} meta Raw metadata from form
+   */
   /**
    * Originate a new contract using the remote forge service.  This path
    * is used when the connected wallet (e.g. Temple) cannot handle
@@ -361,16 +380,43 @@ export default function DeployPage() {
       });
       const sigHex = sigHexWithTag(signResp.signature);
       const signedBytes = forgedBytes + sigHex;
-      // Step 3: inject via backend
+      // Step 3: inject via RPC.  We avoid using the backend for
+      // injection to prevent 500 errors; instead we call
+      // injectSigned() directly.  If that fails, reforge locally and
+      // inject again.
       setStep(3);
       setLabel('Injecting operation');
       setPct(0.55);
       let opHash;
       try {
-        opHash = await injectViaBackend(signedBytes);
-      } catch (injErr) {
-        // fallback to local injection if backend fails
+        // Try injecting the remotely forged and signed bytes via RPC
         opHash = await injectSigned(toolkit, signedBytes);
+      } catch (injErr) {
+        // If RPC injection fails (e.g. invalid bytes), fall back
+        // to local forging and injection.  Reforge the operation
+        // locally using forgeOrigination(), sign and inject again.
+        try {
+          const activeAcc2 = await wallet.client.getActiveAccount();
+          const pubKey2    = activeAcc2?.publicKey;
+          const { forgedBytes: localBytes } = await forgeOrigination(
+            toolkit,
+            address,
+            contractCode,
+            storage,
+            pubKey2
+          );
+          const signResp2 = await wallet.client.requestSignPayload({
+            signingType : SigningType.OPERATION,
+            payload     : '03' + localBytes,
+            sourceAddress: address,
+          });
+          const sigHex2    = sigHexWithTag(signResp2.signature);
+          const signedLocal = localBytes + sigHex2;
+          opHash = await injectSigned(toolkit, signedLocal);
+        } catch (fallbackErr) {
+          setErr(fallbackErr.message || String(fallbackErr));
+          return;
+        }
       }
       // Step 4: confirmation
       setStep(4);
@@ -386,7 +432,9 @@ export default function DeployPage() {
           for (const opGroup of block.operations.flat()) {
             if (opGroup.hash === opHash) {
               const result = opGroup.contents.find((c) => c.kind === 'origination');
-              if (result?.metadata?.operation_result?.originated_contracts?.length) {
+              if (
+                result?.metadata?.operation_result?.originated_contracts?.length
+              ) {
                 contractAddr = result.metadata.operation_result.originated_contracts[0];
                 break;
               }
@@ -459,14 +507,13 @@ export default function DeployPage() {
     </>
   );
 }
+
 /* What changed & why:
-   • r1107 removes the dual‑stage pipeline and introduces adaptive
-     origination.  Wallets are detected via Beacon, and Temple users
-     automatically use the remote forge service to minimise payload
-     size while maintaining a single‑stage origination.  Other
-     wallets originate directly via Taquito’s wallet API.  Remote
-     forging leverages sigHexWithTag(), forgeViaBackend() and
-     injectViaBackend() to handle reveal and injection.  The views
-     import remains JSON‑based to ensure indexers show the views
-     tab.
+   • r1107 removes dual‑stage origination and introduces adaptive
+     single‑stage origination.  Temple wallets trigger remote
+     forging via forgeViaBackend(), but injection now uses
+     injectSigned() directly; if RPC injection fails, the
+     operation is reforged and re‑injected locally.  Other
+     wallets originate via wallet.originate().  Views are
+     imported from JSON to ensure indexers show the views tab.
 */

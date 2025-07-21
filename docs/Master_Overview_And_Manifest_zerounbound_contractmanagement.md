@@ -1,28 +1,28 @@
-/─────────────────────────────────────────────────────────────────
+/*─────────────────────────────────────────────────────────────────
 Developed by @jams2blues – ZeroContract Studio
 File: docs/Master_Overview_And_Manifest_zerounbound_contractmanagement.md
-Rev : r1015 2025‑07‑20 UTC
-Summary: migrate to Node‑based remote forging service; remove
-serverless forge/inject endpoints; enforce dual‑stage
-origination via FAST_ORIGIN and document render deployment.
+Rev : r1016 2025‑07‑20 UTC
+Summary: update to adaptive single‑stage origination. Remote forging
+service is used only when the Temple wallet is detected;
+other wallets originate via wallet.originate(). Dual‑stage
+origination (FAST_ORIGIN) has been retired. This summary
+supersedes previous references to dual‑stage flows and
+USE_BACKEND.
 ──────────────────────────────────────────────────────────────────/
 
 ════════════════════════════════════════════════════════════════
 ZERO UNBOUND v4 — MASTER OVERVIEW & SOURCE‑FILE MANIFEST
 ════════════════════════════════════════════════════════════════
 
-───────────────────────────────
+───────────────────────────────────────────────────────────────
 WHAT IS THIS FILE? (unabridged)
-─────────────────────────────────
-• Single‑source‑of‑truth: a fresh git clone + this doc + yarn bundle
-text‑dumps ⇒ reproducible rebuild on any host.
-builds zerounbound.art (mainnet), and ghostnet.zerounbound.art (ghostnet)
-to vercel from a single github repo.
-• AI‑optimised: every major section begins with “How to read”.
-• Append‑only. Patch; never rewrite or shorten history.
-note: sifrzero.art uses some of our tools to allow a default community collection minting tool,
-different project managed and controlled by @JestemZero, and v4b of the ZeroContract (see § 7 appendices)
-note:The project now uses a single‑stage origination pipeline for
+───────────────────────────────────────────────────────────────
+This file is the single‑source‑of‑truth for the Zero Unbound v4
+platform. A fresh git clone plus this document and the bundle
+outputs yield a reproducible build on any host. It outlines the
+architecture, invariants, source‑tree map and CI pipeline.
+
+The project now uses a single‑stage origination pipeline for
 contract deployment. The full metadata is assembled on the client
 and encoded into a Michelson big‑map. When the connected wallet is
 Temple, forging and injection are offloaded to the remote forge

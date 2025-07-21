@@ -1,18 +1,13 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/deploy.js
-  Rev :    r1110   2025‑07‑21
-  Summary: Deploy page with adaptive origination.  The full
-           metadata is always assembled on the client.  For
-           wallets capable of signing large payloads (Kukai,
-           Umami), the contract is originated via
-           `wallet.originate()` in a single operation.  For
-           Temple wallet users, the deployment offloads the
-           forging step to a remote service backed by the Octez
-           CLI and then signs and injects the returned bytes via
-           RPC.  If backend forging fails, the page falls back
-           to local forging and injection.  Off‑chain views are
-           imported from JSON to ensure indexers recognise them.
+  Rev :    r1111   2025‑07‑21
+  Summary: Fix deploy UI alignment and signature prop.  Wrapped
+           contents in a centralised, opaque container (Wrap)
+           to prevent background bleed‑through and recentred
+           the form.  Passed the correct onDeploy prop to
+           DeployCollectionForm and kept adaptive origination
+           logic for Temple vs other wallets.
 ─────────────────────────────────────────────────────────────*/
 
 import React, { useRef, useState, useCallback } from 'react';
@@ -22,6 +17,35 @@ import { char2Bytes } from '@taquito/utils';
 // UI components
 import DeployCollectionForm from '../ui/DeployCollectionForm.jsx';
 import OperationOverlay     from '../ui/OperationOverlay.jsx';
+
+// Styled container – centre the page content and provide an opaque
+// background.  Without this wrapper the deploy form would sit
+// directly on the page background, causing the decorative zeros to
+// bleed through.  We mimic the layout used on other pages (e.g.
+// manage.js) by setting a max‑width, centering with margin auto and
+// applying padding.  The z‑index ensures overlays appear above
+// background graphics.
+import styledPkg from 'styled-components';
+const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
+
+const Wrap = styled.div`
+  position: relative;
+  z-index: 2;
+  background: var(--zu-bg);
+  width: 100%;
+  max-width: min(90vw, 1920px);
+  margin: 0 auto;
+  min-height: calc(var(--vh) - var(--hdr, 0));
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: 0.8rem clamp(0.4rem, 1.5vw, 1.2rem) 1.8rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(0.2rem, 0.45vh, 0.6rem);
+`;
 
 // Wallet context
 import { useWallet } from '../contexts/WalletContext.js';
@@ -432,11 +456,15 @@ export default function DeployPage() {
   }
   /*──────── render ─────────────────────────────────────────*/
   return (
-    <>
-      {/* The visual components are omitted for brevity.  In your application
-          this would render the form, overlay and progress indicators. */}
-      {/* Replace the following with your actual UI components: */}
-      <DeployCollectionForm onSubmit={originate} />
+    <Wrap>
+      {/* Deploy form collects metadata and triggers origination.  Use
+          the expected onDeploy prop instead of onSubmit; DeployCollectionForm
+          invokes this callback with the user’s metadata when the form
+          submits. */}
+      <DeployCollectionForm onDeploy={originate} />
+      {/* Show the overlay whenever a step is in progress or an error
+          has occurred.  The overlay will cover the parent wrapper and
+          report progress, errors and the resulting contract address. */}
       {(step !== -1 || err) && (
         <OperationOverlay
           step={step}
@@ -447,18 +475,20 @@ export default function DeployPage() {
           onClose={reset}
         />
       )}
-    </>
+    </Wrap>
   );
 }
 
 /* What changed & why:
-   – Bumped revision to r1110.  Temple users now offload forging to
-     a backend running the Octez CLI, then sign and inject the
-     returned bytes via RPC.  If the backend fails, forging is
-     performed locally via forgeOrigination().  All injections
-     occur client-side via injectSigned() to avoid 500 errors on
-     the backend.  Kukai/Umami users continue to originate via
-     wallet.originate() without using the forge service.  Off‑chain
-     views are loaded from JSON to keep the Michelson script free
-     of JSON and to avoid misaligned expression errors in Octez.
+   – Bumped revision to r1111 and centralised the deploy page UI
+     using a styled Wrap component.  This wrapper mirrors the
+     layout used on other pages (e.g. manage.js), providing an
+     opaque background, max‑width and centred positioning.  It
+     prevents the decorative zeros from showing through and
+     recentres the form.  The DeployCollectionForm is now
+     called with onDeploy to match its expected prop, resolving
+     the TypeError.  All adaptive forging logic from r1110 is
+     retained (Temple uses the backend forge service; others use
+     wallet.originate()), and off‑chain views continue to be
+     loaded from JSON to avoid misaligned expression errors.
 */

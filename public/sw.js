@@ -1,8 +1,21 @@
 //File: ghostnet/public/sw.js
-/* r264 – Invariant I09 compliance (Workbox 7) + stable init
-   • Upgraded CDN script to v7.0.0
-   • workbox.setConfig placed first (fixes “config must be set”)
-   • Spinner svg now cached instantly via image route                                   */
+/* r265 – network-first scripts & styles, network-only html
+   • Switch static asset cache from StaleWhileRevalidate to NetworkFirst for JS/CSS/manifest
+   • Use NetworkOnly for HTML documents to always fetch latest pages
+   • Retains image and tzkt caching unchanged                                 */
+
+/* IMPORTANT: This service worker is loaded by Workbox v7.0.0. It
+   controls caching behaviour across the Zerounbound front‑end.  The
+   previous revision used a StaleWhileRevalidate strategy for all
+   scripts, styles and documents which meant browsers could keep
+   returning outdated code from the cache until a network request
+   eventually updated it.  To guarantee users always receive fresh
+   code after a deploy, this revision changes the strategy: scripts,
+   styles and manifests now use NetworkFirst with a 10‑second network
+   timeout (falling back to cache only if offline), and HTML
+   documents bypass the cache entirely.  Images and tzkt JSON
+   continue to use StaleWhileRevalidate with the same expiration
+   policies. */
 
 importScripts('https://storage.googleapis.com/workbox-cdn/releases/7.0.0/workbox-sw.js');
 
@@ -20,13 +33,22 @@ workbox.core.registerQuotaErrorCallback(() =>
 /* clear legacy precaches */
 workbox.precaching.cleanupOutdatedCaches();
 
-/* static assets (js/css/html/json/manifest) */
+/* scripts, styles and manifests: network‑first with timeout */
 workbox.routing.registerRoute(
-  ({ request }) => ['script', 'style', 'document', 'manifest'].includes(request.destination),
-  new workbox.strategies.StaleWhileRevalidate({ cacheName: 'static-assets' }),
+  ({ request }) => ['script', 'style', 'manifest'].includes(request.destination),
+  new workbox.strategies.NetworkFirst({
+    cacheName: 'static-assets',
+    networkTimeoutSeconds: 10,
+  }),
 );
 
-/* images incl. loading.svg */
+/* HTML documents: always fetch from network (fallback offline only) */
+workbox.routing.registerRoute(
+  ({ request }) => request.destination === 'document',
+  new workbox.strategies.NetworkOnly(),
+);
+
+/* images incl. loading.svg (unchanged) */
 workbox.routing.registerRoute(
   ({ request }) => request.destination === 'image',
   new workbox.strategies.StaleWhileRevalidate({
@@ -38,7 +60,7 @@ workbox.routing.registerRoute(
   }),
 );
 
-/* TZKT JSON (5-min SWR) */
+/* TZKT JSON (5‑min SWR) */
 workbox.routing.registerRoute(
   ({ url }) => url.hostname.endsWith('tzkt.io'),
   new workbox.strategies.StaleWhileRevalidate({

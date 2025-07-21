@@ -1,11 +1,12 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/ContractCarousels.jsx
-  Rev :    r759   2025-07-15
-  Summary: adds fetch timeouts and fallbacks so carousels recover from network stalls; never drop contracts with missing meta.
-──────────────────────────────────────────────────────────────*/
+  Rev :    r760   2025-07-21
+  Summary: reduced refresh interval and auto-refresh on storage change
+─────────────────────────────────────────────────────────────*/
 import React, {
-  useEffect, useState, useRef, useCallback, useMemo, forwardRef, useImperativeHandle,
+  useEffect, useState, useRef, useCallback, useMemo, forwardRef, 
+  useImperativeHandle,
 }                       from 'react';
 import { createPortal } from 'react-dom';
 import styledPkg        from 'styled-components';
@@ -40,7 +41,8 @@ const HIDDEN_KEY = 'zu_hidden_contracts_v1';
 const CACHE_KEY  = 'zu_contract_cache_v1';
 const DETAIL_TTL = 7 * 24 * 60 * 60 * 1_000;  /* 7 days */
 const CACHE_MAX  = 150;
-const LIST_TTL   = 300_000;
+/* Shorten list TTL from 5 minutes to 1 minute so new contracts appear sooner */
+const LIST_TTL   = 60_000;
 const MIN_SPIN   = 200;
 const RETRY_MAX  = 3;
 const RETRY_DELAY= 2000;
@@ -105,8 +107,6 @@ async function withRetry(fn, max = RETRY_MAX, delay = RETRY_DELAY) {
   }
   throw lastErr;
 }
-
-/*──────── timeout helper ───────────────────────────────────*/
 
 /*──────── tzkt discovery helpers ───────────────────────────*/
 async function fetchOriginated(addr, net) {
@@ -180,8 +180,7 @@ async function enrich(list, net, force = false) {
     let freshOK = false;
     if (!force && detCache) {
       const ttlOk = (Date.now() - cached.ts) < DETAIL_TTL;
-      const chainNewer =
-        it.timestamp && detCache.date && new Date(it.timestamp) > new Date(detCache.date);
+      const chainNewer = it.timestamp && detCache.date && new Date(it.timestamp) > new Date(detCache.date);
       freshOK = ttlOk && !chainNewer;
     }
 
@@ -369,8 +368,8 @@ const ErrorWrap = styled(BusyWrap)`
   p { font-weight: bold; }
 `;
 
-const ICON_EYE  = '👁️';
-const ICON_HIDE = '🚫';
+const ICON_EYE  = '️';
+const ICON_HIDE = '';
 const ICON_LOAD = '↻';
 
 const TinyHide = styled(PixelButton).withConfig({ componentId: 'cc-hide' })`
@@ -486,7 +485,7 @@ const SlideCard = React.memo(function SlideCard({
         {hazards.scripts && (
           <EnableScriptsToggle
             contractAddress={contract.address}
-            onToggle={() => consentScripts ? setConsentScripts(false) : askEnableScripts()}
+            onToggle={() => (consentScripts ? setConsentScripts(false) : askEnableScripts())}
             style={{ margin: '0.2rem auto 0', display: 'block' }}
           />
         )}
@@ -580,7 +579,7 @@ const Rail = React.memo(function Rail({
           fontWeight: 700,
         }}
       >
-        ↔ drag/swipe • hold ◀ ▶ • Click ↻ to LOAD CONTRACT • 🚫/👁️ hide/unhide
+        ↔ drag/swipe • hold ◀ ▶ • Click ↻ to LOAD CONTRACT • /️ hide/unhide
       </p>
 
       <div
@@ -747,7 +746,19 @@ const ContractCarouselsComponent = forwardRef(function ContractCarousels({ onSel
   useEffect(() => {
     refresh();
     const id = setInterval(() => refresh(), LIST_TTL);
-    return () => clearInterval(id);
+    // Also listen for localStorage updates; if cache key changes, force refresh
+    const onStorage = (e) => {
+      if (e.key === CACHE_KEY) refresh(true);
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('storage', onStorage);
+    }
+    return () => {
+      clearInterval(id);
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('storage', onStorage);
+      }
+    };
   }, [refresh]);
 
   useImperativeHandle(ref, () => ({ refresh }));
@@ -816,4 +827,4 @@ const ContractCarouselsComponent = forwardRef(function ContractCarousels({ onSel
 
 export default ContractCarouselsComponent;
 
-/* What changed & why: portaled dialogs to document.body for center positioning; fixed toggle to call askEnableScripts; added badge click dlg; resolved non-functional clicks; prior fixes preserved; Path & Casing Checkpoint passed; lint-clean. */
+/* What changed & why: shortened LIST_TTL to 1 min and added storage listener for auto-refresh; this keeps carousels up‑to‑date without manual refresh. */

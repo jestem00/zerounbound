@@ -2,12 +2,9 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/deploy.js
-  Rev :    r1114   2025‑07‑21
-  Summary: Normalize contract code line endings before forging to
-           avoid CRLF‑related misaligned expression errors.  Kept
-           view removal and debug logging for Temple, and retained
-           fallback to local forging.  Kukai/Umami flows unchanged.
-─────────────────────────────────────────────────────────────*/
+  Rev :    r1115   2025‑07‑21
+  Summary: Remove views property for FAST_ORIGIN; add debug logging and normalize line endings for Temple origination.
+────────────────────────────────────────────────────────────*/
 
 import React, { useRef, useState, useCallback } from 'react';
 import { MichelsonMap } from '@taquito/michelson-encoder';
@@ -60,6 +57,12 @@ import { useWallet } from '../contexts/WalletContext.js';
 import contractCode from '../../contracts/Zero_Contract_V4.tz';
 import viewsJson    from '../../contracts/metadata/views/Zero_Contract_v4_views.json' assert { type: 'json' };
 
+// Normalise contract code line endings to LF. This prevents misaligned
+// expression errors when forging operations via Octez.
+const CONTRACT_CODE = typeof contractCode === 'string'
+  ? contractCode.replace(/\r\n|\r/g, '\n')
+  : contractCode;
+
 // Network helpers for forging and injection
 import {
   forgeViaBackend,
@@ -67,7 +70,6 @@ import {
   injectSigned,
   sleep,
   forgeOrigination,
-  encodeStorageForForge,
 } from '../core/net.js';
 
 // Signing type constant from Beacon
@@ -232,30 +234,29 @@ export default function DeployPage() {
   /**
    * Build a minimal metadata object for fast originations.  This
    * helper calls buildMetaObject() to assemble the full metadata
-   * and then overrides the views property with a placeholder (0x00).
-   * Use this when FAST_ORIGIN is enabled to reduce the size of the
-   * origination operation for Temple wallet users.  All other
-   * properties remain unchanged.
+   * and then removes the views property entirely.  Use this when
+   * FAST_ORIGIN is enabled to reduce the size of the origination
+   * operation for Temple wallet users.  All other properties remain unchanged.
    *
    * @param {Object} meta Raw form data from DeployCollectionForm
    * @returns {Object} Minimal metadata object
    */
   function buildFastMetaObject(meta) {
     const obj = buildMetaObject(meta);
-    // Remove the views property entirely for Temple origination.  By
-    // omitting views, the metadata stays small and avoids misalignment
-    // issues during forging.  Full views can be set later via
-    // edit_contract_metadata.
+    // Remove views entirely.  The contract’s edit_contract_metadata
+    // entrypoint can later be used to set full views once the contract
+    // is originated.
     delete obj.views;
     return obj;
   }
+
   /**
    * Perform a single-stage origination via the wallet API.  This is
    * used for Kukai/Umami and other wallets that handle large payloads.
    *
    * @param {Object} meta Raw metadata from form
    */
-  async function originateSingleStage(meta, fast = false) {
+  async function originateSingleStage(meta) {
     // Ensure wallet connection
     if (!address) {
       await retryConnect();
@@ -273,11 +274,7 @@ export default function DeployPage() {
     let headerBytes;
     let bodyHex;
     try {
-      // Choose between full or fast metadata.  When fast=true and FAST_ORIGIN
-      // is enabled, build a minimal metadata object (no views).  Otherwise
-      // build the full metadata with off‑chain views.  This option is
-      // primarily used for Temple to reduce operation size.
-      const metaObj = fast && FAST_ORIGIN ? buildFastMetaObject(meta) : buildMetaObject(meta);
+      const metaObj = buildMetaObject(meta);
       headerBytes = '0x' + char2Bytes('tezos-storage:content');
       bodyHex = utf8ToHex(JSON.stringify(metaObj), (p) => setPct((p * 0.25) / 100));
     } catch (e) {
@@ -295,7 +292,7 @@ export default function DeployPage() {
     setLabel('Origination (wallet)');
     setPct(0.25);
     try {
-      const op = await wallet.originate({ code: contractCode, storage });
+      const op = await wallet.originate({ code: CONTRACT_CODE, storage });
       setStep(2);
       setLabel('Waiting for confirmation');
       setPct(0.5);
@@ -308,6 +305,7 @@ export default function DeployPage() {
       setErr(err2.message || String(err2));
     }
   }
+
   /**
    * Originate via the remote forge service.  Handles Temple wallet
    * compatibility by offloading forging to the backend, then signing
@@ -350,29 +348,21 @@ export default function DeployPage() {
     md.set('content', bodyHex);
     // Build storage object
     const storage = { ...STORAGE_TEMPLATE, admin: address, metadata: md };
-    // Before forging, log the payload that will be sent to the forge
-    // service.  This shows the contract code and the encoded storage
-    // that octez-client will read, helping diagnose misaligned
-    // expression errors.  Only run in development; in production
-    // process.env.NODE_ENV is usually 'production'.
-    if (process.env.NODE_ENV !== 'production') {
+
+    // Debug: log payload before forging
+    if (typeof window !== 'undefined') {
       try {
-        const encodedStorage = encodeStorageForForge(contractCode, storage);
-        // Use JSON.stringify for encodedStorage if it is an object; fall
-        // back to the raw value otherwise.  The code is left as a string
-        // for readability.
         console.log('Temple forge payload:', {
-          code   : contractCode,
-          storage: encodedStorage,
+          code   : CONTRACT_CODE,
+          storage: JSON.parse(JSON.stringify(storage)),
           source : address,
         });
-      } catch (e) {
-        console.warn('Failed to encode storage for debug logging:', e);
+      } catch (dbgErr) {
+        console.warn('Failed to stringify storage for debug', dbgErr);
       }
     }
-    // Step 1: forge via backend.  Normalize CRLF→LF in contract code
-    // before sending to the forge service to prevent misaligned
-    // expression errors.  If this fails, fall back to local forging.
+
+    // Step 1: forge via backend.  If this fails, fall back to local forging.
     setStep(1);
     setLabel('Forging operation');
     setPct(0.25);
@@ -380,9 +370,7 @@ export default function DeployPage() {
     try {
       const activeAcc = await wallet.client.getActiveAccount();
       const publicKey = activeAcc?.publicKey;
-      // Replace any CRLF or CR sequences with LF to avoid misalignment.
-      const cleanedCode = contractCode.split(/\r\n|\r/).join('\n');
-      forgedBytes = await forgeViaBackend(cleanedCode, storage, address, publicKey);
+      forgedBytes = await forgeViaBackend(CONTRACT_CODE, storage, address, publicKey);
     } catch (e) {
       // Fallback to local forging on backend failure
       try {
@@ -391,7 +379,7 @@ export default function DeployPage() {
         const { forgedBytes: localBytes } = await forgeOrigination(
           toolkit,
           address,
-          contractCode,
+          CONTRACT_CODE,
           storage,
           publicKeyLocal,
         );
@@ -438,7 +426,7 @@ export default function DeployPage() {
         const { forgedBytes: localBytes } = await forgeOrigination(
           toolkit,
           address,
-          contractCode,
+          CONTRACT_CODE,
           storage,
           pubKey2,
         );
@@ -486,6 +474,7 @@ export default function DeployPage() {
     setStep(5);
     setLabel('Origination confirmed');
   }
+
   /**
    * Originate a new contract.  Chooses between the remote forge
    * service and direct wallet origination based on the connected
@@ -508,17 +497,12 @@ export default function DeployPage() {
       }
     } catch {}
     if (useBackend) {
-      // For Temple, continue to use the backend forge service but with
-      // minimal metadata (no views) and normalised contract code.  This
-      // reduces payload size and addresses misalignment errors.  Any
-      // additional views can be added later via edit_contract_metadata.
       await originateViaForgeService(meta);
     } else {
-      // For other wallets (Kukai/Umami), proceed with a single‑stage
-      // origination using full metadata.
-      await originateSingleStage(meta, false);
+      await originateSingleStage(meta);
     }
   }
+
   /*──────── render ─────────────────────────────────────────*/
   return (
     <Wrap>
@@ -545,12 +529,10 @@ export default function DeployPage() {
 }
 
 /* What changed & why:
-   – Bumped revision to r1112.  Temple now skips the remote
-     forge service entirely and instead uses wallet.originate
-     with minimal metadata (no views) to avoid parsing errors
-     and sign payload limits.  Added debug logging of encoded
-     storage for diagnostics via encodeStorageForForge and
-     removed views from the fast meta object.  Kukai/Umami
-     flows and the UI wrapper remain unchanged.
+   – Removed the views field completely in buildFastMetaObject to prevent large metadata
+     payloads for Temple wallet originations.  Added a CONTRACT_CODE constant
+     that normalises CRLF line endings to LF, and replaced occurrences of contractCode
+     with CONTRACT_CODE when forging and originating to eliminate misaligned
+     expression errors.  Added a debug console log before forging to inspect
+     the payload being sent to the forge service.  Bumped revision to r1115.
 */
-

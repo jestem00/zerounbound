@@ -1,19 +1,11 @@
 /*─────────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    forge_service_node/index.js
-  Rev :    r9   2025‑07‑21
-  Summary: Remote forging service built atop the official Octez CLI.
-           This service exposes a single `/forge` endpoint which
-           accepts a Michelson script, initial storage and the
-           originating tz1/KT1 address.  It writes the script and
-           storage to temporary files and shells out to the
-           `octez-client` binary to construct and forge a dummy
-           origination.  The resulting operation bytes are returned
-           to the caller for signing.  An `/inject` endpoint is
-           intentionally omitted; clients must inject using RPC via
-           Taquito’s `injectSigned()` helper.  To use this service
-           you must install the Octez client inside your deployment
-           (see the accompanying Dockerfile for installation steps).
+  Rev :    r10   2025‑07‑21
+  Summary: Pass initial storage directly as Micheline JSON string to
+           octez-client via --init.  This avoids the previous
+           misaligned expression error caused by writing storage to a
+           separate file and referencing it on the command line.
 ─────────────────────────────────────────────────────────────────*/
 
 const express = require('express');
@@ -54,14 +46,17 @@ function runCli(bin, args = []) {
 
 /**
  * Forge an origination using the Octez client.  A temporary
- * Michelson script and storage are written to the OS temp directory
- * and passed to `octez-client originate contract dummy ... --dry-run`.
- * The command produces a "Raw operation bytes" line which we
- * extract with a regular expression.  The temporary files are
- * removed on completion.
+ * Michelson script is written to the OS temp directory and passed to
+ * `octez-client originate contract dummy ... --dry-run`.  Unlike the
+ * previous implementation, the initial storage is provided
+ * inline via the `--init` flag as a Micheline JSON string.  This
+ * eliminates misaligned expression errors caused by referencing a
+ * separate storage file.  The command produces a "Raw operation
+ * bytes" line which we extract with a regular expression.  The
+ * temporary files are removed on completion.
  *
  * @param {any} code The contract code (string or Micheline array)
- * @param {any} storage The initial storage object
+ * @param {any} storage The initial storage object (Micheline or high-level)
  * @param {string} source The tz1/KT1 address originating the contract
  * @returns {Promise<string>} Hex string of forged operation bytes
  */
@@ -69,31 +64,35 @@ async function forgeWithOctez(code, storage, source) {
   // Determine CLI path and RPC endpoint from environment with sensible
   // defaults.  `OCTEZ_CLIENT` can be set to override the binary
   // location; `RPC_URL` selects which Tezos RPC node to use.
-  const octez     = process.env.OCTEZ_CLIENT || 'octez-client';
-  const rpc       = process.env.RPC_URL      || 'https://rpc.ghostnet.teztnets.com';
+  const octez = process.env.OCTEZ_CLIENT || 'octez-client';
+  const rpc   = process.env.RPC_URL      || 'https://rpc.ghostnet.teztnets.com';
   // Create a temporary directory for this forge request
-  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-'));
-  const codeFile    = path.join(tmpDir, 'contract.tz');
-  const storageFile = path.join(tmpDir, 'storage.json');
-  // Write the code and storage to disk.  If `code` is an object it
-  // will be stringified; otherwise it is assumed to be a Michelson
-  // string.  Storage is always stringified as JSON.
+  const tmpDir   = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-'));
+  const codeFile = path.join(tmpDir, 'contract.tz');
+  // Write the code to disk.  If `code` is an object it will be stringified;
+  // otherwise it is assumed to be a Michelson string.
   await fs.writeFile(codeFile, typeof code === 'string' ? code : JSON.stringify(code));
-  await fs.writeFile(storageFile, JSON.stringify(storage));
+  // Convert the provided storage to a Micheline JSON string.  When storage
+  // is already a string we reuse it verbatim; otherwise we JSON stringify
+  // the object.  The resulting string is passed directly to --init.
+  const storageMicheline = typeof storage === 'string' ? storage : JSON.stringify(storage);
   try {
-    // Build the originate command.  Using `--dry-run` and `--force`
-    // constructs the operation without injecting it.  The dummy
-    // alias can be anything; it is ignored on dry-run.  We set a
-    // conservative burn cap since the CLI requires one even in dry
-    // runs.  The RPC endpoint is passed via --endpoint.
     const args = [
-      '--endpoint', rpc,
-      'originate', 'contract', 'dummy',
-      'transferring', '0',
-      'from', source,
-      'running', codeFile,
-      '--init', storageFile,
-      '--burn-cap', '3',
+      '--endpoint',
+      rpc,
+      'originate',
+      'contract',
+      'dummy',
+      'transferring',
+      '0',
+      'from',
+      source,
+      'running',
+      codeFile,
+      '--init',
+      storageMicheline,
+      '--burn-cap',
+      '3',
       '--dry-run',
       '--force',
     ];
@@ -141,11 +140,10 @@ app.listen(PORT, () => {
 });
 
 /* What changed & why:
-   – Replaced Taquito-based forging logic with a CLI-driven workflow.
-     Octez-client is invoked with a dry-run origination to construct
-     operation bytes exactly as the protocol would.  This method
-     handles large contracts reliably and avoids prevalidation errors
-     seen with Temple.  The service no longer attempts to inject
-     operations and instead delegates that responsibility to the
-     client.  Revision bumped to r9 to reflect major overhaul.
+   – Provide initial storage to octez-client via --init as a Micheline
+     JSON string instead of writing it to a file.  Passing the file
+     path previously caused misaligned expression parsing errors on
+     large contracts.  This fix yields correct forging for the Zero
+     Contract v4 deployment when using Temple Wallet.
+   – Bumped revision to r10 and updated the summary accordingly.
 */

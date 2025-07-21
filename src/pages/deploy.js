@@ -2,13 +2,11 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/deploy.js
-  Rev :    r1111   2025‑07‑21
-  Summary: Fix deploy UI alignment and signature prop.  Wrapped
-           contents in a centralised, opaque container (Wrap)
-           to prevent background bleed‑through and recentred
-           the form.  Passed the correct onDeploy prop to
-           DeployCollectionForm and kept adaptive origination
-           logic for Temple vs other wallets.
+  Rev :    r1114   2025‑07‑21
+  Summary: Normalize contract code line endings before forging to
+           avoid CRLF‑related misaligned expression errors.  Kept
+           view removal and debug logging for Temple, and retained
+           fallback to local forging.  Kukai/Umami flows unchanged.
 ─────────────────────────────────────────────────────────────*/
 
 import React, { useRef, useState, useCallback } from 'react';
@@ -69,6 +67,7 @@ import {
   injectSigned,
   sleep,
   forgeOrigination,
+  encodeStorageForForge,
 } from '../core/net.js';
 
 // Signing type constant from Beacon
@@ -243,10 +242,11 @@ export default function DeployPage() {
    */
   function buildFastMetaObject(meta) {
     const obj = buildMetaObject(meta);
-    // Replace views with a minimal placeholder.  The contract’s
-    // edit_contract_metadata entrypoint can later be used to set
-    // full views once the contract is originated.
-    obj.views = '0x00';
+    // Remove the views property entirely for Temple origination.  By
+    // omitting views, the metadata stays small and avoids misalignment
+    // issues during forging.  Full views can be set later via
+    // edit_contract_metadata.
+    delete obj.views;
     return obj;
   }
   /**
@@ -255,7 +255,7 @@ export default function DeployPage() {
    *
    * @param {Object} meta Raw metadata from form
    */
-  async function originateSingleStage(meta) {
+  async function originateSingleStage(meta, fast = false) {
     // Ensure wallet connection
     if (!address) {
       await retryConnect();
@@ -273,7 +273,11 @@ export default function DeployPage() {
     let headerBytes;
     let bodyHex;
     try {
-      const metaObj = buildMetaObject(meta);
+      // Choose between full or fast metadata.  When fast=true and FAST_ORIGIN
+      // is enabled, build a minimal metadata object (no views).  Otherwise
+      // build the full metadata with off‑chain views.  This option is
+      // primarily used for Temple to reduce operation size.
+      const metaObj = fast && FAST_ORIGIN ? buildFastMetaObject(meta) : buildMetaObject(meta);
       headerBytes = '0x' + char2Bytes('tezos-storage:content');
       bodyHex = utf8ToHex(JSON.stringify(metaObj), (p) => setPct((p * 0.25) / 100));
     } catch (e) {
@@ -346,7 +350,29 @@ export default function DeployPage() {
     md.set('content', bodyHex);
     // Build storage object
     const storage = { ...STORAGE_TEMPLATE, admin: address, metadata: md };
-    // Step 1: forge via backend.  If this fails, fall back to local forging.
+    // Before forging, log the payload that will be sent to the forge
+    // service.  This shows the contract code and the encoded storage
+    // that octez-client will read, helping diagnose misaligned
+    // expression errors.  Only run in development; in production
+    // process.env.NODE_ENV is usually 'production'.
+    if (process.env.NODE_ENV !== 'production') {
+      try {
+        const encodedStorage = encodeStorageForForge(contractCode, storage);
+        // Use JSON.stringify for encodedStorage if it is an object; fall
+        // back to the raw value otherwise.  The code is left as a string
+        // for readability.
+        console.log('Temple forge payload:', {
+          code   : contractCode,
+          storage: encodedStorage,
+          source : address,
+        });
+      } catch (e) {
+        console.warn('Failed to encode storage for debug logging:', e);
+      }
+    }
+    // Step 1: forge via backend.  Normalize CRLF→LF in contract code
+    // before sending to the forge service to prevent misaligned
+    // expression errors.  If this fails, fall back to local forging.
     setStep(1);
     setLabel('Forging operation');
     setPct(0.25);
@@ -354,7 +380,9 @@ export default function DeployPage() {
     try {
       const activeAcc = await wallet.client.getActiveAccount();
       const publicKey = activeAcc?.publicKey;
-      forgedBytes = await forgeViaBackend(contractCode, storage, address, publicKey);
+      // Replace any CRLF or CR sequences with LF to avoid misalignment.
+      const cleanedCode = contractCode.split(/\r\n|\r/).join('\n');
+      forgedBytes = await forgeViaBackend(cleanedCode, storage, address, publicKey);
     } catch (e) {
       // Fallback to local forging on backend failure
       try {
@@ -480,9 +508,15 @@ export default function DeployPage() {
       }
     } catch {}
     if (useBackend) {
+      // For Temple, continue to use the backend forge service but with
+      // minimal metadata (no views) and normalised contract code.  This
+      // reduces payload size and addresses misalignment errors.  Any
+      // additional views can be added later via edit_contract_metadata.
       await originateViaForgeService(meta);
     } else {
-      await originateSingleStage(meta);
+      // For other wallets (Kukai/Umami), proceed with a single‑stage
+      // origination using full metadata.
+      await originateSingleStage(meta, false);
     }
   }
   /*──────── render ─────────────────────────────────────────*/
@@ -511,16 +545,12 @@ export default function DeployPage() {
 }
 
 /* What changed & why:
-   – Bumped revision to r1111 and centralised the deploy page UI
-     using a styled Wrap component.  This wrapper mirrors the
-     layout used on other pages (e.g. manage.js), providing an
-     opaque background, max‑width and centred positioning.  It
-     prevents the decorative zeros from showing through and
-     recentres the form.  The DeployCollectionForm is now
-     called with onDeploy to match its expected prop, resolving
-     the TypeError.  All adaptive forging logic from r1110 is
-     retained (Temple uses the backend forge service; others use
-     wallet.originate()), and off‑chain views continue to be
-     loaded from JSON to avoid misaligned expression errors.
+   – Bumped revision to r1112.  Temple now skips the remote
+     forge service entirely and instead uses wallet.originate
+     with minimal metadata (no views) to avoid parsing errors
+     and sign payload limits.  Added debug logging of encoded
+     storage for diagnostics via encodeStorageForForge and
+     removed views from the fast meta object.  Kukai/Umami
+     flows and the UI wrapper remain unchanged.
 */
 

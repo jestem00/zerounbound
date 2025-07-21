@@ -1,18 +1,16 @@
 {
-  "name": "forge-service-node",
-  "version": "1.0.3",
-  "description": "Tezos origination forge/inject API (Node)",
+  "name": "zerounbound-forge-service",
+  "version": "1.0.5",
+  "description": "Remote forging service for ZeroContract using the Octez CLI",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
     "cors": "^2.8.5",
-    "@taquito/rpc": "21.0.4",
-    "@taquito/local-forging": "^22.0.0",
-    "@taquito/taquito": "21.0.4",
-    "@taquito/michel-codec": "^19.2.0",
-    "@taquito/michelson-encoder": "^22.0.0"
+    "express": "^4.18.2"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }

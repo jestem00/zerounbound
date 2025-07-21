@@ -1,253 +1,151 @@
 /*─────────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    forge_service_node/index.js
-  Rev :    r7   2025‑07‑21
-  Summary: Improved remote forge service for Tezos origination.
-           Estimates gas/fee/storage with TezosToolkit and now
-           attempts to forge operations via the RPC first, falling
-           back to LocalForger on failure.  Handles reveal
-           operations when needed and returns forged bytes only;
-           injection remains client‑side via injectSigned().  This
-           update ensures operations conform to node expectations
-           for large contracts while retaining resilience.
+  Rev :    r9   2025‑07‑21
+  Summary: Remote forging service built atop the official Octez CLI.
+           This service exposes a single `/forge` endpoint which
+           accepts a Michelson script, initial storage and the
+           originating tz1/KT1 address.  It writes the script and
+           storage to temporary files and shells out to the
+           `octez-client` binary to construct and forge a dummy
+           origination.  The resulting operation bytes are returned
+           to the caller for signing.  An `/inject` endpoint is
+           intentionally omitted; clients must inject using RPC via
+           Taquito’s `injectSigned()` helper.  To use this service
+           you must install the Octez client inside your deployment
+           (see the accompanying Dockerfile for installation steps).
 ──────────────────────────────────────────────────────────────────*/
 
 const express = require('express');
 const cors    = require('cors');
-const { RpcClient }   = require('@taquito/rpc');
-const { LocalForger } = require('@taquito/local-forging');
-const { Parser }      = require('@taquito/michel-codec');
-const { Schema }      = require('@taquito/michelson-encoder');
-const { TezosToolkit, OpKind } = require('@taquito/taquito');
+const fs      = require('fs/promises');
+const os      = require('os');
+const path    = require('path');
+const { execFile } = require('child_process');
 
-// Create Express app and enable JSON and CORS
 const app = express();
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '10mb' }));
 app.use(cors());
 
-// Health check endpoint required by Render
-app.get('/healthz', (req, res) => {
+// Basic health check for Render’s liveness probe
+app.get('/healthz', (_req, res) => {
   res.status(200).json({ status: 'ok' });
 });
 
-// Determine RPC URL from environment variable or default to Ghostnet.  We
-// construct both a low-level RpcClient (for branch/counter queries) and
-// a TezosToolkit instance (for fee/gas/storage estimation).
-const rpcUrl = process.env.RPC_URL || 'https://rpc.ghostnet.teztnets.com';
-const rpc    = new RpcClient(rpcUrl);
-const Tezos  = new TezosToolkit(rpcUrl);
-
 /**
- * Utility to fetch branch and counter for a given source address.
- * Uses the RPC to get the current head block hash (branch) and
- * the next counter for the source account.
+ * Execute a CLI command and return its stdout.  This helper wraps
+ * Node’s child_process.execFile in a Promise and sets a generous
+ * buffer to accommodate the large output produced by octez-client.
  *
- * @param {string} source tz1/KT1 address
- * @returns {Promise<{ branch: string, counter: string }>}
+ * @param {string} bin Path to the binary
+ * @param {string[]} args List of command line arguments
+ * @returns {Promise<string>} Stdout from the command
  */
-async function getBranchAndCounter(source) {
-  const header   = await rpc.getBlockHeader();
-  const branch   = header.hash;
-  const contract = await rpc.getContract(source);
-  const counter  = parseInt(contract.counter, 10) + 1;
-  return { branch, counter: counter.toString() };
+function runCli(bin, args = []) {
+  return new Promise((resolve, reject) => {
+    execFile(bin, args, { maxBuffer: 1024 * 1024 * 50 }, (err, stdout) => {
+      if (err) {
+        return reject(err);
+      }
+      resolve(stdout.toString());
+    });
+  });
 }
 
 /**
- * Encode high‑level storage into Micheline using Schema.  If the code
- * argument is a string, it is parsed with Parser.  If the storage
- * already appears to be Micheline (has a prim property), it is
- * returned unchanged.  Otherwise, the storage type is extracted from
- * the Michelson script and encoded via Schema.  On error, the
- * original storage is returned.
+ * Forge an origination using the Octez client.  A temporary
+ * Michelson script and storage are written to the OS temp directory
+ * and passed to `octez-client originate contract dummy ... --dry-run`.
+ * The command produces a "Raw operation bytes" line which we
+ * extract with a regular expression.  The temporary files are
+ * removed on completion.
  *
- * @param {any} code Michelson code array or string
- * @param {any} storage High‑level storage object or Micheline
- * @returns {any} Encoded storage in Micheline or original value
+ * @param {any} code The contract code (string or Micheline array)
+ * @param {any} storage The initial storage object
+ * @param {string} source The tz1/KT1 address originating the contract
+ * @returns {Promise<string>} Hex string of forged operation bytes
  */
-function encodeStorageForForge(code, storage) {
-  // If storage already looks like Micheline, return it directly
-  if (storage && typeof storage === 'object' && storage.prim) {
-    return storage;
-  }
+async function forgeWithOctez(code, storage, source) {
+  // Determine CLI path and RPC endpoint from environment with sensible
+  // defaults.  `OCTEZ_CLIENT` can be set to override the binary
+  // location; `RPC_URL` selects which Tezos RPC node to use.
+  const octez     = process.env.OCTEZ_CLIENT || 'octez-client';
+  const rpc       = process.env.RPC_URL      || 'https://rpc.ghostnet.teztnets.com';
+  // Create a temporary directory for this forge request
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-'));
+  const codeFile    = path.join(tmpDir, 'contract.tz');
+  const storageFile = path.join(tmpDir, 'storage.json');
+  // Write the code and storage to disk.  If `code` is an object it
+  // will be stringified; otherwise it is assumed to be a Michelson
+  // string.  Storage is always stringified as JSON.
+  await fs.writeFile(codeFile, typeof code === 'string' ? code : JSON.stringify(code));
+  await fs.writeFile(storageFile, JSON.stringify(storage));
   try {
-    let script = code;
-    if (typeof code === 'string') {
-      const parser = new Parser();
-      script = parser.parseScript(code);
+    // Build the originate command.  Using `--dry-run` and `--force`
+    // constructs the operation without injecting it.  The dummy
+    // alias can be anything; it is ignored on dry-run.  We set a
+    // conservative burn cap since the CLI requires one even in dry
+    // runs.  The RPC endpoint is passed via --endpoint.
+    const args = [
+      '--endpoint', rpc,
+      'originate', 'contract', 'dummy',
+      'transferring', '0',
+      'from', source,
+      'running', codeFile,
+      '--init', storageFile,
+      '--burn-cap', '3',
+      '--dry-run',
+      '--force',
+    ];
+    const output = await runCli(octez, args);
+    // octez-client prints the raw bytes on a line that looks like:
+    // "Raw operation bytes: 0385734d...".  Extract the hex string.
+    const match = output.match(/Raw operation bytes:?\s*([0-9a-fA-F]+)/);
+    if (!match) {
+      throw new Error('Unable to parse forged bytes from Octez output');
     }
-    // Find the storage declaration
-    let storageExpr;
-    if (Array.isArray(script)) {
-      storageExpr = script.find((d) => d.prim === 'storage');
-    } else if (script && script.prim === 'storage') {
-      storageExpr = script;
-    }
-    if (storageExpr && Array.isArray(storageExpr.args) && storageExpr.args.length) {
-      const storageType = storageExpr.args[0];
-      const schema = new Schema(storageType);
-      return schema.Encode(storage);
-    }
-  } catch (err) {
-    // Swallow errors and return original storage
-  }
-  return storage;
-}
-
-/**
- * Determine whether a reveal operation is required for the given source.
- * Queries the manager key; if undefined or errors, returns true.  A
- * publicKey must be provided by the caller for the reveal operation.
- *
- * @param {string} source tz address
- * @returns {Promise<boolean>} true if reveal is required
- */
-async function needsReveal(source) {
-  try {
-    const mgrKey = await rpc.getManagerKey(source);
-    return !mgrKey;
-  } catch (err) {
-    return true;
+    return match[1];
+  } finally {
+    // Clean up temporary files regardless of success
+    await fs.rm(tmpDir, { recursive: true, force: true });
   }
 }
 
-/**
- * POST /forge
- * Accepts a contract code, storage, source address and optional
- * publicKey from the client.  Encodes storage, checks if the source
- * account needs a reveal operation and constructs the contents array
- * accordingly.  Uses TezosToolkit to estimate gas/fee/storage and
- * LocalForger to forge the operation bytes.  Returns the bytes in
- * the response.  Clients should handle signing and injection
- * separately (via injectSigned()).
- */
 app.post('/forge', async (req, res) => {
   try {
-    const { code, storage, source, publicKey } = req.body || {};
+    const { code, storage, source } = req.body || {};
     if (!code || !storage || !source) {
       return res.status(400).json({ error: 'Missing code, storage or source' });
     }
-    // Parse code if provided as a string
-    let parsedCode = code;
-    if (typeof code === 'string') {
-      try {
-        const parser = new Parser();
-        parsedCode = parser.parseScript(code);
-      } catch (errParse) {
-        return res.status(400).json({ error: 'Invalid contract code: ' + errParse.message });
-      }
-    }
-    // Encode storage
-    const encodedStorage = encodeStorageForForge(parsedCode, storage);
-    // Fetch branch and initial counter
-    const { branch, counter } = await getBranchAndCounter(source);
-    let nextCounter = parseInt(counter, 10);
-    const contents = [];
-    // Determine if reveal is needed
-    let revealNeeded = false;
-    if (publicKey) {
-      revealNeeded = await needsReveal(source);
-    }
-    if (revealNeeded && publicKey) {
-      contents.push({
-        kind         : OpKind.REVEAL,
-        source       : source,
-        fee          : '1300',
-        counter      : nextCounter.toString(),
-        gas_limit    : '10000',
-        storage_limit: '0',
-        public_key   : publicKey,
-      });
-      nextCounter += 1;
-    }
-    // Estimate fee/gas/storage for the origination
-    let feeMutez     = '200000';
-    let gasLimit     = '200000';
-    let storageLimit = '60000';
-    try {
-      const estimate = await Tezos.estimate.originate({ code: parsedCode, storage: encodedStorage, balance: '0' });
-      feeMutez     = estimate.suggestedFeeMutez.toString();
-      gasLimit     = estimate.gasLimit.toString();
-      storageLimit = estimate.storageLimit.toString();
-    } catch (e) {
-      // If estimation fails, leave defaults
-    }
-    contents.push({
-      kind         : OpKind.ORIGINATION,
-      source       : source,
-      fee          : feeMutez,
-      counter      : nextCounter.toString(),
-      gas_limit    : gasLimit,
-      storage_limit: storageLimit,
-      balance      : '0',
-      script       : { code: parsedCode, storage: encodedStorage },
-    });
-    // Attempt to forge using the RPC.  This ensures the operation
-    // conforms to node expectations for large contracts.  If the RPC
-    // forge fails (e.g. due to size or other issues), fall back to
-    // LocalForger as a last resort.
-    try {
-      const forgedBytes = await rpc.forgeOperations({ branch, contents });
-      return res.status(200).json({ forgedBytes });
-    } catch (forgeErrRpc) {
-      // RPC forge may fail for various reasons (e.g. node disabled
-      // forging).  Attempt local forging as a fallback.  Note that
-      // LocalForger may produce slightly different bytes but can
-      // succeed when RPC forging fails.
-      try {
-        const forger = new LocalForger();
-        const forgedBytes = await forger.forge({ branch, contents });
-        return res.status(200).json({ forgedBytes });
-      } catch (forgeErrLocal) {
-        return res.status(500).json({ error: forgeErrLocal.message || 'Forge failed' });
-      }
-    }
+    const bytes = await forgeWithOctez(code, storage, source);
+    return res.json({ forgedBytes: bytes });
   } catch (err) {
-    console.error('Error in /forge:', err);
-    return res.status(500).json({ error: err.message || String(err) });
+    console.error('Forge error:', err);
+    return res.status(500).json({ error: err.message || 'Forge failed' });
   }
 });
 
-/**
- * POST /inject
- * Accepts signedBytes in hex format.  Strips 0x prefix if present and
- * forwards the operation to the underlying RPC injection endpoint.
- * Returns the operation hash.  If injection fails, returns 500.
- */
-app.post('/inject', async (req, res) => {
-  try {
-    let { signedBytes } = req.body || {};
-    if (!signedBytes) {
-      return res.status(400).json({ error: 'Missing signedBytes' });
-    }
-    if (signedBytes.startsWith('0x')) {
-      signedBytes = signedBytes.slice(2);
-    }
-    const opHash = await rpc.injectOperation(signedBytes);
-    return res.status(200).json({ opHash });
-  } catch (err) {
-    console.error('Error in /inject:', err);
-    return res.status(500).json({ error: err.message || String(err) });
-  }
+// The inject endpoint is deliberately disabled.  Clients must sign
+// and inject operations via TezosToolkit on the front‑end.  This
+// preserves flexibility and avoids server‑side secrets.  Return 501
+// to indicate that the functionality is not implemented.
+app.post('/inject', (_req, res) => {
+  return res.status(501).json({ error: 'Injection not supported on forge service' });
 });
 
-// Start server
+// Bind to the configured port (default 8000).  Render will respect
+// the PORT environment variable and map it to the external service.
 const PORT = process.env.PORT || 8000;
 app.listen(PORT, () => {
   console.log(`Forge service listening on port ${PORT}`);
 });
 
 /* What changed & why:
-   • Introduced TezosToolkit to estimate gas/fee/storage, ensuring the
-     origination has adequate limits for large contracts.  This
-     prevents underestimation and prevalidation failures.
-   • Added needsReveal() helper to determine reveal operations based
-     on manager key.  Prepend reveal with typical fee/gas.
-   • Refactored /forge to build contents using reveal + origination,
-     estimate limits, and use LocalForger exclusively.  Returns
-     forgedBytes only; injection is moved to client to avoid
-     backend 500 errors.  This addresses malformed payloads and
-     mismatched dependencies.
-   • Added TezosToolkit dependency; removed RPC forging fallback; updated
-     comments and header.  Rev bumped to r6.
+   – Replaced Taquito-based forging logic with a CLI-driven workflow.
+     Octez-client is invoked with a dry-run origination to construct
+     operation bytes exactly as the protocol would.  This method
+     handles large contracts reliably and avoids prevalidation errors
+     seen with Temple.  The service no longer attempts to inject
+     operations and instead delegates that responsibility to the
+     client.  Revision bumped to r9 to reflect major overhaul.
 */

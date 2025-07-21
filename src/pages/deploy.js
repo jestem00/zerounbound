@@ -1,20 +1,19 @@
 /*─────────────────────────────────────────────────────────────
-      Developed by @jams2blues – ZeroContract Studio
-      File:    src/pages/deploy.js
-      Rev :    r1108   2025‑07‑21
-      Summary: Deploy page with adaptive origination.  Full metadata
-               is always constructed on the client.  For wallets
-               capable of signing large payloads (e.g. Kukai/Umami),
-               the contract is originated via `wallet.originate()` in
-               a single operation.  For Temple wallet users, the
-               deployment falls back to the remote forge service to
-               minimise payload size while retaining a single‑stage
-               origination.  If the backend forge fails, the page
-               now falls back to local forging and signing before
-               injecting, ensuring Temple users can proceed even
-               when the backend is unavailable.  Off‑chain views
-               are imported from JSON to ensure indexers recognise them.
-─────────────────────────────────────────────────────────────*/
+  Developed by @jams2blues – ZeroContract Studio
+  File:    src/pages/deploy.js
+  Rev :    r1110   2025‑07‑21
+  Summary: Deploy page with adaptive origination.  The full
+           metadata is always assembled on the client.  For
+           wallets capable of signing large payloads (Kukai,
+           Umami), the contract is originated via
+           `wallet.originate()` in a single operation.  For
+           Temple wallet users, the deployment offloads the
+           forging step to a remote service backed by the Octez
+           CLI and then signs and injects the returned bytes via
+           RPC.  If backend forging fails, the page falls back
+           to local forging and injection.  Off‑chain views are
+           imported from JSON to ensure indexers recognise them.
+────────────────────────────────────────────────────────────*/
 
 import React, { useRef, useState, useCallback } from 'react';
 import { MichelsonMap } from '@taquito/michelson-encoder';
@@ -33,15 +32,15 @@ import { useWallet } from '../contexts/WalletContext.js';
 import contractCode from '../../contracts/Zero_Contract_V4.tz';
 import viewsJson    from '../../contracts/metadata/views/Zero_Contract_v4_views.json' assert { type: 'json' };
 
-// Network helpers for forging via backend or locally
+// Network helpers for forging and injection
 import {
   forgeViaBackend,
-  injectViaBackend,
   sigHexWithTag,
   injectSigned,
   sleep,
   forgeOrigination,
 } from '../core/net.js';
+
 // Signing type constant from Beacon
 import { SigningType } from '@airgap/beacon-sdk';
 
@@ -66,9 +65,7 @@ const uniqInterfaces = (src = []) => {
 };
 
 // Precompute hex table for fast string encoding
-const HEX = Array.from({ length: 256 }, (_, i) =>
-  i.toString(16).padStart(2, '0'),
-);
+const HEX = Array.from({ length: 256 }, (_, i) => i.toString(16).padStart(2, '0'));
 
 /**
  * Encode a UTF‑8 string into a hex string with a 0x prefix.  A
@@ -117,20 +114,18 @@ export const STORAGE_TEMPLATE = {
   total_supply     : new MichelsonMap(),
 };
 
-
 /*──────── component ───────────────────────────────────────*/
 
 /**
  * DeployPage orchestrates the origination of a new ZeroContract
- * collection.  It supports both single‑stage and dual‑stage
- * origination.  Dual‑stage is recommended for wallets like Temple
- * that cannot handle large payloads, as it minimises the size of
- * the first operation.  Progress and error states are reported via
- * an overlay.
+ * collection.  It selects the origination path based on the
+ * connected wallet: Temple users offload forging to the remote
+ * forge service (Octez CLI) and sign/inject locally; other
+ * wallets originate directly via Taquito’s wallet API.  Progress
+ * and error states are reported via an overlay.
  */
 export default function DeployPage() {
   const { toolkit, address, connect, wallet } = useWallet();
-
   // Refs and state for progress tracking
   const rafRef    = useRef(0);
   const [step, setStep]   = useState(-1);
@@ -138,7 +133,6 @@ export default function DeployPage() {
   const [label, setLabel] = useState('');
   const [kt1, setKt1]     = useState('');
   const [err, setErr]     = useState('');
-
   /**
    * Reset the component state to its initial values.  Cancels
    * any ongoing animation frame used for progress increments.
@@ -151,7 +145,6 @@ export default function DeployPage() {
     setErr('');
     cancelAnimationFrame(rafRef.current);
   };
-
   /**
    * Attempt to connect the wallet.  Captures common errors and
    * reports them to the user.  Retries can be performed by the UI.
@@ -167,12 +160,11 @@ export default function DeployPage() {
       }
     }
   }, [connect]);
-
   /**
-   * Build the full metadata object for the collection.  This
-   * function trims array values, assigns default interfaces, and
-   * embeds the off‑chain views.  It returns a plain object which
-   * will later be stringified and encoded for on‑chain storage.
+   * Build the full metadata object for the collection.  This function
+   * trims array values, assigns default interfaces and embeds
+   * off‑chain views.  It returns a plain object which will later be
+   * stringified and encoded for on‑chain storage.
    *
    * @param {Object} meta Raw form data from DeployCollectionForm
    * @returns {Object} Ordered metadata object ready for JSON.stringify
@@ -206,13 +198,12 @@ export default function DeployPage() {
     });
     return ordered;
   }
-
   /**
    * Single‑stage origination.  Builds the full metadata JSON and
    * encodes it into a big‑map, then calls wallet.originate() to
-   * originate the contract.  This path should be used only when the
-   * wallet can handle large payloads (e.g. Kukai, Umami).  Progress
-   * and error states are updated via setStep, setLabel, setPct.
+   * originate the contract.  This path should be used only when
+   * the wallet can handle large payloads.  Progress and error
+   * states are updated via setStep, setLabel and setPct.
    *
    * @param {Object} meta Raw metadata from form
    */
@@ -227,7 +218,6 @@ export default function DeployPage() {
       return;
     }
     setErr('');
-
     // Stage 0: compress full metadata
     setStep(0);
     setLabel('Compressing metadata');
@@ -242,24 +232,20 @@ export default function DeployPage() {
       setErr(`Metadata compression failed: ${e.message || String(e)}`);
       return;
     }
-
     // Construct the metadata big‑map
     const md = new MichelsonMap();
     md.set('',       header);
     md.set('content', body);
-
     // Stage 1: wait for wallet signature & origination
     setStep(1);
     setLabel('Check wallet & sign');
     setPct(0.25);
-
     // Animate progress while the wallet modal is open
     const tick = () => {
       setPct((p) => Math.min(0.45, p + 0.002));
       rafRef.current = requestAnimationFrame(tick);
     };
     tick();
-
     try {
       const op = await toolkit.wallet.originate({
         code   : contractCode,
@@ -304,24 +290,13 @@ export default function DeployPage() {
       }
     }
   }
-
-  /**
-   * Dual‑stage origination.  This pipeline first originates the contract
-   * with a minimal metadata pointer to keep the operation small.  It
-   * then patches the full metadata via edit_contract_metadata() on
-   * the originated contract.  This approach is necessary for
-   * wallets like Temple that cannot sign large payloads.  The user
-   * experience mirrors the single‑stage path but with additional
-   * steps for the patching operation.
-   *
-   * @param {Object} meta Raw metadata from form
-   */
   /**
    * Originate a new contract using the remote forge service.  This path
    * is used when the connected wallet (e.g. Temple) cannot handle
    * large payloads.  The metadata is fully included in the
-   * origination, but forging and injection are handled by the
-   * backend to reduce the payload size seen by the wallet.
+   * origination, but forging is handled by a backend running
+   * Octez.  The returned bytes are signed and injected via RPC.
+   * If forging fails, local forging is attempted.
    *
    * @param {Object} meta Raw metadata from form
    */
@@ -336,7 +311,6 @@ export default function DeployPage() {
       return;
     }
     setErr('');
-
     // Step 0: build and encode full metadata
     setStep(0);
     setLabel('Preparing metadata');
@@ -357,21 +331,17 @@ export default function DeployPage() {
     md.set('content', bodyHex);
     // Build storage object
     const storage = { ...STORAGE_TEMPLATE, admin: address, metadata: md };
-    // Step 1: forge via backend
+    // Step 1: forge via backend.  If this fails, fall back to local forging.
     setStep(1);
     setLabel('Forging operation');
     setPct(0.25);
     let forgedBytes;
     try {
-      // Retrieve public key for reveal support
       const activeAcc = await wallet.client.getActiveAccount();
       const publicKey = activeAcc?.publicKey;
       forgedBytes = await forgeViaBackend(contractCode, storage, address, publicKey);
     } catch (e) {
-      // If remote forging fails, fall back to local forging.  This
-      // allows Temple users to continue even when the backend is
-      // unavailable.  After forging locally, proceed with signing
-      // and injection using the same logic as below.
+      // Fallback to local forging on backend failure
       try {
         const activeAccLocal = await wallet.client.getActiveAccount();
         const publicKeyLocal = activeAccLocal?.publicKey;
@@ -380,7 +350,7 @@ export default function DeployPage() {
           address,
           contractCode,
           storage,
-          publicKeyLocal
+          publicKeyLocal,
         );
         forgedBytes = localBytes;
       } catch (fallbackForgeErr) {
@@ -392,6 +362,7 @@ export default function DeployPage() {
     setStep(2);
     setLabel('Waiting for wallet signature');
     setPct(0.40);
+    let signedBytes;
     try {
       const signResp = await wallet.client.requestSignPayload({
         signingType: SigningType.OPERATION,
@@ -399,83 +370,79 @@ export default function DeployPage() {
         sourceAddress: address,
       });
       const sigHex = sigHexWithTag(signResp.signature);
-      const signedBytes = forgedBytes + sigHex;
-      // Step 3: inject via RPC.  We avoid using the backend for
-      // injection to prevent 500 errors; instead we call
-      // injectSigned() directly.  If that fails, reforge locally and
-      // inject again.
-      setStep(3);
-      setLabel('Injecting operation');
-      setPct(0.55);
-      let opHash;
-      try {
-        // Try injecting the remotely forged and signed bytes via RPC
-        opHash = await injectSigned(toolkit, signedBytes);
-      } catch (injErr) {
-        // If RPC injection fails (e.g. invalid bytes), fall back
-        // to local forging and injection.  Reforge the operation
-        // locally using forgeOrigination(), sign and inject again.
-        try {
-          const activeAcc2 = await wallet.client.getActiveAccount();
-          const pubKey2    = activeAcc2?.publicKey;
-          const { forgedBytes: localBytes } = await forgeOrigination(
-            toolkit,
-            address,
-            contractCode,
-            storage,
-            pubKey2
-          );
-          const signResp2 = await wallet.client.requestSignPayload({
-            signingType : SigningType.OPERATION,
-            payload     : '03' + localBytes,
-            sourceAddress: address,
-          });
-          const sigHex2    = sigHexWithTag(signResp2.signature);
-          const signedLocal = localBytes + sigHex2;
-          opHash = await injectSigned(toolkit, signedLocal);
-        } catch (fallbackErr) {
-          setErr(fallbackErr.message || String(fallbackErr));
-          return;
-        }
-      }
-      // Step 4: confirmation
-      setStep(4);
-      setLabel('Confirming origination');
-      setPct(0.70);
-      // Attempt to resolve contract address via toolkit RPC
-      let contractAddr = '';
-      // Poll until contract address is available or timeout
-      for (let i = 0; i < 15; i++) {
-        await sleep(3000);
-        try {
-          const block = await toolkit.rpc.getBlock();
-          for (const opGroup of block.operations.flat()) {
-            if (opGroup.hash === opHash) {
-              const result = opGroup.contents.find((c) => c.kind === 'origination');
-              if (
-                result?.metadata?.operation_result?.originated_contracts?.length
-              ) {
-                contractAddr = result.metadata.operation_result.originated_contracts[0];
-                break;
-              }
-            }
-          }
-        } catch {}
-        if (contractAddr) break;
-      }
-      if (!contractAddr) {
-        setErr('Could not resolve contract address after origination.');
-        return;
-      }
-      setKt1(contractAddr);
-      setPct(1);
-      setStep(5);
-      setLabel('Origination confirmed');
+      signedBytes = forgedBytes + sigHex;
     } catch (e) {
       setErr(e.message || String(e));
+      return;
     }
+    // Step 3: inject via RPC.  We avoid using the backend for
+    // injection to prevent 500 errors; instead we call
+    // injectSigned() directly.  If that fails, reforge locally and
+    // inject again.
+    setStep(3);
+    setLabel('Injecting operation');
+    setPct(0.55);
+    let opHash;
+    try {
+      opHash = await injectSigned(toolkit, signedBytes);
+    } catch (injErr) {
+      // If RPC injection fails (e.g. invalid bytes), fall back to
+      // local forging and injection.  Reforge the operation
+      // locally using forgeOrigination(), sign and inject again.
+      try {
+        const activeAcc2 = await wallet.client.getActiveAccount();
+        const pubKey2    = activeAcc2?.publicKey;
+        const { forgedBytes: localBytes } = await forgeOrigination(
+          toolkit,
+          address,
+          contractCode,
+          storage,
+          pubKey2,
+        );
+        const signResp2 = await wallet.client.requestSignPayload({
+          signingType : SigningType.OPERATION,
+          payload     : '03' + localBytes,
+          sourceAddress: address,
+        });
+        const sigHex2     = sigHexWithTag(signResp2.signature);
+        const signedLocal = localBytes + sigHex2;
+        opHash = await injectSigned(toolkit, signedLocal);
+      } catch (fallbackErr) {
+        setErr(fallbackErr.message || String(fallbackErr));
+        return;
+      }
+    }
+    // Step 4: confirmation
+    setStep(4);
+    setLabel('Confirming origination');
+    setPct(0.70);
+    // Attempt to resolve contract address via toolkit RPC
+    let contractAddr = '';
+    for (let i = 0; i < 15; i++) {
+      await sleep(3000);
+      try {
+        const block = await toolkit.rpc.getBlock();
+        for (const opGroup of block.operations.flat()) {
+          if (opGroup.hash === opHash) {
+            const result = opGroup.contents.find((c) => c.kind === 'origination');
+            if (result?.metadata?.operation_result?.originated_contracts?.length) {
+              contractAddr = result.metadata.operation_result.originated_contracts[0];
+              break;
+            }
+          }
+        }
+      } catch {}
+      if (contractAddr) break;
+    }
+    if (!contractAddr) {
+      setErr('Could not resolve contract address after origination.');
+      return;
+    }
+    setKt1(contractAddr);
+    setPct(1);
+    setStep(5);
+    setLabel('Origination confirmed');
   }
-
   /**
    * Originate a new contract.  Chooses between the remote forge
    * service and direct wallet origination based on the connected
@@ -503,7 +470,6 @@ export default function DeployPage() {
       await originateSingleStage(meta);
     }
   }
-
   /*──────── render ─────────────────────────────────────────*/
   return (
     <>
@@ -529,12 +495,12 @@ export default function DeployPage() {
 }
 
 /* What changed & why:
-   • r1108 updates adaptive origination: if the backend forge
-     service fails, the deploy page now falls back to local
-     forging via forgeOrigination() before signing and injecting.
-     This ensures Temple wallets can still originate even when
-     the remote service returns a 500.  Remote injection remains
-     disabled; the client always injects via injectSigned() and
-     retries with locally forged bytes on failure.  Views continue
-     to be imported from JSON for proper indexing.
+   – Bumped revision to r1110.  Temple users now offload forging to
+     a backend running the Octez CLI, then sign and inject the
+     returned bytes via RPC.  If the backend fails, forging is
+     performed locally via forgeOrigination().  All injections
+     occur client‑side using injectSigned() since the backend no
+     longer supports injection.  Kukai/Umami deployments remain
+     unchanged, using wallet.originate().  Views import remains
+     JSON‑based to ensure indexers show the views tab.
 */

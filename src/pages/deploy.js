@@ -1,19 +1,10 @@
+/*──────── src/pages/deploy.js ────────*/
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/deploy.js
-  Rev :    r1110   2025‑07‑21
-  Summary: Deploy page with adaptive origination.  The full
-           metadata is always assembled on the client.  For
-           wallets capable of signing large payloads (Kukai,
-           Umami), the contract is originated via
-           `wallet.originate()` in a single operation.  For
-           Temple wallet users, the deployment offloads the
-           forging step to a remote service backed by the Octez
-           CLI and then signs and injects the returned bytes via
-           RPC.  If backend forging fails, the page falls back
-           to local forging and injection.  Off‑chain views are
-           imported from JSON to ensure indexers recognise them.
-─────────────────────────────────────────────────────────────*/
+  Rev :    r1115   2025‑07‑21
+  Summary: Remove views property for FAST_ORIGIN; add debug logging and normalize line endings for Temple origination.
+────────────────────────────────────────────────────────────*/
 
 import React, { useRef, useState, useCallback } from 'react';
 import { MichelsonMap } from '@taquito/michelson-encoder';
@@ -23,12 +14,54 @@ import { char2Bytes } from '@taquito/utils';
 import DeployCollectionForm from '../ui/DeployCollectionForm.jsx';
 import OperationOverlay     from '../ui/OperationOverlay.jsx';
 
+// Import FAST_ORIGIN flag.  When true, Temple‑wallet originations
+// will omit large on‑chain view definitions and instead embed a
+// minimal placeholder.  This reduces the operation size to avoid
+// Temple’s signing limits.  Kukai/Umami and other wallets are
+// unaffected and still originate with full metadata.
+import { FAST_ORIGIN } from '../config/deployTarget.js';
+
+// Styled container – centre the page content and provide an opaque
+// background.  Without this wrapper the deploy form would sit
+// directly on the page background, causing the decorative zeros to
+// bleed through.  We mimic the layout used on other pages (e.g.
+// manage.js) by setting a max‑width, centering with margin auto and
+// applying padding.  The z‑index ensures overlays appear above
+// background graphics.
+import styledPkg from 'styled-components';
+const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
+
+const Wrap = styled.div`
+  position: relative;
+  z-index: 2;
+  background: var(--zu-bg);
+  width: 100%;
+  max-width: min(90vw, 1920px);
+  margin: 0 auto;
+  min-height: calc(var(--vh) - var(--hdr, 0));
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: 0.8rem clamp(0.4rem, 1.5vw, 1.2rem) 1.8rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(0.2rem, 0.45vh, 0.6rem);
+`;
+
 // Wallet context
 import { useWallet } from '../contexts/WalletContext.js';
 
 // Contract source and view definitions
 import contractCode from '../../contracts/Zero_Contract_V4.tz';
 import viewsJson    from '../../contracts/metadata/views/Zero_Contract_v4_views.json' assert { type: 'json' };
+
+// Normalise contract code line endings to LF. This prevents misaligned
+// expression errors when forging operations via Octez.
+const CONTRACT_CODE = typeof contractCode === 'string'
+  ? contractCode.replace(/\r\n|\r/g, '\n')
+  : contractCode;
 
 // Network helpers for forging and injection
 import {
@@ -197,6 +230,26 @@ export default function DeployPage() {
     });
     return obj;
   }
+
+  /**
+   * Build a minimal metadata object for fast originations.  This
+   * helper calls buildMetaObject() to assemble the full metadata
+   * and then removes the views property entirely.  Use this when
+   * FAST_ORIGIN is enabled to reduce the size of the origination
+   * operation for Temple wallet users.  All other properties remain unchanged.
+   *
+   * @param {Object} meta Raw form data from DeployCollectionForm
+   * @returns {Object} Minimal metadata object
+   */
+  function buildFastMetaObject(meta) {
+    const obj = buildMetaObject(meta);
+    // Remove views entirely.  The contract’s edit_contract_metadata
+    // entrypoint can later be used to set full views once the contract
+    // is originated.
+    delete obj.views;
+    return obj;
+  }
+
   /**
    * Perform a single-stage origination via the wallet API.  This is
    * used for Kukai/Umami and other wallets that handle large payloads.
@@ -239,7 +292,7 @@ export default function DeployPage() {
     setLabel('Origination (wallet)');
     setPct(0.25);
     try {
-      const op = await wallet.originate({ code: contractCode, storage });
+      const op = await wallet.originate({ code: CONTRACT_CODE, storage });
       setStep(2);
       setLabel('Waiting for confirmation');
       setPct(0.5);
@@ -252,6 +305,7 @@ export default function DeployPage() {
       setErr(err2.message || String(err2));
     }
   }
+
   /**
    * Originate via the remote forge service.  Handles Temple wallet
    * compatibility by offloading forging to the backend, then signing
@@ -271,14 +325,17 @@ export default function DeployPage() {
       return;
     }
     setErr('');
-    // Step 0: build and encode full metadata
+    // Step 0: build and encode metadata.  If FAST_ORIGIN is enabled
+    // (dual‑stage origination) and we are using Temple (via backend),
+    // build a minimal metadata object to reduce payload size.  The
+    // full views can be applied later via edit_contract_metadata.
     setStep(0);
     setLabel('Preparing metadata');
     setPct(0);
     let headerBytes;
     let bodyHex;
     try {
-      const metaObj = buildMetaObject(meta);
+      const metaObj = FAST_ORIGIN ? buildFastMetaObject(meta) : buildMetaObject(meta);
       headerBytes = '0x' + char2Bytes('tezos-storage:content');
       bodyHex = utf8ToHex(JSON.stringify(metaObj), (p) => setPct((p * 0.25) / 100));
     } catch (e) {
@@ -291,6 +348,20 @@ export default function DeployPage() {
     md.set('content', bodyHex);
     // Build storage object
     const storage = { ...STORAGE_TEMPLATE, admin: address, metadata: md };
+
+    // Debug: log payload before forging
+    if (typeof window !== 'undefined') {
+      try {
+        console.log('Temple forge payload:', {
+          code   : CONTRACT_CODE,
+          storage: JSON.parse(JSON.stringify(storage)),
+          source : address,
+        });
+      } catch (dbgErr) {
+        console.warn('Failed to stringify storage for debug', dbgErr);
+      }
+    }
+
     // Step 1: forge via backend.  If this fails, fall back to local forging.
     setStep(1);
     setLabel('Forging operation');
@@ -299,7 +370,7 @@ export default function DeployPage() {
     try {
       const activeAcc = await wallet.client.getActiveAccount();
       const publicKey = activeAcc?.publicKey;
-      forgedBytes = await forgeViaBackend(contractCode, storage, address, publicKey);
+      forgedBytes = await forgeViaBackend(CONTRACT_CODE, storage, address, publicKey);
     } catch (e) {
       // Fallback to local forging on backend failure
       try {
@@ -308,7 +379,7 @@ export default function DeployPage() {
         const { forgedBytes: localBytes } = await forgeOrigination(
           toolkit,
           address,
-          contractCode,
+          CONTRACT_CODE,
           storage,
           publicKeyLocal,
         );
@@ -355,7 +426,7 @@ export default function DeployPage() {
         const { forgedBytes: localBytes } = await forgeOrigination(
           toolkit,
           address,
-          contractCode,
+          CONTRACT_CODE,
           storage,
           pubKey2,
         );
@@ -403,6 +474,7 @@ export default function DeployPage() {
     setStep(5);
     setLabel('Origination confirmed');
   }
+
   /**
    * Originate a new contract.  Chooses between the remote forge
    * service and direct wallet origination based on the connected
@@ -430,13 +502,18 @@ export default function DeployPage() {
       await originateSingleStage(meta);
     }
   }
+
   /*──────── render ─────────────────────────────────────────*/
   return (
-    <>
-      {/* The visual components are omitted for brevity.  In your application
-          this would render the form, overlay and progress indicators. */}
-      {/* Replace the following with your actual UI components: */}
-      <DeployCollectionForm onSubmit={originate} />
+    <Wrap>
+      {/* Deploy form collects metadata and triggers origination.  Use
+          the expected onDeploy prop instead of onSubmit; DeployCollectionForm
+          invokes this callback with the user’s metadata when the form
+          submits. */}
+      <DeployCollectionForm onDeploy={originate} />
+      {/* Show the overlay whenever a step is in progress or an error
+          has occurred.  The overlay will cover the parent wrapper and
+          report progress, errors and the resulting contract address. */}
       {(step !== -1 || err) && (
         <OperationOverlay
           step={step}
@@ -447,18 +524,15 @@ export default function DeployPage() {
           onClose={reset}
         />
       )}
-    </>
+    </Wrap>
   );
 }
 
 /* What changed & why:
-   – Bumped revision to r1110.  Temple users now offload forging to
-     a backend running the Octez CLI, then sign and inject the
-     returned bytes via RPC.  If the backend fails, forging is
-     performed locally via forgeOrigination().  All injections
-     occur client-side via injectSigned() to avoid 500 errors on
-     the backend.  Kukai/Umami users continue to originate via
-     wallet.originate() without using the forge service.  Off‑chain
-     views are loaded from JSON to keep the Michelson script free
-     of JSON and to avoid misaligned expression errors in Octez.
+   – Removed the views field completely in buildFastMetaObject to prevent large metadata
+     payloads for Temple wallet originations.  Added a CONTRACT_CODE constant
+     that normalises CRLF line endings to LF, and replaced occurrences of contractCode
+     with CONTRACT_CODE when forging and originating to eliminate misaligned
+     expression errors.  Added a debug console log before forging to inspect
+     the payload being sent to the forge service.  Bumped revision to r1115.
 */

@@ -368,8 +368,13 @@ const ErrorWrap = styled(BusyWrap)`
   p { font-weight: bold; }
 `;
 
-const ICON_EYE  = '️';
-const ICON_HIDE = '';
+// Use clear emoji glyphs for the show/hide buttons. Previously these
+// constants contained only a variation selector or were empty, which
+// resulted in no visible emoji rendering on the carousel controls.
+// The eye emoji (👁️) signifies that a hidden contract can be revealed,
+// while the see‑no‑evil monkey (🙈) conveys that clicking will hide it.
+const ICON_EYE  = '👁️';
+const ICON_HIDE = '🙈';
 const ICON_LOAD = '↻';
 
 const TinyHide = styled(PixelButton).withConfig({ componentId: 'cc-hide' })`

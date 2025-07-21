@@ -1,3 +1,4 @@
+/*──────── src/workers/originate.worker.js ────────*/
 /*─────────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/workers/originate.worker.js
@@ -7,9 +8,14 @@
            and imageUri when `fast` flag is true.
 ──────────────────────────────────────────────────────────────────*/
 
+// Pre-encoded JSON views definition.  The views.hex.js file exports
+// a single default string containing the contract’s view definitions
+// encoded as a hex string with 0x prefix.  Decoding it avoids
+// expensive JSON parsing in the main thread.
 import viewsHex from '../constants/views.hex.js';
 
 /*──────── helpers ─────────*/
+// Normalise interface names and include mandatory standards.
 const uniqInterfaces = (src = []) => {
   const base = ['TZIP-012', 'TZIP-016'];
   const map  = new Map();
@@ -20,14 +26,18 @@ const uniqInterfaces = (src = []) => {
   return Array.from(map.values());
 };
 
+// Convert a hex string (0x...) to a UTF-8 string.
 const hexToString = (hex) => {
-  hex = hex.slice(2);  /* strip 0x */
+  hex = hex.slice(2); /* strip 0x */
   let str = '';
   for (let i = 0; i < hex.length; i += 2)
     str += String.fromCharCode(parseInt(hex.substr(i, 2), 16));
   return str;
 };
 
+// Decode the hex-encoded views into a JSON object.  The imported
+// viewsHex contains the result of JSON.stringify({ views }) encoded
+// via hex.
 const views = JSON.parse(hexToString(viewsHex)).views;
 
 /* fast table for byte→hex */
@@ -36,6 +46,8 @@ for (let i = 0; i < 256; i++) b2h[i] = i.toString(16).padStart(2, '0');
 
 /**
  * utf8 → 0xHEX with progress callbacks
+ * Encodes a UTF-8 string into a hex string prefixed with 0x.  It
+ * reports progress via postMessage to allow the UI to update.
  */
 const utf8ToHex = (str, taskId) => {
   const bytes = new TextEncoder().encode(str);
@@ -53,7 +65,11 @@ const utf8ToHex = (str, taskId) => {
   return '0x' + hex.join('');
 };
 
-/*──────── worker message ─────*/
+/*──────── worker message handler ─────*/
+// This worker receives a metadata object, a taskId for progress
+// tracking, and a boolean `fast` to indicate whether the views
+// should be included.  It returns a hex-encoded JSON string in
+// the `body` property or an error if encountered.
 self.onmessage = ({ data }) => {
   const { meta, taskId, fast } = data;
   try {
@@ -101,4 +117,3 @@ self.onmessage = ({ data }) => {
    • Retained existing placeholder views logic for fast mode and hex‑encoding
      of metadata.
 */
-

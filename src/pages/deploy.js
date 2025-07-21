@@ -1,7 +1,7 @@
 /*─────────────────────────────────────────────────────────────
       Developed by @jams2blues – ZeroContract Studio
       File:    src/pages/deploy.js
-      Rev :    r1107   2025‑07‑21
+      Rev :    r1108   2025‑07‑21
       Summary: Deploy page with adaptive origination.  Full metadata
                is always constructed on the client.  For wallets
                capable of signing large payloads (e.g. Kukai/Umami),
@@ -9,8 +9,11 @@
                a single operation.  For Temple wallet users, the
                deployment falls back to the remote forge service to
                minimise payload size while retaining a single‑stage
-               origination.  Off‑chain views are imported from JSON
-               to ensure indexers recognise them.
+               origination.  If the backend forge fails, the page
+               now falls back to local forging and signing before
+               injecting, ensuring Temple users can proceed even
+               when the backend is unavailable.  Off‑chain views
+               are imported from JSON to ensure indexers recognise them.
 ─────────────────────────────────────────────────────────────*/
 
 import React, { useRef, useState, useCallback } from 'react';
@@ -365,8 +368,25 @@ export default function DeployPage() {
       const publicKey = activeAcc?.publicKey;
       forgedBytes = await forgeViaBackend(contractCode, storage, address, publicKey);
     } catch (e) {
-      setErr(e.message || String(e));
-      return;
+      // If remote forging fails, fall back to local forging.  This
+      // allows Temple users to continue even when the backend is
+      // unavailable.  After forging locally, proceed with signing
+      // and injection using the same logic as below.
+      try {
+        const activeAccLocal = await wallet.client.getActiveAccount();
+        const publicKeyLocal = activeAccLocal?.publicKey;
+        const { forgedBytes: localBytes } = await forgeOrigination(
+          toolkit,
+          address,
+          contractCode,
+          storage,
+          publicKeyLocal
+        );
+        forgedBytes = localBytes;
+      } catch (fallbackForgeErr) {
+        setErr(fallbackForgeErr.message || String(fallbackForgeErr));
+        return;
+      }
     }
     // Step 2: request wallet signature
     setStep(2);
@@ -509,11 +529,12 @@ export default function DeployPage() {
 }
 
 /* What changed & why:
-   • r1107 removes dual‑stage origination and introduces adaptive
-     single‑stage origination.  Temple wallets trigger remote
-     forging via forgeViaBackend(), but injection now uses
-     injectSigned() directly; if RPC injection fails, the
-     operation is reforged and re‑injected locally.  Other
-     wallets originate via wallet.originate().  Views are
-     imported from JSON to ensure indexers show the views tab.
+   • r1108 updates adaptive origination: if the backend forge
+     service fails, the deploy page now falls back to local
+     forging via forgeOrigination() before signing and injecting.
+     This ensures Temple wallets can still originate even when
+     the remote service returns a 500.  Remote injection remains
+     disabled; the client always injects via injectSigned() and
+     retries with locally forged bytes on failure.  Views continue
+     to be imported from JSON for proper indexing.
 */

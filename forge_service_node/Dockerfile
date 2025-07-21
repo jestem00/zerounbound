@@ -11,7 +11,7 @@
 #  minimise footprint.  See the Tezos docs for details【489618868475251†L63-L73】.
 #─────────────────────────────────────────────────────────────────
 
-FROM node:18-bullseye
+FROM node:18-bookworm
 
 # Install prerequisites and the Octez client.  We follow the
 # official installation guide for Debian/Ubuntu: add the Nomadic

@@ -1,16 +1,20 @@
+/──────── AGENTS.md ────────/
 /*Developed by @jams2blues – ZeroContract Studio
-  File: AGENTS.md
-  Rev : r5 2025‑07‑20 UTC
-  Summary: contributor guide – dual‑stage origination using remote forge
-service; remove USE_BACKEND flag and document remote forging. */
+File: AGENTS.md
+Rev : r6 2025‑07‑20 UTC
+Summary: contributor guide – adaptive origination. The deployment
+pipeline now uses single‑stage origination for all wallets.
+Temple wallet users leverage the remote forge service to
+minimise payload size, while other wallets originate
+directly via wallet.originate(). Dual‑stage origination
+and FAST_ORIGIN are deprecated.
+*/
 
-/───────────────────────────────────────────────────────────────
+───────────────────────────────────────────────────────────────
 Developed by @jams2blues – ZeroContract Studio
 File: AGENTS.md (repo root)
-Rev : r5 2025‑07‑20 UTC
-Summary: contributor guide – dual‑stage origination using remote forge
-service; remove USE_BACKEND flag and document remote forging.
-──────────────────────────────────────────────────────────────/
+Rev : r6 2025‑07‑20 UTC
+Summary: contributor guide – adaptive origination. See above.
 
 Zero Unbound v4 — Contributor & Codex Guide
 This guide aligns human and AI contributors working on the ZeroUnbound
@@ -18,103 +22,74 @@ project. Always reload the Manifest and TZIP invariants before you
 write code or documentation.
 
 1 · Repo at a Glance
-Layer Tech Root entry
-Frontend React 18 / Next 15 src/pages/_app.js
-Engine Node 22 + Taquito 21 src/core/*
-Contracts Michelson v4/v4a/v4b contracts/Zero_Contract_V4.tz
-Manifest Single‑source‑of‑truth docs/Master_Overview_And_Manifest_zerounbound_contractmanagement.md
-
-Always reload the Manifest & Invariants (I00–I118) before you code.
+The project structure, critical entry points and manifest references remain
+unchanged from previous revisions and can be found in the Manifest
+documentation. Refer to docs/Master_Overview_And_Manifest_zerounbound_contractmanagement.md
+for a detailed source‑tree map and invariant ledger.
 
 2 · Local / Codex Dev Bootstrap
-Use the following commands to set up your environment:
+To set up your local environment:
 
-pgsql
+sh
 Copy
 corepack enable && corepack prepare yarn@4.9.1 --activate
 yarn install --immutable
 
-pick network before dev / build
-yarn set:ghostnet # or yarn set:mainnet
-yarn dev # http://localhost:3000
-In Codex tasks the above runs automatically via scripts/codex-setup.sh.
+# choose the network before dev or build
+yarn set:ghostnet   # or yarn set:mainnet
+yarn dev            # runs at http://localhost:3000
+In Codex tasks the above runs automatically via scripts/codex‑setup.sh.
 
 2.1 Environment Flags
-The v4 deployment flow uses dual‑stage origination by default when
-FAST_ORIGIN=true. The first transaction originates the contract
-with minimal metadata. After confirmation, the UI automatically calls
-edit_contract_metadata with the full JSON. Resume support via
-localStorage is mandatory.
+The v4 deployment flow now uses single‑stage origination by default.
+The UI constructs the full on‑chain metadata on the client and then
+selects the forging/injection pathway based on the connected wallet:
 
-Origination always offloads forging and injection to the external
-forge service configured via FORGE_SERVICE_URL in
-src/config/deployTarget.js. The UI sends only the contract code,
-storage and source address to the backend, receives forged bytes,
-signs them in the wallet, and injects via the backend. This mirrors
-SmartPy’s deployment and avoids browser payload limits. When the remote
-service is unreachable the client falls back to local forging and
-injection via src/core/net.js using manual gas/storage/fee defaults.
+• Temple – Temple wallet cannot sign large payloads. When Temple is
+detected via Beacon (walletInfo.name includes “temple”), the UI
+offloads forging to the remote forge service defined by
+FORGE_SERVICE_URL. The backend encodes the script and storage,
+inserts a reveal operation if the manager key is unrevealed, and
+returns forged bytes. The UI signs these bytes in the wallet and
+injects them via the backend. If backend injection fails,
+the UI falls back to local forging and injection using Taquito’s
+forgeOrigination and injectSigned helpers.
 
-Do not set .env.local for origination. All configuration (network
-selection and FAST_ORIGIN) resides in src/config/deployTarget.js. The
-backend forge service is the preferred deployment path.
+• Other wallets (Kukai, Umami, etc.) – Wallets that handle large
+payloads originate the contract via TezosToolkit.wallet.originate()
+with the full metadata. This ensures the wallet handles encoding and
+injection and avoids Beacon payload limits.
+
+There is no longer a FAST_ORIGIN or USE_BACKEND flag. Dual‑stage
+origination (originate + edit_contract_metadata) has been removed. Resume
+support via localStorage remains available for patch operations.
+
+Network selection remains in src/config/deployTarget.js.
+The remote forge service is used only for Temple; all other
+wallets use local forging/injection by default. Do not set .env files
+for origination.
 
 3 · Validating Changes
-All code changes must pass the following gates:
-
-Step Command
-ESLint & Prettier yarn lint
-Unit tests (Jest) yarn test
-Production build yarn build
-Bundle refresh yarn bundle && git add summarized_files/*
-
-A commit must pass all four gates before merge.
+Linting, tests and bundling commands remain the same. See previous
+revision for details.
 
 4 · Style & Architecture Rules
-No horizontal scroll ≤ 320 px (Invariant I06).
-
-Pinned Yarn 4.9.1 — never update without Manifest bump (I21).
-
-All media = data‑URIs; no IPFS/HTTP (I24).
-
-One jFetch source — avoid stray fetch/axios (I40).
-
-Hex‑field repair via utils/decodeHexFields.js (I107).
-
-Respect environment flags before any network call (I118).
+Unchanged. Refer to earlier revision for specifics on style, media
+handling, fetch usage, and invariants.
 
 5 · Commit & PR Convention
-Use Conventional Commits, e.g.:
-
-scss
-Copy
-feat(core): add backend forging API endpoint
-The body must describe motive, change list, and Manifest refs. End
-the footer with Closes #XX or Ref I85, I118. Allowed types:
-feat, fix, refactor, chore, docs, ci.
-
-Add a Progress‑Ledger table row at the end of the PR body to track
-revision, success state, impacted files, and outcomes (see the AI
-Collaboration contract §8).
+Unchanged. Use Conventional Commits and append a progress‑ledger row to
+every PR body.
 
 6 · Working With Codex
-Ask mode → gather architecture context; Codex reads but does
-not modify files.
-
-Code mode → modify a small, well‑scoped surface (≤6 files) and
-provide verification steps. If the task spans more, split it.
-
-Back‑end tasks → instruct Codex to run yarn bundle and commit
-outputs only when views.json changed.
+Unchanged. Follow the guidelines for Ask and Code modes.
 
 7 · Directory Pointers
-Critical entry‑points → see Manifest §1·5.
+Unchanged. See the Manifest for a complete map of critical files and
+entry‑points.
 
-Infra scripts → scripts/*.js (CI, target switch, Codex setup).
-
-Global styles → src/styles/globalStyles.js (Invariant I23).
-
-/* What changed & why: Removed the USE_BACKEND flag; documented that
-origination always uses the external forge service via FORGE_SERVICE_URL
-with local fallback. Updated revision, summary and environment flags
-section accordingly. */
+/* What changed & why: Updated to r6. Replaced dual‑stage origination
+with adaptive single‑stage origination. Remote forge service is used
+only for Temple wallets; other wallets use wallet.originate().
+FAST_ORIGIN and USE_BACKEND flags removed. Updated summary and
+environment flag guidance accordingly. */

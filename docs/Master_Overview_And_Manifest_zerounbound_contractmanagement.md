@@ -22,7 +22,16 @@ to vercel from a single github repo.
 • Append‑only. Patch; never rewrite or shorten history.
 note: sifrzero.art uses some of our tools to allow a default community collection minting tool,
 different project managed and controlled by @JestemZero, and v4b of the ZeroContract (see § 7 appendices)
-
+note:The project now uses a single‑stage origination pipeline for
+contract deployment. The full metadata is assembled on the client
+and encoded into a Michelson big‑map. When the connected wallet is
+Temple, forging and injection are offloaded to the remote forge
+service defined in FORGE_SERVICE_URL; the service encodes the
+contract and storage, inserts a reveal operation if needed, and
+returns forged bytes. For all other wallets, the UI calls
+TezosToolkit.wallet.originate() directly. Dual‑stage origination
+and the FAST_ORIGIN flag have been removed. Local fallback is
+available if remote injection fails.
 ════════════════════════════════════════════════════════════════
 TABLE OF CONTENTS (How to read) — skim → locate → jump
 ════════════════════════════════════════════════════════════════

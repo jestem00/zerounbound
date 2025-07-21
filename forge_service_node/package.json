@@ -1,7 +1,7 @@
 {
-  "name": "zerounbound-forge-service",
+  "name": "forge-service-node",
   "version": "1.0.5",
-  "description": "Remote forging service for ZeroContract using the Octez CLI",
+  "description": "Octez-based forging service for ZeroContract",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -9,8 +9,5 @@
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.18.2"
-  },
-  "engines": {
-    "node": ">=18"
   }
 }

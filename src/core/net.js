@@ -11,9 +11,10 @@
            forging via Octez and retains fallback to local forging
            for Kukai/Umami.  injectViaBackend() remains deprecated;
            clients should always inject via injectSigned().
-──────────────────────────────────────────────────────────────────*/
+─────────────────────────────────────────────────────────────────*/
 
 import { OpKind } from '@taquito/taquito';
+// b58cdecode and prefix are used for signature decoding and tagging
 import { b58cdecode, prefix } from '@taquito/utils';
 import { LocalForger } from '@taquito/local-forging';
 import { Parser } from '@taquito/michel-codec';
@@ -205,6 +206,72 @@ export async function injectViaBackend(_signedBytes) {
 }
 
 /*─────────────────────────────────────────────────────────────
+  Signature helpers
+─────────────────────────────────────────────────────────────*/
+
+/**
+ * Convert a base58 signature (edsig/spsig/p2sig/sig) to raw hex for injection.
+ * Beacon wallets return base58 signatures prefixed with edsig/spsig1/p2sig.
+ * This helper decodes the base58 signature and strips the curve prefix.
+ *
+ * @param {string} signature Base58 encoded signature from wallet.client.requestSignPayload
+ * @returns {string} Hex string of signature bytes (without any prefix)
+ */
+export function sigToHex(signature) {
+  let bytes;
+  if (signature.startsWith('edsig')) {
+    bytes = b58cdecode(signature, prefix.edsig);
+    bytes = bytes.slice(5);
+  } else if (signature.startsWith('spsig1')) {
+    bytes = b58cdecode(signature, prefix.spsig1);
+    bytes = bytes.slice(5);
+  } else if (signature.startsWith('p2sig')) {
+    bytes = b58cdecode(signature, prefix.p2sig);
+    bytes = bytes.slice(4);
+  } else {
+    bytes = b58cdecode(signature, prefix.sig);
+    bytes = bytes.slice(3);
+  }
+  return Buffer.from(bytes).toString('hex');
+}
+
+/**
+ * Convert a base58 signature to hex and append the appropriate curve tag.
+ * Tezos RPC requires that the signed operation bytes end with an 8‑bit
+ * tag identifying the curve used for the signature: 00 for Ed25519,
+ * 01 for secp256k1, and 02 for P‑256.  Without this suffix the RPC
+ * may return a phantom operation hash or parsing error.
+ *
+ * @param {string} signature Base58 encoded signature from wallet.client.requestSignPayload
+ * @returns {string} Hex string of signature bytes followed by a curve tag byte
+ */
+export function sigHexWithTag(signature) {
+  const hex = sigToHex(signature);
+  let tag = '00';
+  if (signature.startsWith('spsig1')) {
+    tag = '01';
+  } else if (signature.startsWith('p2sig')) {
+    tag = '02';
+  } else if (signature.startsWith('edsig')) {
+    tag = '00';
+  } else {
+    tag = '00';
+  }
+  return hex + tag;
+}
+
+/**
+ * Inject a signed operation bytes string and return the operation hash.
+ *
+ * @param {TezosToolkit} toolkit Taquito toolkit instance
+ * @param {string} signedBytes Hex string of the signed operation (forgedBytes + signature)
+ * @returns {Promise<string>} Operation hash
+ */
+export async function injectSigned(toolkit, signedBytes) {
+  return await toolkit.rpc.injectOperation(signedBytes);
+}
+
+/*─────────────────────────────────────────────────────────────
   Local forge and inject helpers
 ─────────────────────────────────────────────────────────────*/
 
@@ -308,75 +375,3 @@ export async function forgeOrigination(toolkit, source, code, storage, publicKey
   }
   return { forgedBytes, contents, branch };
 }
-
-/**
- * Convert a base58 signature (edsig/spsig/p2sig) to raw hex for injection.
- * Beacon wallets return base58 signatures prefixed with edsig/spsig1/p2sig.
- * This helper slices the correct prefix and returns the remaining bytes in hex.
- *
- * @param {string} signature Base58 encoded signature from wallet.client.requestSignPayload
- * @returns {string} Hex string of signature bytes (without any prefix)
- */
-export function sigToHex(signature) {
-  let bytes;
-  if (signature.startsWith('edsig')) {
-    bytes = b58cdecode(signature, prefix.edsig);
-    bytes = bytes.slice(5);
-  } else if (signature.startsWith('spsig1')) {
-    bytes = b58cdecode(signature, prefix.spsig1);
-    bytes = bytes.slice(5);
-  } else if (signature.startsWith('p2sig')) {
-    bytes = b58cdecode(signature, prefix.p2sig);
-    bytes = bytes.slice(4);
-  } else {
-    bytes = b58cdecode(signature, prefix.sig);
-    bytes = bytes.slice(3);
-  }
-  return Buffer.from(bytes).toString('hex');
-}
-
-/**
- * Convert a base58 signature to hex and append the appropriate curve tag.
- * Tezos RPC requires that the signed operation bytes end with an 8‑bit
- * tag identifying the curve used for the signature: 00 for Ed25519,
- * 01 for secp256k1, and 02 for P‑256.  Without this suffix the RPC
- * may return a phantom operation hash or parsing error.
- *
- * @param {string} signature Base58 encoded signature from wallet.client.requestSignPayload
- * @returns {string} Hex string of signature bytes followed by a curve tag byte
- */
-export function sigHexWithTag(signature) {
-  const hex = sigToHex(signature);
-  let tag = '00';
-  if (signature.startsWith('spsig1')) {
-    tag = '01';
-  } else if (signature.startsWith('p2sig')) {
-    tag = '02';
-  } else if (signature.startsWith('edsig')) {
-    tag = '00';
-  } else {
-    tag = '00';
-  }
-  return hex + tag;
-}
-
-/**
- * Inject a signed operation bytes string and return the operation hash.
- *
- * @param {TezosToolkit} toolkit Taquito toolkit instance
- * @param {string} signedBytes Hex string of the signed operation (forgedBytes + signature)
- * @returns {Promise<string>} Operation hash
- */
-export async function injectSigned(toolkit, signedBytes) {
-  return await toolkit.rpc.injectOperation(signedBytes);
-}
-
-/* What changed & why:
-   • Bumped revision to r1104.  forgeViaBackend() now supports the
-     CLI-based forge service by sending high-level storage directly
-     and propagating any backend errors.  injectViaBackend() is
-     deprecated and always throws.  Local forging and injection
-     helpers remain unchanged.  These adjustments enable Temple
-     users to originate large contracts by offloading forging to a
-     backend running the Octez CLI.
-*/

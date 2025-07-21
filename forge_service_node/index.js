@@ -14,7 +14,7 @@
            Taquito’s `injectSigned()` helper.  To use this service
            you must install the Octez client inside your deployment
            (see the accompanying Dockerfile for installation steps).
-──────────────────────────────────────────────────────────────────*/
+─────────────────────────────────────────────────────────────────*/
 
 const express = require('express');
 const cors    = require('cors');

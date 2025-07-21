@@ -247,6 +247,10 @@ export default function DeployPage() {
     // during origination.  The edit_contract_metadata entrypoint can
     // later set the full views once the contract is originated.  Only
     // Temple wallet originations set FAST_ORIGIN to true.
+    // Use a single zero after the 0x prefix.  The Michelson
+    // representation for an empty bytes value is 0x00 (0x followed
+    // by two zero characters).  Using two zeros ensures Taquito
+    // correctly interprets the placeholder as an empty view list.
     obj.views = '0x00';
     return obj;
   }

@@ -2,12 +2,12 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/deploy.js
-  Rev :    r1116   2025‑07‑21
-  Summary: Roll back changes affecting all wallets; restore use of contractCode
-           for Kukai/Umami originations.  BuildFastMetaObject now assigns
-           a minimal placeholder ('0x00') to views instead of deleting it.
-           Removed debug logging and line-ending normalization from
-           origination flows.
+  Rev :    r1118   2025‑07‑22
+  Summary: Show error messages in the progress overlay.  When an
+           origination error occurs, the error message is now
+           propagated to the overlay status (label) so users see
+           details instead of a generic “Error” caption.  No
+           changes to core origination logic.
 ────────────────────────────────────────────────────────────*/
 
 import React, { useRef, useState, useCallback } from 'react';
@@ -307,7 +307,10 @@ export default function DeployPage() {
       setPct(1);
       setLabel('Origination confirmed');
     } catch (err2) {
-      setErr(err2.message || String(err2));
+      const msg = err2?.message || String(err2);
+      // propagate error to overlay caption and err state
+      setLabel(msg);
+      setErr(msg);
     }
   }
 
@@ -344,7 +347,9 @@ export default function DeployPage() {
       headerBytes = '0x' + char2Bytes('tezos-storage:content');
       bodyHex = utf8ToHex(JSON.stringify(metaObj), (p) => setPct((p * 0.25) / 100));
     } catch (e) {
-      setErr(`Metadata encoding failed: ${e.message || String(e)}`);
+      const msg = `Metadata encoding failed: ${e?.message || String(e)}`;
+      setLabel(msg);
+      setErr(msg);
       return;
     }
     // Build metadata big‑map
@@ -382,7 +387,9 @@ export default function DeployPage() {
         );
         forgedBytes = localBytes;
       } catch (fallbackForgeErr) {
-        setErr(fallbackForgeErr.message || String(fallbackForgeErr));
+        const msg = fallbackForgeErr?.message || String(fallbackForgeErr);
+        setLabel(msg);
+        setErr(msg);
         return;
       }
     }
@@ -400,7 +407,9 @@ export default function DeployPage() {
       const sigHex = sigHexWithTag(signResp.signature);
       signedBytes = forgedBytes + sigHex;
     } catch (e) {
-      setErr(e.message || String(e));
+      const msg = e?.message || String(e);
+      setLabel(msg);
+      setErr(msg);
       return;
     }
     // Step 3: inject via RPC.  We avoid using the backend for
@@ -436,7 +445,9 @@ export default function DeployPage() {
         const signedLocal = localBytes + sigHex2;
         opHash = await injectSigned(toolkit, signedLocal);
       } catch (fallbackErr) {
-        setErr(fallbackErr.message || String(fallbackErr));
+        const msg = fallbackErr?.message || String(fallbackErr);
+        setLabel(msg);
+        setErr(msg);
         return;
       }
     }
@@ -463,7 +474,9 @@ export default function DeployPage() {
       if (contractAddr) break;
     }
     if (!contractAddr) {
-      setErr('Could not resolve contract address after origination.');
+      const msg = 'Could not resolve contract address after origination.';
+      setLabel(msg);
+      setErr(msg);
       return;
     }
     setKt1(contractAddr);

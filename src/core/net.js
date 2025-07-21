@@ -1,17 +1,16 @@
 /*─────────────────────────────────────────────────────────────────
       Developed by @jams2blues – ZeroContract Studio
       File:    src/core/net.js
-      Rev :    r1102   2025‑07‑21
-      Summary: unified single‑stage origination helpers with storage encoding
-               and signature tagging.  Added sigHexWithTag() to convert
-               edsig/spsig/p2sig signatures to hex and append a curve tag.
-               Updated forgeViaBackend() to accept an optional publicKey
-               for reveal support, and enhanced forgeOrigination() to
-               encode high‑level storage, detect unrevealed accounts and
-               prepend a reveal operation.  RPC forging is attempted
-               before falling back to LocalForger.  These updates
-               resolve injection parsing errors when accounts are
-               unrevealed or storage is complex.
+      Rev :    r1103   2025‑07‑21
+      Summary: unified single‑stage origination helpers.  Added
+               sigHexWithTag() for curve-tagging signatures and
+               updated forgeViaBackend() to send high‑level storage
+               directly to the backend instead of encoding it.  This
+               prevents double encoding when using the remote forge
+               service and aligns with the backend’s new estimation
+               pipeline.  forgeOrigination() still encodes storage,
+               handles reveals and attempts RPC forging before
+               falling back to LocalForger.
 ────────────────────────────────────────────────────────────────*/
 
 import { OpKind } from '@taquito/taquito';
@@ -182,12 +181,11 @@ export function encodeStorageForForge(code, storage) {
  */
 export async function forgeViaBackend(code, storage, source, publicKey) {
   const url = forgeEndpoint();
-  // Encode storage into Micheline before sending to backend forge.
-  const encodedStorage = encodeStorageForForge(code, storage);
-  // Include publicKey when provided to allow the backend to prepend a
-  // reveal operation if the source account is unrevealed.  The
-  // backend expects this property and will ignore it if not needed.
-  const payload = { code, storage: encodedStorage, source };
+  // Do not encode storage here.  Pass the high‑level storage object
+  // directly.  The backend will perform encoding and estimation
+  // itself.  Encoding on the client can lead to double‑encoding and
+  // estimation failures.
+  const payload = { code, storage, source };
   if (publicKey) payload.publicKey = publicKey;
   const res = await jFetch(url, {
     method: 'POST',
@@ -409,15 +407,15 @@ export async function injectSigned(toolkit, signedBytes) {
 }
 
 /* What changed & why:
-   • Bumped revision to r1102 and expanded forge capabilities.  forgeViaBackend()
-     now accepts an optional publicKey parameter and includes it in the
-     request payload, allowing the backend to insert reveal operations.
-   • Enhanced forgeOrigination() to encode high‑level storage via
-     encodeStorageForForge(), detect unrevealed accounts and prepend a
-     reveal operation using the provided publicKey.  Branch and counter
-     handling now increment counters appropriately for reveal + origination.
-   • Added RPC forging with fallback to LocalForger and updated gas/fee
-     estimation with safe defaults.  These changes address prevalidation
-     errors observed when accounts were unrevealed or storage encoding
-     mismatched network expectations.
+   • Bumped revision to r1103.  forgeViaBackend() no longer encodes
+     the storage before sending it to the backend.  Passing the
+     high‑level storage prevents double encoding and allows the
+     backend’s TezosToolkit to correctly estimate gas/fee/storage.
+   • Maintained support for optional publicKey to insert reveal
+     operations.  forgeOrigination() continues to encode storage
+     locally, detect unrevealed accounts, prepend reveal ops and
+     attempt RPC forging before falling back to LocalForger.
+   • These changes align the front‑end with the updated forge
+     service, reducing prevalidation errors due to mis‑encoded
+     storage and ensuring interoperability with large contracts.
 */

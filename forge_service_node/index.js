@@ -1,14 +1,15 @@
 /*─────────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    forge_service_node/index.js
-  Rev :    r6   2025‑07‑21
-  Summary: Refactored remote forge service for Tezos origination.
-           Uses Taquito’s TezosToolkit to estimate gas/fee/storage
-           and LocalForger for deterministic forging.  Handles
-           reveal operations when needed.  Returns forged bytes
-           only; injection should be handled client‑side via
-           injectSigned() to avoid RPC 500 errors.  Supports
-           ghostnet and mainnet via RPC_URL environment variable.
+  Rev :    r7   2025‑07‑21
+  Summary: Improved remote forge service for Tezos origination.
+           Estimates gas/fee/storage with TezosToolkit and now
+           attempts to forge operations via the RPC first, falling
+           back to LocalForger on failure.  Handles reveal
+           operations when needed and returns forged bytes only;
+           injection remains client‑side via injectSigned().  This
+           update ensures operations conform to node expectations
+           for large contracts while retaining resilience.
 ──────────────────────────────────────────────────────────────────*/
 
 const express = require('express');
@@ -181,13 +182,25 @@ app.post('/forge', async (req, res) => {
       balance      : '0',
       script       : { code: parsedCode, storage: encodedStorage },
     });
-    // Forge using LocalForger (avoid RPC forging to sidestep node parsing)
+    // Attempt to forge using the RPC.  This ensures the operation
+    // conforms to node expectations for large contracts.  If the RPC
+    // forge fails (e.g. due to size or other issues), fall back to
+    // LocalForger as a last resort.
     try {
-      const forger = new LocalForger();
-      const forgedBytes = await forger.forge({ branch, contents });
+      const forgedBytes = await rpc.forgeOperations({ branch, contents });
       return res.status(200).json({ forgedBytes });
-    } catch (forgeErr) {
-      return res.status(500).json({ error: forgeErr.message || 'Forge failed' });
+    } catch (forgeErrRpc) {
+      // RPC forge may fail for various reasons (e.g. node disabled
+      // forging).  Attempt local forging as a fallback.  Note that
+      // LocalForger may produce slightly different bytes but can
+      // succeed when RPC forging fails.
+      try {
+        const forger = new LocalForger();
+        const forgedBytes = await forger.forge({ branch, contents });
+        return res.status(200).json({ forgedBytes });
+      } catch (forgeErrLocal) {
+        return res.status(500).json({ error: forgeErrLocal.message || 'Forge failed' });
+      }
     }
   } catch (err) {
     console.error('Error in /forge:', err);

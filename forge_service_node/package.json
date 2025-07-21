@@ -1,6 +1,6 @@
 {
   "name": "forge-service-node",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Tezos origination forge/inject API (Node)",
   "main": "index.js",
   "scripts": {

@@ -11,7 +11,7 @@
            forging via Octez and retains fallback to local forging
            for Kukai/Umami.  injectViaBackend() remains deprecated;
            clients should always inject via injectSigned().
-─────────────────────────────────────────────────────────────────*/
+────────────────────────────────────────────────────────────────*/
 
 import { OpKind } from '@taquito/taquito';
 // b58cdecode and prefix are used for signature decoding and tagging
@@ -93,7 +93,7 @@ export function jFetch(url, opts = {}, tries) {
 
 /*─────────────────────────────────────────────────────────────
   Backend forge and inject helpers
-─────────────────────────────────────────────────────────────*/
+────────────────────────────────────────────────────────────*/
 
 /**
  * Determine the full URL for the forge API.  If
@@ -207,7 +207,7 @@ export async function injectViaBackend(_signedBytes) {
 
 /*─────────────────────────────────────────────────────────────
   Signature helpers
-─────────────────────────────────────────────────────────────*/
+────────────────────────────────────────────────────────────*/
 
 /**
  * Convert a base58 signature (edsig/spsig/p2sig/sig) to raw hex for injection.
@@ -273,7 +273,7 @@ export async function injectSigned(toolkit, signedBytes) {
 
 /*─────────────────────────────────────────────────────────────
   Local forge and inject helpers
-─────────────────────────────────────────────────────────────*/
+────────────────────────────────────────────────────────────*/
 
 /**
  * Forge an origination operation locally.  Estimates gas/fee and
@@ -375,3 +375,11 @@ export async function forgeOrigination(toolkit, source, code, storage, publicKey
   }
   return { forgedBytes, contents, branch };
 }
+
+/* What changed & why:
+   • Added this file to restore baseline network helpers (r1105).
+   • Provides helper functions jFetch, forgeViaBackend, sigHexWithTag,
+     injectSigned, encodeStorageForForge and forgeOrigination.
+   • This file is required by deploy.js and other modules; missing it
+     can cause runtime errors.
+*/

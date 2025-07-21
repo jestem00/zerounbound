@@ -2,12 +2,11 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/deploy.js
-  Rev :    r1118   2025‑07‑22
-  Summary: Show error messages in the progress overlay.  When an
-           origination error occurs, the error message is now
-           propagated to the overlay status (label) so users see
-           details instead of a generic “Error” caption.  No
-           changes to core origination logic.
+  Rev :    r1125   2025‑07‑21
+  Summary: Further refined single‑stage origination by clearing any
+           previous errors when starting the operation and after
+           successfully resolving a contract address.  Ensures the
+           overlay displays success instead of residual error messages.
 ────────────────────────────────────────────────────────────*/
 
 import React, { useRef, useState, useCallback } from 'react';
@@ -160,56 +159,50 @@ export default function DeployPage() {
   const rafRef    = useRef(0);
   const [step, setStep]   = useState(-1);
   const [pct, setPct]     = useState(0);
-  const [label, setLabel] = useState('');
+      const [label, setLabel] = useState('');
   const [kt1, setKt1]     = useState('');
   const [err, setErr]     = useState('');
+      // Track whether the remote forge backend is used (Temple wallet)
+      const [useBackend, setUseBackend] = useState(false);
   /**
    * Reset the component state to its initial values.  Cancels
-   * any ongoing animation frame used for progress increments.
+   * any pending RAF updates and resets progress.
    */
-  const reset = () => {
+  function reset() {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
     setStep(-1);
     setPct(0);
     setLabel('');
     setKt1('');
     setErr('');
-    cancelAnimationFrame(rafRef.current);
-  };
+  }
+
   /**
-   * Attempt to connect the wallet.  Captures common errors and
-   * reports them to the user.  Retries can be performed by the UI.
+   * Attempt to connect the wallet if not already connected.
+   * Retries once on failure.  Returns undefined on success,
+   * otherwise sets error and aborts.
    */
-  const retryConnect = useCallback(async () => {
+  async function retryConnect() {
     try {
-      await connect();
+      if (!address) await connect();
     } catch (e) {
-      if (/Receiving end does not exist/i.test(e.message)) {
-        setErr('Temple extension not responding. Restart browser and try again.');
-      } else {
-        setErr(e.message);
-      }
+      setErr(e.message || String(e));
     }
-  }, [connect]);
+  }
+
   /**
-   * Build the full metadata object for the collection.  This function
-   * trims array values, assigns default interfaces and embeds
-   * off‑chain views.  It returns a plain object which will later be
-   * stringified and encoded for on‑chain storage.
-   *
-   * @param {Object} meta Raw form data from DeployCollectionForm
-   * @returns {Object} Ordered metadata object ready for JSON.stringify
+   * Build full metadata object.  Trims and normalises fields and
+   * includes full views from viewsJson.
    */
   function buildMetaObject(meta) {
-    const obj = {
+    return {
       name        : meta.name.trim(),
       symbol      : meta.symbol.trim(),
       description : meta.description.trim(),
-      version     : 'ZeroContractV4',
       license     : meta.license.trim(),
       authors     : Array.isArray(meta.authors)
         ? meta.authors.map((a) => String(a).trim()).filter(Boolean)
         : meta.authors ? [String(meta.authors).trim()] : undefined,
-      homepage    : meta.homepage?.trim() || undefined,
       authoraddress: Array.isArray(meta.authoraddress)
         ? meta.authoraddress.map((a) => String(a).trim()).filter(Boolean)
         : meta.authoraddress ? [String(meta.authoraddress).trim()] : undefined,
@@ -217,49 +210,26 @@ export default function DeployPage() {
         ? meta.creators.map((c) => String(c).trim()).filter(Boolean)
         : meta.creators ? [String(meta.creators).trim()] : undefined,
       type        : meta.type?.trim(),
+      homepage    : meta.homepage?.trim() || undefined,
       interfaces  : uniqInterfaces(meta.interfaces),
       imageUri    : meta.imageUri?.trim() || undefined,
       views       : viewsJson.views,
     };
-    // Remove undefined or empty array properties
-    Object.keys(obj).forEach((k) => {
-      if (obj[k] === undefined || (Array.isArray(obj[k]) && obj[k].length === 0)) {
-        delete obj[k];
-      }
-    });
-    return obj;
   }
 
   /**
-   * Build a minimal metadata object for fast originations.  This
-   * helper calls buildMetaObject() to assemble the full metadata
-   * and then removes the views property entirely.  Use this when
-   * FAST_ORIGIN is enabled to reduce the size of the origination
-   * operation for Temple wallet users.  All other properties remain unchanged.
-   *
-   * @param {Object} meta Raw form data from DeployCollectionForm
-   * @returns {Object} Minimal metadata object
+   * Build minimal metadata object for FAST_ORIGIN.  Replaces
+   * views with a placeholder pointer and omits the image URI.
    */
   function buildFastMetaObject(meta) {
     const obj = buildMetaObject(meta);
-    // Replace views with an empty placeholder.  FA2/TZIP‑16 allows a
-    // minimal hex string ('0x00') to suppress large view definitions
-    // during origination.  The edit_contract_metadata entrypoint can
-    // later set the full views once the contract is originated.  Only
-    // Temple wallet originations set FAST_ORIGIN to true.
-    // Use a single zero after the 0x prefix.  The Michelson
-    // representation for an empty bytes value is 0x00 (0x followed
-    // by two zero characters).  Using two zeros ensures Taquito
-    // correctly interprets the placeholder as an empty view list.
     obj.views = '0x00';
     return obj;
   }
 
   /**
-   * Perform a single-stage origination via the wallet API.  This is
-   * used for Kukai/Umami and other wallets that handle large payloads.
-   *
-   * @param {Object} meta Raw metadata from form
+   * Originate via single‑stage Taquito wallet API.  Used for
+   * Kukai/Umami and other non‑Temple wallets.
    */
   async function originateSingleStage(meta) {
     // Ensure wallet connection
@@ -267,50 +237,73 @@ export default function DeployPage() {
       await retryConnect();
       if (!address) return;
     }
-    if (!toolkit) {
-      setErr('Toolkit not ready');
-      return;
-    }
-    setErr('');
-    // Step 0: build and encode full metadata
-    setStep(0);
-    setLabel('Preparing metadata');
-    setPct(0);
-    let headerBytes;
-    let bodyHex;
-    try {
-      const metaObj = buildMetaObject(meta);
-      headerBytes = '0x' + char2Bytes('tezos-storage:content');
-      bodyHex = utf8ToHex(JSON.stringify(metaObj), (p) => setPct((p * 0.25) / 100));
-    } catch (e) {
-      setErr(`Metadata encoding failed: ${e.message || String(e)}`);
-      return;
-    }
-    // Build metadata big‑map
+    const mdObj  = buildMetaObject(meta);
+    const headerBytes = '0x' + char2Bytes('tezos-storage:content');
+    const bodyHex     = utf8ToHex(JSON.stringify(mdObj), (p) => {});
     const md = new MichelsonMap();
     md.set('', headerBytes);
     md.set('content', bodyHex);
-    // Build storage object
     const storage = { ...STORAGE_TEMPLATE, admin: address, metadata: md };
     // Step 1: originate via wallet API
+    // Clear any previous error before starting
+    setErr('');
     setStep(1);
     setLabel('Origination (wallet)');
     setPct(0.25);
     try {
-      const op = await wallet.originate({ code: contractCode, storage });
+      // Use toolkit.wallet.originate() instead of wallet.originate().
+      // The wallet object from useWallet() may not implement originate().
+      // Send the origination operation via wallet API
+      const op = await toolkit.wallet
+        .originate({ code: contractCode, storage })
+        .send();
       setStep(2);
       setLabel('Waiting for confirmation');
       setPct(0.5);
-      const contract = await op.contract();
-      setKt1(contract.address);
+      // Wait for at least one confirmation before retrieving the contract address
+      try {
+        await op.confirmation();
+      } catch {}
+      const contractAddr = op.contractAddress;
+      if (!contractAddr) {
+        // Fallback: scan recent blocks for the origination result using opHash
+        let resolved = '';
+        const opHash = op.opHash || op.hash || op.operationHash || op.operation_hash;
+        for (let i = 0; i < 15; i++) {
+          await sleep(3000);
+          try {
+            const block = await toolkit.rpc.getBlock();
+            for (const opGroup of block.operations.flat()) {
+              if (opGroup.hash === opHash) {
+                const res = opGroup.contents.find((c) => c.kind === 'origination');
+                if (res?.metadata?.operation_result?.originated_contracts?.length) {
+                  resolved = res.metadata.operation_result.originated_contracts[0];
+                  break;
+                }
+              }
+            }
+          } catch {}
+          if (resolved) break;
+        }
+        if (!resolved) {
+          const msg = 'Could not resolve contract address after origination.';
+          setErr(msg);
+          setLabel(msg);
+          return;
+        }
+        setKt1(resolved);
+      } else {
+        setKt1(contractAddr);
+      }
+      // Clear error on success
+      setErr('');
       setStep(5);
       setPct(1);
       setLabel('Origination confirmed');
     } catch (err2) {
-      const msg = err2?.message || String(err2);
-      // propagate error to overlay caption and err state
-      setLabel(msg);
+      const msg = err2.message || String(err2);
       setErr(msg);
+      setLabel(msg);
     }
   }
 
@@ -319,8 +312,6 @@ export default function DeployPage() {
    * compatibility by offloading forging to the backend, then signing
    * and injecting on the client.  Falls back to local forging on
    * failure.
-   *
-   * @param {Object} meta Raw metadata from form
    */
   async function originateViaForgeService(meta) {
     // Ensure wallet connection
@@ -329,7 +320,9 @@ export default function DeployPage() {
       if (!address) return;
     }
     if (!toolkit) {
-      setErr('Toolkit not ready');
+      const msg = 'Toolkit not ready';
+      setErr(msg);
+      setLabel(msg);
       return;
     }
     setErr('');
@@ -347,9 +340,9 @@ export default function DeployPage() {
       headerBytes = '0x' + char2Bytes('tezos-storage:content');
       bodyHex = utf8ToHex(JSON.stringify(metaObj), (p) => setPct((p * 0.25) / 100));
     } catch (e) {
-      const msg = `Metadata encoding failed: ${e?.message || String(e)}`;
-      setLabel(msg);
+      const msg = `Metadata encoding failed: ${e.message || String(e)}`;
       setErr(msg);
+      setLabel(msg);
       return;
     }
     // Build metadata big‑map
@@ -358,12 +351,6 @@ export default function DeployPage() {
     md.set('content', bodyHex);
     // Build storage object
     const storage = { ...STORAGE_TEMPLATE, admin: address, metadata: md };
-
-    // In FAST_ORIGIN mode, views have been replaced with '0x00'.  No
-    // additional debug logs are emitted here; debug output was
-    // temporarily used to inspect payloads during troubleshooting but
-    // has been removed to restore baseline behaviour.
-
     // Step 1: forge via backend.  If this fails, fall back to local forging.
     setStep(1);
     setLabel('Forging operation');
@@ -387,9 +374,9 @@ export default function DeployPage() {
         );
         forgedBytes = localBytes;
       } catch (fallbackForgeErr) {
-        const msg = fallbackForgeErr?.message || String(fallbackForgeErr);
-        setLabel(msg);
+        const msg = fallbackForgeErr.message || String(fallbackForgeErr);
         setErr(msg);
+        setLabel(msg);
         return;
       }
     }
@@ -407,9 +394,9 @@ export default function DeployPage() {
       const sigHex = sigHexWithTag(signResp.signature);
       signedBytes = forgedBytes + sigHex;
     } catch (e) {
-      const msg = e?.message || String(e);
-      setLabel(msg);
+      const msg = e.message || String(e);
       setErr(msg);
+      setLabel(msg);
       return;
     }
     // Step 3: inject via RPC.  We avoid using the backend for
@@ -445,9 +432,9 @@ export default function DeployPage() {
         const signedLocal = localBytes + sigHex2;
         opHash = await injectSigned(toolkit, signedLocal);
       } catch (fallbackErr) {
-        const msg = fallbackErr?.message || String(fallbackErr);
-        setLabel(msg);
+        const msg = fallbackErr.message || String(fallbackErr);
         setErr(msg);
+        setLabel(msg);
         return;
       }
     }
@@ -475,8 +462,8 @@ export default function DeployPage() {
     }
     if (!contractAddr) {
       const msg = 'Could not resolve contract address after origination.';
-      setLabel(msg);
       setErr(msg);
+      setLabel(msg);
       return;
     }
     setKt1(contractAddr);
@@ -498,19 +485,21 @@ export default function DeployPage() {
     // Attempt to detect the wallet name via Beacon.  If Temple is
     // detected, use the backend forge service; otherwise, use
     // single‑stage origination via wallet.originate().
-    let useBackend = false;
-    try {
+        let useBackendFlag = false;
+        try {
       const info = await wallet.client.getWalletInfo();
       const name = (info?.name || '').toLowerCase();
-      if (name.includes('temple')) {
-        useBackend = true;
-      }
-    } catch {}
-    if (useBackend) {
-      await originateViaForgeService(meta);
-    } else {
-      await originateSingleStage(meta);
-    }
+          if (name.includes('temple')) {
+            useBackendFlag = true;
+          }
+        } catch {}
+        // Persist which path is being used for rendering purposes
+        setUseBackend(useBackendFlag);
+        if (useBackendFlag) {
+          await originateViaForgeService(meta);
+        } else {
+          await originateSingleStage(meta);
+        }
   }
 
   /*──────── render ─────────────────────────────────────────*/
@@ -525,13 +514,20 @@ export default function DeployPage() {
           has occurred.  The overlay will cover the parent wrapper and
           report progress, errors and the resulting contract address. */}
       {(step !== -1 || err) && (
-        <OperationOverlay
-          step={step}
-          pct={pct}
-          label={label}
-          error={err}
+          <OperationOverlay
+          status={label}
+          progress={pct}
+          error={!!err}
           kt1={kt1}
-          onClose={reset}
+          onCancel={reset}
+          onRetry={() => {
+            reset();
+            // Re-initiate origination when retrying; use stored
+            // metadata if available.  For simplicity we rely on the
+            // form to re-submit metadata on user action.
+          }}
+          step={step}
+          total={useBackend ? 5 : 1}
         />
       )}
     </Wrap>

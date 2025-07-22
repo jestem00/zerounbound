@@ -28,6 +28,21 @@ import decodeHexFields, {
   decodeHexJson,
 }                             from '../../../utils/decodeHexFields.js';
 
+/*──────────────── helpers ───────────────────────────────────────────*/
+// Convert a hex-encoded string into a UTF‑8 string.  TzKT returns
+// contract metadata values as hex bytes; this helper decodes the
+// bytes into a regular JS string.  If the input is not a valid
+// hex sequence, the original string is returned unchanged.
+function hexToString(hex = '') {
+  if (!/^[0-9a-fA-F]*$/.test(hex)) return hex;
+  let str = '';
+  for (let i = 0; i < hex.length; i += 2) {
+    const code = parseInt(hex.substr(i, 2), 16);
+    if (!Number.isNaN(code)) str += String.fromCharCode(code);
+  }
+  return str;
+}
+
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
 /*──────── layout shells ─────────────────────────────────────*/
@@ -143,8 +158,39 @@ export default function TokenDetailPage() {
         }
 
         if (collRow) {
-          /* ensure collection metadata has readable fields */
-          const collMeta = decodeHexFields(collRow.metadata || {});
+          // Ensure collection metadata has readable fields.  The
+          // contracts endpoint does not include the TZIP‑16 content
+          // stored in the metadata big‑map.  Attempt to fetch and
+          // decode that JSON from the big map.  If anything fails,
+          // fall back to collRow.metadata.
+          let collMeta = decodeHexFields(collRow.metadata || {});
+          try {
+            const bigmaps = await jFetch(`${apiBase}/contracts/${addr}/bigmaps`).catch(() => []);
+            const metaMap = Array.isArray(bigmaps) ? bigmaps.find((m) => m.path === 'metadata') : null;
+            if (metaMap) {
+              // Retrieve up to 10 keys from the metadata big‑map.  The
+              // content is usually stored under the key 'content'.
+              const entries = await jFetch(`${apiBase}/bigmaps/${metaMap.ptr}/keys?limit=10`).catch(() => []);
+              let entry = Array.isArray(entries)
+                ? entries.find((k) => k.key === 'content') || entries.find((k) => k.key === '')
+                : null;
+              if (entry && typeof entry.value === 'string') {
+                // Decode the hex bytes into a JSON string and parse it.
+                const jsonStr = hexToString(entry.value);
+                let parsed;
+                try {
+                  parsed = decodeHexJson(jsonStr) || JSON.parse(jsonStr);
+                } catch {
+                  parsed = null;
+                }
+                if (parsed && typeof parsed === 'object') {
+                  collMeta = decodeHexFields(parsed);
+                }
+              }
+            }
+          } catch {
+            /* ignore network or decode errors */
+          }
           setCollection({ ...collRow, metadata: collMeta });
         }
       } finally { if (!cancelled) setLoading(false); }

@@ -171,8 +171,15 @@ const HASH2VER = Object.entries(hashMatrix)
   .reduce((o, [h, v]) => { o[+h] = v.toUpperCase(); return o; }, {});
 
 const PLACEHOLDER = '/sprites/cover_default.svg';
-// Convert ipfs:// URIs to http for thumbnail display
-const ipfsToHttp  = (u = '') => u.replace(/^ipfs:\/\//, 'https://ipfs.io/ipfs/');
+
+/* Strict thumbnail selection: only return data URIs.  In a fully
+   on‑chain environment we do not dereference remote resources such
+   as ipfs:// or http:// URIs.  Non‑data URIs fall back to the
+   placeholder image. */
+function pickDataThumb(uri = '') {
+  const DATA_RE = /^data:/i;
+  return DATA_RE.test(uri) ? uri : '';
+}
 
 /* Decode metadata object.  Accepts a hex string, JSON string or plain
    object and returns a fully decoded object via decodeHexFields. */
@@ -194,10 +201,7 @@ function toMetaObject(meta) {
    a data URI unchanged or converts ipfs:// to https://. */
 function pickThumb(m = {}) {
   const uri = m.imageUri || m.thumbnailUri || m.displayUri || m.artifactUri || '';
-  if (!uri) return '';
-  const DATA_RE = /^data:/i;
-  if (DATA_RE.test(uri)) return uri;
-  return uri.startsWith('ipfs://') ? ipfsToHttp(uri) : uri;
+  return pickDataThumb(uri);
 }
 
 /*──────── component ───────────────────────────────────────*/

@@ -1,15 +1,13 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/MAINTokenMetaPanel.jsx
-  Rev :    r10    2025‑10‑17
-  Summary: responsive token metadata panel with improved
-           collection preview and prefix.  Uses a flexible
-           grid for small screens and robust thumbnail
-           fallbacks.  Adds a “Collection:” label before the
-           collection name and chooses the first available
-           imageUri/logoUri/displayUri/thumbnailUri for the
-           thumbnail.  This version preserves hazard
-           warnings, script toggles and marketplace controls.
+  Rev :    r12    2025‑10‑17
+  Summary: responsive token metadata panel.  Decodes
+           collection metadata via decodeHexFields to obtain
+           proper name/preview, picks thumbnail via
+           image/thumbnail/display/artifact URIs, wraps tags
+           into a row with label, aligns meta rows and uses
+           safe name fallback (name→symbol→title→collectionName→address).
 ─────────────────────────────────────────────────────────────*/
 import React, { useMemo, useState } from 'react';
 import PropTypes                    from 'prop-types';
@@ -34,6 +32,7 @@ import {
 import PixelConfirmDialog           from './PixelConfirmDialog.jsx';
 import countAmount                  from '../utils/countAmount.js';
 import hashMatrix                   from '../data/hashMatrix.json';
+import decodeHexFields, { decodeHexJson } from '../utils/decodeHexFields.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -136,13 +135,25 @@ const Tag = styled.span`
   background: var(--zu-bg-alt);
   font-size: .7rem;
   border-radius: 4px;
+  flex: 0 0 auto;
+  white-space: nowrap;
 `;
 
-/* Meta grid uses adaptive columns. On small screens the labels
-   stack above values; on wider screens they sit side by side. */
+/* Row container for tag chips with a label.  Chips will wrap
+   automatically and maintain tight spacing. */
+const TagsRow = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+`;
+
+/* Meta grid displays labels and values in two columns.  This
+   approach aligns all rows and avoids uneven distribution on
+   large screens.  Each dt/dd pair occupies a single row. */
 const MetaGrid = styled.dl`
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(120px, 40%), 1fr));
+  grid-template-columns: max-content 1fr;
   gap: 4px 8px;
   font-size: .8rem;
   dt {
@@ -163,12 +174,41 @@ const PLACEHOLDER = '/sprites/cover_default.svg';
 // Convert ipfs:// URIs to http for thumbnail display
 const ipfsToHttp  = (u = '') => u.replace(/^ipfs:\/\//, 'https://ipfs.io/ipfs/');
 
+/* Decode metadata object.  Accepts a hex string, JSON string or plain
+   object and returns a fully decoded object via decodeHexFields. */
+function toMetaObject(meta) {
+  if (!meta) return {};
+  if (typeof meta === 'string') {
+    try {
+      return decodeHexFields(JSON.parse(meta));
+    } catch { /* ignore */ }
+    const parsed = decodeHexJson(meta);
+    if (parsed) return decodeHexFields(parsed);
+    return {};
+  }
+  return decodeHexFields(meta);
+}
+
+/* Pick a thumbnail URI from a decoded metadata object.  Chooses
+   imageUri, then thumbnailUri, displayUri or artifactUri.  Returns
+   a data URI unchanged or converts ipfs:// to https://. */
+function pickThumb(m = {}) {
+  const uri = m.imageUri || m.thumbnailUri || m.displayUri || m.artifactUri || '';
+  if (!uri) return '';
+  const DATA_RE = /^data:/i;
+  if (DATA_RE.test(uri)) return uri;
+  return uri.startsWith('ipfs://') ? ipfsToHttp(uri) : uri;
+}
+
 /*──────── component ───────────────────────────────────────*/
 export default function MAINTokenMetaPanel({ token, collection, walletAddress: _wa }) {
   const [copied, setCopied] = useState(false);
 
-  const collMeta = collection.metadata || {};
-  const collHaz  = detectHazards(collMeta);
+  // Decode the collection metadata into a flat object.  This handles
+  // hex-encoded strings and JSON strings, producing fully decoded
+  // fields via decodeHexFields().
+  const collObj  = useMemo(() => toMetaObject(collection.metadata), [collection.metadata]);
+  const collHaz  = detectHazards(collObj);
   const tokHaz   = detectHazards(token.metadata || {});
 
   const [allowScr,   setAllowScr]   = useConsent(`scripts:${collection.address}`, false);
@@ -189,18 +229,22 @@ export default function MAINTokenMetaPanel({ token, collection, walletAddress: _
   const verLabel   = HASH2VER[collection.typeHash] || '?';
 
   /* thumb uri + fallbacks */
-  const rawThumb = collMeta.imageUri
-    || collMeta.logoUri
-    || collMeta.displayUri
-    || collMeta.thumbnailUri
-    || '';
-  const thumb    = rawThumb.startsWith('ipfs://') ? ipfsToHttp(rawThumb) : rawThumb;
+  const rawThumb = pickThumb(collObj);
+  const thumb    = rawThumb; // pickThumb already converts ipfs:// and preserves data URI
   const [thumbOk, setThumbOk] = useState(true);
 
   /* hazard mask logic */
   const needsNSFW  = (collHaz.nsfw   || tokHaz.nsfw)    && !allowNSFW;
   const needsFlash = (collHaz.flashing || tokHaz.flashing) && !allowFlash;
   const hide       = needsNSFW || needsFlash;
+
+  /* safe collection name: prefer name, title or symbol if available,
+     else fall back to the short contract address */
+  const collNameSafe = collObj.name
+    || collObj.symbol
+    || collObj.title
+    || collObj.collectionName
+    || shortKt(collection.address);
 
   /* clipboard copy */
   const copyAddr = () => {
@@ -271,7 +315,7 @@ export default function MAINTokenMetaPanel({ token, collection, walletAddress: _
             </ThumbWrap>
             {/* collection name with prefix */}
             <span style={{ fontWeight: 'bold', fontSize: '.95rem' }}>
-              Collection: {collMeta.name || shortKt(collection.address)}
+              Collection: {collNameSafe}
             </span>
           </CollectionLink>
           {/* address row */}
@@ -320,9 +364,12 @@ export default function MAINTokenMetaPanel({ token, collection, walletAddress: _
         {/* tags */}
         {Array.isArray(token.metadata?.tags) && token.metadata.tags.length > 0 && (
           <Section>
-            {token.metadata.tags.map((t) => (
-              <Tag key={t}>{t}</Tag>
-            ))}
+            <TagsRow>
+              <span style={{ fontWeight: 700 }}>Tags:</span>
+              {token.metadata.tags.map((t) => (
+                <Tag key={t}>{t}</Tag>
+              ))}
+            </TagsRow>
           </Section>
         )}
 
@@ -417,14 +464,18 @@ MAINTokenMetaPanel.propTypes = {
   walletAddress: PropTypes.string,
 };
 
-/* What changed & why (r10):
-   • Added prefix “Collection:” before the collection name and improved
-     thumbnail fallbacks by considering imageUri, logoUri,
-     displayUri and thumbnailUri.
-   • Made the meta grid adaptive using auto‑fit so labels wrap
-     gracefully on small screens.
-   • Reduced rigid widths; Panel now flexes to available space.
-   • Preserved hazard overlays, script toggles and marketplace
-     buttons, ensuring this component remains fully functional.
+/* What changed & why (r12):
+   • Added toMetaObject() and pickThumb() to decode the
+     collection metadata and select a preview from imageUri,
+     thumbnailUri, displayUri or artifactUri.  The preview
+     now renders correctly.
+   • Safe collection name now comes from decoded metadata
+     fields (name, symbol, title or collectionName) before
+     falling back to the KT1 address.
+   • Introduced TagsRow for tags: includes a “Tags:” label
+     and wraps chips on a single line with flex and no stretch.
+   • Updated Tag styling to prevent chips from expanding and
+     ensure they fit neatly next to the label.
+   • Overall meta grid and hazard logic preserved.
 */
 /* EOF */

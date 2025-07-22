@@ -1,70 +1,69 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/MarketplaceBar.jsx
-  Rev :    r1     2025-09-21
-  Summary: tiny action-bar (Buy|List|Offer) for TokenDetailPage
+  Rev :    r2     2025‑07‑22
+  Summary: replace buy/list/offer events with a WIP overlay
+           directing users to objkt.com for marketplace actions.
 ─────────────────────────────────────────────────────────────*/
-import React      from 'react';
-import PropTypes  from 'prop-types';
-import PixelButton from './PixelButton.jsx';
+import React, { useState } from 'react';
+import PropTypes          from 'prop-types';
+import PixelButton        from './PixelButton.jsx';
+import PixelConfirmDialog from './PixelConfirmDialog.jsx';
+import { URL_OBJKT_BASE } from '../config/deployTarget.js';
 
-export default function MarketplaceBar({
-  contractAddress,
-  tokenId,
-  marketplace,
-}) {
-  const post = (type, detail = {}) =>
-    window.dispatchEvent(new CustomEvent(type, { detail }));
+export default function MarketplaceBar({ contractAddress, tokenId, marketplace }) {
+  const [open, setOpen] = useState(false);
+
+  // Build an objkt.com link appropriate to the current network.
+  const objktUrl = `${URL_OBJKT_BASE}${contractAddress}/${tokenId}`;
+
+  // Open the dialog on any button click instead of dispatching internal
+  // marketplace events.  Users are guided to objkt.com until our
+  // marketplace contract is finished.
+  const handleClick = (e) => {
+    e.preventDefault();
+    setOpen(true);
+  };
 
   return (
-    <div style={{ display:'flex', gap:'.5rem', marginTop:'.8rem' }}>
-      <PixelButton
-        size="xs"
-        onClick={() =>
-          post('zu:buyToken', {
-            contract: contractAddress,
-            tokenId,
-            market: marketplace,
-          })}
-      >
-        BUY
-      </PixelButton>
-
-      <PixelButton
-        size="xs"
-        onClick={() =>
-          post('zu:listToken', {
-            contract: contractAddress,
-            tokenId,
-            market: marketplace,
-          })}
-      >
-        LIST
-      </PixelButton>
-
-      <PixelButton
-        size="xs"
-        warning
-        onClick={() =>
-          post('zu:makeOffer', {
-            contract: contractAddress,
-            tokenId,
-            market: marketplace,
-          })}
-      >
-        OFFER
-      </PixelButton>
-    </div>
+    <>
+      <PixelButton onClick={handleClick}>BUY</PixelButton>
+      <PixelButton onClick={handleClick}>LIST</PixelButton>
+      <PixelButton onClick={handleClick}>OFFER</PixelButton>
+      <PixelConfirmDialog
+        open={open}
+        title="Marketplace Unavailable"
+        message={
+          <span>
+            Our marketplace contract is still a work in progress. Please
+            list, buy or make offers on&nbsp;
+            <a href={objktUrl} target="_blank" rel="noopener noreferrer">objkt.com</a>
+            &nbsp;for now.
+          </span>
+        }
+        okLabel="OK"
+        onOk={() => setOpen(false)}
+        cancelLabel=""
+        hideCancel
+      />
+    </>
   );
 }
 
 MarketplaceBar.propTypes = {
   contractAddress: PropTypes.string.isRequired,
-  tokenId        : PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
-  marketplace    : PropTypes.string,
+  tokenId: PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
+  marketplace: PropTypes.string,
 };
 
 MarketplaceBar.defaultProps = {
   marketplace: '',
 };
+
+/* What changed & why:
+   • Introduced a WIP overlay via PixelConfirmDialog to inform
+     users that marketplace functionality is not yet available.
+   • Removed dispatch of zu:buyToken/listToken/makeOffer events and
+     replaced them with a unified handler that triggers the dialog.
+*/
 /* EOF */

@@ -1,9 +1,9 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/constants/integrityBadges.js
-  Rev :    r4      2025‑07‑22
-  Summary: shorten partial blurb and expose uniform accessor
-           for status badges, labels and blurbs.
+  Rev :    r5      2025‑07‑22
+  Summary: corrected emoji glyphs for badges (chain + collision)
+           and reverted to literal star/question mark for safer display.
 ─────────────────────────────────────────────────────────────*/
 
 // Emoji badges representing on‑chain integrity states.  Keep these
@@ -11,12 +11,12 @@
 // change these, ensure they remain 1–2 characters so they don’t
 // disturb layout.
 export const INTEGRITY_BADGES = {
-  // Use unicode escape sequences to avoid storing literal emoji.  This
-  // bypasses certain build pipelines and file syncing issues while
-  // preserving the visual representation at runtime.
-  full    : '\u2B50',                 // ⭐ 100 % fully‑on‑chain
-  partial : '\u2693\uFE0F\u200D\uD83D\uDD25', // ⛓️‍💥 mixes on/off‑chain
-  unknown : '\u2754',                // ❔ can’t determine / missing
+  // Literal emoji values used for status badges.  Using the native
+  // characters ensures correct rendering (⛓️‍💥 for partial, ⭐ for full)
+  // across all environments.
+  full    : '⭐',        // 100 % fully‑on‑chain
+  partial : '⛓️‍💥',     // mixes on/off‑chain
+  unknown : '❔',        // can’t determine / missing
 };
 
 // Short labels shown alongside the badge in the modal.
@@ -54,8 +54,10 @@ export function getIntegrityInfo(status = 'unknown') {
 
 /* What changed & why:
    • Shortened the partial blurb to avoid overflow on very small
-     screens while retaining the meaning (off‑chain or control
-     characters).
+     screens while retaining the meaning.
+   • Corrected the emoji glyphs: the partial badge now uses the
+     proper chain and collision characters (⛓️‍💥), and star/question
+     mark badges revert to literal emojis for accurate display.
    • Added documentation and kept accessor function consistent.
 */
 /* EOF */

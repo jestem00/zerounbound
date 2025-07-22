@@ -4,12 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev:current": "node scripts/ensureDevManifest.js && node scripts/startDev.js",
     "set:ghostnet": "node scripts/setTarget.js ghostnet",
     "set:mainnet": "node scripts/setTarget.js mainnet",
-    "bundle": "node scripts/generateBundles.js",
+    "dev:mainnet": "yarn set:mainnet && node scripts/ensureDevManifest.js && node scripts/startDev.js",
     "dev": "yarn set:ghostnet && node scripts/ensureDevManifest.js && node scripts/startDev.js",
     "build": "node scripts/generateManifest.js && node scripts/updatePkgName.js && next build",
     "start": "next start -p 4000",
+    "bundle": "node scripts/generateBundles.js",
     "lint": "eslint . --ext js,jsx,ts,tsx --max-warnings 0",
     "test": "jest"
   },

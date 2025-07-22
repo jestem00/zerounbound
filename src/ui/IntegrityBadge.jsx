@@ -1,11 +1,12 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/IntegrityBadge.jsx
-  Rev :    r2     2025‑07‑22
-  Summary: improved integrity dialog layout – widen and wrap
-           content so long labels or blurbs never overflow
-           the container.  Responsively caps width to the
-           viewport and ensures words break appropriately.
+  Rev :    r3     2025‑07‑22
+  Summary: further refine modal sizing and typography to
+           ensure integrity descriptions never overflow on
+           small screens.  Adds responsive font scaling,
+           height constraints and dedicated Title/Blurb
+           styled components for better readability.
 ─────────────────────────────────────────────────────────────*/
 import React, { useState } from 'react';
 import styled              from 'styled-components';
@@ -53,17 +54,48 @@ const DialogOuter = styled.div`
 const Dialog = styled.section`
   background:var(--zu-bg);
   border:4px solid var(--zu-fg);
-  padding:1.25rem .75rem;
-  max-width:340px;
-  width:90vw;
+  /* Use clamp() to scale padding based on viewport width.  Larger screens
+     retain generous padding while small screens shrink gracefully. */
+  padding: clamp(1rem, 2.5vw, 1.5rem) clamp(0.5rem, 2vw, 1rem);
+  /* Cap modal width at 360px but allow it to shrink down on narrow
+     viewports.  Using min() ensures we never exceed 95vw. */
+  max-width:360px;
+  width: min(95vw, 360px);
+  /* Constrain height so tall blurbs scroll rather than overflow the
+     viewport; allow vertical scrolling within the modal. */
+  max-height:90vh;
+  overflow-y:auto;
   text-align:center;
   font-family:var(--pixeloid, monospace);
-  line-height:1.4;
+  /* Slightly tighter line height improves vertical spacing. */
+  line-height:1.35;
   word-break:break-word;
   overflow-wrap:anywhere;
   display:flex;
   flex-direction:column;
-  gap:.75rem;
+  gap:0.75rem;
+`;
+
+/* The title row contains the badge icon and the short label.  Use
+   clamp() to scale the font size across devices while keeping
+   generous spacing. */
+const Title = styled.span`
+  font-weight:bold;
+  font-size: clamp(1.2rem, 4vw, 1.6rem);
+  line-height:1.2;
+  display:block;
+  white-space:normal;
+`;
+
+/* The blurb may be lengthy; clamp the font size down on small
+   devices and ensure long words wrap. */
+const Blurb = styled.p`
+  margin: 0;
+  font-size: clamp(0.9rem, 3.5vw, 1.1rem);
+  line-height:1.35;
+  word-break:break-word;
+  overflow-wrap:anywhere;
+  white-space:normal;
 `;
 
 /**
@@ -99,8 +131,8 @@ export default function IntegrityBadge({ status = 'unknown', ...rest }) {
       {open && (
         <DialogOuter onClick={() => setOpen(false)}>
           <Dialog onClick={(e) => e.stopPropagation()}>
-            <span style={{ fontSize: '1.5rem', lineHeight: '1' }}>{badge}  {label}</span>
-            <p style={{ margin: 0 }}>{blurb}</p>
+            <Title>{badge}  {label}</Title>
+            <Blurb>{blurb}</Blurb>
             <PixelButton onClick={() => setOpen(false)}>CLOSE</PixelButton>
           </Dialog>
         </DialogOuter>
@@ -109,10 +141,13 @@ export default function IntegrityBadge({ status = 'unknown', ...rest }) {
   );
 }
 
-/* What changed & why (r2):
-   • Added responsive width and word‑wrapping rules to the modal
-     container, preventing labels and descriptions from overflowing
-     the dialog on narrow screens or with long copy.
-   • Increased line height and introduced flex layout for clearer
-     separation between icon/label, blurb and the close button.
+/* What changed & why (r3):
+   • Added clamp‑based responsive padding and width constraints to
+     ensure the modal scales gracefully across phones, tablets and
+     desktops and never exceeds the viewport.
+   • Introduced Title and Blurb styled components with responsive
+     font sizes to prevent overflow and maintain readability on
+     very narrow screens.
+   • Added max‑height and scrolling behaviour so long copy stays
+     contained within the modal and doesn’t slide off screen.
 */

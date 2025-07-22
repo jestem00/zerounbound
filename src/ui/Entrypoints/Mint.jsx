@@ -1,8 +1,10 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/Mint.jsx
-  Rev :    r880   2025-07-14
-  Summary: refined currentBytesList for multi-edition
+  Rev :    r882   2025-07-22
+  Summary: refine oversize detection; clamp first slice only when needed and
+           flag metadata overhead overflow.  Prevents runaway slices on
+           Mac/iOS and handles <1KB media.
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useRef, useState, useEffect, useMemo, useCallback,
@@ -293,10 +295,36 @@ export default function Mint({
 
   const metaOverhead = useMemo(() => calcExactOverhead(metaMap), [metaMap]);
 
-  const maxFirstSlice = MAX_OP_DATA_BYTES - metaOverhead - 512; // safety
+  /*
+   * Compute the maximum first-slice size.  The metadata overhead can
+   * sometimes exceed MAX_OP_DATA_BYTES when attribute names and values
+   * are very large, particularly on some browsers where unicode
+   * normalisation differs.  A negative or tiny first slice causes
+   * planSlices() to miscalculate, yielding dozens of unnecessary
+   * batches (reportedly affecting Mac/iOS users).  Clamp to at least
+   * SLICE_MIN_BYTES to ensure slices remain sensible and fees stay
+   * predictable across all devices.
+   */
+  /*
+   * Determine whether the media/metadata pair will exceed Tezos’ per‑parameter
+   * limit.  The `maxFirstSliceCandidate` reserves 512 bytes of headroom on
+   * top of the computed metadata overhead.  When the candidate becomes
+   * negative, metadata alone cannot fit into a single call – no amount of
+   * slicing will help – so we flag this with `metaOverflow` and later
+   * invalidate the form.  Otherwise, we calculate `oversize` based on the
+   * remaining budget; if the artifact bytes exceed this threshold we must
+   * slice.  The resulting `maxFirstSlice` is clamped to `SLICE_MIN_BYTES` to
+   * avoid negative or tiny values which previously caused runaway slice
+   * counts on some browsers.
+   */
+  const oversizeThreshold = MAX_OP_DATA_BYTES - metaOverhead - 512;
+  const metaOverflow      = oversizeThreshold <= 0;
+  const oversize          = !metaOverflow && (artifactHex.length / 2 > oversizeThreshold);
+  const maxFirstSlice     = oversize
+    ? Math.max(SLICE_MIN_BYTES, oversizeThreshold)
+    : 0;
 
-  const oversize = artifactHex.length / 2 > maxFirstSlice;
-  const oversizeLarge = artifactHex.length / 2 > 100_000;
+  const oversizeLarge     = artifactHex.length / 2 > 100_000;
 
   const allSlices = useMemo(
     () => oversize ? planSlices(`0x${artifactHex}`, sliceSize, maxFirstSlice) : [],
@@ -318,6 +346,18 @@ export default function Mint({
   useEffect(() => {
     if (oversize) snack('Large file detected – multiple transactions & higher fees required', 'warning');
   }, [oversize]);
+
+  /* Notify the user when the metadata overhead alone exceeds the
+   * parameter budget.  In this situation slicing cannot help – the
+   * on‑chain call would exceed the hard limit even before adding any
+   * artifact bytes – so we surface an immediate error prompting the
+   * creator to reduce names, descriptions, attributes or tags.  This
+   * extra guard complements the standard `metadataBytes` check which
+   * only measures the final metadata map.  See Validator I64.
+   */
+  useEffect(() => {
+    if (metaOverflow) snack('Metadata overhead too large – reduce metadata length or number of attributes', 'error');
+  }, [metaOverflow]);
 
   /* royalties shares */
   const shares = useMemo(() => {
@@ -376,10 +416,10 @@ export default function Mint({
         return !Number.isNaN(n) && n >= 1 && n <= MAX_EDITIONS;
       })(),
       attrs:         validAttributes(attrs.filter((a) => a.name && a.value)),
-      metadataBytes: oversize || metaBytes <= MAX_META_BYTES,
+      metadataBytes: !metaOverflow && (oversize || metaBytes <= MAX_META_BYTES),
       agreed:        f.agree,
     });
-  }, [f, url, file, shares, contractVersion, metaBytes, oversize, attrs, forceSelf, wallet]);
+  }, [f, url, file, shares, contractVersion, metaBytes, oversize, attrs, forceSelf, wallet, metaOverflow]);
 
   /* map checklist item → state (ok | bad | warn) */
   const getState = (key) => {
@@ -923,6 +963,16 @@ export default function Mint({
     </Wrap>
   );
 }
-/* What changed & why: Refined currentBytesList for multi-edition accuracy; rev-bump r880; Compile-Guard passed.
- */
+/* What changed & why:
+   • Replaced naive oversize detection with a threshold that considers
+     metadata overhead + safety headroom.  Only mark oversize when
+     artifact bytes exceed the remaining budget; otherwise avoid slicing.
+   • Introduced `metaOverflow` to detect when metadata overhead alone
+     exceeds the Tezos parameter limit.  Emit an immediate error via
+     snackbar and invalidate the form in this case.
+   • Compute `maxFirstSlice` only when oversize, clamping to
+     SLICE_MIN_BYTES.  Small (<1 KB) files now mint in a single
+     operation without triggering spurious slices.
+   • Updated baseChecks to respect metaOverflow and adjusted revision and
+     summary. */
 /* EOF */

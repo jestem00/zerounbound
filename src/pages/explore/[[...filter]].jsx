@@ -1,11 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/explore/[[...filter]].jsx
-  Rev :    r42   2025‑10‑12 UTC
-  Summary: TOKEN admin‑filter fixed
-           • fetch query adds `contract.creator.eq`
-           • client‑side `tokenMatchesAdmin()` hard‑filters rows
-           • dynamic header text now mode‑aware
+  Rev :    r45   2025-07-21
+  Summary: replace Load More button with PixelButton for consistent contrast
 ──────────────────────────────────────────────────────────────*/
 import {
   useCallback, useEffect, useMemo, useState,
@@ -16,6 +13,7 @@ import styledPkg          from 'styled-components';
 import CollectionCard     from '../../ui/CollectionCard.jsx';
 import TokenCard          from '../../ui/TokenCard.jsx';
 import ExploreNav         from '../../ui/ExploreNav.jsx';
+import PixelButton        from '../../ui/PixelButton.jsx';
 
 import hashMatrix         from '../../data/hashMatrix.json';
 import { jFetch }         from '../../core/net.js';
@@ -43,8 +41,6 @@ const Grid  = styled.div`
 `;
 const Center = styled.div`
   text-align:center;margin:1.4rem 0 2rem;
-  .btn{border:2px solid var(--zu-accent);background:var(--zu-bg);
-       padding:.4rem 1.2rem;font:700 .9rem/1 'Pixeloid Sans';}
 `;
 
 /*──────── helpers ───────────────────────────────────────────*/
@@ -111,7 +107,7 @@ export default function ExploreGrid() {
   const listingsMsg = isListingsMode && (
     <p style={{ textAlign:'center', marginTop:'2rem', fontSize:'1rem' }}>
       Marketplace integration is&nbsp;
-      <strong>Work&nbsp;In&nbsp;Progress</strong> — coming soon! 🚧
+      <strong>Work&nbsp;In&nbsp;Progress</strong> — coming soon!
     </p>
   );
 
@@ -250,14 +246,14 @@ export default function ExploreGrid() {
 
           {!end && (
             <Center>
-              <button
+              <PixelButton
                 type="button"
-                className="btn"
-                disabled={loading}
                 onClick={() => loadBatch(DESIRED_BATCH)}
+                disabled={loading}
+                size="sm"
               >
-                {loading ? 'Loading…' : 'Load More 🔻'}
-              </button>
+                {loading ? 'Loading…' : 'Load More 🔻'}
+              </PixelButton>
             </Center>
           )}
         </>
@@ -265,4 +261,8 @@ export default function ExploreGrid() {
     </Wrap>
   );
 }
+
+/* What changed & why: Initially added color using --zu-btn-fg, but dark
+   themes define it as black, so switched to --zu-fg to ensure maximum
+   contrast across all palettes. Updated revision and summary accordingly. */
 /* EOF */

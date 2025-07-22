@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Header.jsx
-  Rev :    r744‑a2  2025‑08‑11 T09:04 UTC
-  Summary: +SIFR ZERO link • β‑badge • polish lint
+  Rev :    r744‑a3  2025‑07‑21
+  Summary: fix stale wallet by refreshing on mount & focus
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useCallback, useEffect, useMemo, useRef, useState,
@@ -107,6 +107,8 @@ export default function Header() {
     address,
     network: walletNet,
     connect, disconnect,
+    // refresh helper added to sync wallet state from WalletContext
+    refresh,
   } = walletCtx || {};
   const network = walletNet || NETWORK_KEY;
 
@@ -127,6 +129,26 @@ export default function Header() {
     document.documentElement.style
       .setProperty('--zu-net-border', NET_COL[network] || 'var(--zu-accent-sec)');
   }, [network]);
+
+  // ensure wallet state is up‑to‑date: on mount, focus, or
+  // visibility change, request a refresh from WalletContext.  This
+  // prevents stale headers showing disconnected wallets when a
+  // session expires in another tab (see issue with manage page)
+  useEffect(() => {
+    if (!refresh) return;
+    // initial refresh on mount
+    refresh().catch(() => {});
+    const handleVisibility = () => {
+      // call refresh whenever the tab gains focus or becomes visible
+      refresh().catch(() => {});
+    };
+    window.addEventListener('focus', handleVisibility);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      window.removeEventListener('focus', handleVisibility);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [refresh]);
 
   const shortAddr = useMemo(
     () => (address ? `${address.slice(0, 6)}…${address.slice(-4)}` : ''),
@@ -236,8 +258,11 @@ export default function Header() {
   );
 }
 /* What changed & why:
-   • Added external “SIFR ZERO Mint” link to both desktop and mobile menus.
-   • Appended β‑badge after ZERO UNBOUND brand for live‑beta notice.
-   • Comments & minor lint tidy; keeps existing logic intact.
+   • Added refresh helper to destructure and inserted a useEffect hook
+     that invokes WalletContext.refresh() on mount and whenever the
+     tab gains focus or changes visibility.  This ensures stale
+     sessions in the header update automatically and fixes the
+     outdated wallet display on the manage page.
+   • Updated revision and summary lines accordingly.
 */
 /* EOF */

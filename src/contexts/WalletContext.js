@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues with love for the Tezos community
   File:    src/contexts/WalletContext.js
-  Rev :    r531   2025‑07‑19
-  Summary: disable P2P matrix nodes to stabilise Temple wallet
+  Rev :    r532   2025‑07‑21
+  Summary: expose refresh() method to sync stale wallet state
 
   A simplified wallet context for ZeroUnbound.  We explicitly
   disable P2P transports by setting `matrixNodes: []` when
@@ -159,10 +159,15 @@ export function WalletProvider({ children, initialNetwork = DEFAULT_NETWORK }) {
     networkMismatch:   mismatch,
     needsReveal, needsFunds,
     revealAccount,
+    // expose sync helper so external components (e.g. Header) can
+    // force a refresh of the wallet state when a stale session is detected
+    refresh:           sync,
   }), [
     network, address, connected, mismatch,
     needsReveal, needsFunds, connect,
     disconnect, revealAccount,
+    // include sync in dependencies to ensure memo invalidation when it changes
+    sync,
   ]);
 
   return (
@@ -174,8 +179,7 @@ export function WalletProvider({ children, initialNetwork = DEFAULT_NETWORK }) {
 
 export default WalletProvider;
 
-/* What changed & why: Reintroduced `matrixNodes: []` to disable
-   Beacon’s P2P transports and rely solely on browser extension
-   communication.  This resolves Temple’s “Could not establish
-   connection” error during origination.  Updated revision and
-   summary accordingly. */
+/* What changed & why: Added a public `refresh` method to the
+   WalletContext value so components can proactively sync the
+   wallet state and clear stale sessions.  Bumped revision and
+   summary to reflect the new feature. */

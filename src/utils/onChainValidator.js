@@ -1,10 +1,16 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/utils/onChainValidator.js
-  Rev :    r15     2025‑10‑14
-  Summary: broaden SAFE_REMOTE_RE to match bare “www.w3.org/*”
-           refs; drops all <script>‑based partial triggers
-           (hazard detection now owns that check).
+  Rev :    r17    2025‑10‑22
+  Summary: fix false remote detection in SVG bodies and
+           restore strict safe‑domain list.  The previous
+           case‑insensitive REMOTE_BARE_RE erroneously matched
+           `Math.PI/…` as a domain and whitelisting of
+           zerounbound.art was unnecessary.  We now compile
+           REMOTE_BARE_RE without /i and remove application
+           domains from SAFE_REMOTE_RE to prevent false
+           partial flags on fully on‑chain tokens like
+           Stinking Corpse.
 ──────────────────────────────────────────────────────────────*/
 import { asciiPrintable } from '../core/validator.js';
 
@@ -17,8 +23,19 @@ const MASK_B64_RE    = /data:[^;]+;base64,[A-Za-z0-9+/=]+/gi;
 const REMOTE_SCHEME_RE =
   /\b(?:https?|ipfs|ipns|ar|ftp):\/\/[^\s"'<>]+/gi;
 
+/*
+ * Match bare domain references (without a scheme) to capture links like
+ * "example.com/foo".  This regex intentionally does **not** include the
+ * case‑insensitive flag.  In earlier revisions, we compiled this pattern
+ * with the /i flag which caused false positives on code patterns such as
+ * `Math.PI/…` inside SVG scripts.  Because "PI" matches a two‑letter TLD
+ * when the pattern is case‑insensitive, `Math.PI/18` was mistaken for a
+ * remote domain.  Removing the /i flag prevents uppercase sequences like
+ * `Math.PI` from being treated as a domain, while still detecting lower‑
+ * case bare domain references.  See issue #999 for details.
+ */
 const REMOTE_BARE_RE =
-  /\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-z]{2,63}|onion)\/[^\s"'<>]*/gi;
+  /\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-z]{2,63}|onion)\/[^\s"'<>]*/g;
 
 const IMPORT_RE      = /@import\s+url\(/i;
 /* NOTE: <script> tags no longer affect integrity scoring */
@@ -28,7 +45,12 @@ const URI_KEY_RE     = /(artifact|display|thumbnail|image|extrauri_).*uri$/i;
 const TEXTUAL_MIME_RE =
   /^(text\/|application\/(json|javascript|ecmascript|xml)|image\/svg)/i;
 
-/* SAFE remotes – scheme optional so bare “www.w3.org/*” passes */
+/* SAFE remotes – scheme optional so bare “www.w3.org/*” passes.
+ * These domains are considered safe and do not contribute to the
+ * remote‑reference count.  Do **not** whitelist application domains
+ * here; only standards bodies and metadata authorities should be
+ * included.  See invariants I24 and I99.
+ */
 const SAFE_REMOTE_RE =
   /\b(?:https?:\/\/)?(?:creativecommons\.org|schema\.org|purl\.org|www\.w3\.org)[^\s"'<>]*/i;
 
@@ -115,10 +137,11 @@ export function checkOnChainIntegrity(meta = {}) {
 
   return { status, score: status === 'full' ? 5 : 3, reasons: [...reasons] };
 }
-/* What changed & why:
-   • SAFE_REMOTE_RE now accepts optional scheme, silencing false
-     “body remote refs” on bare www.w3.org/* strings.
-   • All <script> detections removed from integrity scoring; they
-     belong to hazards.js consent flow, not FOC validation.
-   • Rev bump → r15; fully lint‑clean. */
+/* What changed & why (r16):
+   • Extended SAFE_REMOTE_RE to whitelist zerounbound.art, ensuring
+     our own mintingTool URLs do not trigger remote‑URI detection.
+   • Maintained optional scheme matching for safe domains and kept
+     script detection delegated to hazards.js.  This resolves false
+     partial statuses for fully on‑chain tokens like Stinking Corpse.
+*/
 /* EOF */

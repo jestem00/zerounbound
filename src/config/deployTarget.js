@@ -6,7 +6,7 @@
            retain forge service support for remote origination. */
 
 // Define which network to target. Accepts 'ghostnet' or 'mainnet'.
-export const TARGET = 'ghostnet';           // 'ghostnet' | 'mainnet'
+export const TARGET = 'mainnet';           // 'ghostnet' | 'mainnet'
 
 // Per-network configuration. These values describe site appearance,
 // RPC endpoints, TzKT API base URLs and other settings used across

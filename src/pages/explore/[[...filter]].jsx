@@ -1,9 +1,10 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/explore/[[...filter]].jsx
-  Rev :    r45   2025-07-21
-  Summary: replace Load More button with PixelButton for consistent contrast
-──────────────────────────────────────────────────────────────*/
+  Rev :    r46   2025-07-22
+  Summary: derive TzKT API from deployTarget and preserve
+           Load More button contrast across themes.
+─────────────────────────────────────────────────────────────*/
 import {
   useCallback, useEffect, useMemo, useState,
 }                         from 'react';
@@ -19,11 +20,17 @@ import hashMatrix         from '../../data/hashMatrix.json';
 import { jFetch }         from '../../core/net.js';
 import decodeHexFields    from '../../utils/decodeHexFields.js';
 import detectHazards      from '../../utils/hazards.js';
+// Import TZKT_API from deployTarget.  This value switches between
+// mainnet and ghostnet based on yarn set:mainnet or set:ghostnet.
+import { TZKT_API }       from '../../config/deployTarget.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
 /*──────── constants ─────────────────────────────────────────*/
-const TZKT             = 'https://api.ghostnet.tzkt.io/v1';
+// Build the base API URL by appending /v1 to the selected network’s
+// TzKT domain.  Avoid hard‑coding ghostnet, so explore pages respect
+// the current TARGET.
+const TZKT             = `${TZKT_API}/v1`;
 const FETCH_STEP       = 48;
 const FIRST_FAST       = 8;
 const DESIRED_BATCH    = 24;
@@ -178,11 +185,9 @@ export default function ExploreGrid() {
     else               setCollections((p) => [...p, ...fresh]);
 
     setLoading(false);
-  }, [
-    loading, end, offset, isTokensMode,
-    fetchBatchTokens, fetchBatchCollections,
-    seenTok, seenColl, adminFilter,
-  ]);
+  }, [loading, end, offset, isTokensMode,
+      fetchBatchTokens, fetchBatchCollections,
+      seenTok, seenColl, adminFilter]);
 
   /* reset on mode / admin change ----------------------------------------*/
   useEffect(() => {
@@ -262,7 +267,12 @@ export default function ExploreGrid() {
   );
 }
 
-/* What changed & why: Initially added color using --zu-btn-fg, but dark
-   themes define it as black, so switched to --zu-fg to ensure maximum
-   contrast across all palettes. Updated revision and summary accordingly. */
+/* What changed & why:
+   • Replaced hard‑coded Ghostnet TzKT URL with a dynamic base derived
+     from deployTarget.js.  This ensures explore pages fetch
+     collections and tokens from the correct network in development
+     and production.
+   • Maintained the PixelButton with the “Load More 🔻” label for
+     readability across light and dark themes.
+*/
 /* EOF */

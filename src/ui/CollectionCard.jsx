@@ -1,9 +1,9 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/CollectionCard.jsx
-  Rev :    r25   2025‑09‑15
-  Summary: persistent scripts‑toggle + UI polish
-──────────────────────────────────────────────────────────────*/
+  Rev :    r26   2025‑07‑22
+  Summary: use deployTarget for network detection and TzKT API
+─────────────────────────────────────────────────────────────*/
 import {
   useEffect, useState, useMemo,
 }                                 from 'react';
@@ -25,6 +25,12 @@ import {
   EnableScriptsToggle,
   EnableScriptsOverlay,
 } from './EnableScripts.jsx';
+// Import network constants from deployTarget.  This avoids reliance on
+// process.env.NEXT_PUBLIC_NETWORK, which is only substituted at build
+// time and may default to ghostnet in development.  NETWORK_KEY
+// resolves to 'mainnet' or 'ghostnet'; TZKT_API provides the base
+// TzKT domain for the selected network.  See src/config/deployTarget.js.
+import { NETWORK_KEY, TZKT_API } from '../config/deployTarget.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -102,8 +108,13 @@ export default function CollectionCard({ contract }) {
   const [allowFlash,setAllowFlash]= useConsent('flash',false);
   const [allowScripts,setAllowScripts]= useConsent('scripts',false);
 
-  const net = process.env.NEXT_PUBLIC_NETWORK || 'ghostnet';
-  const api = `https://api.${net}.tzkt.io/v1`;
+  // Determine current network from deployTarget.js.  Falling back to
+  // process.env will cause mismatches in local dev when NEXT_PUBLIC_NETWORK
+  // is undefined.  NETWORK_KEY returns 'mainnet' or 'ghostnet'.
+  const net = NETWORK_KEY;
+  // Base API URL for the chosen network.  Append /v1 to use the v1
+  // endpoints for tokens, contracts and bigmaps.
+  const api = `${TZKT_API}/v1`;
 
   /*── metadata – big‑map “content” key query ───────────────*/
   useEffect(()=>{let cancelled=false;
@@ -234,4 +245,12 @@ CollectionCard.propTypes = {
     address: PropTypes.string.isRequired,
   }).isRequired,
 };
+/* What changed & why:
+   • Replaced environment‑based network detection with imports from
+     deployTarget.js to ensure correct network selection in both
+     development and production.  process.env.NEXT_PUBLIC_NETWORK is
+     only replaced at build time and may default to ghostnet, causing
+     mainnet pages to fetch testnet data.  We now derive net and API
+     base directly from deployTarget.
+*/
 /* EOF */

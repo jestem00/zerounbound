@@ -225,6 +225,28 @@
         "Src/utils,countTokens.js",
         "src/utils/formatAddress.js" 
       ]
+    },
+    {
+      "bundleName": "last_touched_bundle",
+      "patterns": [
+        "src/pages/contracts/[addr].jsx",
+        "src/pages/explore/[[...filter]].jsx",
+        "src/pages/tokens/[addr]/[tokenId].jsx",
+        "scripts/startDev.js",
+        "scripts/setTarget.js",
+        "package.json",
+        "src/ui/MAINTokenMetaPanel.jsx",
+        "src/utils/onChainValidator.js",
+        "src/ui/IntegrityBadge.jsx",
+        "src/core/validator.js",
+        "src/constants/integrityBadges.js",
+        "scripts/generateManifest.js",
+        "scripts/updatePkgName.js",
+        "scripts/ensureDevManifest.js",
+        "scripts/generateBundles.js",
+        "src/config/deployTarget.js",
+        "src/config/netorkConfig.js"
+      ]
     }
   ]
 }

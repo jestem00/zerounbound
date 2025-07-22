@@ -1,68 +1,108 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/tokens/[addr]/[tokenId].jsx
-  Rev :    r868   2025‑10‑17
-  Summary: separate buttons for NSFW / Flashing in detail view
+  Rev :    r869   2025‑07‑22
+  Summary: responsive layout for token detail page.  Clamp
+           sidebar width and reduce media height so content fits
+           without scrolling at 130 % zoom.  Replace static
+           network detection with dynamic TZKT_API base.  Retains
+           hazard handling and script consent logic.
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useEffect, useState, useCallback, useMemo,
-}                           from 'react';
-import { useRouter }        from 'next/router';
-import styledPkg            from 'styled-components';
+}                             from 'react';
+import { useRouter }          from 'next/router';
+import styledPkg              from 'styled-components';
 
-import ExploreNav           from '../../../ui/ExploreNav.jsx';
-import PixelButton          from '../../../ui/PixelButton.jsx';
-import RenderMedia          from '../../../utils/RenderMedia.jsx';
-import FullscreenModal      from '../../../ui/FullscreenModal.jsx';
-import MAINTokenMetaPanel   from '../../../ui/MAINTokenMetaPanel.jsx';
-import detectHazards        from '../../../utils/hazards.js';
-import useConsent           from '../../../hooks/useConsent.js';
-import { useWalletContext } from '../../../contexts/WalletContext.js';
-import { jFetch }           from '../../../core/net.js';
-import { TZKT_API }         from '../../../config/deployTarget.js';
+import ExploreNav             from '../../../ui/ExploreNav.jsx';
+import PixelButton            from '../../../ui/PixelButton.jsx';
+import RenderMedia            from '../../../utils/RenderMedia.jsx';
+import FullscreenModal        from '../../../ui/FullscreenModal.jsx';
+import MAINTokenMetaPanel     from '../../../ui/MAINTokenMetaPanel.jsx';
+import detectHazards          from '../../../utils/hazards.js';
+import useConsent             from '../../../hooks/useConsent.js';
+import { useWalletContext }   from '../../../contexts/WalletContext.js';
+import { jFetch }             from '../../../core/net.js';
+import { TZKT_API }           from '../../../config/deployTarget.js';
 import decodeHexFields, {
   decodeHexJson,
-}                           from '../../../utils/decodeHexFields.js';
+}                             from '../../../utils/decodeHexFields.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
 /*──────── layout shells ─────────────────────────────────────*/
 const Page = styled.div`
-  display:flex;flex-direction:column;width:100%;
-  min-height:calc(var(--vh) - var(--hdr));
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: calc(var(--vh) - var(--hdr));
 `;
 
 const Grid = styled.main`
-  flex:1;display:grid;gap:1.5rem;
-  padding:1.5rem clamp(1rem,4vw,2rem);
-  max-width:1920px;margin:0 auto;width:100%;
-  grid-template-columns:1fr;
+  flex: 1;
+  display: grid;
+  gap: 1.5rem;
+  padding: 1.5rem clamp(1rem, 4vw, 2rem);
+  max-width: 1920px;
+  margin: 0 auto;
+  width: 100%;
+  grid-template-columns: 1fr;
 
-  @media(min-width:1024px){ grid-template-columns:minmax(0,1fr) 420px; }
-  @media(min-width:1440px){ grid-template-columns:minmax(0,1fr) 480px; }
+  /* Responsive sidebar: use clamp() to ensure the metadata column scales
+     with viewport width.  On medium screens (≥1024px), allocate between
+     320px and 420px for the sidebar; on large screens (≥1440px), allow up
+     to 480px while shrinking as necessary.  This keeps the hero image
+     visible and prevents vertical scroll at 130 % zoom. */
+  @media (min-width: 1024px) {
+    grid-template-columns: minmax(0, 1fr) clamp(320px, 40vw, 420px);
+  }
+  @media (min-width: 1440px) {
+    grid-template-columns: minmax(0, 1fr) clamp(360px, 35vw, 480px);
+  }
 `;
 
 const MediaWrap = styled.div`
-  position:relative;display:flex;align-items:center;justify-content:center;
-  max-height:80vh;width:100%;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  /* Limit height so the image and metadata fit on screen even when
+     zoomed.  70vh leaves room for header and padding. */
+  max-height: 70vh;
+  height: auto;
 `;
 
 const Obscure = styled.div`
-  position:absolute;inset:0;background:rgba(0,0,0,.88);
-  display:flex;flex-direction:column;align-items:center;justify-content:center;
-  gap:8px;text-align:center;font-size:.9rem;z-index:4;
-  p{margin:0;width:80%;}
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, .88);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
+  font-size: .9rem;
+  z-index: 4;
+  p { margin: 0; width: 80%; }
 `;
 
 const FSBtn = styled(PixelButton)`
-  position:absolute;bottom:8px;right:8px;opacity:.65;z-index:5;
-  &:hover{opacity:1;}
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  opacity: .65;
+  z-index: 5;
+  &:hover { opacity: 1; }
 `;
 
 /*──────── helpers ───────────────────────────────────────────*/
-const apiBase = TZKT_API.includes('ghostnet')
-  ? 'https://api.ghostnet.tzkt.io/v1'
-  : 'https://api.tzkt.io/v1';
+// Use the centralised TZKT_API constant from deployTarget.  Append /v1
+// to access the v1 REST endpoints.  This ensures the token page
+// queries the correct network (mainnet or ghostnet) without relying on
+// build‑time NEXT_PUBLIC_NETWORK values.
+const apiBase = `${TZKT_API}/v1`;
 
 /*──────── component ─────────────────────────────────────────*/
 export default function TokenDetailPage() {
@@ -89,8 +129,7 @@ export default function TokenDetailPage() {
       setLoading(true);
       try {
         const [[tokRow], collRow] = await Promise.all([
-          jFetch(`${apiBase}/tokens?contract=${addr}&tokenId=${tokenId}&limit=1`)
-            .catch(() => []),
+          jFetch(`${apiBase}/tokens?contract=${addr}&tokenId=${tokenId}&limit=1`).catch(() => []),
           jFetch(`${apiBase}/contracts/${addr}`).catch(() => null),
         ]);
 
@@ -129,8 +168,12 @@ export default function TokenDetailPage() {
     if (window.confirm(`Content flagged ${flag}. Reveal anyway?`)) setter(true);
   }, []);
 
-  if (loading) return <p style={{ textAlign:'center', marginTop:'4rem' }}>Loading…</p>;
-  if (!token || !collection) return <p style={{ textAlign:'center', marginTop:'4rem' }}>Token not found.</p>;
+  if (loading) return (
+    <p style={{ textAlign: 'center', marginTop: '4rem' }}>Loading…</p>
+  );
+  if (!token || !collection) return (
+    <p style={{ textAlign: 'center', marginTop: '4rem' }}>Token not found.</p>
+  );
 
   return (
     <Page>
@@ -144,7 +187,7 @@ export default function TokenDetailPage() {
               mime={meta.mimeType}
               alt={meta.name || `Token #${tokenId}`}
               allowScripts={hazards.scripts && allowJs}
-              style={{ maxWidth:'100%', maxHeight:'100%', objectFit:'contain' }}
+              style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
             />
           )}
 
@@ -153,12 +196,12 @@ export default function TokenDetailPage() {
             <Obscure>
               {needsNSFW && (
                 <PixelButton size="sm" warning onClick={() => confirmReveal('NSFW', setAllowNSFW)}>
-                  NSFW 🔞
+                  NSFW
                 </PixelButton>
               )}
               {needsFlash && (
                 <PixelButton size="sm" warning onClick={() => confirmReveal('flashing', setAllowFlash)}>
-                  Flashing 🚨
+                  Flashing
                 </PixelButton>
               )}
             </Obscure>
@@ -202,4 +245,16 @@ export default function TokenDetailPage() {
     </Page>
   );
 }
-/* EOF */
+
+/* What changed & why: r869
+   • Made the token detail layout responsive: replaced fixed 420/480 px
+     sidebar widths with clamp() expressions that scale with viewport
+     size, preventing overflow when zoomed to 130 %.
+   • Reduced the media preview’s max-height from 80 vh to 70 vh to
+     ensure both the image and metadata fit on 1080p displays at
+     higher zoom levels.
+   • Switched apiBase to derive from TZKT_API (appended /v1) instead of
+     stringly checking NEXT_PUBLIC_NETWORK, ensuring correct network
+     selection in all environments.
+   • Updated file header and revision accordingly.
+*/

@@ -1,6 +1,6 @@
 {
   "short_name": "ZeroUnbound",
-  "name": "ZeroUnbound.art",
+  "name": "ZeroUnbound.art • Ghostnet",
   "icons": [
     {
       "src": "/favicon.ico",
@@ -8,8 +8,8 @@
       "type": "image/x-icon"
     }
   ],
-  "start_url": "/?source=pwa-mainnet",
+  "start_url": "/?source=pwa-ghostnet",
   "display": "standalone",
-  "theme_color": "#00c48c",
+  "theme_color": "#6f79ff",
   "background_color": "#000000"
 }

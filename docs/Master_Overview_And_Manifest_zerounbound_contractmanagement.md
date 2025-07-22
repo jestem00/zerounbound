@@ -1,13 +1,10 @@
 /*─────────────────────────────────────────────────────────────────
 Developed by @jams2blues – ZeroContract Studio
 File: docs/Master_Overview_And_Manifest_zerounbound_contractmanagement.md
-Rev : r1016 2025‑07‑20 UTC
-Summary: update to adaptive single‑stage origination. Remote forging
-service is used only when the Temple wallet is detected;
-other wallets originate via wallet.originate(). Dual‑stage
-origination (FAST_ORIGIN) has been retired. This summary
-supersedes previous references to dual‑stage flows and
-USE_BACKEND.
+Rev : r1018 2025‑07‑22 UTC
+Summary: clarify local development setup in Quick Start; refine dynamic
+dev scripts guidance; include network propagation and remote
+detection invariants. No functional code changes.
 ──────────────────────────────────────────────────────────────────/
 
 ════════════════════════════════════════════════════════════════
@@ -327,6 +324,12 @@ I115 [F] Hazard Detection & Content Protection — all media rendering component
 I116 [F] Debounced Form State Pattern — form components maintain local state mirroring parent props with upward change propagation via useEffect. Input sanitization applied at component level. Unique id attributes use index pattern: id={\tid-${index}}. I117 [F] Script Security Model — script execution requires both hazard detection AND user consent. Script consent persists per contract address. EnableScriptsOverlayprovides inline consent,EnableScriptsToggle provides permanent toggle. Terms agreement checkbox required for all script consent flows.
 
 I118 [E] Dual‑Stage Origination — when FAST_ORIGIN=true the origination flow must store a placeholder views pointer and then automatically call edit_contract_metadata (v4) within the same UI session to patch the real metadata; failure to patch is critical and must trigger resume logic.
+I119 [F] On‑chain integrity scanning must treat remote domain patterns case‑sensitively: the onChainValidator’s REMOTE_BARE_RE must not match uppercase‑coded identifiers (e.g. Math.PI/…) as remote references. Only safe domains enumerated in SAFE_REMOTE_RE are allowed (see I100).
+I120 [F] Development scripts must propagate the selected network into both build‑time and runtime via environment variables (process.env.NETWORK and NEXT_PUBLIC_NETWORK), using the DEV_PORT exported from deployTarget.js; scripts/startDev.js must spawn Next.js via shell mode on the correct port and set these variables before execution.
+I121 [F] Explore grids and collection/token pages must derive their TzKT API base URL (TZKT_API) and other network parameters from src/config/deployTarget.js rather than hard‑coding Ghostnet or Mainnet domains (extends I10 and I105).
+I122 [F] Token metadata panels must decode contract metadata fully via decodeHexFields/decodeHexJson, fallback through imageUri, logo, artifactUri and thumbnailUri, and display the human‑readable collection name (name → symbol → title → collectionName → short address). Tags must appear with a “Tags:” label and wrap neatly in a single row; meta fields align responsively across breakpoints.
+I123 [F] Marketplace actions (BUY/LIST/OFFER) must use a unified MarketplaceBar.jsx overlay stub that informs users that ZeroSum functionality is still under development and directs them to objkt.com. Direct marketplace operations are disabled until the native marketplace contract is ready.
+I124 [E,F] Local development must support concurrent Ghostnet and Mainnet instances by using yarn set:<network> && yarn dev:current; the dev:current script must honour the selected network and port (3000 for ghostnet, 4000 for mainnet) without resetting TARGET (build script remains unchanged). Clearing local storage may be necessary after network switches to prevent stale data.
 /*
 Note: Invariant I118 is newly reintroduced in this revision. Previous releases
 adopted a single‑stage origination via wallet.originate, but this proved
@@ -618,6 +621,26 @@ mainnet       yarn set:mainnet  && yarn build       zerounboun
 
 No environment variables; scripts/setTarget.js rewrites deployTarget.js.
 
+Local development
+To run the development server against a specific network you must set
+the TARGET via yarn set:<network> and use the dev:current script
+which honours the selected network and port without resetting the
+target. For example:
+
+bash
+Copy
+# Ghostnet (default) on port 3000
+yarn set:ghostnet
+yarn dev:current
+
+# Mainnet on port 4000
+yarn set:mainnet
+yarn dev:current
+The canonical yarn dev script always resets TARGET to ghostnet
+before building. Use dev:current when you want to run the server
+without switching targets. Clearing local storage may be necessary
+between switches to avoid stale data.
+
 ───────────────────────────────────────────────────────────────
 7 · APPENDICES (How to read) — machine‑readables live in code
 ───────────────────────────────────────────────────────────────/
@@ -628,6 +651,7 @@ B. entrypointRegistry.json, contains all Entrypoints used across our supported 
 ──────────────────────────────────────────────────────────────
 CHANGELOG
 ──────────────────────────────────────────────────────────────/
+• r1017 2025‑07‑22 UTC — added invariants I119–I124 covering case‑sensitive remote detection, dynamic dev scripts, TzKT API derivation, improved metadata panels and tags, unified marketplace overlay, and dual‑network development; updated revision and summary; removed application domain whitelisting; refined onChainValidator remote detection.
 • r1015 2025‑07‑20 UTC — migrated to Node‑based remote forging service; removed serverless forge/inject endpoints (src/pages/api/forge.js and src/pages/api/inject.js) and USE_BACKEND flag; updated environment guidance to always use FAST_ORIGIN with local fallback; added forge_service_node entries and deployment instructions; updated Source‑tree map and high‑level architecture accordingly.
 • r1014 2025‑07‑19 UTC — restored dual‑stage origination and manual forging fallback; updated invariants and environment flag guidance accordingly.
 • r1014 2025‑07‑19 UTC — restored dual‑stage origination, manual forging fallback and serverless forging/inject endpoints; updated invariants and environment flag guidance accordingly.

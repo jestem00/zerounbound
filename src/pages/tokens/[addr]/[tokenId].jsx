@@ -1,12 +1,11 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/tokens/[addr]/[tokenId].jsx
-  Rev :    r869   2025‑07‑22
-  Summary: responsive layout for token detail page.  Clamp
-           sidebar width and reduce media height so content fits
-           without scrolling at 130 % zoom.  Replace static
-           network detection with dynamic TZKT_API base.  Retains
-           hazard handling and script consent logic.
+  Rev :    r870a   2025‑10‑23
+  Summary: add script toggle and hazard dialogs to token page;
+           hide search bar via ExploreNav prop; use PixelConfirmDialog
+           instead of window.confirm for hazard reveals and script
+           enabling; provide lightning toggle to enable/disable scripts.
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useEffect, useState, useCallback, useMemo,
@@ -16,6 +15,7 @@ import styledPkg              from 'styled-components';
 
 import ExploreNav             from '../../../ui/ExploreNav.jsx';
 import PixelButton            from '../../../ui/PixelButton.jsx';
+import PixelConfirmDialog     from '../../../ui/PixelConfirmDialog.jsx';
 import RenderMedia            from '../../../utils/RenderMedia.jsx';
 import FullscreenModal        from '../../../ui/FullscreenModal.jsx';
 import MAINTokenMetaPanel     from '../../../ui/MAINTokenMetaPanel.jsx';
@@ -132,8 +132,16 @@ export default function TokenDetailPage() {
 
   const [allowNSFW,  setAllowNSFW ] = useConsent('nsfw',  false);
   const [allowFlash, setAllowFlash] = useConsent('flash', false);
-  const scriptKey    = useMemo(() => `scripts:${addr}:${tokenId}`, [addr, tokenId]);
+  // script consent key scoped per token: scripts:<addr>:<tokenId>
+  const scriptKey    = useMemo(() => {
+    // fallback keys if addr or tokenId undefined; stable string
+    return `scripts:${addr || ''}:${tokenId || ''}`;
+  }, [addr, tokenId]);
   const [allowJs,    setAllowJs  ] = useConsent(scriptKey, false);
+
+  /* dialog state for hazard/script confirm */
+  const [dlgType,  setDlgType]  = useState(null); // 'nsfw' | 'flash' | 'scripts' | null
+  const [dlgTerms, setDlgTerms] = useState(false);
 
   /*──── data fetch ────*/
   useEffect(() => {
@@ -209,10 +217,27 @@ export default function TokenDetailPage() {
   const mediaUri = meta.artifactUri
     || meta.displayUri || meta.imageUri || '';
 
-  const confirmReveal = useCallback((flag, setter) => {
-    // eslint-disable-next-line no-alert
-    if (window.confirm(`Content flagged ${flag}. Reveal anyway?`)) setter(true);
+  /* handlers to open confirm dialogs */
+  const requestReveal = useCallback((type) => {
+    setDlgType(type);
+    setDlgTerms(false);
   }, []);
+
+  /* confirm hazard or script reveal */
+  const confirmReveal = useCallback(() => {
+    if (!dlgTerms || !dlgType) return;
+    if (dlgType === 'nsfw')      setAllowNSFW(true);
+    else if (dlgType === 'flash') setAllowFlash(true);
+    else if (dlgType === 'scripts') setAllowJs(true);
+    setDlgType(null);
+    setDlgTerms(false);
+  }, [dlgType, dlgTerms, setAllowNSFW, setAllowFlash, setAllowJs]);
+
+  /* cancel dialog */
+  const cancelReveal = () => {
+    setDlgType(null);
+    setDlgTerms(false);
+  };
 
   if (loading) return (
     <p style={{ textAlign: 'center', marginTop: '4rem' }}>Loading…</p>
@@ -223,10 +248,12 @@ export default function TokenDetailPage() {
 
   return (
     <Page>
-      <ExploreNav />
+      {/* Use ExploreNav with hideSearch to retain hazard toggles but omit search bar */}
+      <ExploreNav hideSearch />
       <Grid>
         {/*──────── media preview ────────*/}
         <MediaWrap>
+          {/* show media when not hidden by hazard overlays */}
           {!hidden && (
             <RenderMedia
               uri={mediaUri}
@@ -237,29 +264,46 @@ export default function TokenDetailPage() {
             />
           )}
 
-          {/* obscured overlays */}
+          {/* obscured overlays for NSFW / flashing hazards */}
           {hidden && (
             <Obscure>
               {needsNSFW && (
-                <PixelButton size="sm" warning onClick={() => confirmReveal('NSFW', setAllowNSFW)}>
-                  NSFW
+                <PixelButton size="sm" warning onClick={() => requestReveal('nsfw')}>
+                  NSFW&nbsp;🔞
                 </PixelButton>
               )}
               {needsFlash && (
-                <PixelButton size="sm" warning onClick={() => confirmReveal('flashing', setAllowFlash)}>
-                  Flashing
+                <PixelButton size="sm" warning onClick={() => requestReveal('flash')}>
+                  Flashing&nbsp;🚨
                 </PixelButton>
               )}
             </Obscure>
           )}
 
+          {/* script hazard overlay when scripts are present but not allowed */}
           {hazards.scripts && !allowJs && !hidden && (
             <Obscure>
               <p>This media executes scripts.</p>
-              <PixelButton size="sm" warning onClick={() => confirmReveal('scripts', setAllowJs)}>
+              <PixelButton size="sm" warning onClick={() => requestReveal('scripts')}>
                 ALLOW SCRIPTS
               </PixelButton>
             </Obscure>
+          )}
+
+          {/* script toggle button: show when scripts present and not hidden */}
+          {hazards.scripts && !hidden && (
+            <PixelButton
+              size="xs"
+              warning={!allowJs}
+              onClick={() => {
+                if (allowJs) setAllowJs(false);
+                else requestReveal('scripts');
+              }}
+              title={allowJs ? 'Disable scripts' : 'Enable scripts'}
+              style={{ position:'absolute', left:'8px', bottom:'8px', zIndex: 5 }}
+            >
+              ⚡
+            </PixelButton>
           )}
 
           {/* fullscreen btn */}
@@ -288,19 +332,76 @@ export default function TokenDetailPage() {
         allowScripts={hazards.scripts && allowJs}
         scriptHazard={hazards.scripts}
       />
+
+      {/*──────── hazard / script confirm dialog ──────*/}
+      {dlgType && (
+        <PixelConfirmDialog
+          open
+          title={(() => {
+            if (dlgType === 'nsfw') return 'NSFW Warning';
+            if (dlgType === 'flash') return 'Flashing Warning';
+            return 'Enable Scripts';
+          })()}
+          message={(
+            <span>
+              {dlgType === 'nsfw' && (
+                <>
+                  Warning: This asset is flagged <strong>Not‑Safe‑For‑Work (NSFW)</strong>. It may
+                  include explicit nudity, sexual content, graphic violence or other mature themes.
+                  Viewer discretion is advised.
+                  <br />
+                </>
+              )}
+              {dlgType === 'flash' && (
+                <>
+                  Warning: This asset contains <strong>rapid flashing or strobing effects</strong>{' '}
+                  which may trigger seizures for people with photosensitive epilepsy. Learn more&nbsp;
+                  <a href="https://kb.daisy.org/publishing/docs/metadata/schema.org/accessibilityHazard.html#value"
+                     target="_blank" rel="noopener noreferrer">
+                    here
+                  </a>.
+                  <br />
+                </>
+              )}
+              {dlgType === 'scripts' && (
+                <>
+                  Executable code can be harmful. Proceed only if you trust the author.
+                  <br />
+                </>
+              )}
+              <label style={{
+                display:'flex',
+                gap:'6px',
+                alignItems:'center',
+                flexWrap:'wrap',
+                marginTop:'6px',
+              }}>
+                <input
+                  type="checkbox"
+                  checked={dlgTerms}
+                  onChange={(e) => setDlgTerms(e.target.checked)}
+                />
+                I&nbsp;confirm&nbsp;I&nbsp;am&nbsp;18 + and&nbsp;agree&nbsp;to&nbsp;
+                <a href="/terms" target="_blank" rel="noopener noreferrer">Terms</a>
+              </label>
+            </span>
+          )}
+          okLabel={dlgType === 'scripts' ? 'ENABLE' : 'REVEAL'}
+          cancelLabel="Cancel"
+          confirmDisabled={!dlgTerms}
+          onOk={confirmReveal}
+          onCancel={cancelReveal}
+        />
+      )}
     </Page>
   );
 }
 
-/* What changed & why: r869
-   • Made the token detail layout responsive: replaced fixed 420/480 px
-     sidebar widths with clamp() expressions that scale with viewport
-     size, preventing overflow when zoomed to 130 %.
-   • Reduced the media preview’s max-height from 80 vh to 70 vh to
-     ensure both the image and metadata fit on 1080p displays at
-     higher zoom levels.
-   • Switched apiBase to derive from TZKT_API (appended /v1) instead of
-     stringly checking NEXT_PUBLIC_NETWORK, ensuring correct network
-     selection in all environments.
-   • Updated file header and revision accordingly.
+/* What changed & why: r870a
+   • Added dlgType/dlgTerms state and PixelConfirmDialog for NSFW, flash and script consent.
+   • Replaced window.confirm with PixelConfirmDialog requiring terms agreement.
+   • Added lightning PixelButton to allow toggling scripts on/off; open confirm dialog when enabling.
+   • Used ExploreNav hideSearch prop to show hazard toggles but remove search bar on token page.
+   • Retained responsive layout and fullscreen functionality.
 */
+/* EOF */

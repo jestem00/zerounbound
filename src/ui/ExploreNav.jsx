@@ -1,8 +1,9 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/ExploreNav.jsx
-  Rev :    r17    2025‑10‑17
-  Summary: richer disclaimers + flex‑wrap fix
+  Rev :    r18    2025‑10‑23
+  Summary: add hideSearch prop to optionally hide search bar
+           on pages like token detail; maintain hazard toggles.
 ──────────────────────────────────────────────────────────────*/
 import { useState }  from 'react';
 import { useRouter } from 'next/router';
@@ -29,7 +30,17 @@ const Bar = styled.nav`
   & input{width:clamp(180px,30vw,340px);min-width:160px;}
 `;
 
-export default function ExploreNav() {
+/**
+ * Explore navigation bar with optional search suppression.
+ * This component renders navigation buttons, a search field and
+ * hazard toggles.  Set hideSearch=true to remove the search form,
+ * which is useful on pages that don't require a search box (e.g.
+ * token detail view).
+ *
+ * @param {Object} props
+ * @param {boolean} [props.hideSearch=false] whether to hide the search bar
+ */
+export default function ExploreNav({ hideSearch = false }) {
   const [q, setQ] = useState('');
   const router     = useRouter();
 
@@ -92,14 +103,16 @@ export default function ExploreNav() {
         <PixelButton as="a" href="/explore?cmd=tokens">TOKENS</PixelButton>
         <PixelButton as="a" href="/explore/listings">LISTINGS</PixelButton>
 
-        <form onSubmit={go}>
-          <PixelInput
-            placeholder="Search by Admin Address or KT1…"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
-          <PixelButton size="sm" type="submit">GO</PixelButton>
-        </form>
+        {!hideSearch && (
+          <form onSubmit={go}>
+            <PixelInput
+              placeholder="Search by Admin Address or KT1…"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+            <PixelButton size="sm" type="submit">GO</PixelButton>
+          </form>
+        )}
 
         {/* hazard toggles */}
         <PixelButton
@@ -173,8 +186,9 @@ export default function ExploreNav() {
     </>
   );
 }
-/* What changed & why (r17):
-   • Added explicit NSFW / flashing disclaimers with epilepsy link.
-   • label now flex‑wraps to prevent overflow on narrow panels.
-   • No business‑logic alteration. */
+/* What changed & why (r18):
+   • Added hideSearch prop to optionally hide the search bar.
+   • Wrapped search form in a conditional check.
+   • Updated header and summary for new revision.
+*/
 /* EOF */

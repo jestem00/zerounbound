@@ -1,14 +1,12 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/MAINTokenMetaPanel.jsx
-  Rev :    r12    2025‑10‑17
-  Summary: responsive token metadata panel.  Decodes
-           collection metadata via decodeHexFields to obtain
-           proper name/preview, picks thumbnail via
-           image/thumbnail/display/artifact URIs, wraps tags
-           into a row with label, aligns meta rows and uses
-           safe name fallback (name→symbol→title→collectionName→address).
-─────────────────────────────────────────────────────────────*/
+  Rev :    r13    2025‑10‑23
+  Summary: add token-level script & fullscreen controls; preserve
+           collection script toggle; reposition controls near token
+           name; decode collection metadata and tags; maintain
+           hazard and consent logic.
+──────────────────────────────────────────────────────────────*/
 import React, { useMemo, useState } from 'react';
 import PropTypes                    from 'prop-types';
 import { format }                   from 'date-fns';
@@ -140,7 +138,7 @@ const Tag = styled.span`
 `;
 
 /* Row container for tag chips with a label.  Chips will wrap
-   automatically and maintain tight spacing. */
+   automatically and maintain tight spacing.  */
 const TagsRow = styled.div`
   display: flex;
   flex-wrap: wrap;
@@ -205,7 +203,17 @@ function pickThumb(m = {}) {
 }
 
 /*──────── component ───────────────────────────────────────*/
-export default function MAINTokenMetaPanel({ token, collection, walletAddress: _wa }) {
+export default function MAINTokenMetaPanel({
+  token,
+  collection,
+  walletAddress: _wa,
+  tokenScripts,
+  tokenAllowJs,
+  onToggleScript,
+  onRequestScriptReveal,
+  onFullscreen,
+  fsDisabled,
+}) {
   const [copied, setCopied] = useState(false);
 
   // Decode the collection metadata into a flat object.  This handles
@@ -222,7 +230,7 @@ export default function MAINTokenMetaPanel({ token, collection, walletAddress: _
   /* reveal dialog state */
   const [dlgType,   setDlgType]   = useState(null);   // 'nsfw' | 'flash' | null
   const [dlgTerms,  setDlgTerms]  = useState(false);
-  /* script‑consent dialog state */
+  /* script‑consent dialog state (collection-level) */
   const [dlgScr,    setDlgScr]    = useState(false);
   const [termsScr,  setTermsScr]  = useState(false);
 
@@ -257,7 +265,7 @@ export default function MAINTokenMetaPanel({ token, collection, walletAddress: _
     setTimeout(() => setCopied(false), 1000);
   };
 
-  /* script-consent handler */
+  /* collection script-consent handler */
   const askEnable = () => { setTermsScr(false); setDlgScr(true); };
   const enable    = () => {
     if (!termsScr) return;
@@ -265,7 +273,7 @@ export default function MAINTokenMetaPanel({ token, collection, walletAddress: _
     setDlgScr(false);
   };
 
-  /* hazard reveal handlers */
+  /* collection hazard reveal handlers */
   const askReveal = (tp) => { setDlgType(tp); setDlgTerms(false); };
   const confirmReveal = () => {
     if (!dlgTerms) return;
@@ -327,14 +335,11 @@ export default function MAINTokenMetaPanel({ token, collection, walletAddress: _
             <code>{shortKt(collection.address)}</code>
             <button type="button" onClick={copyAddr}>{copied ? '✓' : '📋'}</button>
             <Tag>({verLabel})</Tag>
-            {/* permanent scripts toggle */}
+            {/* permanent scripts toggle for collection-level hazard */}
             {collHaz.scripts && (
               <EnableScriptsToggle
-                checked={allowScr}
-                onChange={(val) => {
-                  if (!val) setAllowScr(false);
-                  else askEnable();
-                }}
+                enabled={allowScr}
+                onToggle={allowScr ? () => setAllowScr(false) : askEnable}
               />
             )}
           </AddrRow>
@@ -345,6 +350,22 @@ export default function MAINTokenMetaPanel({ token, collection, walletAddress: _
           <BadgeWrap>
             <PixelHeading level={4}>{token.metadata?.name || `Token #${token.tokenId}`}</PixelHeading>
             <IntegrityBadge status={integrity.status} />
+            {/* token-level script toggle and fullscreen button */}
+            {tokenScripts && (
+              <EnableScriptsToggle
+                enabled={tokenAllowJs}
+                onToggle={tokenAllowJs ? () => onToggleScript(false) : onRequestScriptReveal}
+                title={tokenAllowJs ? 'Disable scripts' : 'Enable scripts'}
+              />
+            )}
+            {onFullscreen && (
+              <PixelButton
+                size="xs"
+                disabled={fsDisabled}
+                onClick={onFullscreen}
+                title="Fullscreen"
+              >⛶</PixelButton>
+            )}
           </BadgeWrap>
           <span style={{ fontSize: '.75rem', opacity: .85 }}>
             Minted {format(new Date(token.firstTime), 'MMM dd, yyyy')} • {editions} edition{editions !== 1 ? 's' : ''}
@@ -398,7 +419,7 @@ export default function MAINTokenMetaPanel({ token, collection, walletAddress: _
         </Section>
       </Panel>
 
-      {/* enable scripts confirm dialog */}
+      {/* enable collection scripts confirm dialog */}
       {dlgScr && (
         <PixelConfirmDialog
           open={dlgScr}
@@ -466,20 +487,18 @@ MAINTokenMetaPanel.propTypes = {
   token        : PropTypes.object.isRequired,
   collection   : PropTypes.object.isRequired,
   walletAddress: PropTypes.string,
+  tokenScripts : PropTypes.bool,
+  tokenAllowJs : PropTypes.bool,
+  onToggleScript: PropTypes.func,
+  onRequestScriptReveal: PropTypes.func,
+  onFullscreen: PropTypes.func,
+  fsDisabled : PropTypes.bool,
 };
 
-/* What changed & why (r12):
-   • Added toMetaObject() and pickThumb() to decode the
-     collection metadata and select a preview from imageUri,
-     thumbnailUri, displayUri or artifactUri.  The preview
-     now renders correctly.
-   • Safe collection name now comes from decoded metadata
-     fields (name, symbol, title or collectionName) before
-     falling back to the KT1 address.
-   • Introduced TagsRow for tags: includes a “Tags:” label
-     and wraps chips on a single line with flex and no stretch.
-   • Updated Tag styling to prevent chips from expanding and
-     ensure they fit neatly next to the label.
-   • Overall meta grid and hazard logic preserved.
+/* What changed & why (r13):
+   • Added token-level script toggle and fullscreen button via new props.
+   • Moved script and fullscreen controls adjacent to token name in BadgeWrap.
+   • Continue to support collection-level script toggle and hazard reveals.
+   • Updated prop types and header/footer summaries.
 */
 /* EOF */

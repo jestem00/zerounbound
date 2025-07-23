@@ -1,13 +1,15 @@
 /*──────── src/pages/deploy.js ────────*/
-/*─────────────────────────────────────────────────────────────
+/*──────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/deploy.js
-  Rev :    r1125   2025‑07‑21
-  Summary: Further refined single‑stage origination by clearing any
-           previous errors when starting the operation and after
-           successfully resolving a contract address.  Ensures the
-           overlay displays success instead of residual error messages.
-────────────────────────────────────────────────────────────*/
+  Rev :    r1125‑a1   2025‑07‑23
+  Summary: Improved single‑stage origination by reliably resolving the
+           contract address on mainnet.  After confirmation, the code
+           now attempts to retrieve the address via op.contract() and
+           getOriginatedContractAddresses() before falling back to a
+           longer block‑scan.  This prevents timeouts when Kukai/Umami
+           succeed but op.contractAddress is undefined.
+──────────────────────────────────────────────────────────────*/
 
 import React, { useRef, useState, useCallback } from 'react';
 import { MichelsonMap } from '@taquito/michelson-encoder';
@@ -59,7 +61,6 @@ import { useWallet } from '../contexts/WalletContext.js';
 // Contract source and view definitions
 import contractCode from '../../contracts/Zero_Contract_V4.tz';
 import viewsJson    from '../../contracts/metadata/views/Zero_Contract_v4_views.json' assert { type: 'json' };
-
 
 // Network helpers for forging and injection
 import {
@@ -159,11 +160,12 @@ export default function DeployPage() {
   const rafRef    = useRef(0);
   const [step, setStep]   = useState(-1);
   const [pct, setPct]     = useState(0);
-      const [label, setLabel] = useState('');
+  const [label, setLabel] = useState('');
   const [kt1, setKt1]     = useState('');
   const [err, setErr]     = useState('');
-      // Track whether the remote forge backend is used (Temple wallet)
-      const [useBackend, setUseBackend] = useState(false);
+  // Track whether the remote forge backend is used (Temple wallet)
+  const [useBackend, setUseBackend] = useState(false);
+
   /**
    * Reset the component state to its initial values.  Cancels
    * any pending RAF updates and resets progress.
@@ -264,19 +266,38 @@ export default function DeployPage() {
       try {
         await op.confirmation();
       } catch {}
-      const contractAddr = op.contractAddress;
+      let contractAddr = op.contractAddress;
+      // Attempt to resolve the contract address via Taquito helpers
+      if (!contractAddr) {
+        try {
+          const c = await (op.contract?.());
+          if (c && c.address) {
+            contractAddr = c.address;
+          }
+        } catch {}
+      }
+      if (!contractAddr) {
+        try {
+          const arr = op.getOriginatedContractAddresses?.();
+          if (arr && arr.length) {
+            contractAddr = arr[0];
+          }
+        } catch {}
+      }
       if (!contractAddr) {
         // Fallback: scan recent blocks for the origination result using opHash
         let resolved = '';
         const opHash = op.opHash || op.hash || op.operationHash || op.operation_hash;
-        for (let i = 0; i < 15; i++) {
+        for (let i = 0; i < 20; i++) {
           await sleep(3000);
           try {
             const block = await toolkit.rpc.getBlock();
             for (const opGroup of block.operations.flat()) {
               if (opGroup.hash === opHash) {
                 const res = opGroup.contents.find((c) => c.kind === 'origination');
-                if (res?.metadata?.operation_result?.originated_contracts?.length) {
+                if (
+                  res?.metadata?.operation_result?.originated_contracts?.length
+                ) {
                   resolved = res.metadata.operation_result.originated_contracts[0];
                   break;
                 }
@@ -291,10 +312,10 @@ export default function DeployPage() {
           setLabel(msg);
           return;
         }
-        setKt1(resolved);
-      } else {
-        setKt1(contractAddr);
+        contractAddr = resolved;
       }
+      // Set the resolved contract address
+      setKt1(contractAddr);
       // Clear error on success
       setErr('');
       setStep(5);
@@ -444,14 +465,16 @@ export default function DeployPage() {
     setPct(0.70);
     // Attempt to resolve contract address via toolkit RPC
     let contractAddr = '';
-    for (let i = 0; i < 15; i++) {
+    for (let i = 0; i < 20; i++) {
       await sleep(3000);
       try {
         const block = await toolkit.rpc.getBlock();
         for (const opGroup of block.operations.flat()) {
           if (opGroup.hash === opHash) {
             const result = opGroup.contents.find((c) => c.kind === 'origination');
-            if (result?.metadata?.operation_result?.originated_contracts?.length) {
+            if (
+              result?.metadata?.operation_result?.originated_contracts?.length
+            ) {
               contractAddr = result.metadata.operation_result.originated_contracts[0];
               break;
             }
@@ -485,21 +508,21 @@ export default function DeployPage() {
     // Attempt to detect the wallet name via Beacon.  If Temple is
     // detected, use the backend forge service; otherwise, use
     // single‑stage origination via wallet.originate().
-        let useBackendFlag = false;
-        try {
+    let useBackendFlag = false;
+    try {
       const info = await wallet.client.getWalletInfo();
       const name = (info?.name || '').toLowerCase();
-          if (name.includes('temple')) {
-            useBackendFlag = true;
-          }
-        } catch {}
-        // Persist which path is being used for rendering purposes
-        setUseBackend(useBackendFlag);
-        if (useBackendFlag) {
-          await originateViaForgeService(meta);
-        } else {
-          await originateSingleStage(meta);
-        }
+      if (name.includes('temple')) {
+        useBackendFlag = true;
+      }
+    } catch {}
+    // Persist which path is being used for rendering purposes
+    setUseBackend(useBackendFlag);
+    if (useBackendFlag) {
+      await originateViaForgeService(meta);
+    } else {
+      await originateSingleStage(meta);
+    }
   }
 
   /*──────── render ─────────────────────────────────────────*/
@@ -514,7 +537,7 @@ export default function DeployPage() {
           has occurred.  The overlay will cover the parent wrapper and
           report progress, errors and the resulting contract address. */}
       {(step !== -1 || err) && (
-          <OperationOverlay
+        <OperationOverlay
           status={label}
           progress={pct}
           error={!!err}
@@ -543,4 +566,9 @@ export default function DeployPage() {
      deleting it entirely.  These changes ensure that Kukai and Umami
      origination flows operate correctly while still enabling FAST_ORIGIN
      (reduced payloads) for Temple.
+   – Improved contract address resolution in single‑stage origination.
+     After waiting for confirmation, the code now calls op.contract()
+     and getOriginatedContractAddresses() to retrieve the new KT1 on
+     mainnet.  If both methods fail, the fallback block scan runs for
+     20 iterations instead of 15, reducing timeouts on slower networks.
 */

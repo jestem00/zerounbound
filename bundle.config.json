@@ -228,7 +228,7 @@
       ]
     },
     {
-      "bundleName": "last_touched_bundle",
+      "bundleName": "token_validation_&_main_token_meta_panel_bundle",
       "patterns": [
         "src/pages/contracts/[addr].jsx",
         "src/pages/explore/[[...filter]].jsx",

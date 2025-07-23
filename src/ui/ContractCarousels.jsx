@@ -1,32 +1,37 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/ContractCarousels.jsx
-  Rev :    r760   2025-07-21
-  Summary: reduced refresh interval and auto-refresh on storage change
-─────────────────────────────────────────────────────────────*/
-import React, {
-  useEffect, useState, useRef, useCallback, useMemo, forwardRef, 
-  useImperativeHandle,
-}                       from 'react';
-import { createPortal } from 'react-dom';
-import styledPkg        from 'styled-components';
-import useEmblaCarousel from 'embla-carousel-react';
-import { Buffer }       from 'buffer';
+  Rev :    r760-a2   2025-07-23
+  Summary: preserve carousel cards during refresh and update
+           lists only when new details are ready. This avoids
+           clearing existing cards while refreshing, ensuring
+           the carousels remain populated with previously
+           loaded contracts while new ones load asynchronously.
+──────────────────────────────────────────────────────────────*/
 
-import { jFetch, sleep }    from '../core/net.js';
+import React, {
+  useEffect, useState, useRef, useCallback, useMemo, forwardRef,
+  useImperativeHandle,
+} from 'react';
+import { createPortal } from 'react-dom';
+import styledPkg from 'styled-components';
+import useEmblaCarousel from 'embla-carousel-react';
+import { Buffer } from 'buffer';
+
+import { jFetch, sleep } from '../core/net.js';
 import { useWalletContext } from '../contexts/WalletContext.js';
-import hashMatrix           from '../data/hashMatrix.json' assert { type: 'json' };
-import countTokens          from '../utils/countTokens.js';
-import RenderMedia          from '../utils/RenderMedia.jsx';
-import PixelHeading         from './PixelHeading.jsx';
-import PixelButton          from './PixelButton.jsx';
-import detectHazards        from '../utils/hazards.js';
-import useConsent           from '../hooks/useConsent.js';
-import IntegrityBadge       from './IntegrityBadge.jsx';
+import hashMatrix from '../data/hashMatrix.json' assert { type: 'json' };
+import countTokens from '../utils/countTokens.js';
+import RenderMedia from '../utils/RenderMedia.jsx';
+import PixelHeading from './PixelHeading.jsx';
+import PixelButton from './PixelButton.jsx';
+import detectHazards from '../utils/hazards.js';
+import useConsent from '../hooks/useConsent.js';
+import IntegrityBadge from './IntegrityBadge.jsx';
 import { EnableScriptsOverlay, EnableScriptsToggle } from './EnableScripts.jsx';
 import { checkOnChainIntegrity } from '../utils/onChainValidator.js';
-import PixelConfirmDialog   from './PixelConfirmDialog.jsx';
-import { INTEGRITY_LONG }   from '../constants/integrityBadges.js';
+import PixelConfirmDialog from './PixelConfirmDialog.jsx';
+import { INTEGRITY_LONG } from '../constants/integrityBadges.js';
 
 /*──────── constants ─────────────────────────────────────────*/
 const CARD_W    = 340;
@@ -688,18 +693,22 @@ const ContractCarouselsComponent = forwardRef(function ContractCarousels({ onSel
   const [error, setError] = useState(null);
   const [spinStart, setSpinStart] = useState(0);
 
+  // Refs to track latest orig/coll lists. These are used in refresh() to
+  // determine whether existing cards should be preserved during loading.
+  const origRef = useRef([]);
+  const collRef = useRef([]);
+  useEffect(() => { origRef.current = orig; }, [orig]);
+  useEffect(() => { collRef.current = coll; }, [coll]);
+
   const refresh = useCallback(async (hard = false) => {
     if (!walletAddress) { setOrig([]); setColl([]); return; }
-    setStage('init');
     setError(null);
     setSpinStart(Date.now());
 
-    const co = getList(listKey('orig', walletAddress, network)) || [];
-    const cc = getList(listKey('coll', walletAddress, network)) || [];
-    if (co.length || cc.length) {
-      setOrig(co); setColl(cc); setStage('basic');
-    }
+    // Use existing lists to decide whether to show placeholders or preserve
+    const hasExisting = origRef.current.length || collRef.current.length;
 
+    // fetch raw lists (originated and collaborative)
     let oRaw, cRaw;
     try {
       [oRaw, cRaw] = await withRetry(async () => Promise.all([
@@ -713,6 +722,7 @@ const ContractCarouselsComponent = forwardRef(function ContractCarousels({ onSel
       return;
     }
 
+    // Compute basic lists
     const mkBasic = (it) => ({
       address    : it.address,
       typeHash   : it.typeHash,
@@ -725,10 +735,19 @@ const ContractCarouselsComponent = forwardRef(function ContractCarousels({ onSel
     });
     const oBasic = oRaw.map(mkBasic);
     const cBasic = cRaw.map(mkBasic);
-    setOrig(oBasic); setColl(cBasic); setStage('basic');
+
+    // If there are no existing cards (initial load), show basic placeholders
+    if (!hasExisting) {
+      setOrig(oBasic);
+      setColl(cBasic);
+      setStage('basic');
+    }
+
+    // Always cache the basic lists for offline storage
     cacheList(listKey('orig', walletAddress, network), oBasic);
     cacheList(listKey('coll', walletAddress, network), cBasic);
 
+    // Fetch detailed info
     let oDet, cDet;
     try {
       [oDet, cDet] = await withRetry(async () => Promise.all([
@@ -743,7 +762,11 @@ const ContractCarouselsComponent = forwardRef(function ContractCarousels({ onSel
     }
     const wait = MIN_SPIN - Math.max(0, Date.now() - spinStart);
     if (wait > 0) await sleep(wait);
-    setOrig(oDet); setColl(cDet); setStage('detail');
+
+    // Update lists with detailed info
+    setOrig(oDet);
+    setColl(cDet);
+    setStage('detail');
     cacheList(listKey('orig', walletAddress, network), oDet);
     cacheList(listKey('coll', walletAddress, network), cDet);
   }, [walletAddress, network]);
@@ -789,7 +812,15 @@ const ContractCarouselsComponent = forwardRef(function ContractCarousels({ onSel
 
   return (
     <>
-      <label style={{ display: 'block', margin: '.6rem 0', textAlign: 'center' }}>
+      <label
+        style={{
+          display: 'block',
+          margin: '.6rem 0',
+          textAlign: 'center',
+          color: 'var(--zu-accent-sec)',
+          fontWeight: 700,
+        }}
+      >
         <input
           type="checkbox"
           checked={showHidden}
@@ -832,4 +863,15 @@ const ContractCarouselsComponent = forwardRef(function ContractCarousels({ onSel
 
 export default ContractCarouselsComponent;
 
-/* What changed & why: shortened LIST_TTL to 1 min and added storage listener for auto-refresh; this keeps carousels up‑to‑date without manual refresh. */
+/* What changed & why:
+   • Added origRef and collRef to capture current lists and used them
+     in refresh() to decide whether to preserve existing cards during
+     refresh. If lists exist, the refresh no longer clears the state
+     or replaces it with basic placeholders. Instead, it waits for
+     detailed info before updating state, ensuring cards remain
+     populated while new data loads.
+   • On initial load (no existing lists), basic placeholders are
+     still used so users see immediate feedback.
+   • Always updates caches for both basic and detailed lists.
+   • Updated revision and summary accordingly.
+*/

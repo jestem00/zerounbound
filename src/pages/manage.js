@@ -1,16 +1,20 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/manage.js
-  Rev :    r882   2025-07-15 UTC
-  Summary: refresh clears kt/nav/cache/reload; fixes new contract visibility; lint-clean; compile-guard passed.
+  Rev :    r882-a1   2025-07-23
+  Summary: reposition reset-carousels button, rename it and
+           wrap dynamic ContractCarousels with forwardRef to
+           support ref usage. Also improves styling for show
+           hidden checkbox.
 ──────────────────────────────────────────────────────────────*/
+
 import React, {
   useState, useEffect, useCallback, useRef,
-}                         from 'react';
-import { Buffer }         from 'buffer';
-import { useRouter }      from 'next/router';
-import dynamic            from 'next/dynamic';
-import styledPkg          from 'styled-components';
+} from 'react';
+import { Buffer } from 'buffer';
+import { useRouter } from 'next/router';
+import dynamic from 'next/dynamic';
+import styledPkg from 'styled-components';
 
 import PixelHeading       from '../ui/PixelHeading.jsx';
 import PixelInput         from '../ui/PixelInput.jsx';
@@ -22,10 +26,18 @@ import { useWalletContext } from '../contexts/WalletContext.js';
 import { jFetch, sleep }  from '../core/net.js';
 import hashMatrix         from '../data/hashMatrix.json' assert { type: 'json' };
 
-const ContractCarousels = dynamic(
+// Dynamically import the ContractCarousels component.  Wrap it in a
+// forwardRef so the parent can access the underlying refresh() method
+// exposed via useImperativeHandle. Without this wrapper, the ref would
+// point to the dynamic loader and carouselsRef.current.refresh would be
+// undefined.
+const DynamicContractCarousels = dynamic(
   () => import('../ui/ContractCarousels.jsx'),
   { ssr: false },
 );
+const ContractCarousels = React.forwardRef((props, ref) => (
+  <DynamicContractCarousels {...props} ref={ref} />
+));
 
 /*──────────────── styled shells ─────────────────────────────*/
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
@@ -62,12 +74,19 @@ const Center = styled.div`
 `;
 
 const SearchWrap = styled.div`
-  display:flex;flex-wrap:wrap;gap:10px;justify-content:center;
-  align-items:center;margin-top:.4rem;
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+  justify-content:center;
+  align-items:center;
+  margin-top:.4rem;
 `;
 
 const BusyWrap = styled.div`
-  display:flex;align-items:center;gap:6px;font-size:.8rem;
+  display:flex;
+  align-items:center;
+  gap:6px;
+  font-size:.8rem;
   color:var(--zu-accent-sec);
 `;
 
@@ -221,20 +240,20 @@ export default function ManagePage() {
     load(address);
   }, [navigateIfDiff, load]);
 
-  const handleRefresh = useCallback(async () => {
+  // Reset carousels: clear caches and refresh the carousel component. This
+  // function clears all carousel-related caches (orig/coll/meta/hidden) then
+  // calls refresh(true) on the carousels ref if available. It leaves the
+  // KT1 input untouched.
+  const handleResetCarousels = useCallback(async () => {
     setLoading(true);
-    setKt('');
-    localStorage.removeItem('zu_contract_cache_v1');
-    localStorage.removeItem('zu_meta_cache_v1');
-    localStorage.removeItem('zu_hidden_contracts_v1');
-    router.replace('/manage', undefined, { shallow: true });
     try {
+      localStorage.removeItem('zu_contract_cache_v1');
+      localStorage.removeItem('zu_meta_cache_v1');
+      localStorage.removeItem('zu_hidden_contracts_v1');
       await carouselsRef.current?.refresh(true);
-    } finally {
-      setLoading(false);
-      window.location.reload();
-    }
-  }, [router]);
+    } catch {}
+    setLoading(false);
+  }, []);
 
   const go = (e) => {
     e?.preventDefault();
@@ -267,20 +286,25 @@ export default function ManagePage() {
           style={{ minWidth: 220, maxWidth: 640, flex: '1 1 640px' }}
         />
         <PixelButton onClick={go}>GO</PixelButton>
-        <PixelButton onClick={handleRefresh}>Refresh</PixelButton>
-        {busy && (
-          <BusyWrap>
-            <LoadingSpinner size={16} />
-            <span>Loading… 30 seconds max</span>
-          </BusyWrap>
-        )}
-        {loading && (
-          <BusyWrap>
-            <LoadingSpinner size={16} />
-            <span>Refreshing…</span>
-          </BusyWrap>
-        )}
       </SearchWrap>
+
+      {/* Reset carousels button: centered below search bar */}
+      <div style={{ textAlign: 'center', margin: '.6rem 0' }}>
+        <PixelButton onClick={handleResetCarousels}>reset carousels</PixelButton>
+      </div>
+
+      {busy && (
+        <BusyWrap>
+          <LoadingSpinner size={16} />
+          <span>Loading… 30 seconds max</span>
+        </BusyWrap>
+      )}
+      {loading && (
+        <BusyWrap>
+          <LoadingSpinner size={16} />
+          <span>Resetting…</span>
+        </BusyWrap>
+      )}
 
       <ContractCarousels ref={carouselsRef} onSelect={onSelect} />
 
@@ -307,4 +331,15 @@ export default function ManagePage() {
   );
 }
 
-/* What changed & why: handleRefresh clears kt/nav/cache/reload; fixes new contract visibility; Rev-bump r882. */
+/* What changed & why:
+   • Wrapped dynamic ContractCarousels import with React.forwardRef so
+     carouselsRef.current.refresh works correctly. This fixes runtime
+     TypeError when invoking refresh via the reset button.
+   • Renamed the page’s “Refresh” button to “reset carousels” and
+     repositioned it below the search bar with centered alignment.
+     The button now clears carousel caches and invokes refresh() on
+     the component without clearing the KT1 input. It avoids a full
+     hard reload and prevents misleading semantics.
+   • Added loading state styling (“Resetting…”) during reset operations.
+   • Updated revision and summary accordingly.
+*/

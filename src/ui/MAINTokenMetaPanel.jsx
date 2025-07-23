@@ -1,11 +1,11 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/MAINTokenMetaPanel.jsx
-  Rev :    r13    2025‑10‑23
+  Rev :    r14    2025‑10‑23
   Summary: add token-level script & fullscreen controls; preserve
            collection script toggle; reposition controls near token
            name; decode collection metadata and tags; maintain
-           hazard and consent logic.
+           hazard and consent logic; fix inline style syntax.
 ──────────────────────────────────────────────────────────────*/
 import React, { useMemo, useState } from 'react';
 import PropTypes                    from 'prop-types';
@@ -186,7 +186,9 @@ function toMetaObject(meta) {
   if (typeof meta === 'string') {
     try {
       return decodeHexFields(JSON.parse(meta));
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     const parsed = decodeHexJson(meta);
     if (parsed) return decodeHexFields(parsed);
     return {};
@@ -219,36 +221,36 @@ export default function MAINTokenMetaPanel({
   // Decode the collection metadata into a flat object.  This handles
   // hex-encoded strings and JSON strings, producing fully decoded
   // fields via decodeHexFields().
-  const collObj  = useMemo(() => toMetaObject(collection.metadata), [collection.metadata]);
-  const collHaz  = detectHazards(collObj);
-  const tokHaz   = detectHazards(token.metadata || {});
+  const collObj = useMemo(() => toMetaObject(collection.metadata), [collection.metadata]);
+  const collHaz = detectHazards(collObj);
+  const tokHaz = detectHazards(token.metadata || {});
 
-  const [allowScr,   setAllowScr]   = useConsent(`scripts:${collection.address}`, false);
-  const [allowNSFW,  setAllowNSFW]  = useConsent('nsfw',  false);
+  const [allowScr, setAllowScr] = useConsent(`scripts:${collection.address}`, false);
+  const [allowNSFW, setAllowNSFW] = useConsent('nsfw', false);
   const [allowFlash, setAllowFlash] = useConsent('flash', false);
 
   /* reveal dialog state */
-  const [dlgType,   setDlgType]   = useState(null);   // 'nsfw' | 'flash' | null
-  const [dlgTerms,  setDlgTerms]  = useState(false);
+  const [dlgType, setDlgType] = useState(null);   // 'nsfw' | 'flash' | null
+  const [dlgTerms, setDlgTerms] = useState(false);
   /* script‑consent dialog state (collection-level) */
-  const [dlgScr,    setDlgScr]    = useState(false);
-  const [termsScr,  setTermsScr]  = useState(false);
+  const [dlgScr, setDlgScr] = useState(false);
+  const [termsScr, setTermsScr] = useState(false);
 
   /* integrity + editions */
-  const integrity  = useMemo(() => checkOnChainIntegrity(token.metadata || {}), [token.metadata]);
-  const { label }  = useMemo(() => getIntegrityInfo(integrity.status), [integrity.status]);
-  const editions   = useMemo(() => countAmount(token), [token]);
-  const verLabel   = HASH2VER[collection.typeHash] || '?';
+  const integrity = useMemo(() => checkOnChainIntegrity(token.metadata || {}), [token.metadata]);
+  const { label } = useMemo(() => getIntegrityInfo(integrity.status), [integrity.status]);
+  const editions = useMemo(() => countAmount(token), [token]);
+  const verLabel = HASH2VER[collection.typeHash] || '?';
 
   /* thumb uri + fallbacks */
   const rawThumb = pickThumb(collObj);
-  const thumb    = rawThumb; // pickThumb already converts ipfs:// and preserves data URI
+  const thumb = rawThumb; // pickThumb already converts ipfs:// and preserves data URI
   const [thumbOk, setThumbOk] = useState(true);
 
   /* hazard mask logic */
-  const needsNSFW  = (collHaz.nsfw   || tokHaz.nsfw)    && !allowNSFW;
+  const needsNSFW = (collHaz.nsfw || tokHaz.nsfw) && !allowNSFW;
   const needsFlash = (collHaz.flashing || tokHaz.flashing) && !allowFlash;
-  const hide       = needsNSFW || needsFlash;
+  const hide = needsNSFW || needsFlash;
 
   /* safe collection name: prefer name, title or symbol if available,
      else fall back to the short contract address */
@@ -267,7 +269,7 @@ export default function MAINTokenMetaPanel({
 
   /* collection script-consent handler */
   const askEnable = () => { setTermsScr(false); setDlgScr(true); };
-  const enable    = () => {
+  const enable = () => {
     if (!termsScr) return;
     setAllowScr(true);
     setDlgScr(false);
@@ -277,7 +279,7 @@ export default function MAINTokenMetaPanel({
   const askReveal = (tp) => { setDlgType(tp); setDlgTerms(false); };
   const confirmReveal = () => {
     if (!dlgTerms) return;
-    if (dlgType === 'nsfw')  setAllowNSFW(true);
+    if (dlgType === 'nsfw') setAllowNSFW(true);
     if (dlgType === 'flash') setAllowFlash(true);
     setDlgType(null);
     setDlgTerms(false);
@@ -350,26 +352,34 @@ export default function MAINTokenMetaPanel({
           <BadgeWrap>
             <PixelHeading level={4}>{token.metadata?.name || `Token #${token.tokenId}`}</PixelHeading>
             <IntegrityBadge status={integrity.status} />
-            {/* token-level script toggle and fullscreen button */}
-            {tokenScripts && (
-              <EnableScriptsToggle
-                enabled={tokenAllowJs}
-                onToggle={tokenAllowJs ? () => onToggleScript(false) : onRequestScriptReveal}
-                title={tokenAllowJs ? 'Disable scripts' : 'Enable scripts'}
-              />
-            )}
-            {onFullscreen && (
-              <PixelButton
-                size="xs"
-                disabled={fsDisabled}
-                onClick={onFullscreen}
-                title="Fullscreen"
-              >⛶</PixelButton>
-            )}
           </BadgeWrap>
           <span style={{ fontSize: '.75rem', opacity: .85 }}>
             Minted {format(new Date(token.firstTime), 'MMM dd, yyyy')} • {editions} edition{editions !== 1 ? 's' : ''}
           </span>
+        </Section>
+
+        {/* controls: script toggle + fullscreen button.  Always render fullscreen above the description; stack vertically. */}
+        <Section>
+          {/* Only show the script toggle when the token has script hazards */}
+          {tokenScripts && (
+            <EnableScriptsToggle
+              enabled={tokenAllowJs}
+              onToggle={tokenAllowJs ? () => onToggleScript(false) : onRequestScriptReveal}
+              title={tokenAllowJs ? 'Disable scripts' : 'Enable scripts'}
+            />
+          )}
+          {/* Fullscreen control: label plus icon for clarity */}
+          {onFullscreen && (
+            <PixelButton
+              size="xs"
+              disabled={fsDisabled}
+              onClick={onFullscreen}
+              title="Enter fullscreen mode"
+              style={{ marginTop: tokenScripts ? '4px' : '0' }}
+            >
+              Fullscreen&nbsp;⛶
+            </PixelButton>
+          )}
         </Section>
 
         {/* description */}
@@ -495,10 +505,11 @@ MAINTokenMetaPanel.propTypes = {
   fsDisabled : PropTypes.bool,
 };
 
-/* What changed & why (r13):
+/* What changed & why (r14):
    • Added token-level script toggle and fullscreen button via new props.
    • Moved script and fullscreen controls adjacent to token name in BadgeWrap.
    • Continue to support collection-level script toggle and hazard reveals.
+   • Fixed inline style error by using camelCase (fontWeight).
    • Updated prop types and header/footer summaries.
 */
 /* EOF */

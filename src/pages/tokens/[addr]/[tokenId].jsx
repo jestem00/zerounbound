@@ -1,32 +1,33 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/tokens/[addr]/[tokenId].jsx
-  Rev :    r870a   2025‑10‑23
-  Summary: add script toggle and hazard dialogs to token page;
-           hide search bar via ExploreNav prop; use PixelConfirmDialog
-           instead of window.confirm for hazard reveals and script
-           enabling; provide lightning toggle to enable/disable scripts.
+  Rev :    r872    2025‑10‑23
+  Summary: reposition script & fullscreen controls; remove script
+           overlay from preview; freeze scripts when disabled;
+           show script toggle and fullscreen button in meta panel;
+           hide bottom‑left lightning icon.
 ──────────────────────────────────────────────────────────────*/
 import React, {
-  useEffect, useState, useCallback, useMemo,
-}                             from 'react';
-import { useRouter }          from 'next/router';
-import styledPkg              from 'styled-components';
+  useEffect,
+  useState,
+  useCallback,
+  useMemo,
+} from 'react';
+import { useRouter } from 'next/router';
+import styledPkg from 'styled-components';
 
-import ExploreNav             from '../../../ui/ExploreNav.jsx';
-import PixelButton            from '../../../ui/PixelButton.jsx';
-import PixelConfirmDialog     from '../../../ui/PixelConfirmDialog.jsx';
-import RenderMedia            from '../../../utils/RenderMedia.jsx';
-import FullscreenModal        from '../../../ui/FullscreenModal.jsx';
-import MAINTokenMetaPanel     from '../../../ui/MAINTokenMetaPanel.jsx';
-import detectHazards          from '../../../utils/hazards.js';
-import useConsent             from '../../../hooks/useConsent.js';
-import { useWalletContext }   from '../../../contexts/WalletContext.js';
-import { jFetch }             from '../../../core/net.js';
-import { TZKT_API }           from '../../../config/deployTarget.js';
-import decodeHexFields, {
-  decodeHexJson,
-}                             from '../../../utils/decodeHexFields.js';
+import ExploreNav from '../../../ui/ExploreNav.jsx';
+import PixelButton from '../../../ui/PixelButton.jsx';
+import PixelConfirmDialog from '../../../ui/PixelConfirmDialog.jsx';
+import RenderMedia from '../../../utils/RenderMedia.jsx';
+import FullscreenModal from '../../../ui/FullscreenModal.jsx';
+import MAINTokenMetaPanel from '../../../ui/MAINTokenMetaPanel.jsx';
+import detectHazards from '../../../utils/hazards.js';
+import useConsent from '../../../hooks/useConsent.js';
+import { useWalletContext } from '../../../contexts/WalletContext.js';
+import { jFetch } from '../../../core/net.js';
+import { TZKT_API } from '../../../config/deployTarget.js';
+import decodeHexFields, { decodeHexJson } from '../../../utils/decodeHexFields.js';
 
 /*──────────────── helpers ───────────────────────────────────────────*/
 // Convert a hex-encoded string into a UTF‑8 string.  TzKT returns
@@ -103,15 +104,6 @@ const Obscure = styled.div`
   p { margin: 0; width: 80%; }
 `;
 
-const FSBtn = styled(PixelButton)`
-  position: absolute;
-  bottom: 8px;
-  right: 8px;
-  opacity: .65;
-  z-index: 5;
-  &:hover { opacity: 1; }
-`;
-
 /*──────── helpers ───────────────────────────────────────────*/
 // Use the centralised TZKT_API constant from deployTarget.  Append /v1
 // to access the v1 REST endpoints.  This ensures the token page
@@ -125,22 +117,21 @@ export default function TokenDetailPage() {
   const { addr, tokenId } = router.query;
   const { address: walletAddr } = useWalletContext() || {};
 
-  const [token,      setToken]      = useState(null);
+  const [token, setToken] = useState(null);
   const [collection, setCollection] = useState(null);
-  const [loading,    setLoading]    = useState(true);
-  const [fsOpen,     setFsOpen]     = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [fsOpen, setFsOpen] = useState(false);
 
-  const [allowNSFW,  setAllowNSFW ] = useConsent('nsfw',  false);
+  const [allowNSFW, setAllowNSFW] = useConsent('nsfw', false);
   const [allowFlash, setAllowFlash] = useConsent('flash', false);
   // script consent key scoped per token: scripts:<addr>:<tokenId>
-  const scriptKey    = useMemo(() => {
-    // fallback keys if addr or tokenId undefined; stable string
+  const scriptKey = useMemo(() => {
     return `scripts:${addr || ''}:${tokenId || ''}`;
   }, [addr, tokenId]);
-  const [allowJs,    setAllowJs  ] = useConsent(scriptKey, false);
+  const [allowJs, setAllowJs] = useConsent(scriptKey, false);
 
   /* dialog state for hazard/script confirm */
-  const [dlgType,  setDlgType]  = useState(null); // 'nsfw' | 'flash' | 'scripts' | null
+  const [dlgType, setDlgType] = useState(null); // 'nsfw' | 'flash' | 'scripts' | null
   const [dlgTerms, setDlgTerms] = useState(false);
 
   /*──── data fetch ────*/
@@ -201,7 +192,9 @@ export default function TokenDetailPage() {
           }
           setCollection({ ...collRow, metadata: collMeta });
         }
-      } finally { if (!cancelled) setLoading(false); }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     })();
 
     return () => { cancelled = true; };
@@ -210,12 +203,11 @@ export default function TokenDetailPage() {
   const meta = token?.metadata || {};
   const hazards = detectHazards(meta);
 
-  const needsNSFW  = hazards.nsfw     && !allowNSFW;
+  const needsNSFW = hazards.nsfw && !allowNSFW;
   const needsFlash = hazards.flashing && !allowFlash;
-  const hidden     = needsNSFW || needsFlash;
+  const hidden = needsNSFW || needsFlash;
 
-  const mediaUri = meta.artifactUri
-    || meta.displayUri || meta.imageUri || '';
+  const mediaUri = meta.artifactUri || meta.displayUri || meta.imageUri || '';
 
   /* handlers to open confirm dialogs */
   const requestReveal = useCallback((type) => {
@@ -226,7 +218,7 @@ export default function TokenDetailPage() {
   /* confirm hazard or script reveal */
   const confirmReveal = useCallback(() => {
     if (!dlgTerms || !dlgType) return;
-    if (dlgType === 'nsfw')      setAllowNSFW(true);
+    if (dlgType === 'nsfw') setAllowNSFW(true);
     else if (dlgType === 'flash') setAllowFlash(true);
     else if (dlgType === 'scripts') setAllowJs(true);
     setDlgType(null);
@@ -238,6 +230,19 @@ export default function TokenDetailPage() {
     setDlgType(null);
     setDlgTerms(false);
   };
+
+  /* script toggle helper passed to meta panel */
+  const toggleScript = useCallback((val) => {
+    if (!val) setAllowJs(false);
+    else requestReveal('scripts');
+  }, [requestReveal, setAllowJs]);
+
+  /* full‑screen helper passed to meta panel */
+  const openFullscreen = useCallback(() => {
+    setFsOpen(true);
+  }, []);
+
+  const fsDisabled = hazards.scripts && !allowJs;
 
   if (loading) return (
     <p style={{ textAlign: 'center', marginTop: '4rem' }}>Loading…</p>
@@ -260,6 +265,8 @@ export default function TokenDetailPage() {
               mime={meta.mimeType}
               alt={meta.name || `Token #${tokenId}`}
               allowScripts={hazards.scripts && allowJs}
+              /* force re-mount when script consent toggles */
+              key={String(allowJs)}
               style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
             />
           )}
@@ -279,40 +286,6 @@ export default function TokenDetailPage() {
               )}
             </Obscure>
           )}
-
-          {/* script hazard overlay when scripts are present but not allowed */}
-          {hazards.scripts && !allowJs && !hidden && (
-            <Obscure>
-              <p>This media executes scripts.</p>
-              <PixelButton size="sm" warning onClick={() => requestReveal('scripts')}>
-                ALLOW SCRIPTS
-              </PixelButton>
-            </Obscure>
-          )}
-
-          {/* script toggle button: show when scripts present and not hidden */}
-          {hazards.scripts && !hidden && (
-            <PixelButton
-              size="xs"
-              warning={!allowJs}
-              onClick={() => {
-                if (allowJs) setAllowJs(false);
-                else requestReveal('scripts');
-              }}
-              title={allowJs ? 'Disable scripts' : 'Enable scripts'}
-              style={{ position:'absolute', left:'8px', bottom:'8px', zIndex: 5 }}
-            >
-              ⚡
-            </PixelButton>
-          )}
-
-          {/* fullscreen btn */}
-          <FSBtn
-            size="xs"
-            disabled={hazards.scripts && !allowJs}
-            onClick={() => setFsOpen(true)}
-            title="Fullscreen"
-          >⛶</FSBtn>
         </MediaWrap>
 
         {/*──────── meta panel ───────────*/}
@@ -320,6 +293,13 @@ export default function TokenDetailPage() {
           token={token}
           collection={collection}
           walletAddress={walletAddr}
+          /* token‑specific script and fullscreen controls */
+          tokenScripts={hazards.scripts}
+          tokenAllowJs={allowJs}
+          onToggleScript={toggleScript}
+          onRequestScriptReveal={() => requestReveal('scripts')}
+          onFullscreen={openFullscreen}
+          fsDisabled={fsDisabled}
         />
       </Grid>
 
@@ -397,11 +377,11 @@ export default function TokenDetailPage() {
   );
 }
 
-/* What changed & why: r870a
-   • Added dlgType/dlgTerms state and PixelConfirmDialog for NSFW, flash and script consent.
-   • Replaced window.confirm with PixelConfirmDialog requiring terms agreement.
-   • Added lightning PixelButton to allow toggling scripts on/off; open confirm dialog when enabling.
-   • Used ExploreNav hideSearch prop to show hazard toggles but remove search bar on token page.
-   • Retained responsive layout and fullscreen functionality.
+/* What changed & why: r872
+   • Removed script overlay and bottom-left toggle from preview; use fallback image / freeze.
+   • Added toggleScript helper and onFullscreen, passing controls to meta panel.
+   • Pass tokenScripts and tokenAllowJs to meta panel for script control.
+   • Moved fullscreen and script toggles out of media frame; relocated into meta panel.
+   • Hide bottom-left lightning icon entirely.
 */
 /* EOF */

@@ -1,12 +1,12 @@
 /*─────────────────────────────────────────────────────────────────
 Developed by @jams2blues – ZeroContract Studio
 File: docs/Master_Overview_And_Manifest_zerounbound_contractmanagement.md
-Rev : r1018 2025‑07‑22 UTC
-Summary: clarify local development setup in Quick Start; refine dynamic
-dev scripts guidance; include network propagation and remote
-detection invariants. No functional code changes.
+Rev : r1020 2025‑07‑23 UTC
+Summary: refine token-detail UX: stack script & fullscreen controls above description, add labelled fullscreen button, auto-refresh previews on script toggle; update Mint hints and OperationOverlay features; adjust ExploreNav hideSearch; update manifest and source-tree map accordingly.
 ──────────────────────────────────────────────────────────────────/
 
+yaml
+Copy
 ════════════════════════════════════════════════════════════════
 ZERO UNBOUND v4 — MASTER OVERVIEW & SOURCE‑FILE MANIFEST
 ════════════════════════════════════════════════════════════════
@@ -167,7 +167,7 @@ I59 [F] Silent session restore on mount.
 /──────────────────────────────────────────────────────────────
 I60 [F,E] Resumable Slice Uploads — Mint, Append & Repair
 ───────────────────────────────────────────────────────────────
-• Oversize writes are chunked (32 768 B – 1 024 head-room); first slice inside
+• Oversize writes are chunked (32 768 B – 1 024 head‑room); first slice inside
 the mint, the rest via append* in strict order.
 • Each chunk persists a checkpoint in
 localStorage.zuSliceCache.<network>[<contract>:<tokenId>:<label>]:
@@ -188,7 +188,7 @@ I61 [F] Slice-Cache Hygiene & Expiry
 • Cache entry auto-deletes when:
 – stale ≥ 24 h • total === 0 • hash mismatch • global > 5 MB.
 • Purge is non-blocking; all IO sits in try {} catch {} so quota /
-private-mode issues never break the UI.
+private‑mode issues never break the UI.
 ──────────────────────────────────────────────────────────────/
 I62 [F] Busy‑Select Spinner.
 I63 [I] Single‑Repo Target Switch (scripts/setTarget.js).
@@ -196,7 +196,7 @@ I64 [F] Wheel‑Tunnel Modals.
 I65 [F] Immediate Busy Indicators — superseded by I76.
 I66 [F] Empty‑Collection Grace.
 I67 [F,E] Filter destroyed / burn balances.
-I68 [E] listLiveTokenIds.js 30 s TTL.
+I68 [E] listLiveTokenIds.js 30 s TTL.
 I69 [F] ContractCarousels auto‑refresh + zu_cache_flush listener.
 I70 [I] destroy/burn dispatches zu_cache_flush.
 I71 [F] Copy‑Address UX via PixelButton.
@@ -277,13 +277,13 @@ Rationale: guarantees identical ergonomics across the admin suite,
 eliminates copy‑paste drift, and codifies the proven pattern that
 already passed WCAG AA + LCP audits.
 I103 [F] Token‑metadata legacy alias artists is accepted read‑only;
-        UI maps it to authors, never writes this key.
+        UI maps it to authors, never writes this key.
 I104 [F,C] Contract‑level metadata must include a symbol key
-        (3‑5 upper‑case A‑Z/0‑9) positioned directly after name.
-        Deploy & edit UIs enforce /^[A-Z0-9]{3,5}$/, loader refuses
-        contracts missing the key; guaranteed on‑chain order:
-        name → symbol → description.
-        (TZIP v4 §2.1 compliance, see commit r745).
+        (3‑5 upper‑case A‑Z/0‑9) positioned directly after name.
+        Deploy & edit UIs enforce /^[A-Z0-9]{3,5}$/, loader refuses
+        contracts missing the key; guaranteed on‑chain order:
+        name → symbol → description.
+        (TZIP v4 §2.1 compliance, see commit r745).
 I105 [F] Explore Grid Uniformity — the collection grid on every
 /explore/* route must use
 grid-template-columns:repeat(auto-fill,var(--col))
@@ -321,11 +321,16 @@ I112 [F,E] Marketplace dialogs (buy/list/offer) must call feeEstimator.js and di
 I113 [F] Unified Consent Management — all consent decisions use useConsent hook with standardized keys: 'nsfw' (for content), 'flash' (for flashing), 'scripts:{contractAddress}' (per‑contract script execution). Consent state syncs across components via CustomEvent broadcasting and always requires explicit user acknowledgment through PixelConfirmDialog with checkbox agreement to terms.
 I114 [F] Portal‑Based Draggable Windows — draggable preview windows use createPortal(component, document.body) for z‑index isolation. Draggable state managed through useRef pattern with randomized start positions (60 + Math.random()*30) to prevent stacking. SSR compatibility: typeof document === 'undefined' ? body : createPortal(body, document.body).
 I115 [F] Hazard Detection & Content Protection — all media rendering components must call detectHazards(metadata) before display. Hazard types: { nsfw, flashing, scripts }. Script hazards detect HTML MIME types, JavaScript URIs, SVG with <script> tags. Obfuscation overlays block content until explicit user consent with age verification (18+) for NSFW.
-I116 [F] Debounced Form State Pattern — form components maintain local state mirroring parent props with upward change propagation via useEffect. Input sanitization applied at component level. Unique id attributes use index pattern: id={\tid-${index}}. I117 [F] Script Security Model — script execution requires both hazard detection AND user consent. Script consent persists per contract address. EnableScriptsOverlayprovides inline consent,EnableScriptsToggle provides permanent toggle. Terms agreement checkbox required for all script consent flows.
+I116 [F] Debounced Form State Pattern — form components maintain local state mirroring parent props with upward change propagation via useEffect. Input sanitization applied at component level. Unique id attributes use index pattern: id={\tid-${index}}. I117 [F] Script Security Model — script execution requires both hazard detection AND user consent. Script consent persists per contract address. EnableScriptsOverlay provides inline consent, EnableScriptsToggle provides permanent toggle. Terms agreement checkbox required for all script consent flows.
 
-I118 [E] Dual‑Stage Origination — when FAST_ORIGIN=true the origination flow must store a placeholder views pointer and then automatically call edit_contract_metadata (v4) within the same UI session to patch the real metadata; failure to patch is critical and must trigger resume logic.
-I119 [F] On‑chain integrity scanning must treat remote domain patterns case‑sensitively: the onChainValidator’s REMOTE_BARE_RE must not match uppercase‑coded identifiers (e.g. Math.PI/…) as remote references. Only safe domains enumerated in SAFE_REMOTE_RE are allowed (see I100).
-I120 [F] Development scripts must propagate the selected network into both build‑time and runtime via environment variables (process.env.NETWORK and NEXT_PUBLIC_NETWORK), using the DEV_PORT exported from deployTarget.js; scripts/startDev.js must spawn Next.js via shell mode on the correct port and set these variables before execution.
+I118 [E] Dual‑Stage Origination — when FAST_ORIGIN=true the origination flow must store a placeholder views pointer
+and then automatically call edit_contract_metadata (v4) within the same UI session to patch the real metadata; failure
+to patch is critical and must trigger resume logic.
+I119 [F] On‑chain integrity scanning must treat remote domain patterns case‑sensitively: the onChainValidator’s
+REMOTE_BARE_RE must not match uppercase‑coded identifiers (e.g. Math.PI/…) as remote references. Only safe domains
+enumerated in SAFE_REMOTE_RE are allowed (see I100).
+I120 [F] Development scripts must propagate the selected network into both build‑time and runtime via environment
+variables (process.env.NETWORK and NEXT_PUBLIC_NETWORK), using the DEV_PORT exported from deployTarget.js; scripts/startDev.js must spawn Next.js via shell mode on the correct port and set these variables before execution.
 I121 [F] Explore grids and collection/token pages must derive their TzKT API base URL (TZKT_API) and other network parameters from src/config/deployTarget.js rather than hard‑coding Ghostnet or Mainnet domains (extends I10 and I105).
 I122 [F] Token metadata panels must decode contract metadata fully via decodeHexFields/decodeHexJson, fallback through imageUri, logo, artifactUri and thumbnailUri, and display the human‑readable collection name (name → symbol → title → collectionName → short address). Tags must appear with a “Tags:” label and wrap neatly in a single row; meta fields align responsively across breakpoints.
 I123 [F] Marketplace actions (BUY/LIST/OFFER) must use a unified MarketplaceBar.jsx overlay stub that informs users that ZeroSum functionality is still under development and directs them to objkt.com. Direct marketplace operations are disabled until the native marketplace contract is ready.
@@ -363,8 +368,8 @@ src/core/net.js is used with a manual gas/storage/fee fallback.
 4 · COMPREHENSIVE SOURCE‑TREE MAP (per‑file description • imports • exports)
 ───────────────────────────────────────────────────────────────/
 /* Legend – one line per path, keep case‑exact
-   <relative‑path> – <purpose>; Imports: <comma‑list>; Exports: <comma‑list>
-   “·” = none.  */
+   <relative‑path> – <purpose>; Imports: <comma‑list>; Exports: <comma‑list>
+   “·” = none.  */
 
 zerounbound – repo root; Imports:· Exports:·
 zerounbound/.eslintrc.cjs – ESLint ruleset; Imports: eslint-config-next; Exports: module.exports
@@ -473,7 +478,7 @@ zerounbound/src/hooks/useTxEstimate.js – dry‑run gas/fee; Imports: @taquito/
 zerounbound/src/pages/contracts/[addr].jsx – collection detail page; Imports: ContractMetaPanelContracts,TokenCard,hazards.js; Exports: ContractPage
 zerounbound/src/pages/explore/[[...filter]].jsx – dynamic explore grid; Imports: CollectionCard,useConsent; Exports: Explore
 zerounbound/src/pages/explore/search.jsx (retired 10d92ac) – former advanced token search; Imports:· Exports:·
-zerounbound/src/pages/tokens/[addr]/[tokenId].jsx – token-detail page; Imports: RenderMedia,hazards,useConsent; Exports: TokenDetailPage
+zerounbound/src/pages/tokens/[addr]/[tokenId].jsx – responsive token-detail page that fetches collection and token metadata, displays media preview with hazard overlays, and moves script enable/disable and fullscreen controls into the metadata panel; integrates ExploreNav without search for global hazard toggles; re‑renders preview on script permission changes; clamps sidebar width and media height; Imports: React,useRouter,styled-components,ExploreNav,PixelButton,RenderMedia,FullscreenModal,MAINTokenMetaPanel,detectHazards,useConsent,useWalletContext,jFetch,TZKT_API,decodeHexFields,decodeHexJson; Exports: TokenDetailPage
 zerounbound/src/pages/_app.js – root providers; Imports: ThemeContext,WalletContext,GlobalStyles; Exports: MyApp
 zerounbound/src/pages/_document.js – custom document (I20); Imports: next/document; Exports: default class
 zerounbound/src/pages/deploy.js – create collection UI; Imports: DeployCollectionForm,Layout; Exports: DeployPage
@@ -488,7 +493,7 @@ zerounbound/src/styles/palettes.json – theme palettes; Imports:· Exports:·
 ╭── src/ui (shell) ──────────────────────────────────────────────────────────╮
 zerounbound/src/ui/CollectionCard.jsx – responsive 8‑bit contract card; Imports: React,hazards,useConsent,RenderMedia; Exports: CollectionCard
 zerounbound/src/ui/CRTFrame.jsx – CRT screen border; Imports: react; Exports: CRTFrame
-zerounbound/src/ui/ExploreNav.jsx – sticky explore nav bar; Imports: PixelButton; Exports: ExploreNav
+zerounbound/src/ui/ExploreNav.jsx – sticky explore nav bar with search and hazard toggles; includes hideSearch prop to omit the search bar; shows NSFW and flashing consent prompts; Imports: PixelButton,PixelInput,PixelConfirmDialog,useConsent,useRouter; Exports: ExploreNav
 zerounbound/src/ui/FiltersPanel.jsx – explore filters sidebar; Imports: React; Exports: FiltersPanel
 zerounbound/src/ui/Header.jsx – top nav + network switch; Imports: react,useWallet,useTheme; Exports: Header
 zerounbound/src/ui/Layout.jsx – app shell & scroll‑lock; Imports: Header,useViewportUnit,useHeaderHeight; Exports: Layout
@@ -502,12 +507,12 @@ zerounbound/src/ui/WalletNotice.jsx – wallet status banner; Imports: useWallet
 zerounbound/src/ui/ZerosBackground.jsx – animated zeros field; Imports: react; Exports: ZerosBackground
 zerounbound/src/ui/IntegrityBadge.jsx – on‑chain integrity badge; Imports: react,integrityBadges.js,PixelButton.jsx; Exports: IntegrityBadge
 zerounbound/src/ui/MakeOfferBtn.jsx - XS size, make-offer button from marketplace contract ZeroSum.tz Import:PropTypes,PixelButton Export:MakeOfferBtn
-zerounbound/src/ui/MAINTokenMetaPanel.jsx – enhanced token metadata panel with hazard detection and consent handling; Imports: React,PropTypes,date-fns,styled-components,detectHazards,useConsent,IntegrityBadge,onChainValidator,hashMatrix; Exports: MAINTokenMetaPanel
+zerounbound/src/ui/MAINTokenMetaPanel.jsx – responsive token metadata panel with hazard detection, consent handling, token‑level script toggle and fullscreen controls; decodes collection metadata, selects thumbnails, wraps tags with a label, aligns meta fields and uses safe name fallback; re‑renders preview on script permission changes; Imports: React,PropTypes,date-fns,styled-components,PixelHeading,PixelButton,RenderMedia,IntegrityBadge,MarketplaceBar,detectHazards,useConsent,shortKt,copyToClipboard,EnableScriptsToggle,PixelConfirmDialog,countAmount,hashMatrix,decodeHexFields; Exports: MAINTokenMetaPanel
 
 ╭── src/ui/operation & misc ─────────────────────────────────────────────────╮
 zerounbound/src/ui/AdminTools.jsx – dynamic entry‑point modal; Imports: react,WalletContext; Exports: AdminTools
 zerounbound/src/ui/OperationConfirmDialog.jsx – tx summary dialog; Imports: react,PixelConfirmDialog; Exports: OperationConfirmDialog
-zerounbound/src/ui/OperationOverlay.jsx – progress overlay with status updates and Temple prompts; Imports: react,useWheelTunnel,LoadingSpinner,CanvasFireworks,PixelButton; Exports: OperationOverlay
+zerounbound/src/ui/OperationOverlay.jsx – progress overlay with status updates, Temple prompts and optional token link; supports tokenUrl prop for “View Token” button; Imports: react,useWheelTunnel,LoadingSpinner,CanvasFireworks,PixelButton; Exports: OperationOverlay
 zerounbound/src/ui/ContractCarousels.jsx – live contract cards; Imports: react,jFetch,countTokens; Exports: ContractCarousels
 zerounbound/src/ui/ContractMetaPanel.jsx – contract stats card; Imports: react,styled-components; Exports: ContractMetaPanel
 zerounbound/src/ui/ContractMetaPanelContracts.jsx – banner panel on /contracts; Imports: React,RenderMedia; Exports: ContractMetaPanelContracts
@@ -539,7 +544,7 @@ zerounbound/src/ui/Entrypoints/EditContractMetadata.jsx – contract meta editor
 zerounbound/src/ui/Entrypoints/EditTokenMetadata.jsx – token meta editor (stub); Imports: react,TokenMetaPanel; Exports: EditTokenMetadata
 zerounbound/src/ui/Entrypoints/ManageCollaborators.jsx – v3/v4 collab GUI; Imports: react; Exports: ManageCollaborators
 zerounbound/src/ui/Entrypoints/ManageParentChild.jsx – parent/child GUI; Imports: react; Exports: ManageParentChild
-zerounbound/src/ui/Entrypoints/Mint.jsx – main mint flow; Imports: batch,useTxEstimate,sliceCache; Exports: Mint
+zerounbound/src/ui/Entrypoints/Mint.jsx – main mint flow (mint NFTs); collects token metadata and optional authors with hints; constructs tokenUrl for OperationOverlay and passes it; imports: batch,useTxEstimate,sliceCache; Exports: Mint
 zerounbound/src/ui/Entrypoints/MintV4a.jsx – v4a mint UI; Imports: batchV4a.js,sliceCacheV4a.js,feeEstimator.js,sleepV4a.js; Exports: MintV4a
 zerounbound/src/ui/Entrypoints/MintPreview.jsx – pre‑mint gallery; Imports: react,RenderMedia; Exports: MintPreview
 zerounbound/src/ui/Entrypoints/MintUpload.jsx – drag/upload step; Imports: react,PixelButton,mimeTypes.js,PixelConfirmDialog.jsx,onChainValidator.js; Exports: MintUpload
@@ -651,6 +656,8 @@ B. entrypointRegistry.json, contains all Entrypoints used across our supported 
 ──────────────────────────────────────────────────────────────
 CHANGELOG
 ──────────────────────────────────────────────────────────────/
+• r1020 2025‑07‑23 UTC — refined token-detail UX: stacked script toggle and labelled fullscreen button above description; ensured previews re-render when toggling scripts; updated ExploreNav to hide search bar when hideSearch prop is set and include hazard consent prompts; updated Mint flow with authors hints and tokenUrl; added token link support to OperationOverlay; revised manifest summary and source-tree map accordingly.
+• r1019 2025‑07‑23 UTC — repositioned token-level script toggle and fullscreen controls on token detail pages; moved controls into MAINTokenMetaPanel; removed script overlay and bottom-left icons; added auto-refresh of token previews upon script permission changes; updated manifest summary and source-tree map accordingly.
 • r1017 2025‑07‑22 UTC — added invariants I119–I124 covering case‑sensitive remote detection, dynamic dev scripts, TzKT API derivation, improved metadata panels and tags, unified marketplace overlay, and dual‑network development; updated revision and summary; removed application domain whitelisting; refined onChainValidator remote detection.
 • r1015 2025‑07‑20 UTC — migrated to Node‑based remote forging service; removed serverless forge/inject endpoints (src/pages/api/forge.js and src/pages/api/inject.js) and USE_BACKEND flag; updated environment guidance to always use FAST_ORIGIN with local fallback; added forge_service_node entries and deployment instructions; updated Source‑tree map and high‑level architecture accordingly.
 • r1014 2025‑07‑19 UTC — restored dual‑stage origination and manual forging fallback; updated invariants and environment flag guidance accordingly.

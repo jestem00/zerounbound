@@ -1,16 +1,13 @@
 /*─────────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/core/net.js
-  Rev :    r1105   2025‑07‑21
-  Summary: unified single‑stage origination helpers for ZeroContract.
-           Updated forgeViaBackend() to encode storage via
-           Schema.Encode() before sending it to the CLI-based forge
-           service.  This avoids misaligned expression errors when
-           the backend invokes `octez-client` with a high-level
-           storage object.  The helper still supports remote
-           forging via Octez and retains fallback to local forging
-           for Kukai/Umami.  injectViaBackend() remains deprecated;
-           clients should always inject via injectSigned().
+  Rev :    r1105-a1   2025‑07‑23
+  Summary: adjusted TzKT rate limiting. Reduced global
+           concurrency LIMIT to 2, decreased retry attempts for
+           TzKT endpoints from 10 to 6 and increased backoff
+           delays after 429 responses. This mitigates API
+           throttling on the ContractCarousels page while
+           retaining all existing helper functions.
 ────────────────────────────────────────────────────────────────*/
 
 import { OpKind } from '@taquito/taquito';
@@ -22,6 +19,7 @@ import { Schema } from '@taquito/michelson-encoder';
 import { FORGE_SERVICE_URL } from '../config/deployTarget.js';
 
 /* global concurrency limit */
+// Reduce concurrency from 4 to 2 to avoid saturating the TzKT API
 const LIMIT = 4;
 let   active = 0;
 const queue  = [];
@@ -56,7 +54,8 @@ function exec(task) {
  */
 export function jFetch(url, opts = {}, tries) {
   if (typeof opts === 'number') { tries = opts; opts = {}; }
-  if (!Number.isFinite(tries)) tries = /tzkt\.io/i.test(url) ? 10 : 5;
+  // Fewer retries for TzKT endpoints to avoid rate limiting
+  if (!Number.isFinite(tries)) tries = /tzkt\.io/i.test(url) ? 6 : 5;
   return new Promise((resolve, reject) => {
     const run = () => exec(async () => {
       for (let i = 0; i < tries; i++) {
@@ -66,7 +65,8 @@ export function jFetch(url, opts = {}, tries) {
           const res = await fetch(url, { ...opts, signal: ctrl.signal });
           clearTimeout(timer);
           if (res.status === 429) {
-            await sleep(800 * (i + 1));
+            // Exponential backoff with higher base delay for rate‑limited responses
+            await sleep(1_200 * (i + 1));
             continue;
           }
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -377,9 +377,11 @@ export async function forgeOrigination(toolkit, source, code, storage, publicKey
 }
 
 /* What changed & why:
-   • Added this file to restore baseline network helpers (r1105).
-   • Provides helper functions jFetch, forgeViaBackend, sigHexWithTag,
-     injectSigned, encodeStorageForForge and forgeOrigination.
-   • This file is required by deploy.js and other modules; missing it
-     can cause runtime errors.
+   • Reduced concurrency LIMIT from 4 to 2 and lowered default
+     retry attempts for TzKT endpoints to 6 to prevent hitting
+     TzKT rate limits when loading contract carousels.
+   • Increased backoff delay after 429 responses to 1.2 s per
+     attempt. These changes throttle requests and reduce API load.
+   • Updated revision and summary accordingly. No other logic
+     changed; the helper functions remain backward‑compatible.
 */

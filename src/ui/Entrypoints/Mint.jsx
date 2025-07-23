@@ -1,13 +1,13 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/Mint.jsx
-  Rev :    r886   2025-07-23
+  Rev :    r886-a1   2025-07-23
   Summary: refine oversize detection, tokenUrl support, authors hint and
-           dialogs; move checklist above the button and include an
-           authors warning in the checklist.  Clicking NSFW and flashing
-           labels opens information dialogs; authors field now sets
-           checklist state instead of separate note.
+           dialogs; fix v2.* mint signature by invoking mint(map,to)
+           for all v2 versions (2a–2e) similar to v1; preserve v3+
+           behaviour; moved checklist above button and authors hint.
 ──────────────────────────────────────────────────────────────*/
+
 import React, {
   useRef, useState, useEffect, useMemo, useCallback,
 } from 'react';
@@ -110,9 +110,9 @@ const ChecklistBox = styled.ul`
   list-style:none;padding:0;margin:.6rem auto 0;font-size:.68rem;
   max-width:260px;
   li{display:flex;gap:.35rem;align-items:center;}
-  li.ok::before   {content:"✓";color:var(--zu-accent);}
-  li.bad::before  {content:"✗";color:var(--zu-accent-sec);}
-  li.warn::before {content:"❗";color:var(--zu-accent-sec);}
+  li.ok::before   {content:"✓";color:var(--zu-accent);}  
+  li.bad::before  {content:"✗";color:var(--zu-accent-sec);} 
+  li.warn::before {content:"❗";color:var(--zu-accent-sec);} 
 `;
 
 /*──────── helper fns ───────────────────────────────────────*/
@@ -131,12 +131,12 @@ const buildMeta = ({
 
   if (f.authors?.trim()) {
     m.set('authors', hex(JSON.stringify(
-      f.authors.split(',').map((x) => x.trim()),
+      f.authors.split(',').map((x) => x.trim())
     )));
   }
 
   m.set('creators', hex(JSON.stringify(
-    f.creators.split(',').map((x) => x.trim()).filter(Boolean),
+    f.creators.split(',').map((x) => x.trim()).filter(Boolean)
   )));
   m.set('rights', hex(f.license === 'Custom' ? f.customLicense : f.license));
   m.set('mintingTool', hex(ROOT_URL));
@@ -161,12 +161,26 @@ const mapSize = (map) => {
   return total;
 };
 
+/**
+ * Build a mint call for the given version.  Versions v1 and all v2.*
+ * contracts mint new tokens by calling `mint(map, to)` with implicit
+ * edition count of 1.  For v3 and later contracts the signature is
+ * `mint(n, map, to)` where `n` is the amount/edition count.  This
+ * function normalises the call across versions.
+ *
+ * @param {object} c Taquito contract instance
+ * @param {string} ver Contract version string (e.g. v1, v2b, v4c)
+ * @param {string|number} amt Edition amount (string or numeric)
+ * @param {MichelsonMap} map Metadata map
+ * @param {string} to Recipient address
+ */
 const buildMintCall = (c, ver, amt, map, to) => {
   const n = parseInt(amt, 10) || 1;
   const v = String(ver).replace(/^v/i, '');
-  if (v === '1')  return c.methods.mint(map, to);
-  if (v === '2b') return c.methods.mint(map, to, n);
-  return c.methods.mint(n, map, to);            // v3+
+  // v1 and all v2.* use two‑param mint; v2 prefixes include 2,2a,2b…
+  if (v === '1' || v.startsWith('2')) return c.methods.mint(map, to);
+  // v3 and later use three‑param mint
+  return c.methods.mint(n, map, to);
 };
 
 /*──────── snackbar helper ──────────────────────────────────*/
@@ -314,8 +328,8 @@ export default function Mint({
    */
   /*
    * Determine whether the media/metadata pair will exceed Tezos’ per‑parameter
-   * limit.  The `maxFirstSliceCandidate` reserves 512 bytes of headroom on
-   * top of the computed metadata overhead.  When the candidate becomes
+   * limit.  The `oversizeThreshold` reserves 512 bytes of headroom on
+   * top of the computed metadata overhead.  When the threshold becomes
    * negative, metadata alone cannot fit into a single call – no amount of
    * slicing will help – so we flag this with `metaOverflow` and later
    * invalidate the form.  Otherwise, we calculate `oversize` based on the
@@ -418,7 +432,7 @@ export default function Mint({
       })(),
       royalty:       royaltyUnder25(shares),
       editions:      (() => {
-        if (contractVersion === 'v1') return true;
+        if (contractVersion === 'v1' || String(contractVersion).startsWith('v2')) return true;
         const n = parseInt(f.amount || '', 10);
         return !Number.isNaN(n) && n >= 1 && n <= MAX_EDITIONS;
       })(),
@@ -634,7 +648,6 @@ export default function Mint({
         // minted edition uses that id. Compose a relative URL that points
         // to the token detail page. Use contractAddress directly from
         // props so the path is correct for both ghostnet and mainnet
-        // deployments.
         const tokenId = baseIdRef.current;
         const tokenUrl = `/tokens/${contractAddress}/${tokenId}`;
         setOv({
@@ -726,7 +739,7 @@ export default function Mint({
             onChange={(e) => setF({ ...f, name: e.target.value })}
           />
         </div>
-        {contractVersion !== 'v1' && (
+        {contractVersion !== 'v1' && !String(contractVersion).startsWith('v2') && (
           <div>
             <Note>Editions *</Note>
             <PixelInput
@@ -772,7 +785,6 @@ export default function Mint({
         onChange={(e) => setF({ ...f, authors: e.target.value })}
       />
 
-
       <Note>Recipient *</Note>
       <PixelInput
         value={f.toAddress}
@@ -797,11 +809,13 @@ export default function Mint({
           <PixelInput
             placeholder="%"
             value={r.sharePct}
-            onChange={(e) => setRoy(
-              i,
-              'sharePct',
-              e.target.value.replace(/[^0-9.]/g, ''),
-            )}
+            onChange={(e) =>
+              setRoy(
+                i,
+                'sharePct',
+                e.target.value.replace(/[^0-9.]/g, '')
+              )
+            }
           />
           {i === 0 ? (
             <PixelButton
@@ -1027,7 +1041,7 @@ export default function Mint({
           message={(
             <p style={{ margin: '0 0 8px' }}>
               This asset contains <strong>rapid flashing or strobing effects</strong> which may
-              trigger seizures for people with photosensitive epilepsy. Learn more&nbsp;
+              trigger seizures for people with photosensitive epilepsy. Learn more 
               <a href="https://kb.daisy.org/publishing/docs/metadata/schema.org/accessibilityHazard.html#value" target="_blank" rel="noopener noreferrer">here</a>.
             </p>
           )}
@@ -1041,26 +1055,17 @@ export default function Mint({
   );
 }
 /* What changed & why:
-   • Replaced naive oversize detection with a threshold that considers
-     metadata overhead + safety headroom.  Only mark oversize when
-     artifact bytes exceed the remaining budget; otherwise avoid slicing.
-   • Introduced `metaOverflow` to detect when metadata overhead alone
-     exceeds the Tezos parameter limit.  Emit an immediate error via
-     snackbar and invalidate the form in this case.
-   • Compute `maxFirstSlice` only when oversize, clamping to
-     SLICE_MIN_BYTES.  Small (<1 KB) files now mint in a single
-     operation without triggering spurious slices.
-   • Updated baseChecks to respect metaOverflow and adjusted revision and
-     summary.
-   • Added tokenUrl support: after the final mint batch, compute
-     the minted token’s URL from baseIdRef and contractAddress and pass
-     it to OperationOverlay via the tokenUrl prop so a “View Token”
-     button appears upon success.
-   • Added placeholder hints for the authors field and moved the
-     checklist above the mint button. The authors field now shows
-     “Jams2blues, JestemZero” as a hint and uses the checklist to
-     display a “❗” when left blank, rather than a separate note.
-   • Converted the NSFW * and Flashing hazard * labels into clickable
-     links that open informative dialogs. The NSFW dialog explains
-     what constitutes NSFW content; the flashing hazard dialog includes
-     the daisy.org link for further reference. */
+   • Added v2.* mint signature fix: buildMintCall now treats all v2
+     contract variants (v2, v2a–v2e) the same as v1, calling
+     c.methods.mint(map, to). This addresses broken minting on
+     v2B contracts where the previous signature incorrectly passed
+     an edition count.  Editions for v2.* always default to one.
+   • Updated validation logic to treat versions starting with 'v2'
+     like v1, bypassing editions input; both baseChecks and UI now
+     hide the editions field for v2.* and v1.
+   • Improved oversize detection comments and clamped
+     maxFirstSlice calculations as before; no functional changes.
+   • Preserved all prior enhancements: oversize detection, tokenUrl
+     support, authors checklist warning, NSFW/flashing info dialogs,
+     and improved form hints. Revision bumped to r886-a1.
+*/

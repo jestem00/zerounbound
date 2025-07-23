@@ -1,11 +1,12 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/AdminTools.jsx
-  Rev :    r833-a1   2025‑07‑23 UTC
-  Summary: restore collaborator and parent/child counts fallback.
-           Reintroduced on‑chain storage lookup via TezosToolkit
-           when TzKT returns zero counts; minor cleanup and
-           optimisations; lint‑clean.
+  Rev :    r833-a3   2025‑07‑23 UTC
+  Summary: fix collaborator/parent/child counts for mainnet by
+           counting array-based sets returned by TzKT; refine
+           resolveEp logic to inject collaborator managers only for
+           v3 and v4 contracts (excluding v4a/v4c); preserve
+           on-chain fallback and prior optimisations.
 ─────────────────────────────────────────────────────────────*/
 
 import React, {
@@ -92,19 +93,26 @@ async function tzktCounts(addr, net = 'ghostnet') {
     `${base}/contracts/${addr}/storage?select=collaborators,parents,children,active_tokens,next_token_id`,
   ).catch(() => null);
   if (!raw) return { coll: 0, parent: 0, child: 0, total: 0 };
-  // helper to fetch bigmap key counts
-  const fetchCount = async (bmId) => {
-    if (!Number.isInteger(bmId)) return 0;
-    const bm = await jFetch(
-      `${base}/bigmaps/${bmId}?select=totalKeys`,
-    ).catch(() => null);
-    return bm?.totalKeys ?? 0;
+  // helper to fetch bigmap key counts or count array-based sets
+  const countEntries = async (field) => {
+    // If TzKT returns an array (for set types) count its length
+    if (Array.isArray(field)) return field.length;
+    // If the field is a numeric bigmap id, fetch its totalKeys
+    if (Number.isInteger(field)) {
+      const bm = await jFetch(
+        `${base}/bigmaps/${field}?select=totalKeys`,
+      ).catch(() => null);
+      return bm?.totalKeys ?? 0;
+    }
+    // Otherwise, unknown type → return 0
+    return 0;
   };
+  // count collaborator, parent and child entries
   const [coll, parent, child, active] = await Promise.all([
-    fetchCount(raw.collaborators),
-    fetchCount(raw.parents),
-    fetchCount(raw.children),
-    fetchCount(raw.active_tokens),
+    countEntries(raw.collaborators),
+    countEntries(raw.parents),
+    countEntries(raw.children),
+    countEntries(raw.active_tokens),
   ]);
   return {
     coll,
@@ -297,11 +305,20 @@ function resolveEp(ver = '') {
     vLoop = spec.$extends;
   }
   const vLow = (ver || '').toLowerCase();
-  // explicit injection: always show collaborators manager
-  if (vLow.startsWith('v4a')) {
-    enabled.add('manage_collaborators_v4a');
-  } else if (!vLow.startsWith('v4c')) {
-    enabled.add('manage_collaborators');
+  /*
+   * Show the appropriate collaborators manager only if the current
+   * contract actually exposes collaborator entrypoints.  Versions prior
+   * to v3 (e.g. v2b) have no collaborator methods, so injecting a
+   * manage_collaborators button is incorrect.  Conversely, v4a/v4d use
+   * set-based collaborators and require a separate manager component.
+   */
+  const hasCollabEp = enabled.has('add_collaborator') || enabled.has('add_collaborators');
+  if (hasCollabEp) {
+    if (enabled.has('add_collaborators')) {
+      enabled.add('manage_collaborators_v4a');
+    } else {
+      enabled.add('manage_collaborators');
+    }
   }
   // parent-child manage only if parentchild_edit exists
   if (enabled.has('parentchild_edit')) enabled.add('manage_parent_child');
@@ -559,6 +576,12 @@ export default function AdminTools({ contract, onClose }) {
 }
 
 /* What changed & why:
+   • Added conditional collaborator manager injection: the
+     resolveEp helper now inspects the enabled entrypoints and
+     injects `manage_collaborators`/`manage_collaborators_v4a`
+     only when the contract exposes collaborator entrypoints.
+     This prevents erroneous manage buttons on v2x contracts
+     (e.g. v2b) which lack collaborator methods.
    • Reintroduced on‑chain storage fallback for collaborator,
      parent and child counts using TezosToolkit when TzKT
      provides zero counts. This resolves counts display

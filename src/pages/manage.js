@@ -271,7 +271,7 @@ export default function ManagePage() {
         {busy && (
           <BusyWrap>
             <LoadingSpinner size={16} />
-            <span>Loading…</span>
+            <span>Loading… 30 seconds max</span>
           </BusyWrap>
         )}
         {loading && (

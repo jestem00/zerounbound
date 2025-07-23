@@ -13,6 +13,8 @@
 
   "v2a": {
     "$extends": "v1",
+    "mint":  ["map(string,bytes)","address"],
+    "burn":  ["nat"],
     "add_parent":  ["address"],
     "remove_parent": ["address"],
     "add_child":   ["address"],
@@ -26,6 +28,8 @@
 
   "v3": {
     "$extends": "v2a",
+    "mint":  ["nat","map(string,bytes)","address"],
+    "burn":  ["nat","nat"],
     "add_collaborator":   ["address"],
     "remove_collaborator": ["address"],
     "lock_metadata": false
@@ -95,4 +99,3 @@
     "repair_uri":   false
   }
 }
-

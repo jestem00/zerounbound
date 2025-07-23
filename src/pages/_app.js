@@ -1,7 +1,7 @@
 /*Developed by @jams2blues with love for the Tezos community
   File:    src/pages/_app.js
-  Rev :    r556   2025‑09‑22
-  Summary: adds GlobalSnackbar + syntax fixes + zero unused imports */
+  Rev :    r556-a1   2025-07-23
+  Summary: add SW update auto-reload; register service worker once and include GlobalSnackbar*/
 import React from 'react';
 import Head  from 'next/head';
 
@@ -29,6 +29,31 @@ export default function ZeroUnboundApp({ Component, pageProps }) {
     navigator.serviceWorker
       .register('/sw.js')
       .catch((e) => console.warn('SW registration failed', e));
+  }, []);
+
+  /* NEW: reload when a new SW takes control
+   * Listen for controllerchange events on serviceWorker.
+   * When triggered, force a hard reload so users always run the latest code.
+   * Without this hook, clients may continue executing stale bundles after
+   * an update until a full page reload, causing mismatched fee/slice logic.
+   */
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
+    let refreshing = false;
+    const handleControllerChange = () => {
+      if (refreshing) return;
+      refreshing = true;
+      // reload the page to pick up new assets
+      try {
+        window.location.reload(true);
+      } catch {
+        window.location.reload();
+      }
+    };
+    navigator.serviceWorker.addEventListener('controllerchange', handleControllerChange);
+    return () => {
+      navigator.serviceWorker.removeEventListener('controllerchange', handleControllerChange);
+    };
   }, []);
 
   /* I61 – purge stale slice checkpoints (>24 h) */
@@ -108,4 +133,10 @@ export default function ZeroUnboundApp({ Component, pageProps }) {
     </ThemeProvider>
   );
 }
+/* What changed & why:
+   • Added a controllerchange listener to automatically reload when the service
+     worker takes control of a new version; this ensures users run the
+     latest bundle without manual cache clears.
+   • Updated revision and summary lines to reflect the new functionality.
+*/
 /* EOF */

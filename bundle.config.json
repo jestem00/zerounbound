@@ -45,6 +45,7 @@
         "src/hooks/useConsent.js",
         "src/pages/contracts/**/*.jsx",
         "src/pages/explore/**/*.jsx",
+        "src/pages/tokens/**/*.jsx",
         "src/pages/search.jsx",
         "src/pages/largeview/**/*.jsx",
         "src/ui/CollectionCard.jsx",

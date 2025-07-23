@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Header.jsx
-  Rev :    r744‑a3  2025‑07‑21
-  Summary: fix stale wallet by refreshing on mount & focus
+  Rev :    r744-a4  2025-07-23
+  Summary: add Reset Cache button & version display; refresh wallet state
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useCallback, useEffect, useMemo, useRef, useState,
@@ -23,6 +23,8 @@ const NET_COL = {
 };
 const BREAK        = 800;
 const COPY_TIMEOUT = 1800;
+/* Application version (increment for each deploy) */
+const APP_VERSION = '0.65';
 
 /*──────── styled shells ─────*/
 const selectCSS = css`
@@ -150,11 +152,13 @@ export default function Header() {
     };
   }, [refresh]);
 
+  // copy address to clipboard
   const shortAddr = useMemo(
     () => (address ? `${address.slice(0, 6)}…${address.slice(-4)}` : ''),
     [address],
   );
 
+  // network navigation
   const navNet = useCallback((e) => {
     window.location.assign(
       e.target.value === 'ghostnet'
@@ -163,6 +167,7 @@ export default function Header() {
     );
   }, []);
 
+  // copy wallet to clipboard with toast
   const copyAddr = useCallback(() => {
     if (!address || copied) return;
     navigator?.clipboard?.writeText(address).then(() => {
@@ -170,6 +175,34 @@ export default function Header() {
       setTimeout(() => setCopied(false), COPY_TIMEOUT);
     });
   }, [address, copied]);
+
+  /* reset cache & hard reload
+   * Unregisters all service workers and clears all caches before forcing a reload.
+   * This mirrors the Empty Cache + Hard Reload behaviour to fix stale-code
+   * issues reported by artists on mainnet.
+   */
+  const handleCacheRefresh = useCallback(() => {
+    (async () => {
+      try {
+        if ('serviceWorker' in navigator) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map((reg) => reg.unregister()));
+        }
+        if (typeof caches !== 'undefined') {
+          const keys = await caches.keys();
+          await Promise.all(keys.map((key) => caches.delete(key)));
+        }
+      } catch (err) {
+        console.warn('Cache refresh error', err);
+      } finally {
+        try {
+          window.location.reload(true);
+        } catch {
+          window.location.reload();
+        }
+      }
+    })();
+  }, []);
 
   /*──────── render ─────*/
   const NavLinks = (
@@ -188,11 +221,14 @@ export default function Header() {
     <>
       <Shell>
         <Wrap ref={wrapRef}>
-          {/* logo + net label */}
+          {/* logo + net label + version */}
           <div style={{ display:'flex', flexDirection:'column' }}>
             <BrandLine href="/">
               <span>ZERO UNBOUND</span>
               <sup>β</sup>
+              <span style={{ fontSize:'0.55rem', marginLeft:'0.25rem', color:'var(--zu-accent-sec)' }}>
+                v.{APP_VERSION}
+              </span>
             </BrandLine>
             <Note>you are on <b>{network.toUpperCase()}</b></Note>
           </div>
@@ -216,6 +252,11 @@ export default function Header() {
                 <option key={k} value={k}>{k.replace(/-/g, ' ')}</option>
               ))}
             </ThemeSelect>
+
+            {/* Reset cache button (global) */}
+            <PixelButton onClick={handleCacheRefresh} data-sec>
+              Reset Cache
+            </PixelButton>
 
             {address ? (
               <>
@@ -243,6 +284,7 @@ export default function Header() {
         <Drawer>
           <PixelButton onClick={() => setDrawer(false)} data-sec>Close ×</PixelButton>
           {NavLinks}
+          {/* replicate theme select and network select in drawer; include cache button for mobile */}
           <ThemeSelect
             value={theme}
             onChange={(e) => setTheme(e.target.value)}
@@ -252,17 +294,25 @@ export default function Header() {
               <option key={k} value={k}>{k.replace(/-/g, ' ')}</option>
             ))}
           </ThemeSelect>
+          <NetSelect value={network} onChange={navNet} aria-label="Network mobile">
+            <option value="ghostnet">Ghostnet</option>
+            <option value="mainnet">Mainnet</option>
+          </NetSelect>
+          <PixelButton onClick={handleCacheRefresh} data-sec>
+            Reset Cache
+          </PixelButton>
         </Drawer>
       )}
     </>
   );
 }
 /* What changed & why:
-   • Added refresh helper to destructure and inserted a useEffect hook
-     that invokes WalletContext.refresh() on mount and whenever the
-     tab gains focus or changes visibility.  This ensures stale
-     sessions in the header update automatically and fixes the
-     outdated wallet display on the manage page.
-   • Updated revision and summary lines accordingly.
+   • Introduced APP_VERSION constant and displayed “v.0.65” next to the β symbol
+     in the header; this helps authors verify they’re running the latest build.
+   • Added handleCacheRefresh() helper which unregisters all service workers,
+     clears caches and forces a hard reload.  Inserted a Reset Cache button in
+     both desktop controls and mobile drawer to trigger this helper.
+   • Updated revision and summary lines to reflect new features; preserved
+     existing wallet refresh logic and styling.
 */
 /* EOF */

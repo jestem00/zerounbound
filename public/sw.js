@@ -1,8 +1,7 @@
-//File: ghostnet/public/sw.js
-/* r265 – network-first scripts & styles, network-only html
-   • Switch static asset cache from StaleWhileRevalidate to NetworkFirst for JS/CSS/manifest
-   • Use NetworkOnly for HTML documents to always fetch latest pages
-   • Retains image and tzkt caching unchanged                                 */
+/*Developed by @jams2blues – ZeroContract Studio
+  File:    ghostnet/public/sw.js
+  Rev :    r265-a1  2025‑07‑23
+  Summary: ensure network-first caching and unify across networks */
 
 /* IMPORTANT: This service worker is loaded by Workbox v7.0.0. It
    controls caching behaviour across the Zerounbound front‑end.  The
@@ -71,3 +70,8 @@ workbox.routing.registerRoute(
     })],
   }),
 );
+
+/* What changed & why:
+   • Added standard header/footer to comply with collaboration contract and bumped revision number.
+   • No functional changes; this file already implements network-first caching for scripts/styles and network-only for HTML.
+*/

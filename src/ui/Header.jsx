@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Header.jsx
-  Rev :    r744-a4  2025-07-23
-  Summary: add Reset Cache button & version display; refresh wallet state
+  Rev :    r744-a7  2025-07-23
+  Summary: reorder controls; shrink all header buttons; use icon for reset
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useCallback, useEffect, useMemo, useRef, useState,
@@ -96,6 +96,11 @@ const CopyBtn = styled(PixelButton).attrs({ size: 'xs' })`
   padding: 0 0.55rem; font-size: 0.85rem;
   background: var(--zu-accent-sec);
 `;
+
+/* compact button variants for header */
+const HeaderBtn = styled(PixelButton).attrs({ size: 'sm' })``;
+/* ultra‑compact reset button with icon */
+const ResetBtn  = styled(PixelButton).attrs({ size: 'xs' })``;
 
 /*──────── component ───────────────────────*/
 export default function Header() {
@@ -238,6 +243,11 @@ export default function Header() {
 
           {/* controls */}
           <Controls>
+            {/* Reordered: first the reset button, then network & theme selectors */}
+            <ResetBtn aria-label="Reset cache" onClick={handleCacheRefresh} data-sec>
+              🔁
+            </ResetBtn>
+
             <NetSelect value={network} onChange={navNet} aria-label="Network">
               <option value="ghostnet">Ghostnet</option>
               <option value="mainnet">Mainnet</option>
@@ -253,14 +263,9 @@ export default function Header() {
               ))}
             </ThemeSelect>
 
-            {/* Reset cache button (global) */}
-            <PixelButton onClick={handleCacheRefresh} data-sec>
-              Reset Cache
-            </PixelButton>
-
             {address ? (
               <>
-                <PixelButton title={address}>{shortAddr}</PixelButton>
+                <HeaderBtn title={address}>{shortAddr}</HeaderBtn>
                 <CopyBtn
                   aria-label="Copy wallet address"
                   title={copied ? 'Copied!' : 'Copy address'}
@@ -268,10 +273,10 @@ export default function Header() {
                 >
                   {copied ? '✓' : '📋'}
                 </CopyBtn>
-                <PixelButton onClick={disconnect} data-sec>Disconnect</PixelButton>
+                <HeaderBtn onClick={disconnect} data-sec>Disconnect</HeaderBtn>
               </>
             ) : (
-              <PixelButton onClick={connect}>Connect Wallet</PixelButton>
+              <HeaderBtn onClick={connect}>Connect Wallet</HeaderBtn>
             )}
           </Controls>
 
@@ -282,9 +287,16 @@ export default function Header() {
       {/* mobile drawer */}
       {drawer && (
         <Drawer>
-          <PixelButton onClick={() => setDrawer(false)} data-sec>Close ×</PixelButton>
+          <HeaderBtn onClick={() => setDrawer(false)} data-sec>Close ×</HeaderBtn>
           {NavLinks}
-          {/* replicate theme select and network select in drawer; include cache button for mobile */}
+          {/* reorder mobile controls: reset first, then network, theme */}
+          <ResetBtn aria-label="Reset cache" onClick={handleCacheRefresh} data-sec>
+            🔁
+          </ResetBtn>
+          <NetSelect value={network} onChange={navNet} aria-label="Network mobile">
+            <option value="ghostnet">Ghostnet</option>
+            <option value="mainnet">Mainnet</option>
+          </NetSelect>
           <ThemeSelect
             value={theme}
             onChange={(e) => setTheme(e.target.value)}
@@ -294,13 +306,6 @@ export default function Header() {
               <option key={k} value={k}>{k.replace(/-/g, ' ')}</option>
             ))}
           </ThemeSelect>
-          <NetSelect value={network} onChange={navNet} aria-label="Network mobile">
-            <option value="ghostnet">Ghostnet</option>
-            <option value="mainnet">Mainnet</option>
-          </NetSelect>
-          <PixelButton onClick={handleCacheRefresh} data-sec>
-            Reset Cache
-          </PixelButton>
         </Drawer>
       )}
     </>
@@ -310,9 +315,12 @@ export default function Header() {
    • Introduced APP_VERSION constant and displayed “v.0.65” next to the β symbol
      in the header; this helps authors verify they’re running the latest build.
    • Added handleCacheRefresh() helper which unregisters all service workers,
-     clears caches and forces a hard reload.  Inserted a Reset Cache button in
-     both desktop controls and mobile drawer to trigger this helper.
-   • Updated revision and summary lines to reflect new features; preserved
-     existing wallet refresh logic and styling.
+     clears caches and forces a hard reload; provided Reset controls in desktop
+     and mobile header.
+   • Converted all header PixelButtons (Connect, address, Disconnect) to a
+     smaller variant via HeaderBtn for better spacing.  The Reset button is
+     now an icon (🔁) via the ResetBtn variant.
+   • Updated revision and summary lines to reflect new size adjustments and
+     icon change; preserved existing wallet refresh logic and styling.
 */
 /* EOF */

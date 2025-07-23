@@ -1,10 +1,12 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/OperationOverlay.jsx
-  Rev :    r964   2025-07-21
+  Rev :    r965   2025-07-23
   Summary: unified progress overlay for origination, mint,
            repair and append.  Restores success view,
            wallet hints, timeout messaging and cache clearing on close.
+           Adds optional tokenUrl support to render a
+           “View Token” button on success.
 ──────────────────────────────────────────────────────────────*/
 
 import React, {
@@ -141,7 +143,20 @@ const List = styled.ul.attrs((p)=>({$n:p.$n}))`
 export default function OperationOverlay({
   status    = '',
   progress: progressProp = 0,
-  error, kt1, opHash, current, step, total = 1,
+  error,
+  kt1,
+  opHash,
+  current,
+  step,
+  total = 1,
+  /**
+   * Optional URL pointing to the freshly minted token. When provided
+   * (e.g. by the mint entrypoint after successful completion), the
+   * overlay will render a “View Token” button that links directly
+   * to the token detail page on the correct network.  Without this
+   * prop the overlay behaves exactly as before.
+   */
+  tokenUrl,
   onRetry  = undefined,
   onCancel = () => {},
 }){
@@ -212,18 +227,39 @@ export default function OperationOverlay({
             </Addy>
           )}
 
-          <div style={{
-            display:'flex',flexWrap:'wrap',
-            gap:'1rem',justifyContent:'center',marginTop:'1rem',
-          }}>
+          <div
+            style={{
+              display:'flex',
+              flexWrap:'wrap',
+              gap:'1rem',
+              justifyContent:'center',
+              marginTop:'1rem',
+            }}
+          >
             {kt1 && (
               <>
-                {linkBtn(`${URL_BCD_BASE}${kt1}`,'BCD')}
-                {linkBtn(`${URL_OBJKT_BASE}${kt1}`,'objkt')}
+                {linkBtn(`${URL_BCD_BASE}${kt1}`, 'BCD')}
+                {linkBtn(`${URL_OBJKT_BASE}${kt1}`, 'objkt')}
                 <PixelButton as="a" href={`/manage?addr=${kt1}`}>Manage</PixelButton>
               </>
             )}
-            <PixelButton onClick={()=>handleCopy(kt1||opHash)}>Copy</PixelButton>
+            {/*
+             * If a tokenUrl is supplied (e.g. after mint completes), render
+             * a dedicated link to the token’s detail page. Use an eye emoji
+             * for accessibility and to hint at previewing the token.  Without
+             * tokenUrl this button is omitted.
+             */}
+            {tokenUrl && (
+              <PixelButton
+                as="a"
+                href={tokenUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                👁️ View&nbsp;Token
+              </PixelButton>
+            )}
+            <PixelButton onClick={() => handleCopy(kt1 || opHash)}>Copy</PixelButton>
             <PixelButton onClick={handleClose}>Close</PixelButton>
           </div>
         </Panel>

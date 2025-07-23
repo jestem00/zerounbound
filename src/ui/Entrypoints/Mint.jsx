@@ -1,10 +1,12 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/Mint.jsx
-  Rev :    r882   2025-07-22
-  Summary: refine oversize detection; clamp first slice only when needed and
-           flag metadata overhead overflow.  Prevents runaway slices on
-           Mac/iOS and handles <1KB media.
+  Rev :    r886   2025-07-23
+  Summary: refine oversize detection, tokenUrl support, authors hint and
+           dialogs; move checklist above the button and include an
+           authors warning in the checklist.  Clicking NSFW and flashing
+           labels opens information dialogs; authors field now sets
+           checklist state instead of separate note.
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useRef, useState, useEffect, useMemo, useCallback,
@@ -22,6 +24,7 @@ import MintUpload         from './MintUpload.jsx';
 import MintPreview        from './MintPreview.jsx';
 import OperationOverlay   from '../OperationOverlay.jsx';
 import OperationConfirmDialog from '../OperationConfirmDialog.jsx';
+import PixelConfirmDialog    from '../PixelConfirmDialog.jsx';
 
 import { useWalletContext } from '../../contexts/WalletContext.js';
 import {
@@ -230,6 +233,10 @@ export default function Mint({
 
   const [retryCount, setRetryCount] = useState(0);
   const [sliceSize, setSliceSize] = useState(SLICE_MAX_BYTES);
+
+  // Informational dialog flags for NSFW and flashing hazard explanations
+  const [nsfwInfoOpen, setNsfwInfoOpen]     = useState(false);
+  const [flashInfoOpen, setFlashInfoOpen]   = useState(false);
 
   const tagRef = useRef(null);
 
@@ -621,13 +628,27 @@ export default function Mint({
       }
 
       if (currentIdx + 1 === batches.length) {
+        // When the final batch completes, build a link to the newly minted
+        // token so OperationOverlay can display a “View Token” button. The
+        // baseIdRef holds the starting tokenId for this mint; the first
+        // minted edition uses that id. Compose a relative URL that points
+        // to the token detail page. Use contractAddress directly from
+        // props so the path is correct for both ghostnet and mainnet
+        // deployments.
+        const tokenId = baseIdRef.current;
+        const tokenUrl = `/tokens/${contractAddress}/${tokenId}`;
         setOv({
-          open: true, opHash: op.opHash,
-          step: batches.length, total: batches.length,
+          open: true,
+          opHash: op.opHash,
+          step: batches.length,
+          total: batches.length,
+          tokenUrl,
         });
         onMutate?.();
         /* reset */
-        setBatches(null); setStepIdx(0); setConfirmCount(0);
+        setBatches(null);
+        setStepIdx(0);
+        setConfirmCount(0);
       } else {
         setStepIdx(currentIdx + 1);
       }
@@ -746,9 +767,11 @@ export default function Mint({
 
       <Note>Authors (comma‑sep names)</Note>
       <PixelInput
+        placeholder="Jams2blues, JestemZero"
         value={f.authors}
         onChange={(e) => setF({ ...f, authors: e.target.value })}
       />
+
 
       <Note>Recipient *</Note>
       <PixelInput
@@ -822,7 +845,14 @@ export default function Mint({
 
       <Grid>
         <div>
-          <Note>NSFW *</Note>
+          <Note>
+            <a
+              href="#"
+              onClick={(e) => { e.preventDefault(); setNsfwInfoOpen(true); }}
+            >
+              NSFW *
+            </a>
+          </Note>
           <Select
             value={f.nsfw}
             onChange={(e) => setF({ ...f, nsfw: e.target.value })}
@@ -832,7 +862,14 @@ export default function Mint({
           </Select>
         </div>
         <div>
-          <Note>Flashing hazard *</Note>
+          <Note>
+            <a
+              href="#"
+              onClick={(e) => { e.preventDefault(); setFlashInfoOpen(true); }}
+            >
+              Flashing hazard *
+            </a>
+          </Note>
           <Select
             value={f.flashing}
             onChange={(e) => setF({ ...f, flashing: e.target.value })}
@@ -925,6 +962,16 @@ export default function Mint({
         bytes
       </Note>
 
+      {/* Checklist moved above the mint button; includes authors warning */}
+      <ChecklistBox>
+        {checklist.map(({ key, label }) => (
+          <li key={key} className={getState(key)}>{label}</li>
+        ))}
+        <li className={!f.authors.trim() ? 'warn' : 'ok'}>
+          Authors provided
+        </li>
+      </ChecklistBox>
+
       <PixelButton
         type="button"
         onClick={prepareMint}
@@ -933,12 +980,6 @@ export default function Mint({
       >
         {isEstim ? 'Estimating…' : 'Mint NFT'}
       </PixelButton>
-
-      <ChecklistBox>
-        {checklist.map(({ key, label }) => (
-          <li key={key} className={getState(key)}>{label}</li>
-        ))}
-      </ChecklistBox>
 
       {confirmOpen && (
         <OperationConfirmDialog
@@ -960,6 +1001,42 @@ export default function Mint({
           }}
         />
       )}
+
+      {/* Info dialogs for NSFW and flashing hazard explanations */}
+      {nsfwInfoOpen && (
+        <PixelConfirmDialog
+          open
+          title="NSFW content"
+          message={(
+            <p style={{ margin: '0 0 8px' }}>
+              This asset is flagged as <strong>Not‑Safe‑For‑Work (NSFW)</strong>. It may
+              contain explicit nudity, sexual content, graphic violence or other
+              mature themes. Viewer discretion is advised.
+            </p>
+          )}
+          confirmLabel="Close"
+          hideCancel
+          onConfirm={() => setNsfwInfoOpen(false)}
+          onCancel={() => setNsfwInfoOpen(false)}
+        />
+      )}
+      {flashInfoOpen && (
+        <PixelConfirmDialog
+          open
+          title="Flashing hazard"
+          message={(
+            <p style={{ margin: '0 0 8px' }}>
+              This asset contains <strong>rapid flashing or strobing effects</strong> which may
+              trigger seizures for people with photosensitive epilepsy. Learn more&nbsp;
+              <a href="https://kb.daisy.org/publishing/docs/metadata/schema.org/accessibilityHazard.html#value" target="_blank" rel="noopener noreferrer">here</a>.
+            </p>
+          )}
+          confirmLabel="Close"
+          hideCancel
+          onConfirm={() => setFlashInfoOpen(false)}
+          onCancel={() => setFlashInfoOpen(false)}
+        />
+      )}
     </Wrap>
   );
 }
@@ -974,5 +1051,16 @@ export default function Mint({
      SLICE_MIN_BYTES.  Small (<1 KB) files now mint in a single
      operation without triggering spurious slices.
    • Updated baseChecks to respect metaOverflow and adjusted revision and
-     summary. */
-/* EOF */
+     summary.
+   • Added tokenUrl support: after the final mint batch, compute
+     the minted token’s URL from baseIdRef and contractAddress and pass
+     it to OperationOverlay via the tokenUrl prop so a “View Token”
+     button appears upon success.
+   • Added placeholder hints for the authors field and moved the
+     checklist above the mint button. The authors field now shows
+     “Jams2blues, JestemZero” as a hint and uses the checklist to
+     display a “❗” when left blank, rather than a separate note.
+   • Converted the NSFW * and Flashing hazard * labels into clickable
+     links that open informative dialogs. The NSFW dialog explains
+     what constitutes NSFW content; the flashing hazard dialog includes
+     the daisy.org link for further reference. */

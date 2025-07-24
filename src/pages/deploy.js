@@ -2,16 +2,13 @@
 /*──────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/deploy.js
-  Rev :    r1125‑a1   2025‑07‑23
-  Summary: Improved single‑stage origination by reliably resolving the
-           contract address on mainnet.  After confirmation, the code
-           now attempts to retrieve the address via op.contract() and
-           getOriginatedContractAddresses() before falling back to a
-           longer block‑scan.  This prevents timeouts when Kukai/Umami
-           succeed but op.contractAddress is undefined.
+  Rev :    r1126‑a2   2025‑07‑24
+  Summary: Tweak Temple‑wallet warning banner styling for improved
+           contrast across themes.  The banner now uses a bright
+           accent background with dark text for better legibility.
 ──────────────────────────────────────────────────────────────*/
 
-import React, { useRef, useState, useCallback } from 'react';
+import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { MichelsonMap } from '@taquito/michelson-encoder';
 import { char2Bytes } from '@taquito/utils';
 
@@ -53,6 +50,23 @@ const Wrap = styled.div`
   flex-direction: column;
   align-items: center;
   gap: clamp(0.2rem, 0.45vh, 0.6rem);
+`;
+
+// Warning banner for Temple wallet users.  Uses accent colours from the
+// theme to draw attention.  This banner appears above the deploy
+// form when a Temple wallet is connected.
+const Warning = styled.div`
+  width: 100%;
+  margin-bottom: 1rem;
+  padding: 0.8rem 1rem;
+  /* Use a bright accent background with dark text to maximise contrast. */
+  background: var(--zu-accent-sec);
+  color: var(--zu-bg);
+  border: 1px solid var(--zu-accent);
+  border-radius: 0.25rem;
+  text-align: center;
+  font-size: 0.8rem;
+  line-height: 1.3;
 `;
 
 // Wallet context
@@ -165,6 +179,23 @@ export default function DeployPage() {
   const [err, setErr]     = useState('');
   // Track whether the remote forge backend is used (Temple wallet)
   const [useBackend, setUseBackend] = useState(false);
+  // Track whether a Temple wallet is connected; used for warning and to block origination
+  const [isTempleWallet, setIsTempleWallet] = useState(false);
+
+  // Detect the connected wallet name on mount and whenever the wallet changes.
+  // If a Temple wallet is detected, flag it for the warning banner and disable origination.
+  useEffect(() => {
+    async function detectTemple() {
+      try {
+        const info = await wallet?.client?.getWalletInfo?.();
+        const name = (info?.name || '').toLowerCase();
+        setIsTempleWallet(name.includes('temple'));
+      } catch {
+        setIsTempleWallet(false);
+      }
+    }
+    detectTemple();
+  }, [wallet]);
 
   /**
    * Reset the component state to its initial values.  Cancels
@@ -241,7 +272,7 @@ export default function DeployPage() {
     }
     const mdObj  = buildMetaObject(meta);
     const headerBytes = '0x' + char2Bytes('tezos-storage:content');
-    const bodyHex     = utf8ToHex(JSON.stringify(mdObj), (p) => {});
+    const bodyHex     = utf8ToHex(JSON.stringify(mdObj), () => {});
     const md = new MichelsonMap();
     md.set('', headerBytes);
     md.set('content', bodyHex);
@@ -505,6 +536,13 @@ export default function DeployPage() {
    * @param {Object} meta Metadata from form
    */
   async function originate(meta) {
+    // If a Temple wallet is connected, block origination and show a message.
+    if (isTempleWallet) {
+      const msg = 'Temple wallet cannot currently originate the ZeroContract v4 due to payload size limits. Please import your wallet into Kukai or Umami to originate new contracts.';
+      setErr(msg);
+      setLabel(msg);
+      return;
+    }
     // Attempt to detect the wallet name via Beacon.  If Temple is
     // detected, use the backend forge service; otherwise, use
     // single‑stage origination via wallet.originate().
@@ -528,6 +566,12 @@ export default function DeployPage() {
   /*──────── render ─────────────────────────────────────────*/
   return (
     <Wrap>
+      {/* Warning banner for Temple users – displayed when a Temple wallet is connected */}
+      {isTempleWallet && (
+        <Warning>
+          Temple wallet cannot currently originate the ZeroContract v4 due to payload size limitations. Please import your wallet into Kukai or Umami to originate new contracts. We are working on a fix.
+        </Warning>
+      )}
       {/* Deploy form collects metadata and triggers origination.  Use
           the expected onDeploy prop instead of onSubmit; DeployCollectionForm
           invokes this callback with the user’s metadata when the form
@@ -558,17 +602,14 @@ export default function DeployPage() {
 }
 
 /* What changed & why:
-   – Restored baseline behaviour for origination across all wallets.  The
-     CONTRACT_CODE constant and debug logging introduced in r1115 have been
-     removed, and the code now relies on the original contractCode import
-     for both single‑stage and remote forge flows.  buildFastMetaObject now
-     assigns a minimal placeholder ('0x00') to the views property instead of
-     deleting it entirely.  These changes ensure that Kukai and Umami
-     origination flows operate correctly while still enabling FAST_ORIGIN
-     (reduced payloads) for Temple.
-   – Improved contract address resolution in single‑stage origination.
-     After waiting for confirmation, the code now calls op.contract()
-     and getOriginatedContractAddresses() to retrieve the new KT1 on
-     mainnet.  If both methods fail, the fallback block scan runs for
-     20 iterations instead of 15, reducing timeouts on slower networks.
+   – Added a useEffect hook to detect when a Temple wallet is connected.  This
+     sets the isTempleWallet state, which drives both the warning banner and
+     early exit in the originate() function.  Users connecting with Temple
+     will see a notice telling them to use Kukai or Umami instead, and
+     origination is blocked to prevent failures.
+   – Added a Warning styled component and conditional rendering to display
+     the notice above the deploy form.  This uses theme variables for
+     consistent styling.
+   – Imported useEffect and added new state isTempleWallet.  The header
+     revision and summary were updated accordingly.
 */

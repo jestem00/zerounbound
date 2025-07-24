@@ -2,14 +2,13 @@
 /*──────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/deploy.js
-  Rev :    r1127‑a1   2025‑07‑24
-  Summary: Consolidate Temple origination path with Kukai/Umami.  All
-           wallets now use the single‑stage origination flow to
-           reproduce the original Temple error.  Remote forging
-           detection and early exits have been removed.
+  Rev :    r1127‑a2   2025‑07‑24
+  Summary: Remove Temple warning banner and remote‑forge pipeline; all
+           wallets originate via single‑stage Taquito flow.  FAST_ORIGIN
+           and Temple detection removed.
 ──────────────────────────────────────────────────────────────*/
 
-import React, { useRef, useState, useCallback, useEffect } from 'react';
+import React, { useRef, useState } from 'react';
 import { MichelsonMap } from '@taquito/michelson-encoder';
 import { char2Bytes } from '@taquito/utils';
 
@@ -17,12 +16,10 @@ import { char2Bytes } from '@taquito/utils';
 import DeployCollectionForm from '../ui/DeployCollectionForm.jsx';
 import OperationOverlay     from '../ui/OperationOverlay.jsx';
 
-// Import FAST_ORIGIN flag.  When true, Temple‑wallet originations
-// will omit large on‑chain view definitions and instead embed a
-// minimal placeholder.  This reduces the operation size to avoid
-// Temple’s signing limits.  Kukai/Umami and other wallets are
-// unaffected and still originate with full metadata.
-import { FAST_ORIGIN } from '../config/deployTarget.js';
+// The FAST_ORIGIN flag and related remote‑forge helpers were removed
+// when Temple wallet origination was restored.  All wallets now
+// originate via a single‑stage flow using Taquito’s wallet API.
+
 
 // Styled container – centre the page content and provide an opaque
 // background.  Without this wrapper the deploy form would sit
@@ -53,22 +50,8 @@ const Wrap = styled.div`
   gap: clamp(0.2rem, 0.45vh, 0.6rem);
 `;
 
-// Warning banner for Temple wallet users.  Uses accent colours from the
-// theme to draw attention.  This banner appears above the deploy
-// form when a Temple wallet is connected.
-const Warning = styled.div`
-  width: 100%;
-  margin-bottom: 1rem;
-  padding: 0.8rem 1rem;
-  /* Use a bright accent background with dark text to maximise contrast. */
-  background: var(--zu-accent-sec);
-  color: var(--zu-bg);
-  border: 1px solid var(--zu-accent);
-  border-radius: 0.25rem;
-  text-align: center;
-  font-size: 0.8rem;
-  line-height: 1.3;
-`;
+// Removed the warning banner for Temple wallet users.  Temple now
+// supports large payload originations, so no special notice is shown.
 
 // Wallet context
 import { useWallet } from '../contexts/WalletContext.js';
@@ -77,14 +60,9 @@ import { useWallet } from '../contexts/WalletContext.js';
 import contractCode from '../../contracts/Zero_Contract_V4.tz';
 import viewsJson    from '../../contracts/metadata/views/Zero_Contract_v4_views.json' assert { type: 'json' };
 
-// Network helpers for forging and injection
-import {
-  forgeViaBackend,
-  sigHexWithTag,
-  injectSigned,
-  sleep,
-  forgeOrigination,
-} from '../core/net.js';
+// Network helper for throttled sleep.  Remote forging helpers are
+// unused now that all wallets use single‑stage origination.
+import { sleep } from '../core/net.js';
 
 // Signing type constant from Beacon
 import { SigningType } from '@airgap/beacon-sdk';
@@ -163,11 +141,9 @@ export const STORAGE_TEMPLATE = {
 
 /**
  * DeployPage orchestrates the origination of a new ZeroContract
- * collection.  It selects the origination path based on the
- * connected wallet: Temple users offload forging to the remote
- * forge service (Octez CLI) and sign/inject locally; other
- * wallets originate directly via Taquito’s wallet API.  Progress
- * and error states are reported via an overlay.
+ * collection.  All wallets originate directly via Taquito’s wallet
+ * API; remote forging and Temple‑specific logic have been removed.
+ * Progress and error states are reported via an overlay.
  */
 export default function DeployPage() {
   const { toolkit, address, connect, wallet } = useWallet();
@@ -178,25 +154,9 @@ export default function DeployPage() {
   const [label, setLabel] = useState('');
   const [kt1, setKt1]     = useState('');
   const [err, setErr]     = useState('');
-  // Track whether the remote forge backend is used (Temple wallet)
-  const [useBackend, setUseBackend] = useState(false);
-  // Track whether a Temple wallet is connected; used for warning and to block origination
-  const [isTempleWallet, setIsTempleWallet] = useState(false);
-
-  // Detect the connected wallet name on mount and whenever the wallet changes.
-  // If a Temple wallet is detected, flag it for the warning banner and disable origination.
-  useEffect(() => {
-    async function detectTemple() {
-      try {
-        const info = await wallet?.client?.getWalletInfo?.();
-        const name = (info?.name || '').toLowerCase();
-        setIsTempleWallet(name.includes('temple'));
-      } catch {
-        setIsTempleWallet(false);
-      }
-    }
-    detectTemple();
-  }, [wallet]);
+  // Removed useBackend and isTempleWallet states.  The application
+  // no longer distinguishes between Temple and other wallets.  All
+  // origination logic flows through originateSingleStage().
 
   /**
    * Reset the component state to its initial values.  Cancels
@@ -251,15 +211,8 @@ export default function DeployPage() {
     };
   }
 
-  /**
-   * Build minimal metadata object for FAST_ORIGIN.  Replaces
-   * views with a placeholder pointer and omits the image URI.
-   */
-  function buildFastMetaObject(meta) {
-    const obj = buildMetaObject(meta);
-    obj.views = '0x00';
-    return obj;
-  }
+  // Removed buildFastMetaObject().  FAST_ORIGIN and truncated views
+  // are no longer supported now that Temple can handle large payloads.
 
   /**
    * Originate via single‑stage Taquito wallet API.  Used for
@@ -360,172 +313,8 @@ export default function DeployPage() {
     }
   }
 
-  /**
-   * Originate via the remote forge service.  Handles Temple wallet
-   * compatibility by offloading forging to the backend, then signing
-   * and injecting on the client.  Falls back to local forging on
-   * failure.
-   */
-  async function originateViaForgeService(meta) {
-    // Ensure wallet connection
-    if (!address) {
-      await retryConnect();
-      if (!address) return;
-    }
-    if (!toolkit) {
-      const msg = 'Toolkit not ready';
-      setErr(msg);
-      setLabel(msg);
-      return;
-    }
-    setErr('');
-    // Step 0: build and encode metadata.  If FAST_ORIGIN is enabled
-    // (dual‑stage origination) and we are using Temple (via backend),
-    // build a minimal metadata object to reduce payload size.  The
-    // full views can be applied later via edit_contract_metadata.
-    setStep(0);
-    setLabel('Preparing metadata');
-    setPct(0);
-    let headerBytes;
-    let bodyHex;
-    try {
-      const metaObj = FAST_ORIGIN ? buildFastMetaObject(meta) : buildMetaObject(meta);
-      headerBytes = '0x' + char2Bytes('tezos-storage:content');
-      bodyHex = utf8ToHex(JSON.stringify(metaObj), (p) => setPct((p * 0.25) / 100));
-    } catch (e) {
-      const msg = `Metadata encoding failed: ${e.message || String(e)}`;
-      setErr(msg);
-      setLabel(msg);
-      return;
-    }
-    // Build metadata big‑map
-    const md = new MichelsonMap();
-    md.set('', headerBytes);
-    md.set('content', bodyHex);
-    // Build storage object
-    const storage = { ...STORAGE_TEMPLATE, admin: address, metadata: md };
-    // Step 1: forge via backend.  If this fails, fall back to local forging.
-    setStep(1);
-    setLabel('Forging operation');
-    setPct(0.25);
-    let forgedBytes;
-    try {
-      const activeAcc = await wallet.client.getActiveAccount();
-      const publicKey = activeAcc?.publicKey;
-      forgedBytes = await forgeViaBackend(contractCode, storage, address, publicKey);
-    } catch (e) {
-      // Fallback to local forging on backend failure
-      try {
-        const activeAccLocal = await wallet.client.getActiveAccount();
-        const publicKeyLocal = activeAccLocal?.publicKey;
-        const { forgedBytes: localBytes } = await forgeOrigination(
-          toolkit,
-          address,
-          contractCode,
-          storage,
-          publicKeyLocal,
-        );
-        forgedBytes = localBytes;
-      } catch (fallbackForgeErr) {
-        const msg = fallbackForgeErr.message || String(fallbackForgeErr);
-        setErr(msg);
-        setLabel(msg);
-        return;
-      }
-    }
-    // Step 2: request wallet signature
-    setStep(2);
-    setLabel('Waiting for wallet signature');
-    setPct(0.40);
-    let signedBytes;
-    try {
-      const signResp = await wallet.client.requestSignPayload({
-        signingType: SigningType.OPERATION,
-        payload    : '03' + forgedBytes,
-        sourceAddress: address,
-      });
-      const sigHex = sigHexWithTag(signResp.signature);
-      signedBytes = forgedBytes + sigHex;
-    } catch (e) {
-      const msg = e.message || String(e);
-      setErr(msg);
-      setLabel(msg);
-      return;
-    }
-    // Step 3: inject via RPC.  We avoid using the backend for
-    // injection to prevent 500 errors; instead we call
-    // injectSigned() directly.  If that fails, reforge locally and
-    // inject again.
-    setStep(3);
-    setLabel('Injecting operation');
-    setPct(0.55);
-    let opHash;
-    try {
-      opHash = await injectSigned(toolkit, signedBytes);
-    } catch (injErr) {
-      // If RPC injection fails (e.g. invalid bytes), fall back to
-      // local forging and injection.  Reforge the operation
-      // locally using forgeOrigination(), sign and inject again.
-      try {
-        const activeAcc2 = await wallet.client.getActiveAccount();
-        const pubKey2    = activeAcc2?.publicKey;
-        const { forgedBytes: localBytes } = await forgeOrigination(
-          toolkit,
-          address,
-          contractCode,
-          storage,
-          pubKey2,
-        );
-        const signResp2 = await wallet.client.requestSignPayload({
-          signingType : SigningType.OPERATION,
-          payload     : '03' + localBytes,
-          sourceAddress: address,
-        });
-        const sigHex2     = sigHexWithTag(signResp2.signature);
-        const signedLocal = localBytes + sigHex2;
-        opHash = await injectSigned(toolkit, signedLocal);
-      } catch (fallbackErr) {
-        const msg = fallbackErr.message || String(fallbackErr);
-        setErr(msg);
-        setLabel(msg);
-        return;
-      }
-    }
-    // Step 4: confirmation
-    setStep(4);
-    setLabel('Confirming origination');
-    setPct(0.70);
-    // Attempt to resolve contract address via toolkit RPC
-    let contractAddr = '';
-    for (let i = 0; i < 20; i++) {
-      await sleep(3000);
-      try {
-        const block = await toolkit.rpc.getBlock();
-        for (const opGroup of block.operations.flat()) {
-          if (opGroup.hash === opHash) {
-            const result = opGroup.contents.find((c) => c.kind === 'origination');
-            if (
-              result?.metadata?.operation_result?.originated_contracts?.length
-            ) {
-              contractAddr = result.metadata.operation_result.originated_contracts[0];
-              break;
-            }
-          }
-        }
-      } catch {}
-      if (contractAddr) break;
-    }
-    if (!contractAddr) {
-      const msg = 'Could not resolve contract address after origination.';
-      setErr(msg);
-      setLabel(msg);
-      return;
-    }
-    setKt1(contractAddr);
-    setPct(1);
-    setStep(5);
-    setLabel('Origination confirmed');
-  }
+  // The remote forge origination path has been removed.  All wallets
+  // originate via originateSingleStage() using Taquito’s wallet API.
 
   /**
    * Originate a new contract.  Chooses between the remote forge
@@ -538,21 +327,14 @@ export default function DeployPage() {
    */
   async function originate(meta) {
     // Always use the single‑stage origination flow for all wallets.
-    // This replicates the original error encountered with Temple wallet
-    // and removes remote forging and special cases.
-    setUseBackend(false);
+    // Remote forging and special cases have been removed.
     await originateSingleStage(meta);
   }
 
   /*──────── render ─────────────────────────────────────────*/
   return (
     <Wrap>
-      {/* Warning banner for Temple users – displayed when a Temple wallet is connected */}
-      {isTempleWallet && (
-        <Warning>
-          Temple wallet cannot currently originate the ZeroContract v4 due to payload size limitations. Please import your wallet into Kukai or Umami to originate new contracts. We are working on a fix.
-        </Warning>
-      )}
+      {/* No warning banner.  Temple now supports large contract originations. */}
       {/* Deploy form collects metadata and triggers origination.  Use
           the expected onDeploy prop instead of onSubmit; DeployCollectionForm
           invokes this callback with the user’s metadata when the form
@@ -583,11 +365,15 @@ export default function DeployPage() {
 }
 
 /* What changed & why:
-   – Consolidated the origination pipeline: the originate() function now
-     always calls originateSingleStage() for all wallets.  Remote
-     forging and early termination for Temple wallets have been removed
-     so the original error can be reproduced.  The overlay now uses a
-     fixed total of 1 signature.
-   – Updated header revision and summary to r1127‑a1 with new
-     description.
+   • Removed the Temple warning banner and associated state/detection.
+     Temple wallet now supports large payloads, so no special notice
+     or blocking is required.
+   • Removed the FAST_ORIGIN flag, buildFastMetaObject() and the
+     originateViaForgeService() remote‑forge pipeline.  All wallets
+     now originate via originateSingleStage() using the Taquito wallet
+     API.
+   • Simplified imports to include only sleep from net.js.  Removed
+     unused forgeViaBackend, sigHexWithTag, injectSigned and
+     forgeOrigination imports.
+   • Updated header revision to r1127‑a2 and summary accordingly.
 */

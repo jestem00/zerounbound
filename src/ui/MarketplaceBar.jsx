@@ -1,84 +1,111 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/MarketplaceBar.jsx
-  Rev :    r3    2025‑10‑17
-  Summary: marketplace stub that directs users to objkt.com
-           until our own marketplace contract is ready.  It
-           computes the correct objkt.com asset URL for the
-           current network and provides BUY, LIST and OFFER
-           buttons that open a dismissible dialog.  No events
-           are dispatched to internal marketplace handlers.
+  Rev :    r4     2025‑07‑24 UTC
+  Summary: swap stub for live ZeroSum UI – shows lowest price &
+           opens BUY/LIST/OFFER dialogs; falls back gracefully.
 ─────────────────────────────────────────────────────────────*/
-import React, { useState } from 'react';
-import PropTypes          from 'prop-types';
-import PixelButton        from './PixelButton.jsx';
-import PixelConfirmDialog from './PixelConfirmDialog.jsx';
-import { URL_OBJKT_BASE } from '../config/deployTarget.js';
+import React, { useEffect, useState } from 'react';
+import PropTypes                      from 'prop-types';
 
-/**
- * MarketplaceBar
- *
- * Displays BUY, LIST and OFFER buttons for a token.  When any
- * button is clicked, a modal appears informing the user that
- * marketplace actions are not yet available and provides a link
- * to objkt.com.  The objkt URL is constructed by replacing
- * '/collection/' in the base with '/asset/' and appending the
- * contract address and token ID.
- */
-export default function MarketplaceBar({ contractAddress, tokenId, marketplace }) {
-  const [open, setOpen] = useState(false);
-  // Compute the correct objkt asset URL.  The base constant ends
-  // with `/collection/`; replace it with `/asset/` to reach the
-  // token detail page on objkt.  Then append the FA2 contract
-  // address and token ID.
-  const objktBase = URL_OBJKT_BASE.replace(/\/collection\/?$/, '/asset/');
-  const objktUrl  = `${objktBase}${contractAddress}/${tokenId}`;
+import PixelButton                    from './PixelButton.jsx';
+import BuyDialog                      from './BuyDialog.jsx';
+import ListTokenDialog                from './ListTokenDialog.jsx';
+import MakeOfferDialog                from './MakeOfferDialog.jsx';
 
-  const handleClick = (e) => {
-    e.preventDefault();
-    setOpen(true);
-  };
+import { useWalletContext }           from '../contexts/WalletContext.js';
+import { fetchLowestListing }         from '../core/marketplace.js';
+
+export default function MarketplaceBar({
+  contractAddress,
+  tokenId,
+}) {
+  const { toolkit }        = useWalletContext() || {};
+  const [priceMutez, setPrice] = useState(null);
+  const [dlg, setDlg]      = useState(null);   // 'buy' | 'list' | 'offer'
+
+  /*── load cheapest listing on mount ───────────────────────*/
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      if (!toolkit) return;
+      try {
+        const l = await fetchLowestListing({
+          toolkit,
+          nftContract: contractAddress,
+          tokenId,
+        });
+        if (!cancel && l) setPrice(l.priceMutez);
+      } catch (e) { /* silent – network OK */ }
+    })();
+    return () => { cancel = true; };
+  }, [toolkit, contractAddress, tokenId]);
+
+  const priceXTZ = priceMutez != null ? (priceMutez / 1_000_000).toLocaleString() : null;
+
+  const disabledBuy = priceMutez == null || !toolkit;
+  const disabledList = !toolkit;
+  const disabledOffer = !toolkit;
 
   return (
     <>
-      <PixelButton onClick={handleClick}>BUY</PixelButton>
-      <PixelButton onClick={handleClick}>LIST</PixelButton>
-      <PixelButton onClick={handleClick}>OFFER</PixelButton>
-      <PixelConfirmDialog
-        open={open}
-        onOk={() => setOpen(false)}
-        okLabel="OK"
-        cancelLabel=""
-        hideCancel
-        title="Marketplace Unavailable"
-        message={(
-          <span>
-            Our marketplace contract is still a work in progress. Please
-            list, buy or make offers on&nbsp;
-            <a href={objktUrl} target="_blank" rel="noopener noreferrer">objkt.com</a>
-            &nbsp;for now.
-          </span>
-        )}
-      />
+      <PixelButton
+        disabled={disabledBuy}
+        warning={disabledBuy}
+        onClick={() => setDlg('buy')}
+      >
+        {priceXTZ ? `BUY (${priceXTZ} ꜩ)` : 'BUY'}
+      </PixelButton>
+
+      <PixelButton
+        disabled={disabledList}
+        onClick={() => setDlg('list')}
+      >
+        LIST
+      </PixelButton>
+
+      <PixelButton
+        disabled={disabledOffer}
+        onClick={() => setDlg('offer')}
+      >
+        OFFER
+      </PixelButton>
+
+      {/* dialogs */}
+      {dlg === 'buy' && (
+        <BuyDialog
+          open
+          contract={contractAddress}
+          tokenId={tokenId}
+          priceMutez={priceMutez}
+          onClose={() => setDlg(null)}
+        />
+      )}
+      {dlg === 'list' && (
+        <ListTokenDialog
+          open
+          contract={contractAddress}
+          tokenId={tokenId}
+          onClose={() => setDlg(null)}
+        />
+      )}
+      {dlg === 'offer' && (
+        <MakeOfferDialog
+          open
+          contract={contractAddress}
+          tokenId={tokenId}
+          onClose={() => setDlg(null)}
+        />
+      )}
     </>
   );
 }
 
 MarketplaceBar.propTypes = {
   contractAddress: PropTypes.string.isRequired,
-  tokenId: PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
-  marketplace: PropTypes.string,
+  tokenId        : PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
 };
-
-MarketplaceBar.defaultProps = {
-  marketplace: '',
-};
-
-/* What changed & why (r3):
-   • Construct the objkt.com asset URL using the collection base
-     constant by replacing `/collection/` with `/asset/` to fix
-     broken links.
-   • Provided a modal that closes on OK and does not have a
-     cancel button, matching the stub behaviour.
-*/
+/* What changed & why: replaced objkt stub with live integration – queries
+   cheapest listing via off‑chain view, shows dynamic price; opens existing
+   Buy/List/Offer dialogs wired to new core helpers. */
 /* EOF */

@@ -1,9 +1,9 @@
-/*──────── src/config/deployTarget.js ────────*/
-/*Developed by @jams2blues – ZeroContract Studio
-  File: src/config/deployTarget.js
-  Rev:  r747‑r31   2025‑07‑20
-  Summary: enable FAST_ORIGIN by default across networks;
-           retain forge service support for remote origination. */
+/*─────────────────────────────────────────────────────────────────
+Developed by @jams2blues – ZeroContract Studio
+File: src/config/deployTarget.js
+Rev:  r747‑r32   2025‑07‑24
+Summary: switch to single‑stage origination across all networks;
+         disable FAST_ORIGIN and remove remote forge service support.  */
 
 // Define which network to target. Accepts 'ghostnet' or 'mainnet'.
 export const TARGET = 'ghostnet';           // 'ghostnet' | 'mainnet'
@@ -130,31 +130,25 @@ export async function selectFastestRpc(timeout = 2000) {
 export const DEFAULT_NETWORK = NETWORK_KEY;
 
 /**
- * FAST_ORIGIN: enable dual‑stage origination by default.
- * If the FAST_ORIGIN environment variable is set, honour it;
- * otherwise, default to true across all networks.  This avoids
- * parsing the massive views JSON during the first origination.
+ * FAST_ORIGIN: dual‑stage origination has been retired.  This constant
+ * exists for backward compatibility but is now permanently set to false.
  */
-export const FAST_ORIGIN =
-  process.env.FAST_ORIGIN !== undefined
-    ? process.env.FAST_ORIGIN === 'true'
-    : true;
+export const FAST_ORIGIN = false;
 
 /**
- * Base URLs for remote forge services.  When non-empty, net.js will
- * send forge/inject requests to these hosts instead of the Next.js
- * API routes.  Change the mainnet value when you deploy a mainnet
- * forge service.
+ * Base URLs for remote forge services.  Remote forging and injection
+ * have been removed from the platform.  These values are left empty
+ * to indicate that client‑side forging is always used.
  */
 const FORGE_URLS = {
-  ghostnet: 'https://forgeghostnet.zerounbound.art',
-  mainnet : 'https://forgemainnet.zerounbound.art',
+  ghostnet: '',
+  mainnet : '',
 };
 
-export const FORGE_SERVICE_URL = FORGE_URLS[TARGET] ?? '';
+// Deprecated: always returns an empty string.
+export const FORGE_SERVICE_URL = '';
 
 /* What changed & why:
-   • Enabled fast origination by default when FAST_ORIGIN is unset, to prevent
-     heavy views parsing during the “Preparing storage” step.
-   • Documented behaviour and left environment override intact.
-   • Retained per-network forge service URLs for remote forging/injecting. */
+   • Disabled dual‑stage origination by permanently setting FAST_ORIGIN to false.
+   • Removed remote forge service support; FORGE_SERVICE_URL now always empty.
+   • Updated summary and comments to reflect single‑stage origination for all wallets. */

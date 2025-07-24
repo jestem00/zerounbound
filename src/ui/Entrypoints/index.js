@@ -36,4 +36,7 @@ export { default as TokenPreviewWindow }          from './TokenPreviewWindow.jsx
 export { default as TransferRow}                  from './TransferRow.jsx';
 export { default as Transfer }                    from './Transfer.jsx';
 
+/* marketplace elements */
+export { default as CancelListing }               from './CancelListing.jsx';
+export { default as AcceptOffer }                 from './AcceptOffer.jsx';
 /* EOF */

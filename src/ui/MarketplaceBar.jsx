@@ -1,10 +1,12 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/MarketplaceBar.jsx
-  Rev :    r4     2025‑07‑24 UTC
-  Summary: swap stub for live ZeroSum UI – shows lowest price &
-           opens BUY/LIST/OFFER dialogs; falls back gracefully.
+  Rev :    r5     2025‑07‑24 UTC
+  Summary: live ZeroSum integration – displays the lowest
+           listing price for a token and opens BUY, LIST
+           and OFFER dialogs wired to marketplace helpers.
 ─────────────────────────────────────────────────────────────*/
+
 import React, { useEffect, useState } from 'react';
 import PropTypes                      from 'prop-types';
 
@@ -16,15 +18,26 @@ import MakeOfferDialog                from './MakeOfferDialog.jsx';
 import { useWalletContext }           from '../contexts/WalletContext.js';
 import { fetchLowestListing }         from '../core/marketplace.js';
 
-export default function MarketplaceBar({
-  contractAddress,
-  tokenId,
-}) {
-  const { toolkit }        = useWalletContext() || {};
+/**
+ * MarketplaceBar
+ *
+ * Renders BUY, LIST and OFFER buttons for a token.  On mount it
+ * queries the marketplace off‑chain view for the cheapest active
+ * listing and displays the price in XTZ.  Clicking BUY opens
+ * BuyDialog with the resolved listing details; LIST opens
+ * ListTokenDialog; and OFFER opens MakeOfferDialog.  Buttons
+ * disable gracefully when the wallet is disconnected or no
+ * listing exists.
+ */
+export default function MarketplaceBar({ contractAddress, tokenId }) {
+  const { toolkit }          = useWalletContext() || {};
   const [priceMutez, setPrice] = useState(null);
-  const [dlg, setDlg]      = useState(null);   // 'buy' | 'list' | 'offer'
+  const [listing,    setListing] = useState(null);
+  const [dlg,        setDlg]     = useState(null);  // 'buy' | 'list' | 'offer'
 
-  /*── load cheapest listing on mount ───────────────────────*/
+  // Fetch the lowest active listing whenever toolkit, contract or
+  // tokenId changes.  The listing is cached locally until any
+  // dependency changes.
   useEffect(() => {
     let cancel = false;
     (async () => {
@@ -35,16 +48,27 @@ export default function MarketplaceBar({
           nftContract: contractAddress,
           tokenId,
         });
-        if (!cancel && l) setPrice(l.priceMutez);
-      } catch (e) { /* silent – network OK */ }
+        if (!cancel) {
+          if (l) {
+            setPrice(l.priceMutez);
+            setListing(l);
+          } else {
+            setPrice(null);
+            setListing(null);
+          }
+        }
+      } catch (e) {
+        // ignore network or view errors – UI shows disabled state
+        if (!cancel) { setPrice(null); setListing(null); }
+      }
     })();
     return () => { cancel = true; };
   }, [toolkit, contractAddress, tokenId]);
 
   const priceXTZ = priceMutez != null ? (priceMutez / 1_000_000).toLocaleString() : null;
 
-  const disabledBuy = priceMutez == null || !toolkit;
-  const disabledList = !toolkit;
+  const disabledBuy   = priceMutez == null || !toolkit;
+  const disabledList  = !toolkit;
   const disabledOffer = !toolkit;
 
   return (
@@ -54,7 +78,7 @@ export default function MarketplaceBar({
         warning={disabledBuy}
         onClick={() => setDlg('buy')}
       >
-        {priceXTZ ? `BUY (${priceXTZ} ꜩ)` : 'BUY'}
+        {priceXTZ ? `BUY (${priceXTZ} ꜩ)` : 'BUY'}
       </PixelButton>
 
       <PixelButton
@@ -72,12 +96,12 @@ export default function MarketplaceBar({
       </PixelButton>
 
       {/* dialogs */}
-      {dlg === 'buy' && (
+      {dlg === 'buy' && listing && (
         <BuyDialog
           open
           contract={contractAddress}
           tokenId={tokenId}
-          priceMutez={priceMutez}
+          listing={listing}
           onClose={() => setDlg(null)}
         />
       )}
@@ -105,7 +129,9 @@ MarketplaceBar.propTypes = {
   contractAddress: PropTypes.string.isRequired,
   tokenId        : PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
 };
-/* What changed & why: replaced objkt stub with live integration – queries
-   cheapest listing via off‑chain view, shows dynamic price; opens existing
-   Buy/List/Offer dialogs wired to new core helpers. */
+
+/* What changed & why: replaced objkt stub with a live integration.  It
+   queries the off‑chain view for the cheapest listing, displays
+   the price on the BUY button and opens Buy/List/Offer dialogs
+   wired to new core marketplace helpers. */
 /* EOF */

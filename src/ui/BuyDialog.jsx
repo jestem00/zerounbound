@@ -1,13 +1,20 @@
-/*Developed by @jams2blues – ZeroContract Studio
+/*─────────────────────────────────────────────────────────────
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/BuyDialog.jsx
-  Rev :    r2     2025‑09‑22
-  Summary: drop unused import + path‑fixes lint‑clean */
-import React, { useState }  from 'react';
-import PropTypes            from 'prop-types';
-import styledPkg            from 'styled-components';
+  Rev :    r3     2025‑07‑24 UTC
+  Summary: updated for ZeroSum marketplace: remove user
+           inputs for amount/price, accept a listing prop with
+           seller/nonce/priceMutez and utilise new
+           marketplace helpers to build buy params.  Displays
+           the price in XTZ and provides simplified confirm
+           flow.
+─────────────────────────────────────────────────────────────*/
+
+import React, { useState }    from 'react';
+import PropTypes              from 'prop-types';
+import styledPkg              from 'styled-components';
 
 import PixelHeading           from './PixelHeading.jsx';
-import PixelInput             from './PixelInput.jsx';
 import PixelButton            from './PixelButton.jsx';
 import OperationOverlay       from './OperationOverlay.jsx';
 import OperationConfirmDialog from './OperationConfirmDialog.jsx';
@@ -19,17 +26,22 @@ const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 const Wrap   = styled.section`margin-top:1.4rem;`;
 
 export default function BuyDialog({
-  open, contract, tokenId, market: _market, onClose = () => {},
+  open,
+  contract,
+  tokenId,
+  listing,
+  onClose = () => {},
 }) {
   const { toolkit } = useWalletContext() || {};
-  const [amount, setAmount]  = useState('1');
-  const [price,  setPrice ]  = useState('');
-  const [ov,     setOv]      = useState({ open:false });
-  const [confirm,setConfirm] = useState(false);
-  const [est,    setEst]     = useState(null);
+  const [ov, setOv]       = useState({ open:false });
+  const [confirm, setConfirm] = useState(false);
+  const [est, setEst]     = useState(null);
 
   if (!open) return null;
-  const disabled = !toolkit || !amount || !price;
+  if (!listing) return null;
+
+  const priceXTZ = (listing.priceMutez / 1_000_000).toLocaleString();
+  const disabled = !toolkit;
 
   const snack = (msg, sev='info') =>
     window.dispatchEvent(new CustomEvent('zu:snackbar',
@@ -37,11 +49,12 @@ export default function BuyDialog({
 
   async function handleBuy() {
     try {
-      const params = await buildBuyParams(toolkit,{
-        nft: contract,
-        tokenId:+tokenId,
-        amount:+amount,
-        priceMutez: +price * 1_000_000,
+      const params = await buildBuyParams(toolkit, {
+        nftContract: contract,
+        tokenId: +tokenId,
+        priceMutez: listing.priceMutez,
+        seller: listing.seller,
+        nonce: listing.nonce,
       });
       setEst(await estimateChunked(toolkit, params));
       setConfirm(true);
@@ -52,11 +65,12 @@ export default function BuyDialog({
     try {
       setOv({ open:true, label:'Waiting for confirmation …' });
       const op = await toolkit.wallet
-        .batch(await buildBuyParams(toolkit,{
-          nft: contract,
-          tokenId:+tokenId,
-          amount:+amount,
-          priceMutez: +price * 1_000_000,
+        .batch(await buildBuyParams(toolkit, {
+          nftContract: contract,
+          tokenId: +tokenId,
+          priceMutez: listing.priceMutez,
+          seller: listing.seller,
+          nonce: listing.nonce,
         }))
         .send();
       await op.confirmation();
@@ -71,42 +85,32 @@ export default function BuyDialog({
 
   return (
     <Wrap>
-      <PixelHeading level={4}>Buy Token</PixelHeading>
-
-      <label>
-        Amount
-        <PixelInput
-          type="number" min="1" value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-        />
-      </label>
-
-      <label>
-        Price ꜩ
-        <PixelInput
-          type="number" min="0" step="0.000001" value={price}
-          onChange={(e) => setPrice(e.target.value)}
-        />
-      </label>
-
-      <PixelButton disabled={disabled} onClick={handleBuy}>BUY</PixelButton>
-
+      <PixelHeading as="h2">Buy Token</PixelHeading>
+      <p style={{ marginTop:'0.6rem', marginBottom:'1.2rem' }}>
+        You are about to buy <strong>1</strong> edition for{' '}
+        <strong>{priceXTZ} ꜩ</strong>.
+      </p>
+      <PixelButton
+        disabled={disabled}
+        onClick={handleBuy}
+      >
+        BUY
+      </PixelButton>
       {ov.open && (
-        <OperationOverlay {...ov} onCancel={() => setOv({ open:false })} />
+        <OperationOverlay
+          open
+          label={ov.label}
+          onClose={() => setOv({ open:false })}
+        />
       )}
-
       {confirm && (
         <OperationConfirmDialog
           open
-          estimate={est}
-          onOk={() => { setConfirm(false); submitTx(); }}
+          onConfirm={() => { setConfirm(false); submitTx(); }}
           onCancel={() => setConfirm(false)}
         />
       )}
-
-      <PixelButton size="sm" style={{ marginTop:'.6rem' }} onClick={onClose}>
-        Close
-      </PixelButton>
+      <PixelButton onClick={onClose}>Close</PixelButton>
     </Wrap>
   );
 }
@@ -115,7 +119,18 @@ BuyDialog.propTypes = {
   open    : PropTypes.bool,
   contract: PropTypes.string,
   tokenId : PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
-  market  : PropTypes.string,
+  listing : PropTypes.shape({
+    priceMutez: PropTypes.number,
+    amount    : PropTypes.number,
+    seller    : PropTypes.string,
+    nonce     : PropTypes.number,
+    active    : PropTypes.bool,
+  }),
   onClose : PropTypes.func,
 };
+
+/* What changed & why: rewrote component for live ZeroSum marketplace.
+   Removed price/amount inputs; accepts listing prop with priceMutez,
+   seller and nonce; uses new buildBuyParams helper; displays
+   price in XTZ and simplifies confirm flow. */
 /* EOF */

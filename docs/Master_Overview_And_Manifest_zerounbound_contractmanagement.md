@@ -1,12 +1,10 @@
 /*─────────────────────────────────────────────────────────────────
 Developed by @jams2blues – ZeroContract Studio
 File: docs/Master_Overview_And_Manifest_zerounbound_contractmanagement.md
-Rev : r1020 2025‑07‑23 UTC
-Summary: refine token-detail UX: stack script & fullscreen controls above description, add labelled fullscreen button, auto-refresh previews on script toggle; update Mint hints and OperationOverlay features; adjust ExploreNav hideSearch; update manifest and source-tree map accordingly.
+Rev : r1021 2025‑07‑24 UTC
+Summary: removed remote forge service; unified single-stage origination; updated manifest, invariants, and source-tree map; moved forge_service_node to graveyard; polished token and marketplace features.
 ──────────────────────────────────────────────────────────────────/
 
-yaml
-Copy
 ════════════════════════════════════════════════════════════════
 ZERO UNBOUND v4 — MASTER OVERVIEW & SOURCE‑FILE MANIFEST
 ════════════════════════════════════════════════════════════════
@@ -19,16 +17,14 @@ platform. A fresh git clone plus this document and the bundle
 outputs yield a reproducible build on any host. It outlines the
 architecture, invariants, source‑tree map and CI pipeline.
 
-The project now uses a single‑stage origination pipeline for
+The project uses a single‑stage origination pipeline for
 contract deployment. The full metadata is assembled on the client
-and encoded into a Michelson big‑map. When the connected wallet is
-Temple, forging and injection are offloaded to the remote forge
-service defined in FORGE_SERVICE_URL; the service encodes the
-contract and storage, inserts a reveal operation if needed, and
-returns forged bytes. For all other wallets, the UI calls
-TezosToolkit.wallet.originate() directly. Dual‑stage origination
-and the FAST_ORIGIN flag have been removed. Local fallback is
-available if remote injection fails.
+and encoded into a Michelson big‑map. All wallets, including Temple,
+originate contracts via Taquito’s wallet.originate() interface with
+the full metadata; forging and injection are performed locally in the
+browser via Taquito’s LocalForger and RPC. The remote forge service
+and the FAST_ORIGIN flag have been removed. There is no separate
+server‑side forge/inject operation.
 ════════════════════════════════════════════════════════════════
 TABLE OF CONTENTS (How to read) — skim → locate → jump
 ════════════════════════════════════════════════════════════════
@@ -62,25 +58,24 @@ ZeroEngine API (Node 22 + Taquito) → ZeroContracts v4 / v4a + Zer
 
 100 % on‑chain media (data: URI); utils/RenderMedia.jsx whitelists MIME.
 
-────────── NEW REMOTE FORGE SERVICE
+────────── REMOTE FORGE SERVICE RETIRED
 ──────────────────────────────────────────────────────────────────
-Earlier revisions relied on serverless /api/forge and /api/inject endpoints
-living within the Next.js application to offload forging and injection. Those
-endpoints required a heavy Python or manual fallback and caused build issues.
-With the reintroduction of dual‑stage origination in r1014 and the need to
-support Temple wallet users, we now offload forging and injection to a
-separate Node.js service. This service uses Taquito’s RPC utilities and
-Express to expose /forge, /inject, and /healthz endpoints and is
-deployed on Render (see forge_service_node). The front‑end points to this
-service via FORGE_SERVICE_URL in deployTarget.js and falls back to
-client‑side forging via src/core/net.js when unreachable. No .env or
-USE_BACKEND flag is needed—offloading happens automatically when
-FORGE_SERVICE_URL is non‑empty.
+Earlier revisions used a separate remote forging service to offload
+forging and injection for Temple wallets. This service has been
+retired in r1021. All wallets now use a unified single‑stage
+origination: the UI constructs the full metadata, forges and injects
+the operation locally using Taquito’s LocalForger and RPC, and
+broadcasts it via wallet.originate(). There is no separate /forge or
+/inject endpoint, no FAST_ORIGIN flag, and no FORGE_SERVICE_URL
+configuration. The forge_service_node directory has been moved to
+the graveyard.
 
 ───────────────────────────────────────────────────────────────
 1·5 · CRITICAL‑ENTRY INDEX 🗝️ (How to read) — quickest cognitive entry‑points
 ───────────────────────────────────────────────────────────────
-• src/core/net.js … network helpers (jFetch, forgeOrigination, injectSigned) with back‑off and multi‑RPC fallback
+• src/core/net.js … network helpers (jFetch, forgeOrigination, injectSigned)
+with back‑off and multi‑RPC fallback; forging/injection occurs locally via
+Taquito for all wallets (remote forge service removed).
 • src/ui/CollectionCard.jsx … canonical contract card (I105 / I106)
 • src/pages/explore/[[...filter]].jsx … marketplace grid loader
 • src/hooks/useConsent.js … persistent NSFW / flash / script flags
@@ -104,8 +99,12 @@ FORGE_SERVICE_URL is non‑empty.
 ───────────────────────────────────────────────────────────────
 2 · INVARIANTS 🔒 (scope tags: [F]rontend | [C]ontract | [E]ngine | [I]nfra)
 ───────────────────────────────────────────────────────────────
-I00 [F, C, E, I] All UI elements—styling, fonts, buttons, overlays, popups, containers, and more—must follow our 8‑bit retro arcade theme, including pixel fonts, sprites, palettes, layouts, and theme context. Every component and page should be resolution‑ and aspect‑ratio‑agnostic: interfaces must adapt fluidly so text, images, and containers render and resize correctly on any device or viewport.
-I01 [C] One canonical on-chain record per contract instance.
+I00 [F, C, E, I] All UI elements—styling, fonts, buttons, overlays, popups,
+containers, and more—must follow our 8‑bit retro arcade theme, including pixel
+fonts, sprites, palettes, layouts, and theme context. Every component and page
+should be resolution‑ and aspect‑ratio‑agnostic: interfaces must adapt fluidly so
+text, images, and containers render and resize correctly on any device or viewport.
+I01 [C] One canonical on‑chain record per contract instance.
 I02 [E] Engine ↔ Chain parity ≥ 2 blocks.
 I03 [F,C] Role-based ACL (admin/owner/collaborator).
 I04 [C] Contract terms immutable once locked.
@@ -164,16 +163,11 @@ I56 [F] Oversize mint triggers upfront Snackbar warning.
 I57 [F] WalletContext delayed BeaconWallet instantiation.
 I58 [F] Reveal action uses explicit 1 mutez transfer.
 I59 [F] Silent session restore on mount.
-/──────────────────────────────────────────────────────────────
 I60 [F,E] Resumable Slice Uploads — Mint, Append & Repair
-───────────────────────────────────────────────────────────────
 • Oversize writes are chunked (32 768 B – 1 024 head‑room); first slice inside
 the mint, the rest via append* in strict order.
 • Each chunk persists a checkpoint in
 localStorage.zuSliceCache.<network>[<contract>:<tokenId>:<label>]:
-
-python
-Copy
 { tokenId:nat, label:"artifactUri"|…, total:nat, next:nat,
 chunkSize:32768, hash:"sha256:<hex>", updated:<unix-ms> }
 • Upload resumes at next, clears cache once confirmed next===total,
@@ -181,15 +175,12 @@ and is idempotent — repeating slices can’t corrupt bytes.
 • RepairUri rebuilds on-chain dataURI, byte-diffs against re-upload, aborts
 on mismatch (“Conflict detected — choose correct file” toast).
 • UI rejects out-of-order, oversize or duplicate slices with toast feedback.
-/──────────────────────────────────────────────────────────────
 I61 [F] Slice-Cache Hygiene & Expiry
-───────────────────────────────────────────────────────────────
 • purgeExpiredSliceCache() runs on app boot + mount of slice UIs.
 • Cache entry auto-deletes when:
 – stale ≥ 24 h • total === 0 • hash mismatch • global > 5 MB.
 • Purge is non-blocking; all IO sits in try {} catch {} so quota /
 private‑mode issues never break the UI.
-──────────────────────────────────────────────────────────────/
 I62 [F] Busy‑Select Spinner.
 I63 [I] Single‑Repo Target Switch (scripts/setTarget.js).
 I64 [F] Wheel‑Tunnel Modals.
@@ -214,7 +205,6 @@ I82 [F] Form values persist across navigation.
 I83 [F] Modal CloseBtn anchor stays inside modal bounds.
 I84 [F] Unicode & Emoji acceptance — full UTF‑8 except C0/C1.
 I85 [F] Single feeEstimator.js source of truth — duplicates banned.
-
 I86 [F] HelpBox Standard — every entry-point component exposes a
 concise .75 rem HelpBox covering Purpose, When and
 How-To; rendered immediately below the PixelHeading.
@@ -226,150 +216,70 @@ I89 [F,E] v4a slice batch operations must compute storageLimit dynamically based
 I90 [F] All async wait/sleep logic standardized on sleepV4a.js.
 I91 [F,E] All ledger sync helpers (waitForLedger) share the same Michelson key-building logic, ensuring consistency and preventing FA2 balance errors.
 I92 [F,E] Mint operations (MintV4a.jsx) utilize a single, centralized ledger-wait implementation, invoked only after the first batch slice in oversize uploads.
-I93 [F] OperationOverlay “fun lines” scroll every ≈ 3 000 ms with a
-brief 250 ms pause per line, Solari‑board style animation.
-I94 [F] AdminTools “Token Actions” header no longer shows dynamic count;
-only contextual counts (Collaborators, Parent/Child) remain.
-I95 [F] v4a collections display an inline experimental banner inside
-AdminTools (“⚠ ZeroTerminal contracts under construction …”).
-Note: I49 and I53 intentionally duplicate JSON-encode/hex-wrap rule
-for legacy-lint compatibility.
-I96 [F] OperationOverlay fun-lines text colour must use
-var(--zu-accent) so the Solari board adapts to active palette, uses CSS-steps Solari board to stay live during hangs.
-I97 [F] OperationOverlay “Close” button triggers window.location.reload()
-after overlay unmount to guarantee fresh state across routes.
-I98 [F] contract origination forms include a fixed top-right CloseBtn (×) that
-navigates to “/” (home) for rapid escape; button obeys I83 bounds.
+I93 [F] OperationOverlay “fun lines” scroll every ≈ 3 000 ms with a brief 250 ms pause per line, Solari‑board style animation.
+I94 [F] AdminTools “Token Actions” header no longer shows dynamic count; only contextual counts (Collaborators, Parent/Child) remain.
+I95 [F] v4a collections display an inline experimental banner inside AdminTools (“⚠ ZeroTerminal contracts under construction …”).
+I96 [F] OperationOverlay fun-lines text colour must use var(--zu-accent) so the Solari board adapts to active palette, uses CSS-steps Solari board to stay live during hangs.
+I97 [F] OperationOverlay “Close” button triggers window.location.reload() after overlay unmount to guarantee fresh state across routes.
+I98 [F] contract origination forms include a fixed top-right CloseBtn (×) that navigates to “/” (home) for rapid escape; button obeys I83 bounds.
 I99 [F] Every UI that accepts a file (mint, deploy, meta panels, etc.) runs the upload through onChainValidator.js; the result shows ⭐ (fully on‑chain), ⛓️‍💥 (partial, reason shown) or ❔ (undetermined) via integrityBadges.js. Upload flows present a confirmation dialog with the badge before users proceed.
-I100 [F] In conjunction with I99, keep certain false-positives such as "URLs that are safe to embed as plain‑text references inside on‑chain SVG/RDF metadata. These are not dereferenced by the renderer and therefore do not break the FOC invariant. Add patterns conservatively." such as "const SAFE_REMOTE_RE = /\bhttps?://(?:creativecommons.org|schema.org|purl.org|www.w3.org)[^\s"'<>]*/i;". C0 only – C1 allowed.
-/*immutability guard for v4 flags */
-I101 [F] Contract v4 forbids removing the “mature” content‑rating
-or “flashing” accessibility flags once they are stored on‑chain.
-Front‑end components must:
+I100 [F] In conjunction with I99, keep certain false-positives such as "URLs that are safe to embed as plain‑text references inside on‑chain SVG/RDF metadata. These are not dereferenced by the renderer and therefore do not break the FOC invariant. Add patterns conservatively." such as "const SAFE_REMOTE_RE = /\bhttps?://(?:creativecommons.org|schema.org|purl.org|www.w3.org)[^\s"'<>]/i;". C0 only – C1 allowed.
+I101 [F] Contract v4 forbids removing the “mature” content‑rating or “flashing” accessibility flags once they are stored on‑chain. Front‑end components must:
 • warn at mint (Mint.jsx HelpBox) and at edit (EditTokenMetadata.jsx HelpBox);
 • hard‑disable attempts to unset these keys;
 • surface a checklist error when a user tries to downgrade either flag.
-Back‑end validation refuses any edit_token_metadata map that omits a
-flag previously present in storage.
-I102 [F] Responsive Entry‑Point & Meta‑Panel Blueprint – Every new
-entry‑point module, admin panel or optioned metadata editor must
-inherit the layout strategy pioneered in src/ui/Entrypoints/ EditTokenMetadata.jsx:
-
-pgsql
-Copy
-• A GridWrap with grid-template-columns:repeat(12,1fr) and
-breakpoint collapse to single column at ≤ 1100 px.
-• An inner FormGrid using auto‑fit minmax(240px,1fr) (220 px on
-ultra‑wide ≥ 1800 px).
-• GlobalStyle Break700 patch that lifts any hard‑coded 700 px
-max‑width constraints inside third‑party components.
-• All <PixelInput/PixelButton> elements arranged so the form remains
-fully usable on a 320 px viewport and scales gracefully on
-≥ 4 K monitors (columns tighten gap from 1.6 → 1.2 rem at ≥ 1800 px).
-• CTA row stacks vertically with .flex-direction:column on mobile
-and surfaces a <ul> error list whenever validation fails.
-• No media query may introduce horizontal scrolling; use intrinsic
-grid re‑flow only.
-• Any future module diverging from these specs must add its own
-“Break*” GlobalStyle helper and document exceptions inline.
-
-Rationale: guarantees identical ergonomics across the admin suite,
-eliminates copy‑paste drift, and codifies the proven pattern that
-already passed WCAG AA + LCP audits.
-I103 [F] Token‑metadata legacy alias artists is accepted read‑only;
-        UI maps it to authors, never writes this key.
-I104 [F,C] Contract‑level metadata must include a symbol key
-        (3‑5 upper‑case A‑Z/0‑9) positioned directly after name.
-        Deploy & edit UIs enforce /^[A-Z0-9]{3,5}$/, loader refuses
-        contracts missing the key; guaranteed on‑chain order:
-        name → symbol → description.
-        (TZIP v4 §2.1 compliance, see commit r745).
-I105 [F] Explore Grid Uniformity — the collection grid on every
-/explore/* route must use
-grid-template-columns:repeat(auto-fill,var(--col))
-where --col = clamp(160px,18vw,220px) and width:100%; rows
-re‑flow without dead‑space from 320 px up to ≥ 8 K viewports,
-guaranteeing ≥ 1 column on smallest devices and edge‑to‑edge fill
-on ultra‑wide monitors.
-I106 [F] Script‑Hazard Consent — any media or collection thumbnail
-flagged by utils/hazards.js as scripts:true must remain
-hidden inside a sandboxed <iframe> (no allow‑scripts) until
-the user explicitly clicks “Allow scripts — I trust the author”.
-Consent persists per wallet via useConsent('scripts'); disabling
-clears the flag in localStorage and re‑hides the media.
-I107 [F] Hex‑field UTF‑8 repair — any hex‑encoded string returned
-from on‑chain metadata must be passed through
-decodeHexFields.js before it is rendered, searched or cached.
-Components failing to do so are a CI error.
-
-I108 [F] Token‑ID filter UX — collection detail pages expose a
-<TokenIdSelect/> dropdown listing live token‑ids; selecting an
-id filters the grid instantly on the client without refetching.
-Clearing the filter restores the previous search/sort state.
-
-I109 [F,E] Live on‑chain stats — token & owner counts shown in
-any UI derive from countTokens.js / countOwners.js and must
-not rely on static total_supply; until the async fetch
-resolves, the UI displays an ellipsis “…” placeholder.
-
-I110 [F] Integrity badge standardisation — every component that
-presents token or collection media must render an
-<IntegrityBadge status=…/>; the adjacent tooltip / title
-conveys the long‑form label from constants/integrityBadges.js.
-I111 [F,C,E,I] Don't use "global" in any comments or line summaries, it messes with yarn lint and throws false warnings
+Back‑end validation refuses any edit_token_metadata map that omits a flag previously present in storage.
+I102 [F] Responsive Entry‑Point & Meta‑Panel Blueprint – Every new entry‑point module, admin panel or optioned metadata editor must inherit the layout strategy pioneered in src/ui/Entrypoints/EditTokenMetadata.jsx:
+• A GridWrap with grid-template-columns:repeat(12,1fr) and breakpoint collapse to single column at ≤ 1100 px.
+• An inner FormGrid using auto‑fit minmax(240px,1fr) (220 px on ultra‑wide ≥ 1800 px).
+• GlobalStyle Break700 patch that lifts any hard‑coded 700 px max‑width constraints inside third‑party components.
+• All <PixelInput/PixelButton> elements arranged so the form remains fully usable on a 320 px viewport and scales gracefully on ≥ 4 K monitors (columns tighten gap from 1.6 → 1.2 rem at ≥ 1800 px).
+• CTA row stacks vertically with .flex-direction:column on mobile and surfaces a <ul> error list whenever validation fails.
+• No media query may introduce horizontal scrolling; use intrinsic grid re‑flow only.
+• Any future module diverging from these specs must add its own “Break” GlobalStyle helper and document exceptions inline.
+Rationale: guarantees identical ergonomics across the admin suite, eliminates copy‑paste drift, and codifies the proven pattern that already passed WCAG AA + LCP audits.
+I103 [F] Token‑metadata legacy alias artists is accepted read‑only; UI maps it to authors, never writes this key.
+I104 [F,C] Contract‑level metadata must include a symbol key (3‑5 upper‑case A‑Z/0‑9) positioned directly after name. Deploy & edit UIs enforce /^[A-Z0-9]{3,5}$/; loader refuses contracts missing the key; guaranteed on‑chain order: name → symbol → description. (TZIP v4 §2.1 compliance, see commit r745).
+I105 [F] Explore Grid Uniformity — the collection grid on every /explore/* route must use grid-template-columns:repeat(auto-fill,var(--col)) where --col = clamp(160px,18vw,220px) and width:100%; rows re‑flow without dead‑space from 320 px up to ≥ 8 K viewports, guaranteeing ≥ 1 column on smallest devices and edge‑to‑edge fill on ultra‑wide monitors.
+I106 [F] Script‑Hazard Consent — any media or collection thumbnail flagged by utils/hazards.js as scripts:true must remain hidden inside a sandboxed <iframe> (no allow‑scripts) until the user explicitly clicks “Allow scripts — I trust the author”. Consent persists per wallet via useConsent('scripts'); disabling clears the flag in localStorage and re‑hides the media.
+I107 [F] Hex‑field UTF‑8 repair — any hex‑encoded string returned from on‑chain metadata must be passed through decodeHexFields.js before it is rendered, searched or cached. Components failing to do so are a CI error.
+I108 [F] Token‑ID filter UX — collection detail pages expose a <TokenIdSelect/> dropdown listing live token‑ids; selecting an id filters the grid instantly on the client without refetching. Clearing the filter restores the previous search/sort state.
+I109 [F,E] Live on‑chain stats — token & owner counts shown in any UI derive from countTokens.js / countOwners.js and must not rely on static total_supply; until the async fetch resolves, the UI displays an ellipsis “…” placeholder.
+I110 [F] Integrity badge standardisation — every component that presents token or collection media must render an <IntegrityBadge status=…/>; the adjacent tooltip / title conveys the long‑form label from constants/integrityBadges.js.
+I111 [F,C,E,I] Don't use "global" in any comments or line summaries, it messes with yarn lint and throws false warnings.
 I112 [F,E] Marketplace dialogs (buy/list/offer) must call feeEstimator.js and display <OperationOverlay/> before dispatching any transaction.
 I113 [F] Unified Consent Management — all consent decisions use useConsent hook with standardized keys: 'nsfw' (for content), 'flash' (for flashing), 'scripts:{contractAddress}' (per‑contract script execution). Consent state syncs across components via CustomEvent broadcasting and always requires explicit user acknowledgment through PixelConfirmDialog with checkbox agreement to terms.
-I114 [F] Portal‑Based Draggable Windows — draggable preview windows use createPortal(component, document.body) for z‑index isolation. Draggable state managed through useRef pattern with randomized start positions (60 + Math.random()*30) to prevent stacking. SSR compatibility: typeof document === 'undefined' ? body : createPortal(body, document.body).
+I114 [F] Portal‑Based Draggable Windows — draggable preview windows use createPortal(component, document.body) for z‑index isolation. Draggable state managed through useRef pattern with randomized start positions (60 + Math.random()30) to prevent stacking. SSR compatibility: typeof document === 'undefined' ? body : createPortal(body, document.body).
 I115 [F] Hazard Detection & Content Protection — all media rendering components must call detectHazards(metadata) before display. Hazard types: { nsfw, flashing, scripts }. Script hazards detect HTML MIME types, JavaScript URIs, SVG with <script> tags. Obfuscation overlays block content until explicit user consent with age verification (18+) for NSFW.
-I116 [F] Debounced Form State Pattern — form components maintain local state mirroring parent props with upward change propagation via useEffect. Input sanitization applied at component level. Unique id attributes use index pattern: id={\tid-${index}}. I117 [F] Script Security Model — script execution requires both hazard detection AND user consent. Script consent persists per contract address. EnableScriptsOverlay provides inline consent, EnableScriptsToggle provides permanent toggle. Terms agreement checkbox required for all script consent flows.
-
-I118 [E] Dual‑Stage Origination — when FAST_ORIGIN=true the origination flow must store a placeholder views pointer
-and then automatically call edit_contract_metadata (v4) within the same UI session to patch the real metadata; failure
-to patch is critical and must trigger resume logic.
-I119 [F] On‑chain integrity scanning must treat remote domain patterns case‑sensitively: the onChainValidator’s
-REMOTE_BARE_RE must not match uppercase‑coded identifiers (e.g. Math.PI/…) as remote references. Only safe domains
-enumerated in SAFE_REMOTE_RE are allowed (see I100).
-I120 [F] Development scripts must propagate the selected network into both build‑time and runtime via environment
-variables (process.env.NETWORK and NEXT_PUBLIC_NETWORK), using the DEV_PORT exported from deployTarget.js; scripts/startDev.js must spawn Next.js via shell mode on the correct port and set these variables before execution.
+I116 [F] Debounced Form State Pattern — form components maintain local state mirroring parent props with upward change propagation via useEffect. Input sanitization applied at component level. Unique id attributes use index pattern: id={\tid-${index}}.
+I117 [F] Script Security Model — script execution requires both hazard detection AND user consent. Script consent persists per contract address. EnableScriptsOverlay provides inline consent, EnableScriptsToggle provides permanent toggle. Terms agreement checkbox required for all script consent flows.
+I118 [retired] Dual‑Stage Origination — FAST_ORIGIN and dual‑stage origination were used in earlier revisions to reduce payload sizes for Temple wallet users. In r1021, dual‑stage origination and the remote forging backend were removed. All wallets now perform single‑stage origination with the full metadata payload via Taquito.
+I119 [F] On‑chain integrity scanning must treat remote domain patterns case‑sensitively: the onChainValidator’s REMOTE_BARE_RE must not match uppercase‑coded identifiers (e.g. Math.PI/…) as remote references. Only safe domains enumerated in SAFE_REMOTE_RE are allowed (see I100).
+I120 [F] Development scripts must propagate the selected network into both build‑time and runtime via environment variables (process.env.NETWORK and NEXT_PUBLIC_NETWORK), using the DEV_PORT exported from deployTarget.js; scripts/startDev.js must spawn Next.js via shell mode on the correct port and set these variables before execution.
 I121 [F] Explore grids and collection/token pages must derive their TzKT API base URL (TZKT_API) and other network parameters from src/config/deployTarget.js rather than hard‑coding Ghostnet or Mainnet domains (extends I10 and I105).
 I122 [F] Token metadata panels must decode contract metadata fully via decodeHexFields/decodeHexJson, fallback through imageUri, logo, artifactUri and thumbnailUri, and display the human‑readable collection name (name → symbol → title → collectionName → short address). Tags must appear with a “Tags:” label and wrap neatly in a single row; meta fields align responsively across breakpoints.
 I123 [F] Marketplace actions (BUY/LIST/OFFER) must use a unified MarketplaceBar.jsx overlay stub that informs users that ZeroSum functionality is still under development and directs them to objkt.com. Direct marketplace operations are disabled until the native marketplace contract is ready.
 I124 [E,F] Local development must support concurrent Ghostnet and Mainnet instances by using yarn set:<network> && yarn dev:current; the dev:current script must honour the selected network and port (3000 for ghostnet, 4000 for mainnet) without resetting TARGET (build script remains unchanged). Clearing local storage may be necessary after network switches to prevent stale data.
-/*
-Note: Invariant I118 is newly reintroduced in this revision. Previous releases
-adopted a single‑stage origination via wallet.originate, but this proved
-incompatible with Temple wallet and other browser extensions due to
-payload size limits. Dual‑stage origination reduces the initial
-operation payload by omitting heavy fields such as off‑chain view
-definitions and high‑resolution images. After the contract is
-originated with minimal metadata, a subsequent transaction updates the
-%metadata big‑map with the full JSON (views array and real imageUri) via
-edit_contract_metadata or update_contract_metadata. The UI tracks
-progress across both operations and provides resume support via
-localStorage. See src/pages/deploy.js for implementation details.
 /
-/ New in this revision: Backend forging/injection. The flags
-FAST_ORIGIN and USE_BACKEND reside in src/config/deployTarget.js.
-When USE_BACKEND=true (default), the front‑end sends only the
-contract code, storage and source address to the serverless
-endpoints /api/forge and /api/inject. These functions run
-Taquito on the server to estimate limits (falling back to safe
-defaults), forge the operation and inject it. The wallet signs
-a small payload (the forged bytes) rather than the full
-operation. When USE_BACKEND=false, client‑side forging via
-src/core/net.js is used with a manual gas/storage/fee fallback.
+Note: Invariant I118 is now retired. Earlier revisions used dual‑stage
+origination (FAST_ORIGIN) and a remote forging backend to circumvent
+payload limitations in Temple wallet. In r1021, dual‑stage origination,
+FAST_ORIGIN and the remote forge service were removed. The project now
+uses a single‑stage origination for all wallets, forging and injecting
+operations locally via Taquito's wallet interface. See src/pages/deploy.js
+for implementation details.
 */
 
 ───────────────────────────────────────────────────────────────
 3 · reserved for future research notes
-────────────────────────────────────────────────────────────────/
+───────────────────────────────────────────────────────────────/
 
 ───────────────────────────────────────────────────────────────
 4 · COMPREHENSIVE SOURCE‑TREE MAP (per‑file description • imports • exports)
 ───────────────────────────────────────────────────────────────/
 /* Legend – one line per path, keep case‑exact
-   <relative‑path> – <purpose>; Imports: <comma‑list>; Exports: <comma‑list>
-   “·” = none.  */
+<relative‑path> – <purpose>; Imports: <comma‑list>; Exports: <comma‑list>
+“·” = none.  */
 
 zerounbound – repo root; Imports:· Exports:·
 zerounbound/.eslintrc.cjs – ESLint ruleset; Imports: eslint-config-next; Exports: module.exports
@@ -414,10 +324,10 @@ zerounbound/contracts/ZeroSum.tz – ZeroSum marketplace; Imports:· Exports:·
 zerounbound/contracts/ZeroSum - Copy.txt – backup copy of ZeroSum marketplace contract; Imports:· Exports:·
 zerounbound/contracts/metadata/views/Zero_Contract_v4_views.json – off‑chain views; Imports:· Exports:·
 
-╭── forge_service_node – new remote forging service ───────────────────────────────╮
-forge_service_node/Dockerfile – builds Node service on Render; Imports: node:18-slim; Exports: container image
-forge_service_node/index.js – Express server exposing /forge, /inject and /healthz endpoints; Imports: express,cors,@taquito/rpc,@taquito/michel-codec; Exports: Express app
-forge_service_node/README.md – service documentation explaining endpoints, environment variables (PORT,RPC_URL), local development and Render deployment; Imports:· Exports:·
+╭── forge_service_node – remote forging service (retired) ───────────────────────────────╮
+forge_service_node/Dockerfile – builds Node service on Render; Imports: node:18-slim; Exports: container image (moved to graveyard)
+forge_service_node/index.js – Express server exposing /forge, /inject and /healthz endpoints; Imports: express,cors,@taquito/rpc,@taquito/michel-codec; Exports: Express app (retired)
+forge_service_node/README.md – service documentation explaining endpoints, environment variables (PORT,RPC_URL), local development and Render deployment; Imports:· Exports:· (retired)
 
 ╭── public assets ───────────────────────────────────────────────────────────╮
 zerounbound/public/embla-left.svg – carousel arrow ⬅; Imports:· Exports:·
@@ -444,7 +354,7 @@ zerounbound/public/sprites/logo.psd – logo source PSD; Imports:· Exports:·
 zerounbound/public/sprites/logo.svg – Zero logo; Imports:· Exports:·
 
 ╭── src/config ──────────────────────────────────────────────────────────────╮
-zerounbound/src/config/deployTarget.js – TARGET constant (I10) and network configuration (rpc urls, site urls, etc.), now always enabling FAST_ORIGIN by default and defining FORGE_SERVICE_URL per network; Imports:· Exports: TARGET
+zerounbound/src/config/deployTarget.js – TARGET constant (I10) and network configuration (rpc urls, site urls, etc.); FAST_ORIGIN and remote forging have been removed; this file defines NETWORK_KEY, RPC lists, theme values and other constants for Ghostnet and Mainnet.
 zerounbound/src/config/networkConfig.js – RPC endpoints map; Imports:· Exports: NETWORKS
 
 ╭── src/constants ───────────────────────────────────────────────────────────╮
@@ -461,7 +371,7 @@ zerounbound/src/core/batch.js – batch ops (v1‑v4); Imports: @taquito/utils,
 zerounbound/src/core/batchV4a.js – v4a‑specific batch ops; Imports: @taquito/taquito; Exports: SLICE_SAFE_BYTES,sliceHex,buildAppendTokenMetaCalls
 zerounbound/src/core/feeEstimator.js – chunk‑safe fee/burn estimator; Imports: @taquito/taquito; Exports: estimateChunked,calcStorageMutez,toTez
 zerounbound/src/core/marketplace.js – ZeroSum helpers; Imports: net.js,@taquito/taquito; Exports: buildBuyParams,buildListParams,buildOfferParams
-zerounbound/src/core/net.js – network helpers (jFetch, forgeOrigination, injectSigned). This module now always attempts remote forging/injecting via FORGE_SERVICE_URL before falling back to local forging using Taquito’s LocalForger/TezosToolkit. Imports: Parser,@taquito/michelson-encoder,deployTarget; Exports: jFetch,forgeOrigination,injectSigned
+zerounbound/src/core/net.js – network helpers (jFetch, forgeOrigination, injectSigned). This module now always uses local forging and injection via Taquito's LocalForger/TezosToolkit; remote forging support has been removed. Imports: Parser,@taquito/michelson-encoder,deployTarget; Exports: jFetch,forgeOrigination,injectSigned
 zerounbound/src/core/validator.js – JSON‑schema helpers; Imports: ajv; Exports: validateContract,validateToken
 
 ╭── src/data ────────────────────────────────────────────────────────────────╮
@@ -506,13 +416,13 @@ zerounbound/src/ui/ThemeToggle.jsx – palette switch button; Imports: ThemeCont
 zerounbound/src/ui/WalletNotice.jsx – wallet status banner; Imports: useWallet; Exports: WalletNotice
 zerounbound/src/ui/ZerosBackground.jsx – animated zeros field; Imports: react; Exports: ZerosBackground
 zerounbound/src/ui/IntegrityBadge.jsx – on‑chain integrity badge; Imports: react,integrityBadges.js,PixelButton.jsx; Exports: IntegrityBadge
-zerounbound/src/ui/MakeOfferBtn.jsx - XS size, make-offer button from marketplace contract ZeroSum.tz Import:PropTypes,PixelButton Export:MakeOfferBtn
+zerounbound/src/ui/MakeOfferBtn.jsx - XS size, make-offer button from marketplace contract ZeroSum.tz; Imports: PropTypes,PixelButton; Exports: MakeOfferBtn
 zerounbound/src/ui/MAINTokenMetaPanel.jsx – responsive token metadata panel with hazard detection, consent handling, token‑level script toggle and fullscreen controls; decodes collection metadata, selects thumbnails, wraps tags with a label, aligns meta fields and uses safe name fallback; re‑renders preview on script permission changes; Imports: React,PropTypes,date-fns,styled-components,PixelHeading,PixelButton,RenderMedia,IntegrityBadge,MarketplaceBar,detectHazards,useConsent,shortKt,copyToClipboard,EnableScriptsToggle,PixelConfirmDialog,countAmount,hashMatrix,decodeHexFields; Exports: MAINTokenMetaPanel
 
 ╭── src/ui/operation & misc ─────────────────────────────────────────────────╮
 zerounbound/src/ui/AdminTools.jsx – dynamic entry‑point modal; Imports: react,WalletContext; Exports: AdminTools
 zerounbound/src/ui/OperationConfirmDialog.jsx – tx summary dialog; Imports: react,PixelConfirmDialog; Exports: OperationConfirmDialog
-zerounbound/src/ui/OperationOverlay.jsx – progress overlay with status updates, Temple prompts and optional token link; supports tokenUrl prop for “View Token” button; Imports: react,useWheelTunnel,LoadingSpinner,CanvasFireworks,PixelButton; Exports: OperationOverlay
+zerounbound/src/ui/OperationOverlay.jsx – progress overlay with status updates and optional token link; supports tokenUrl prop for “View Token” button; Imports: react,useWheelTunnel,LoadingSpinner,CanvasFireworks,PixelButton; Exports: OperationOverlay
 zerounbound/src/ui/ContractCarousels.jsx – live contract cards; Imports: react,jFetch,countTokens; Exports: ContractCarousels
 zerounbound/src/ui/ContractMetaPanel.jsx – contract stats card; Imports: react,styled-components; Exports: ContractMetaPanel
 zerounbound/src/ui/ContractMetaPanelContracts.jsx – banner panel on /contracts; Imports: React,RenderMedia; Exports: ContractMetaPanelContracts
@@ -521,13 +431,13 @@ zerounbound/src/ui/BuyDialog.jsx – buy confirmation dialog; Imports: React,Ope
 zerounbound/src/ui/ListTokenDialog.jsx – listing dialog; Imports: React,OperationOverlay,PixelInput; Exports: ListTokenDialog
 zerounbound/src/ui/MarketplaceBar.jsx – token action bar; Imports: React,PixelButton; Exports: MarketplaceBar
 zerounbound/src/ui/GlobalSnackbar.jsx – global toast host; Imports: React; Exports: GlobalSnackbar
-zerounbound/src/ui/MakeOfferDialog.jsx - add amount and make your bid; Imports:React,styledPkg,PixelInput,PixelButton,useWalletContext Export:MakeOfferDialog
+zerounbound/src/ui/MakeOfferDialog.jsx - add amount and make your bid; Imports: React,styledPkg,PixelInput,PixelButton,useWalletContext; Exports: MakeOfferDialog
 zerounbound/src/ui/TokenCard.jsx – token preview card; Imports: React,hazards,useConsent; Exports: TokenCard
 zerounbound/src/ui/TokenIdSelect.jsx – live id dropdown; Imports: styled-components; Exports: TokenIdSelect
 zerounbound/src/ui/TokenMetaPanel.jsx – detailed token panel; Imports: React,RenderMedia; Exports: TokenMetaPanel
 zerounbound/src/ui/canvasFireworks.jsx – confetti canvas; Imports: react; Exports: FireworksCanvas
-zerounbound/src/ui/EnableScripts.jsx – common enable scripts prompt components; Imports: React,PropTypes,PixelButton Exports: EnableScriptsOverlay,EnableScriptsToggle
-zerounbound/src/ui/FullscreenModal.jsx - reusable fullscreen viewer + pixel-upscale control; Imports: React,PropTypes,styledPkg,RenderMedia,PixelButton,pixelUpscaleStyle Exports: FullscreenModal
+zerounbound/src/ui/EnableScripts.jsx – common enable scripts prompt components; Imports: React,PropTypes,PixelButton; Exports: EnableScriptsOverlay,EnableScriptsToggle
+zerounbound/src/ui/FullscreenModal.jsx – reusable fullscreen viewer + pixel-upscale control; Imports: React,PropTypes,styledPkg,RenderMedia,PixelButton,pixelUpscaleStyle; Exports: FullscreenModal
 
 ╭── src/ui/Entrypoints (v4 & v4a) ───────────────────────────────────────────╮
 zerounbound/src/ui/Entrypoints/index.js – lazy EP resolver; Imports: dynamic import; Exports: resolveEp
@@ -594,9 +504,7 @@ zerounbound/summarized_files/infra_bundle.txt – infra dump; Imports:· Exports
 contracts_bundle.txt → Michelson sources + views
 assets_bundle.txt  → fonts, sprites, sw.js
 engine_bundle.txt  → scripts/, core/, data/, config/, constants/, utils/
-(now includes utils/decodeHexFields.js)
 frontend_bundle.txt → contexts/, hooks/, ui/, pages/, styles/
-(now includes ui/TokenIdSelect.jsx)
 infra_bundle.txt   → root configs, next.config.js, package.json, CI helpers
 master_bundle.txt → contains everything in all the above bundles.
 
@@ -609,8 +517,6 @@ yarn install
 ### OpenAI Codex setup script
 Codex pulls scripts/codex-setup.sh automatically:
 
-bash
-Copy
 #!/usr/bin/env bash
 corepack enable
 corepack prepare yarn@4.9.1 --activate
@@ -632,13 +538,11 @@ the TARGET via yarn set:<network> and use the dev:current script
 which honours the selected network and port without resetting the
 target. For example:
 
-bash
-Copy
-# Ghostnet (default) on port 3000
+Ghostnet (default) on port 3000
 yarn set:ghostnet
 yarn dev:current
 
-# Mainnet on port 4000
+Mainnet on port 4000
 yarn set:mainnet
 yarn dev:current
 The canonical yarn dev script always resets TARGET to ghostnet
@@ -653,9 +557,10 @@ A. hashMatrix.json, contains all the typeHashes' generated by tzkt used in filt
 
 B. entrypointRegistry.json, contains all Entrypoints used across our supported v1-v4d contracts (unchanged).
 
-──────────────────────────────────────────────────────────────
+─────────────────────────────────────────────────────────────
 CHANGELOG
-──────────────────────────────────────────────────────────────/
+─────────────────────────────────────────────────────────────/
+• r1021 2025‑07‑24 UTC — removed the remote forge service and FAST_ORIGIN flag; unified single‑stage origination via Taquito’s wallet.originate() for all wallets; updated manifest, invariants, and source‑tree map to reflect removal; moved forge_service_node to graveyard; polished token metadata and marketplace features.
 • r1020 2025‑07‑23 UTC — refined token-detail UX: stacked script toggle and labelled fullscreen button above description; ensured previews re-render when toggling scripts; updated ExploreNav to hide search bar when hideSearch prop is set and include hazard consent prompts; updated Mint flow with authors hints and tokenUrl; added token link support to OperationOverlay; revised manifest summary and source-tree map accordingly.
 • r1019 2025‑07‑23 UTC — repositioned token-level script toggle and fullscreen controls on token detail pages; moved controls into MAINTokenMetaPanel; removed script overlay and bottom-left icons; added auto-refresh of token previews upon script permission changes; updated manifest summary and source-tree map accordingly.
 • r1017 2025‑07‑22 UTC — added invariants I119–I124 covering case‑sensitive remote detection, dynamic dev scripts, TzKT API derivation, improved metadata panels and tags, unified marketplace overlay, and dual‑network development; updated revision and summary; removed application domain whitelisting; refined onChainValidator remote detection.

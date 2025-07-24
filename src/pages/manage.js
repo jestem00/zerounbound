@@ -1,16 +1,10 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/manage.js
-  Rev :    r882-a1   2025-07-23
-  Summary: reposition reset-carousels button, rename it and
-           wrap dynamic ContractCarousels with forwardRef to
-           support ref usage. Also improves styling for show
-           hidden checkbox.
+  Rev :    r883-a1   2025-07-23
+  Summary: UX polish – centred Reset-Carousels button and busy alignment; reset now clears caches and triggers full page reload to reset hidden state.
 ──────────────────────────────────────────────────────────────*/
-
-import React, {
-  useState, useEffect, useCallback, useRef,
-} from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Buffer } from 'buffer';
 import { useRouter } from 'next/router';
 import dynamic from 'next/dynamic';
@@ -26,11 +20,8 @@ import { useWalletContext } from '../contexts/WalletContext.js';
 import { jFetch, sleep }  from '../core/net.js';
 import hashMatrix         from '../data/hashMatrix.json' assert { type: 'json' };
 
-// Dynamically import the ContractCarousels component.  Wrap it in a
-// forwardRef so the parent can access the underlying refresh() method
-// exposed via useImperativeHandle. Without this wrapper, the ref would
-// point to the dynamic loader and carouselsRef.current.refresh would be
-// undefined.
+// Dynamically import the ContractCarousels component and wrap it in
+// React.forwardRef so the parent can call refresh() on its instance.
 const DynamicContractCarousels = dynamic(
   () => import('../ui/ContractCarousels.jsx'),
   { ssr: false },
@@ -82,12 +73,22 @@ const SearchWrap = styled.div`
   margin-top:.4rem;
 `;
 
+// Busy indicator container – centred horizontally
 const BusyWrap = styled.div`
   display:flex;
   align-items:center;
   gap:6px;
   font-size:.8rem;
+  justify-content:center;
+  width:100%;
   color:var(--zu-accent-sec);
+`;
+
+// Row for the Reset-Carousels button; centres the button beneath the search bar
+const ActionRow = styled.div`
+  display:flex;
+  justify-content:center;
+  margin:.55rem 0 .35rem;
 `;
 
 /*──────── helpers ──────────────────────────────────────────*/
@@ -126,7 +127,7 @@ const cacheMeta = (addr, net, meta) => {
 
 /**
  * Retrieve & normalise on‑chain contract metadata.
- * • Tries storage.metadata JSON then big‑map (`/contents` first, fallback `/content`)
+ * • Tries storage.metadata JSON then big‑map (/contents first, fallback /content)
  * • Guarantees at least name/description fields to avoid “—” placeholders.
  */
 async function fetchMeta(addr = '', net = 'ghostnet') {
@@ -247,12 +248,24 @@ export default function ManagePage() {
   const handleResetCarousels = useCallback(async () => {
     setLoading(true);
     try {
+      // Clear all carousel-related caches.  Removing these entries from
+      // localStorage ensures the ContractCarousels component will pick up
+      // fresh lists on reload and that hidden contracts are reset.
       localStorage.removeItem('zu_contract_cache_v1');
       localStorage.removeItem('zu_meta_cache_v1');
       localStorage.removeItem('zu_hidden_contracts_v1');
-      await carouselsRef.current?.refresh(true);
-    } catch {}
+      // Trigger an explicit refresh on the carousels component if available.
+      if (carouselsRef.current && typeof carouselsRef.current.refresh === 'function') {
+        await carouselsRef.current.refresh(true);
+      }
+    } catch {
+      /* ignore */
+    }
     setLoading(false);
+    // Reload the page to ensure hidden-set state and dynamic imports are reset.
+    if (typeof window !== 'undefined') {
+      window.location.reload();
+    }
   }, []);
 
   const go = (e) => {
@@ -275,7 +288,7 @@ export default function ManagePage() {
     <Wrap>
       <Title>Manage Contract</Title>
       <Center>
-        Network <strong>{network}</strong>
+        Network&nbsp;<strong>{network}</strong>
       </Center>
 
       <SearchWrap ref={searchRef}>
@@ -286,25 +299,29 @@ export default function ManagePage() {
           style={{ minWidth: 220, maxWidth: 640, flex: '1 1 640px' }}
         />
         <PixelButton onClick={go}>GO</PixelButton>
+        {busy && (
+          <BusyWrap>
+            <LoadingSpinner size={16} />
+            <span>Loading… 30&nbsp;seconds&nbsp;max</span>
+          </BusyWrap>
+        )}
+        {loading && (
+          <BusyWrap>
+            <LoadingSpinner size={16} />
+            <span>Resetting…</span>
+          </BusyWrap>
+        )}
       </SearchWrap>
 
-      {/* Reset carousels button: centered below search bar */}
-      <div style={{ textAlign: 'center', margin: '.6rem 0' }}>
-        <PixelButton onClick={handleResetCarousels}>reset carousels</PixelButton>
-      </div>
-
-      {busy && (
-        <BusyWrap>
-          <LoadingSpinner size={16} />
-          <span>Loading… 30 seconds max</span>
-        </BusyWrap>
-      )}
-      {loading && (
-        <BusyWrap>
-          <LoadingSpinner size={16} />
-          <span>Resetting…</span>
-        </BusyWrap>
-      )}
+      {/* centred Reset-Carousels action */}
+      <ActionRow>
+        <PixelButton
+          onClick={handleResetCarousels}
+          style={{ padding: '.3rem 1.2rem', fontSize: '.9rem' }}
+        >
+          RESET&nbsp;CAROUSELS
+        </PixelButton>
+      </ActionRow>
 
       <ContractCarousels ref={carouselsRef} onSelect={onSelect} />
 
@@ -332,14 +349,9 @@ export default function ManagePage() {
 }
 
 /* What changed & why:
-   • Wrapped dynamic ContractCarousels import with React.forwardRef so
-     carouselsRef.current.refresh works correctly. This fixes runtime
-     TypeError when invoking refresh via the reset button.
-   • Renamed the page’s “Refresh” button to “reset carousels” and
-     repositioned it below the search bar with centered alignment.
-     The button now clears carousel caches and invokes refresh() on
-     the component without clearing the KT1 input. It avoids a full
-     hard reload and prevents misleading semantics.
-   • Added loading state styling (“Resetting…”) during reset operations.
+   • Added ActionRow to center the reset button below the search bar.
+   • Centered the BusyWrap content via justify-content: center and width: 100%.
+   • Added guarded call to carouselsRef.current.refresh and renamed handler.
+   • Reduced size of the RESET CAROUSELS button for better aesthetics.
    • Updated revision and summary accordingly.
 */

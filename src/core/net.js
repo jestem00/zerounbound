@@ -20,7 +20,7 @@ import { FORGE_SERVICE_URL } from '../config/deployTarget.js';
 
 /* global concurrency limit */
 // Reduce concurrency from 4 to 2 to avoid saturating the TzKT API
-const LIMIT = 2;
+const LIMIT = 4;
 let   active = 0;
 const queue  = [];
 

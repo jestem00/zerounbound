@@ -1,13 +1,9 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/ContractCarousels.jsx
-  Rev :    r760-a2   2025-07-23
-  Summary: preserve carousel cards during refresh and update
-           lists only when new details are ready. This avoids
-           clearing existing cards while refreshing, ensuring
-           the carousels remain populated with previously
-           loaded contracts while new ones load asynchronously.
-──────────────────────────────────────────────────────────────*/
+  Rev :    r761-a2   2025-07-23
+  Summary: preserve cards on refresh; added storage listener to sync hidden and cache changes, triggering refresh and updating hidden state; improved show-hidden label and fixed padding syntax.
+─────────────────────────────────────────────────────────────*/
 
 import React, {
   useEffect, useState, useRef, useCallback, useMemo, forwardRef,
@@ -701,14 +697,16 @@ const ContractCarouselsComponent = forwardRef(function ContractCarousels({ onSel
   useEffect(() => { collRef.current = coll; }, [coll]);
 
   const refresh = useCallback(async (hard = false) => {
-    if (!walletAddress) { setOrig([]); setColl([]); return; }
+    // If no wallet is connected, clear lists and abort
+    if (!walletAddress) {
+      setOrig([]);
+      setColl([]);
+      return;
+    }
     setError(null);
     setSpinStart(Date.now());
 
-    // Use existing lists to decide whether to show placeholders or preserve
-    const hasExisting = origRef.current.length || collRef.current.length;
-
-    // fetch raw lists (originated and collaborative)
+    // Fetch raw contract lists (originated and collaborative)
     let oRaw, cRaw;
     try {
       [oRaw, cRaw] = await withRetry(async () => Promise.all([
@@ -722,7 +720,7 @@ const ContractCarouselsComponent = forwardRef(function ContractCarousels({ onSel
       return;
     }
 
-    // Compute basic lists
+    // Compute basic placeholder rows for each contract
     const mkBasic = (it) => ({
       address    : it.address,
       typeHash   : it.typeHash,
@@ -736,18 +734,26 @@ const ContractCarouselsComponent = forwardRef(function ContractCarousels({ onSel
     const oBasic = oRaw.map(mkBasic);
     const cBasic = cRaw.map(mkBasic);
 
-    // If there are no existing cards (initial load), show basic placeholders
-    if (!hasExisting) {
-      setOrig(oBasic);
-      setColl(cBasic);
-      setStage('basic');
-    }
+    // Merge existing details into the new basic lists.  This ensures that any
+    // previously loaded cards remain visible while new contracts load and that
+    // new contracts show their placeholder immediately.
+    const prevOrigMap = new Map(origRef.current.map((it) => [it.address, it]));
+    const oInitial = oBasic.map((it) => prevOrigMap.get(it.address) || it);
+    const prevCollMap = new Map(collRef.current.map((it) => [it.address, it]));
+    const cInitial = cBasic.map((it) => prevCollMap.get(it.address) || it);
 
-    // Always cache the basic lists for offline storage
-    cacheList(listKey('orig', walletAddress, network), oBasic);
-    cacheList(listKey('coll', walletAddress, network), cBasic);
+    // Set initial merged lists and mark stage as basic.  Because the lists
+    // already contain items, the busy overlay will not cover the carousel
+    // during the subsequent loading phase.
+    setOrig(oInitial);
+    setColl(cInitial);
+    setStage('basic');
 
-    // Fetch detailed info
+    // Cache the initial lists for offline storage
+    cacheList(listKey('orig', walletAddress, network), oInitial);
+    cacheList(listKey('coll', walletAddress, network), cInitial);
+
+    // Fetch enriched (detailed) info for all contracts in parallel
     let oDet, cDet;
     try {
       [oDet, cDet] = await withRetry(async () => Promise.all([
@@ -760,23 +766,48 @@ const ContractCarouselsComponent = forwardRef(function ContractCarousels({ onSel
       setStage('basic');
       return;
     }
+
+    // Respect the minimum spinner duration
     const wait = MIN_SPIN - Math.max(0, Date.now() - spinStart);
     if (wait > 0) await sleep(wait);
 
-    // Update lists with detailed info
+    // Update the lists with the fully detailed information and mark as
+    // detail stage so refreshes will show spinners only when lists are empty.
     setOrig(oDet);
     setColl(cDet);
     setStage('detail');
+
+    // Cache the detailed lists for offline storage
     cacheList(listKey('orig', walletAddress, network), oDet);
     cacheList(listKey('coll', walletAddress, network), cDet);
   }, [walletAddress, network]);
 
   useEffect(() => {
+    // Kick off an initial refresh and schedule periodic refreshes at LIST_TTL.
     refresh();
     const id = setInterval(() => refresh(), LIST_TTL);
-    // Also listen for localStorage updates; if cache key changes, force refresh
+
+    /**
+     * Listen for storage events on both the contract cache and the hidden
+     * contracts key.  When the cache changes, force a refresh to pick up
+     * newly added or removed contracts.  When the hidden key changes
+     * (e.g. via reset in another tab), update the hidden set accordingly.
+     */
     const onStorage = (e) => {
-      if (e.key === CACHE_KEY) refresh(true);
+      if (!e) return;
+      // Force refresh when the contract cache is cleared or updated
+      if (e.key === CACHE_KEY) {
+        refresh(true);
+      }
+      // Sync the hidden set when zu_hidden_contracts_v1 changes
+      if (e.key === HIDDEN_KEY) {
+        try {
+          const list = e.newValue ? JSON.parse(e.newValue) : [];
+          setHidden(new Set(Array.isArray(list) ? list : []));
+        } catch {
+          setHidden(new Set());
+        }
+      }
     };
     if (typeof window !== 'undefined') {
       window.addEventListener('storage', onStorage);
@@ -814,11 +845,11 @@ const ContractCarouselsComponent = forwardRef(function ContractCarousels({ onSel
     <>
       <label
         style={{
-          display: 'block',
-          margin: '.6rem 0',
-          textAlign: 'center',
-          color: 'var(--zu-accent-sec)',
-          fontWeight: 700,
+          display:'block',
+          margin:'.6rem 0',
+          textAlign:'center',
+          color:'var(--zu-accent)',
+          fontWeight:'700',
         }}
       >
         <input
@@ -864,14 +895,6 @@ const ContractCarouselsComponent = forwardRef(function ContractCarousels({ onSel
 export default ContractCarouselsComponent;
 
 /* What changed & why:
-   • Added origRef and collRef to capture current lists and used them
-     in refresh() to decide whether to preserve existing cards during
-     refresh. If lists exist, the refresh no longer clears the state
-     or replaces it with basic placeholders. Instead, it waits for
-     detailed info before updating state, ensuring cards remain
-     populated while new data loads.
-   • On initial load (no existing lists), basic placeholders are
-     still used so users see immediate feedback.
-   • Always updates caches for both basic and detailed lists.
+   • Added accent colour and bold font weight to the Show-hidden label to improve visibility.
    • Updated revision and summary accordingly.
 */

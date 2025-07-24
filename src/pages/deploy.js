@@ -2,10 +2,11 @@
 /*──────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/deploy.js
-  Rev :    r1126‑a2   2025‑07‑24
-  Summary: Tweak Temple‑wallet warning banner styling for improved
-           contrast across themes.  The banner now uses a bright
-           accent background with dark text for better legibility.
+  Rev :    r1127‑a1   2025‑07‑24
+  Summary: Consolidate Temple origination path with Kukai/Umami.  All
+           wallets now use the single‑stage origination flow to
+           reproduce the original Temple error.  Remote forging
+           detection and early exits have been removed.
 ──────────────────────────────────────────────────────────────*/
 
 import React, { useRef, useState, useCallback, useEffect } from 'react';
@@ -536,31 +537,11 @@ export default function DeployPage() {
    * @param {Object} meta Metadata from form
    */
   async function originate(meta) {
-    // If a Temple wallet is connected, block origination and show a message.
-    if (isTempleWallet) {
-      const msg = 'Temple wallet cannot currently originate the ZeroContract v4 due to payload size limits. Please import your wallet into Kukai or Umami to originate new contracts.';
-      setErr(msg);
-      setLabel(msg);
-      return;
-    }
-    // Attempt to detect the wallet name via Beacon.  If Temple is
-    // detected, use the backend forge service; otherwise, use
-    // single‑stage origination via wallet.originate().
-    let useBackendFlag = false;
-    try {
-      const info = await wallet.client.getWalletInfo();
-      const name = (info?.name || '').toLowerCase();
-      if (name.includes('temple')) {
-        useBackendFlag = true;
-      }
-    } catch {}
-    // Persist which path is being used for rendering purposes
-    setUseBackend(useBackendFlag);
-    if (useBackendFlag) {
-      await originateViaForgeService(meta);
-    } else {
-      await originateSingleStage(meta);
-    }
+    // Always use the single‑stage origination flow for all wallets.
+    // This replicates the original error encountered with Temple wallet
+    // and removes remote forging and special cases.
+    setUseBackend(false);
+    await originateSingleStage(meta);
   }
 
   /*──────── render ─────────────────────────────────────────*/
@@ -594,7 +575,7 @@ export default function DeployPage() {
             // form to re-submit metadata on user action.
           }}
           step={step}
-          total={useBackend ? 5 : 1}
+          total={1}
         />
       )}
     </Wrap>
@@ -602,14 +583,11 @@ export default function DeployPage() {
 }
 
 /* What changed & why:
-   – Added a useEffect hook to detect when a Temple wallet is connected.  This
-     sets the isTempleWallet state, which drives both the warning banner and
-     early exit in the originate() function.  Users connecting with Temple
-     will see a notice telling them to use Kukai or Umami instead, and
-     origination is blocked to prevent failures.
-   – Added a Warning styled component and conditional rendering to display
-     the notice above the deploy form.  This uses theme variables for
-     consistent styling.
-   – Imported useEffect and added new state isTempleWallet.  The header
-     revision and summary were updated accordingly.
+   – Consolidated the origination pipeline: the originate() function now
+     always calls originateSingleStage() for all wallets.  Remote
+     forging and early termination for Temple wallets have been removed
+     so the original error can be reproduced.  The overlay now uses a
+     fixed total of 1 signature.
+   – Updated header revision and summary to r1127‑a1 with new
+     description.
 */

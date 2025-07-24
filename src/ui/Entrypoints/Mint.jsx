@@ -1,11 +1,8 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/Mint.jsx
-  Rev :    r886-a1   2025-07-23
-  Summary: refine oversize detection, tokenUrl support, authors hint and
-           dialogs; fix v2.* mint signature by invoking mint(map,to)
-           for all v2 versions (2a–2e) similar to v1; preserve v3+
-           behaviour; moved checklist above button and authors hint.
+  Rev :    r887   2025-09-06
+  Summary: limit editions for large media; warn users and clamp editions; retain prior enhancements.
 ──────────────────────────────────────────────────────────────*/
 
 import React, {
@@ -415,6 +412,18 @@ export default function Mint({
     [shares],
   );
 
+  /* clamp editions when oversize */
+  const editionCount = useMemo(() => {
+    const n = parseInt(f.amount, 10) || 1;
+    return n < 1 ? 1 : n;
+  }, [f.amount]);
+  useEffect(() => {
+    if (oversize && editionCount > 1) {
+      setF((p) => ({ ...p, amount: '1' }));
+      snack('Large uploads are limited to 1 edition; please use bulk transfer after mint.', 'warning');
+    }
+  }, [oversize, editionCount, snack]);
+
   /*──────── validation helpers ─────────────────────*/
   const baseChecks = useMemo(() => {
     const recipientOk = forceSelf
@@ -434,6 +443,7 @@ export default function Mint({
       editions:      (() => {
         if (contractVersion === 'v1' || String(contractVersion).startsWith('v2')) return true;
         const n = parseInt(f.amount || '', 10);
+        if (oversize) return n === 1;
         return !Number.isNaN(n) && n >= 1 && n <= MAX_EDITIONS;
       })(),
       attrs:         validAttributes(attrs.filter((a) => a.name && a.value)),
@@ -1055,17 +1065,15 @@ export default function Mint({
   );
 }
 /* What changed & why:
-   • Added v2.* mint signature fix: buildMintCall now treats all v2
-     contract variants (v2, v2a–v2e) the same as v1, calling
-     c.methods.mint(map, to). This addresses broken minting on
-     v2B contracts where the previous signature incorrectly passed
-     an edition count.  Editions for v2.* always default to one.
-   • Updated validation logic to treat versions starting with 'v2'
-     like v1, bypassing editions input; both baseChecks and UI now
-     hide the editions field for v2.* and v1.
-   • Improved oversize detection comments and clamped
-     maxFirstSlice calculations as before; no functional changes.
-   • Preserved all prior enhancements: oversize detection, tokenUrl
-     support, authors checklist warning, NSFW/flashing info dialogs,
-     and improved form hints. Revision bumped to r886-a1.
+   • Clamped edition counts for oversize uploads: when a media file
+     requires slicing (oversize), the edition amount is restricted to 1.
+     If a user enters a higher amount, the component resets it to "1"
+     and displays a warning explaining that large uploads must be
+     minted one edition at a time.
+   • Updated baseChecks.editions to enforce the same single‑edition rule
+     for oversize uploads; non-oversize editions continue to obey
+     MAX_EDITIONS constraints.
+   • Updated header and revision number accordingly. All prior
+     enhancements (v2 signature fix, oversize detection, tokenUrl
+     support, authors checklist, NSFW/flashing dialogs) are preserved.
 */

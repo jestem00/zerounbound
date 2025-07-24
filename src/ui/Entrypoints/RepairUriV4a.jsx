@@ -301,9 +301,16 @@ export default function RepairUriV4a({
 
       await confirmOrTimeout(op);
 
+      // Persist progress and update local resumeInfo to reflect the
+      // completed batch. Without updating resumeInfo state, the next
+      // retry would reset to the first batch. See issue #retryReset.
       saveSliceCheckpoint(...checkpointArgs, {
-        ...resumeInfo, next: idx + 1,
+        ...resumeInfo,
+        next: idx + 1,
       });
+      setResumeInfo((prev) => (
+        prev ? { ...prev, next: idx + 1 } : { next: idx + 1, total: batches.length }
+      ));
 
       if (idx + 1 < batches.length) {
         requestAnimationFrame(() => runSlice(idx + 1));

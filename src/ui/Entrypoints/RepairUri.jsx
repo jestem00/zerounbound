@@ -568,7 +568,18 @@ export default function RepairUri({
           lastOpHash = sentOp.opHash;
           setOverlay({ open: true, status: 'Broadcasting…', current: idx + 1, total: packs.length, error: false });
           await confirmOrTimeout(sentOp);
-          const batchBytes = params.reduce((sum, p) => sum + (p.parameter?.value?.length - 2) / 2, 0);
+          const batchBytes = params.reduce((sum, p) => {
+            // Extract appended bytes length from the last argument's bytes field.
+            try {
+              const args = p.parameter?.value?.args;
+              if (Array.isArray(args)) {
+                const last = args[args.length - 1];
+                const b = last?.bytes;
+                if (typeof b === 'string') return sum + (b.length / 2);
+              }
+            } catch {}
+            return sum;
+          }, 0);
           currentByte += batchBytes;
           saveSliceCheckpoint(...checkpointKeyArgs, { ...resumeInfo, next: currentByte });
           setResumeInfo((prev) => ({ ...prev, next: currentByte }));
@@ -578,7 +589,17 @@ export default function RepairUri({
             setOverlay({ open: true, status: 'Polling for inclusion…', current: idx + 1, total: packs.length, error: false });
             const landed = await pollOpStatus(sentOp.opHash, TZKT_API);
             if (landed) {
-              const batchBytes = params.reduce((sum, p) => sum + (p.parameter?.value?.length - 2) / 2, 0);
+              const batchBytes = params.reduce((sum, p) => {
+                try {
+                  const args = p.parameter?.value?.args;
+                  if (Array.isArray(args)) {
+                    const last = args[args.length - 1];
+                    const b = last?.bytes;
+                    if (typeof b === 'string') return sum + (b.length / 2);
+                  }
+                } catch {}
+                return sum;
+              }, 0);
               currentByte += batchBytes;
               saveSliceCheckpoint(...checkpointKeyArgs, { ...resumeInfo, next: currentByte });
               setResumeInfo((prev) => ({ ...prev, next: currentByte }));

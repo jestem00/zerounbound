@@ -53,17 +53,14 @@ export default function MyTokens() {
       setLoading(true);
       try {
         /*
-         * Fetch tokens created/minted by the user.  The TzKT API allows deep
-         * filtering by nested metadata fields, so query tokens whose
-         * `metadata.creators` or `metadata.authors` array contains the
-         * connected wallet.  Also retain the legacy `creator` filter for
-         * contracts that populate that field instead of the metadata.
-         * Collect contract+tokenId pairs from all three queries into a
-         * unified minted set.  Note: each query is limited to 1000 entries.
+         * Build a set of tokens minted by the user based on deep metadata
+         * queries.  For environments where the TzKT API may not return
+         * metadata‑filtered results or the `creator` field, this set may
+         * remain empty.  Fallback logic below will deduce creations by
+         * inspecting the metadata of tokens currently owned.
          */
         const mintedSet = new Set();
         try {
-          // tokens where metadata.creators contains the address
           const resMetaCreators = await fetch(
             `${TZKT_API}/v1/tokens?metadata.creators.[*]=${address}&limit=1000&select=contract.address,tokenId`
           );
@@ -73,7 +70,6 @@ export default function MyTokens() {
             const id = row.tokenId ?? row['tokenId'];
             if (c && id != null) mintedSet.add(`${c}:${id}`);
           });
-          // tokens where metadata.authors contains the address (fallback)
           const resMetaAuthors = await fetch(
             `${TZKT_API}/v1/tokens?metadata.authors.[*]=${address}&limit=1000&select=contract.address,tokenId`
           );
@@ -83,7 +79,6 @@ export default function MyTokens() {
             const id = row.tokenId ?? row['tokenId'];
             if (c && id != null) mintedSet.add(`${c}:${id}`);
           });
-          // tokens where the legacy `creator` field equals the address
           const resCre = await fetch(
             `${TZKT_API}/v1/tokens?creator=${address}&limit=1000&select=contract.address,tokenId`
           );
@@ -94,7 +89,6 @@ export default function MyTokens() {
             if (c && id != null) mintedSet.add(`${c}:${id}`);
           });
         } catch (err) {
-          // ignore errors from minted queries; mintedSet may remain empty
           console.error('Failed to fetch minted token identifiers:', err);
         }
 
@@ -133,10 +127,26 @@ export default function MyTokens() {
         });
 
         // Determine created tokens that are minted by the user and still owned.
-        // Use the mintedSet composed from metadata and creator queries.  Only tokens
-        // present in mintedSet are considered creations; the rest are purchases.
-        const createdOwned = focOwned.filter((t) => mintedSet.has(`${t.contract}:${t.tokenId}`));
-        const purchased = focOwned.filter((t) => !mintedSet.has(`${t.contract}:${t.tokenId}`));
+        // First check the mintedSet from the TzKT deep queries; if it is empty,
+        // fallback to inspecting each token’s metadata: consider it a creation
+        // if the connected wallet appears in metadata.creators, metadata.authors
+        // or metadata.creator (legacy).  Comparisons are case‑insensitive.
+        const createdOwned = [];
+        const purchased   = [];
+        const lowerAddr   = address?.toLowerCase() || '';
+        focOwned.forEach((t) => {
+          const key = `${t.contract}:${t.tokenId}`;
+          let isMinted = mintedSet.size > 0 ? mintedSet.has(key) : false;
+          if (!isMinted) {
+            const m = t.metadata || {};
+            const creators = Array.isArray(m.creators) ? m.creators : [];
+            const authors  = Array.isArray(m.authors)  ? m.authors  : [];
+            const creatorField = typeof m.creator === 'string' ? [m.creator] : [];
+            const all = [...creators, ...authors, ...creatorField].map((s) => (typeof s === 'string' ? s.toLowerCase() : ''));
+            isMinted = all.some((a) => a === lowerAddr);
+          }
+          if (isMinted) createdOwned.push(t); else purchased.push(t);
+        });
 
         setCreations(createdOwned);
         setPurchases(purchased);

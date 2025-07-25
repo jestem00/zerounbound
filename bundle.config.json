@@ -83,6 +83,7 @@
 		    "src/ui/Entrypoints/index.js",
 	    	"src/ui/Entrypoints/AcceptOffer.jsx",
 	    	"src/ui/Entrypoints/CancelListing.jsx",
+        "src/ui/OperationOverlay.jsx",
         "src/pages/explore/listings.jsx",
         "src/pages/Entrypoints/CancelOffer.jsx",
         "src/pages/my/collections.jsx",

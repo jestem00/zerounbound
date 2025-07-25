@@ -337,6 +337,13 @@ export default function ListTokenDialog({ open, contract, tokenId, onClose = () 
             <OperationOverlay
               label={ov.label}
               onClose={() => setOv({ open: false, label: '' })}
+              /**
+               * Provide an onCancel handler so that clicking the
+               * Cancel button inside OperationOverlay closes the
+               * overlay immediately. Without this prop the Cancel
+               * button defaults to a no‑op for this dialog.
+               */
+              onCancel={() => setOv({ open: false, label: '' })}
             />
           )}
           <PixelButton onClick={onClose}>Close</PixelButton>

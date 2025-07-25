@@ -1,7 +1,7 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/AcceptOffer.jsx
-  Rev :    r1    2025‑07‑25 UTC
+  Rev :    r2    2025‑07‑25 UTC
   Summary: Pop‑out UI for accepting marketplace offers on a
            listed NFT.  Fetches active offers via the
            get_offers_for_token off‑chain view, displays them
@@ -20,7 +20,8 @@ import PixelButton        from '../PixelButton.jsx';
 import OperationOverlay   from '../OperationOverlay.jsx';
 import { useWalletContext } from '../../contexts/WalletContext.js';
 import { getMarketContract } from '../../core/marketplace.js';
-import { Tzip16Module }     from '@taquito/tzip16';
+import { Tzip16Module } from '@taquito/tzip16';
+// note: Tzip16Module imported above; remove duplicate import
 
 // styled-components helper
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
@@ -95,50 +96,45 @@ export default function AcceptOffer({ open = false, contract = '', tokenId = '',
       if (!open || !toolkit || !contract || tokenId === '' || tokenId === undefined) return;
       try {
         // ensure Tzip16 extension
-        try { toolkit.addExtension(new Tzip16Module()); } catch (errExt) { /* ignore duplicate add */ }
+        try { toolkit.addExtension(new Tzip16Module()); } catch (_) {}
         const market = await getMarketContract(toolkit);
         const views  = await market.tzip16().metadataViews();
+        // Fetch offers via off‑chain view
         const rawOffers = await views.get_offers_for_token().executeView(String(contract), Number(tokenId));
-        const list   = [];
-        const push   = (offeror, obj) => {
+        const list = [];
+        const pushOffer = (offeror, obj) => {
           list.push({
-            offeror: offeror,
-            priceMutez: Number(obj.price),
-            amount: Number(obj.amount),
-            nonce: Number(obj.nonce),
-            accepted: obj.accepted,
+            offeror    : offeror,
+            priceMutez : Number(obj.price),
+            amount     : Number(obj.amount),
+            nonce      : Number(obj.nonce), // listing nonce stored in offers bigmap
+            accepted   : obj.accepted,
           });
         };
         if (rawOffers?.entries) {
-          for (const [key, value] of rawOffers.entries()) push(key, value);
+          for (const [key, value] of rawOffers.entries()) pushOffer(key, value);
         } else if (typeof rawOffers === 'object' && rawOffers !== null) {
-          Object.entries(rawOffers).forEach(([k, v]) => push(k, v));
+          Object.entries(rawOffers).forEach(([k, v]) => pushOffer(k, v));
         }
-        // fetch active listings for this token to ensure offers correspond to existing listings
-        let activeListingNonces = new Set();
-        try {
-          const rawListings = await views.get_listings_for_token().executeView(String(contract), Number(tokenId));
-          if (rawListings?.entries) {
-            for (const [nonceStr, details] of rawListings.entries()) {
-              if (details && details.active) {
-                activeListingNonces.add(Number(nonceStr));
-              }
+        // Validate each offer by checking listing details. Remove offers where listing amount is 0.
+        const validated = [];
+        for (const offer of list) {
+          if (offer.accepted || offer.amount <= 0) continue;
+          let valid = false;
+          try {
+            const det = await views.get_listing_details().executeView(Number(offer.nonce), String(contract), Number(tokenId));
+            if (det && det.amount !== undefined && Number(det.amount) > 0) {
+              valid = true;
             }
-          } else if (typeof rawListings === 'object' && rawListings !== null) {
-            Object.entries(rawListings).forEach(([nStr, details]) => {
-              if (details && details.active) {
-                activeListingNonces.add(Number(nStr));
-              }
-            });
+          } catch (_) {
+            // ignore errors; treat as invalid
           }
-        } catch (_) {
-          // ignore listing view errors; fallback to include all offers
-          activeListingNonces = null;
+          if (valid) {
+            validated.push(offer);
+          }
         }
-        // filter out accepted offers and those without an active listing
-        const filtered = list.filter((o) => !o.accepted && (activeListingNonces == null || activeListingNonces.has(o.nonce)));
         if (!cancel) {
-          setOffers(filtered);
+          setOffers(validated);
           setPage(0);
         }
       } catch (err) {

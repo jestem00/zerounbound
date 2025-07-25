@@ -118,11 +118,25 @@ export default function MyTokens() {
             return m && Object.keys(m).length > 0;
           });
 
+        // Filter tokens down to fully on‑chain NFTs (ZeroContract).  Only include
+        // tokens whose metadata URIs are all data URIs.  This removes IPFS/
+        // remote‑hosted tokens from the personalised views on mainnet.
+        const focOwned = owned.filter((t) => {
+          const m = t.metadata || {};
+          const uriKeys = Object.keys(m).filter((k) => /uri$/i.test(k));
+          // If no URI fields exist, treat as non‑FOC and exclude.
+          if (uriKeys.length === 0) return false;
+          return uriKeys.every((k) => {
+            const val = m[k];
+            return typeof val === 'string' && val.trim().toLowerCase().startsWith('data:');
+          });
+        });
+
         // Determine created tokens that are minted by the user and still owned.
         // Use the mintedSet composed from metadata and creator queries.  Only tokens
         // present in mintedSet are considered creations; the rest are purchases.
-        const createdOwned = owned.filter((t) => mintedSet.has(`${t.contract}:${t.tokenId}`));
-        const purchased = owned.filter((t) => !mintedSet.has(`${t.contract}:${t.tokenId}`));
+        const createdOwned = focOwned.filter((t) => mintedSet.has(`${t.contract}:${t.tokenId}`));
+        const purchased = focOwned.filter((t) => !mintedSet.has(`${t.contract}:${t.tokenId}`));
 
         setCreations(createdOwned);
         setPurchases(purchased);

@@ -85,24 +85,13 @@ export default function MyOffers() {
       // Fetch all entries from the offers bigmap
       const offersKeysRes = await fetch(`${TZKT_API}/v1/bigmaps/${offersMap.ptr}/keys?limit=1000`);
       const offersKeys = await offersKeysRes.json();
-      // Build an index of listings keyed by contract, tokenId and nonce.
-      // Each entry maps `contract:tokenId:nonce` to listing details
-      const listingIndex = new Map();
-      if (listingsMap) {
-        const listingsKeysRes = await fetch(`${TZKT_API}/v1/bigmaps/${listingsMap.ptr}/keys?limit=1000`);
-        const listingsKeys = await listingsKeysRes.json();
-        listingsKeys.forEach((entry) => {
-          const { key, value } = entry;
-          const contractAddr = key.address;
-          const tokenId     = Number(key.nat);
-          if (!value) return;
-          Object.entries(value).forEach(([nonceStr, details]) => {
-            const nonce = Number(nonceStr);
-            const id    = `${contractAddr}:${tokenId}:${nonce}`;
-            listingIndex.set(id, details);
-          });
-        });
-      }
+      // We previously built a listing index to map offers to listings
+      // via seller lookups.  However, older marketplace versions may
+      // store listing details differently or omit the seller field
+      // entirely, causing offers to be filtered out incorrectly.  To
+      // ensure all valid offers appear, we will not filter by listing
+      // existence here; instead, AcceptOffer will perform a final
+      // validation using off‑chain views.
       const acceptList = [];
       const myList     = [];
       offersKeys.forEach((entry) => {
@@ -120,30 +109,14 @@ export default function MyOffers() {
           // Record offers made by the current user
           if (offeror.toLowerCase() === address.toLowerCase()) {
             myList.push({ contract: contractAddr, tokenId, offeror, nonce, amount, priceMutez });
-          }
-          // Record offers placed on listings owned by the current user.
-          const id      = `${contractAddr}:${tokenId}:${nonce}`;
-          const details = listingIndex.get(id);
-          // Only consider listings that are still active (amount > 0)
-          if (
-            details &&
-            details.seller &&
-            details.seller.toLowerCase() === address.toLowerCase() &&
-            Number(details.amount) > 0
-          ) {
+          } else {
+            // Offers on tokens the user might own
             acceptList.push({ contract: contractAddr, tokenId, offeror, nonce, amount, priceMutez });
           }
         });
       });
       setOffersToAccept(acceptList);
-      // Filter my offers to only include those attached to an active listing
-      const filteredMy = myList.filter((row) => {
-        const id = `${row.contract}:${row.tokenId}:${row.nonce}`;
-        const details = listingIndex.get(id);
-        // Only include offers on listings that are still active
-        return details && Number(details.amount) > 0;
-      });
-      setMyOffers(filteredMy);
+      setMyOffers(myList);
     } catch (err) {
       console.error('Failed to fetch marketplace offers:', err);
       setOffersToAccept([]);

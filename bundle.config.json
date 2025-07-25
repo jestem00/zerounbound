@@ -88,7 +88,9 @@
         "src/pages/Entrypoints/CancelOffer.jsx",
         "src/pages/my/collections.jsx",
         "src/pages/my/tokens.jsx",
-        "src/pages/my/offers.jsx"
+        "src/pages/my/offers.jsx",
+        "src/data/hashMatrix.json",
+        "src/data/entrypointRegistry.json"
       ]
     },
     {

@@ -112,31 +112,59 @@ export default function MyTokens() {
             return m && Object.keys(m).length > 0;
           });
 
-        // Filter tokens down to fully on‑chain NFTs (ZeroContract).  Only include
-        // tokens whose metadata URIs are all data URIs.  This removes IPFS/
-        // remote‑hosted tokens from the personalised views on mainnet.
+        // Filter tokens down to fully on‑chain NFTs (ZeroContract).  Include
+        // tokens when at least one URI field starts with data:, rather than
+        // requiring all URIs to be data URIs.  Some metadata may omit
+        // optional URI fields; we treat those as FOC if any existing URI is
+        // on‑chain.  If no URI fields exist, we exclude the token.
         const focOwned = owned.filter((t) => {
           const m = t.metadata || {};
-          const uriKeys = Object.keys(m).filter((k) => /uri$/i.test(k));
-          // If no URI fields exist, treat as non‑FOC and exclude.
-          if (uriKeys.length === 0) return false;
-          return uriKeys.every((k) => {
-            const val = m[k];
-            return typeof val === 'string' && val.trim().toLowerCase().startsWith('data:');
+          // Recognised URI keys (case‑insensitive).  Use explicit keys for
+          // better compatibility.
+          const uriValues = [];
+          ['artifactUri','artifact_uri','displayUri','display_uri','thumbnailUri','thumbnail_uri'].forEach((k) => {
+            if (m[k]) uriValues.push(m[k]);
           });
+          if (uriValues.length === 0) return false;
+          // A token is FOC if at least one URI starts with data:
+          return uriValues.some((val) => typeof val === 'string' && val.trim().toLowerCase().startsWith('data:'));
         });
 
+        // Determine contracts managed by the connected wallet.  Tokens
+        // originating from contracts where the user is manager are
+        // considered creations if other heuristics fail.  Some APIs
+        // return raw strings, others objects; normalize accordingly.
+        const managedContracts = new Set();
+        try {
+          const resMgr = await fetch(
+            `${TZKT_API}/v1/contracts?manager=${address}&select=address`
+          );
+          const dataMgr = await resMgr.json();
+          (Array.isArray(dataMgr) ? dataMgr : []).forEach((row) => {
+            const c = row.address ?? row;
+            if (c) managedContracts.add(c);
+          });
+        } catch (err) {
+          console.error('Failed to fetch managed contracts:', err);
+        }
+
         // Determine created tokens that are minted by the user and still owned.
-        // First check the mintedSet from the TzKT deep queries; if it is empty,
-        // fallback to inspecting each token’s metadata: consider it a creation
-        // if the connected wallet appears in metadata.creators, metadata.authors
-        // or metadata.creator (legacy).  Comparisons are case‑insensitive.
+        // Check mintedSet from TzKT deep queries; fallback to metadata
+        // creators/authors/creator fields; finally fallback to contract
+        // management: if the user manages the contract, assume all tokens
+        // minted under that contract are their creations.  Comparisons are
+        // case‑insensitive.
         const createdOwned = [];
         const purchased   = [];
         const lowerAddr   = address?.toLowerCase() || '';
         focOwned.forEach((t) => {
           const key = `${t.contract}:${t.tokenId}`;
-          let isMinted = mintedSet.size > 0 ? mintedSet.has(key) : false;
+          let isMinted = false;
+          // Primary source: mintedSet
+          if (mintedSet.size > 0) {
+            isMinted = mintedSet.has(key);
+          }
+          // Fallback: metadata creators/authors/creator fields
           if (!isMinted) {
             const m = t.metadata || {};
             const creators = Array.isArray(m.creators) ? m.creators : [];
@@ -144,6 +172,10 @@ export default function MyTokens() {
             const creatorField = typeof m.creator === 'string' ? [m.creator] : [];
             const all = [...creators, ...authors, ...creatorField].map((s) => (typeof s === 'string' ? s.toLowerCase() : ''));
             isMinted = all.some((a) => a === lowerAddr);
+          }
+          // Final fallback: contract manager heuristic
+          if (!isMinted && managedContracts.size > 0) {
+            isMinted = managedContracts.has(t.contract);
           }
           if (isMinted) createdOwned.push(t); else purchased.push(t);
         });

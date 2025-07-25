@@ -1,10 +1,13 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/MarketplaceBar.jsx
-  Rev :    r5     2025‑07‑24 UTC
-  Summary: live ZeroSum integration – displays the lowest
-           listing price for a token and opens BUY, LIST
-           and OFFER dialogs wired to marketplace helpers.
+  Rev :    r914    2025‑07‑24 UTC
+  Summary: Marketplace action bar.  Displays the lowest active
+           listing price for a given token and exposes Buy,
+           List, Offer, Cancel and Accept buttons.  Each button
+           opens a centrally aligned overlay form rather than
+           relying on a scrolling drawer.  Uses off‑chain views
+           to determine the cheapest listing and offer presence.
 ─────────────────────────────────────────────────────────────*/
 
 import React, { useEffect, useState } from 'react';
@@ -14,30 +17,28 @@ import PixelButton                    from './PixelButton.jsx';
 import BuyDialog                      from './BuyDialog.jsx';
 import ListTokenDialog                from './ListTokenDialog.jsx';
 import MakeOfferDialog                from './MakeOfferDialog.jsx';
+import CancelListing                  from './Entrypoints/CancelListing.jsx';
+import AcceptOffer                    from './Entrypoints/AcceptOffer.jsx';
 
 import { useWalletContext }           from '../contexts/WalletContext.js';
-import { fetchLowestListing }         from '../core/marketplace.js';
+import { fetchLowestListing, fetchOffers } from '../core/marketplace.js';
 
 /**
- * MarketplaceBar
- *
- * Renders BUY, LIST and OFFER buttons for a token.  On mount it
- * queries the marketplace off‑chain view for the cheapest active
- * listing and displays the price in XTZ.  Clicking BUY opens
- * BuyDialog with the resolved listing details; LIST opens
- * ListTokenDialog; and OFFER opens MakeOfferDialog.  Buttons
- * disable gracefully when the wallet is disconnected or no
- * listing exists.
+ * A responsive action bar for the ZeroSum marketplace.  Shows
+ * dynamic actions based on the lowest listing and wallet
+ * ownership.  Buttons open overlay dialogs rather than drawers.
  */
-export default function MarketplaceBar({ contractAddress, tokenId }) {
-  const { toolkit }          = useWalletContext() || {};
-  const [priceMutez, setPrice] = useState(null);
-  const [listing,    setListing] = useState(null);
-  const [dlg,        setDlg]     = useState(null);  // 'buy' | 'list' | 'offer'
+export default function MarketplaceBar({
+  contractAddress,
+  tokenId,
+  marketplace, // unused placeholder for future props
+}) {
+  const { toolkit, address: walletAddr } = useWalletContext() || {};
+  const [lowest, setLowest]   = useState(null);
+  const [hasOffers, setHasOffers] = useState(false);
+  const [dlg, setDlg]         = useState(null);   // 'buy' | 'list' | 'offer' | 'cancel' | 'accept'
 
-  // Fetch the lowest active listing whenever toolkit, contract or
-  // tokenId changes.  The listing is cached locally until any
-  // dependency changes.
+  /* Load the cheapest listing and offer presence on mount */
   useEffect(() => {
     let cancel = false;
     (async () => {
@@ -48,60 +49,84 @@ export default function MarketplaceBar({ contractAddress, tokenId }) {
           nftContract: contractAddress,
           tokenId,
         });
-        if (!cancel) {
-          if (l) {
-            setPrice(l.priceMutez);
-            setListing(l);
-          } else {
-            setPrice(null);
-            setListing(null);
-          }
-        }
-      } catch (e) {
-        // ignore network or view errors – UI shows disabled state
-        if (!cancel) { setPrice(null); setListing(null); }
-      }
+        if (!cancel) setLowest(l);
+      } catch {/* ignore network errors */}
+      try {
+        const offers = await fetchOffers({
+          toolkit,
+          nftContract: contractAddress,
+          tokenId,
+        });
+        if (!cancel) setHasOffers(offers && offers.length > 0);
+      } catch {/* ignore network errors */}
     })();
     return () => { cancel = true; };
   }, [toolkit, contractAddress, tokenId]);
 
-  const priceXTZ = priceMutez != null ? (priceMutez / 1_000_000).toLocaleString() : null;
+  // Format price in ꜩ when available
+  const priceXTZ = lowest && lowest.priceMutez != null
+    ? (lowest.priceMutez / 1_000_000).toLocaleString()
+    : null;
 
-  const disabledBuy   = priceMutez == null || !toolkit;
-  const disabledList  = !toolkit;
-  const disabledOffer = !toolkit;
+  // Determine if the connected wallet is the seller of the lowest listing
+  const isSeller = lowest && walletAddr && lowest.seller && walletAddr.toLowerCase() === lowest.seller.toLowerCase();
 
   return (
     <>
+      {/* Buy button – disabled when no active listing or toolkit not ready */}
       <PixelButton
-        disabled={disabledBuy}
-        warning={disabledBuy}
+        disabled={!toolkit || !lowest || lowest.priceMutez == null || isSeller}
+        warning={!lowest || lowest.priceMutez == null}
         onClick={() => setDlg('buy')}
       >
         {priceXTZ ? `BUY (${priceXTZ} ꜩ)` : 'BUY'}
       </PixelButton>
 
+      {/* List button – always available if wallet connected */}
       <PixelButton
-        disabled={disabledList}
+        disabled={!toolkit}
         onClick={() => setDlg('list')}
       >
         LIST
       </PixelButton>
 
+      {/* Offer button – always available if wallet connected */}
       <PixelButton
-        disabled={disabledOffer}
+        disabled={!toolkit}
         onClick={() => setDlg('offer')}
       >
         OFFER
       </PixelButton>
 
+      {/* Cancel button – only show when the wallet is the seller */}
+      {isSeller && lowest && (
+        <PixelButton
+          disabled={!toolkit}
+          onClick={() => setDlg('cancel')}
+        >
+          CANCEL
+        </PixelButton>
+      )}
+
+      {/* Accept button – only show when the wallet is the seller and there are offers */}
+      {isSeller && hasOffers && (
+        <PixelButton
+          disabled={!toolkit}
+          onClick={() => setDlg('accept')}
+        >
+          ACCEPT
+        </PixelButton>
+      )}
+
       {/* dialogs */}
-      {dlg === 'buy' && listing && (
+      {dlg === 'buy' && lowest && (
         <BuyDialog
           open
           contract={contractAddress}
           tokenId={tokenId}
-          listing={listing}
+          priceMutez={lowest.priceMutez}
+          seller={lowest.seller}
+          nonce={lowest.nonce}
           onClose={() => setDlg(null)}
         />
       )}
@@ -118,6 +143,24 @@ export default function MarketplaceBar({ contractAddress, tokenId }) {
           open
           contract={contractAddress}
           tokenId={tokenId}
+          marketContract={marketplace}
+          onClose={() => setDlg(null)}
+        />
+      )}
+      {dlg === 'cancel' && lowest && (
+        <CancelListing
+          open
+          contract={contractAddress}
+          tokenId={tokenId}
+          listingNonce={lowest.nonce}
+          onClose={() => setDlg(null)}
+        />
+      )}
+      {dlg === 'accept' && (
+        <AcceptOffer
+          open
+          contract={contractAddress}
+          tokenId={tokenId}
           onClose={() => setDlg(null)}
         />
       )}
@@ -128,10 +171,16 @@ export default function MarketplaceBar({ contractAddress, tokenId }) {
 MarketplaceBar.propTypes = {
   contractAddress: PropTypes.string.isRequired,
   tokenId        : PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
+  marketplace    : PropTypes.any,
 };
 
-/* What changed & why: replaced objkt stub with a live integration.  It
-   queries the off‑chain view for the cheapest listing, displays
-   the price on the BUY button and opens Buy/List/Offer dialogs
-   wired to new core marketplace helpers. */
+/* What changed & why: new MarketplaceBar implementation that
+   integrates all ZeroSum operations (buy, list, offer, cancel,
+   accept) into a centralised overlay-driven UI.  Uses off‑chain
+   views to determine the lowest active listing and whether any
+   offers exist, computes seller ownership to conditionally
+   expose cancel/accept buttons, and opens corresponding dialogs
+   when clicked.  This implementation avoids scrollable drawers,
+   aligning with the 8‑bit overlay aesthetic mandated by the
+   project invariants. */
 /* EOF */

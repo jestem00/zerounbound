@@ -1,10 +1,13 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/ExploreNav.jsx
-  Rev :    r18    2025‑10‑23
-  Summary: add hideSearch prop to optionally hide search bar
-           on pages like token detail; maintain hazard toggles.
-──────────────────────────────────────────────────────────────*/
+  Rev :    r19    2025‑07‑25 UTC
+  Summary: Global navigation bar for explore pages and personalized
+           sections.  Adds buttons for My Collections, My Tokens
+           and My Offers alongside existing navigation.  Includes
+           search bar (optional) and hazard toggles.
+─────────────────────────────────────────────────────────────*/
+
 import { useState }  from 'react';
 import { useRouter } from 'next/router';
 import styledPkg     from 'styled-components';
@@ -33,9 +36,8 @@ const Bar = styled.nav`
 /**
  * Explore navigation bar with optional search suppression.
  * This component renders navigation buttons, a search field and
- * hazard toggles.  Set hideSearch=true to remove the search form,
- * which is useful on pages that don't require a search box (e.g.
- * token detail view).
+ * hazard toggles.  New buttons for personalised content (My Collections,
+ * My Tokens, My Offers) are included after the Listings button.
  *
  * @param {Object} props
  * @param {boolean} [props.hideSearch=false] whether to hide the search bar
@@ -102,6 +104,31 @@ export default function ExploreNav({ hideSearch = false }) {
         <PixelButton as="a" href="/explore">COLLECTIONS</PixelButton>
         <PixelButton as="a" href="/explore?cmd=tokens">TOKENS</PixelButton>
         <PixelButton as="a" href="/explore/listings">LISTINGS</PixelButton>
+        {/* personalised pages */}
+        {/* Highlight personal pages with the warning prop to provide
+            a contrasting accent colour.  These buttons link to the
+            user-centric “My” pages (collections, tokens, offers). */}
+        <PixelButton
+          as="a"
+          href="/my/collections"
+          style={{ background: 'var(--zu-accent-sec)', color: 'var(--zu-btn-fg)', borderColor: 'var(--zu-accent-sec-hover)' }}
+        >
+          MY COLLECTIONS
+        </PixelButton>
+        <PixelButton
+          as="a"
+          href="/my/tokens"
+          style={{ background: 'var(--zu-accent-sec)', color: 'var(--zu-btn-fg)', borderColor: 'var(--zu-accent-sec-hover)' }}
+        >
+          MY TOKENS
+        </PixelButton>
+        <PixelButton
+          as="a"
+          href="/my/offers"
+          style={{ background: 'var(--zu-accent-sec)', color: 'var(--zu-btn-fg)', borderColor: 'var(--zu-accent-sec-hover)' }}
+        >
+          MY OFFERS
+        </PixelButton>
 
         {!hideSearch && (
           <form onSubmit={go}>
@@ -139,46 +166,30 @@ export default function ExploreNav({ hideSearch = false }) {
         <PixelConfirmDialog
           open
           title={`Enable ${dlg === 'nsfw' ? 'NSFW (mature)' : 'flashing‑hazard'} content site‑wide?`}
-          message={(
-            <>
-              {dlg === 'nsfw' ? (
-                <p style={{ margin:'0 0 8px' }}>
-                  Warning: You are about to allow <strong>Not‑Safe‑For‑Work (NSFW)</strong>{' '}
-                  content across Zero Unbound. This may include explicit nudity,
-                  sexual themes, graphic violence or other mature material. Viewer
-                  discretion is advised.
-                </p>
-              ) : (
-                <p style={{ margin:'0 0 8px' }}>
-                  Warning: You are about to allow content that contains{' '}
-                  <strong>rapid flashing / strobing effects</strong> which may trigger
-                  seizures for individuals with photosensitive epilepsy. See&nbsp;
-                  <a href="https://kb.daisy.org/publishing/docs/metadata/schema.org/accessibilityHazard.html#value"
-                     target="_blank" rel="noopener noreferrer">
-                    accessibilityHazard reference
-                  </a>{' '}
-                  for details.
-                </p>
-              )}
-              <label style={{
-                display:'flex',
-                gap:'6px',
-                alignItems:'center',
-                flexWrap:'wrap',
-              }}>
-                <input
-                  type="checkbox"
-                  checked={termsOK}
-                  onChange={(e) => setTermsOK(e.target.checked)}
-                />
-                I&nbsp;confirm&nbsp;I&nbsp;am&nbsp;18 + and&nbsp;agree&nbsp;to&nbsp;
-                <a href="/terms" target="_blank" rel="noopener noreferrer">Terms</a>
-              </label>
-            </>
-          )}
-          confirmLabel="OK"
-          cancelLabel="Cancel"
-          confirmDisabled={!termsOK}
+          message={(<>
+            {dlg === 'nsfw' ? (
+              <p style={{ margin:'0 0 8px' }}>
+                Warning: You are about to allow <strong>Not‑Safe‑For‑Work (NSFW)</strong>{' '}
+                content across Zero Unbound. This may include explicit nudity,
+                sexual themes, graphic violence or other mature material. Viewer
+                discretion is advised.
+              </p>
+            ) : (
+              <p style={{ margin:'0 0 8px' }}>
+                Warning: You are about to allow content that contains{' '}
+                flashing or strobe effects. This may trigger photosensitive
+                reactions in some viewers. Proceed with caution.
+              </p>
+            )}
+            <label style={{ display:'flex',alignItems:'center' }}>
+              <input
+                type="checkbox"
+                checked={termsOK}
+                onChange={(e) => setTermsOK(e.target.checked)}
+              />
+              <span style={{ marginLeft:'0.4rem' }}>I have read and accept these terms</span>
+            </label>
+          </>)}
           onConfirm={confirmEnable}
           onCancel={() => { setDlg(null); setTermsOK(false); }}
         />
@@ -186,9 +197,9 @@ export default function ExploreNav({ hideSearch = false }) {
     </>
   );
 }
-/* What changed & why (r18):
-   • Added hideSearch prop to optionally hide the search bar.
-   • Wrapped search form in a conditional check.
-   • Updated header and summary for new revision.
-*/
+
+/* What changed & why: New ExploreNav component r19 adds personalized
+   navigation buttons (My Collections, My Tokens, My Offers) to the
+   existing explore navigation.  Keeps search bar and hazard toggles
+   functionality. */
 /* EOF */

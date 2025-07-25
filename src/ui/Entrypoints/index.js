@@ -39,4 +39,5 @@ export { default as Transfer }                    from './Transfer.jsx';
 /* marketplace elements */
 export { default as CancelListing }               from './CancelListing.jsx';
 export { default as AcceptOffer }                 from './AcceptOffer.jsx';
+export { default as CancelOffer }                 from './CancelOffer.jsx';
 /* EOF */

@@ -24,7 +24,7 @@ const NET_COL = {
 const BREAK        = 800;
 const COPY_TIMEOUT = 1800;
 /* Application version (increment for each deploy) */
-const APP_VERSION = '0.68';
+const APP_VERSION = '0.77';
 
 /*──────── styled shells ─────*/
 const selectCSS = css`
@@ -312,7 +312,7 @@ export default function Header() {
   );
 }
 /* What changed & why:
-   • Introduced APP_VERSION constant and displayed “v.0.65” next to the β symbol
+   • Introduced APP_VERSION constant and displayed “v.0.69” next to the β symbol
      in the header; this helps authors verify they’re running the latest build.
    • Added handleCacheRefresh() helper which unregisters all service workers,
      clears caches and forces a hard reload; provided Reset controls in desktop

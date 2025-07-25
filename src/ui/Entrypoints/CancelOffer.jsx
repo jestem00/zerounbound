@@ -1,14 +1,14 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
-  File:    src/ui/Entrypoints/AcceptOffer.jsx
+  File:    src/ui/Entrypoints/CancelOffer.jsx
   Rev :    r1    2025‑07‑25 UTC
-  Summary: Pop‑out UI for accepting marketplace offers on a
-           listed NFT.  Fetches active offers via the
-           get_offers_for_token off‑chain view, displays them
-           in a paginated table and allows the seller to accept
-           a specific offer with a single click.  Uses
-           withContractCall to dispatch the accept_offer
-           transaction, showing a progress overlay.
+  Summary: Pop‑out UI for withdrawing (canceling) offers made
+           by the connected buyer on a given NFT token.  Uses
+           the get_offers_for_token view to list the buyer's
+           current offers and allows canceling individually or
+           all at once via the marketplace's withdraw_offer
+           entrypoint.  Shows a progress overlay during
+           transactions.
 ─────────────────────────────────────────────────────────────*/
 
 import React, { useEffect, useState, useMemo } from 'react';
@@ -61,12 +61,8 @@ const Table = styled.table`
     border-bottom: 1px solid var(--zu-accent, #8f3ce1);
     text-align: left;
   }
-  th {
-    font-weight: bold;
-  }
-  tr:hover {
-    background: rgba(255, 255, 255, 0.04);
-  }
+  th { font-weight: bold; }
+  tr:hover { background: rgba(255, 255, 255, 0.04); }
 `;
 
 const Pagination = styled.div`
@@ -76,7 +72,7 @@ const Pagination = styled.div`
   gap: 0.4rem;
 `;
 
-export default function AcceptOffer({ open = false, contract = '', tokenId = '', onClose = () => {} }) {
+export default function CancelOffer({ open = false, contract = '', tokenId = '', onClose = () => {} }) {
   const { toolkit, address: walletAddr } = useWalletContext() || {};
   const [offers, setOffers] = useState([]);
   const [ov, setOv]       = useState({ open: false, label: '' });
@@ -88,17 +84,18 @@ export default function AcceptOffer({ open = false, contract = '', tokenId = '',
     window.dispatchEvent(new CustomEvent('zu:snackbar', { detail: { message: msg, severity: sev } }));
   };
 
-  // Fetch active offers when the dialog opens
+  // Fetch offers made by the connected wallet
   useEffect(() => {
     let cancel = false;
     (async () => {
       if (!open || !toolkit || !contract || tokenId === '' || tokenId === undefined) return;
+      if (!walletAddr) return;
       try {
         // ensure Tzip16 extension
-        try { toolkit.addExtension(new Tzip16Module()); } catch (errExt) { /* ignore duplicate add */ }
+        try { toolkit.addExtension(new Tzip16Module()); } catch (errExt) { /* ignore */ }
         const market = await getMarketContract(toolkit);
         const views  = await market.tzip16().metadataViews();
-        const rawOffers = await views.get_offers_for_token().executeView(String(contract), Number(tokenId));
+        const raw    = await views.get_offers_for_token().executeView(String(contract), Number(tokenId));
         const list   = [];
         const push   = (offeror, obj) => {
           list.push({
@@ -109,47 +106,24 @@ export default function AcceptOffer({ open = false, contract = '', tokenId = '',
             accepted: obj.accepted,
           });
         };
-        if (rawOffers?.entries) {
-          for (const [key, value] of rawOffers.entries()) push(key, value);
-        } else if (typeof rawOffers === 'object' && rawOffers !== null) {
-          Object.entries(rawOffers).forEach(([k, v]) => push(k, v));
+        if (raw?.entries) {
+          for (const [key, value] of raw.entries()) push(key, value);
+        } else if (typeof raw === 'object' && raw !== null) {
+          Object.entries(raw).forEach(([k, v]) => push(k, v));
         }
-        // fetch active listings for this token to ensure offers correspond to existing listings
-        let activeListingNonces = new Set();
-        try {
-          const rawListings = await views.get_listings_for_token().executeView(String(contract), Number(tokenId));
-          if (rawListings?.entries) {
-            for (const [nonceStr, details] of rawListings.entries()) {
-              if (details && details.active) {
-                activeListingNonces.add(Number(nonceStr));
-              }
-            }
-          } else if (typeof rawListings === 'object' && rawListings !== null) {
-            Object.entries(rawListings).forEach(([nStr, details]) => {
-              if (details && details.active) {
-                activeListingNonces.add(Number(nStr));
-              }
-            });
-          }
-        } catch (_) {
-          // ignore listing view errors; fallback to include all offers
-          activeListingNonces = null;
-        }
-        // filter out accepted offers and those without an active listing
-        const filtered = list.filter((o) => !o.accepted && (activeListingNonces == null || activeListingNonces.has(o.nonce)));
+        // Filter offers by current wallet address and not yet accepted
+        const filtered = list.filter((o) => !o.accepted && walletAddr && o.offeror.toLowerCase() === walletAddr.toLowerCase());
         if (!cancel) {
           setOffers(filtered);
           setPage(0);
         }
       } catch (err) {
         console.error('Failed to fetch offers:', err);
-        if (!cancel) {
-          setOffers([]);
-        }
+        if (!cancel) setOffers([]);
       }
     })();
     return () => { cancel = true; };
-  }, [open, toolkit, contract, tokenId]);
+  }, [open, toolkit, contract, tokenId, walletAddr]);
 
   // Pagination logic
   const pages = Math.ceil(offers.length / perPage);
@@ -158,40 +132,39 @@ export default function AcceptOffer({ open = false, contract = '', tokenId = '',
     return offers.slice(start, start + perPage);
   }, [offers, page]);
 
-  // Accept a single offer
-  async function acceptOffer(offer) {
+  // Cancel a single offer (withdraw)
+  async function cancelSingle() {
     if (!toolkit) return;
     try {
-      setOv({ open: true, label: 'Accepting offer…' });
+      setOv({ open: true, label: 'Cancelling offer…' });
       const market = await getMarketContract(toolkit);
-      const call   = market.methodsObject.accept_offer({
-        amount       : Number(offer.amount),
-        listing_nonce: Number(offer.nonce),
-        nft_contract : contract,
-        offeror      : offer.offeror,
-        token_id     : Number(tokenId),
+      const call = market.methodsObject.withdraw_offer({
+        nft_contract: contract,
+        token_id    : Number(tokenId),
       });
-      // Dispatch accept_offer via a wallet batch.  This pattern aligns
-      // with other marketplace actions and ensures proper parameter
-      // wrapping for the Tezos RPC.
       const op = await toolkit.wallet.batch().withContractCall(call).send();
       await op.confirmation();
       setOv({ open: false, label: '' });
-      snack('Offer accepted ✔');
-      // Remove accepted offer from list
-      setOffers((prev) => prev.filter((o) => o.nonce !== offer.nonce || o.offeror !== offer.offeror));
-      // Close the modal by calling onClose from props
+      snack('Offer cancelled ✔');
+      // Remove all offers from list (withdraw cancels all offers by the buyer on this token)
+      setOffers([]);
+      // Close the modal via onClose
       onClose();
 
-      // Notify other components (e.g., MyOffers page) to refresh offers
+      // Broadcast a refresh event so parent lists can update
       try {
         window.dispatchEvent(new CustomEvent('zu:offersRefresh'));
       } catch (_) {}
     } catch (err) {
-      console.error('Accept offer failed:', err);
+      console.error('Cancel offer failed:', err);
       setOv({ open: false, label: '' });
       snack(err.message || 'Transaction failed', 'error');
     }
+  }
+
+  // Cancel all offers (same as single, but keep semantics)
+  async function cancelAll() {
+    await cancelSingle();
   }
 
   // do not render when closed
@@ -199,10 +172,10 @@ export default function AcceptOffer({ open = false, contract = '', tokenId = '',
 
   return (
     <ModalOverlay onClick={onClose}>
-      <ModalBox onClick={(e) => e.stopPropagation()} data-modal="accept-offer">
-        <PixelHeading level={3}>Accept Offers</PixelHeading>
+      <ModalBox onClick={(e) => e.stopPropagation()} data-modal="cancel-offer">
+        <PixelHeading level={3}>Cancel Offer</PixelHeading>
         {offers.length === 0 ? (
-          <p style={{ marginTop: '0.8rem' }}>No active offers to accept.</p>
+          <p style={{ marginTop: '0.8rem' }}>You have no active offers to cancel.</p>
         ) : (
           <>
             <Table>
@@ -213,12 +186,11 @@ export default function AcceptOffer({ open = false, contract = '', tokenId = '',
                   <th>Amount</th>
                   <th>Price (ꜩ)</th>
                   <th>Nonce</th>
-                  <th></th>
                 </tr>
               </thead>
               <tbody>
                 {pageOffers.map((offer) => (
-                  <tr key={`${offer.offeror}:${offer.nonce}`}> 
+                  <tr key={`${offer.offeror}:${offer.nonce}`}>
                     <td style={{ width: '40px' }}>
                       {/* TODO: preview thumbnail of the NFT; placeholder for now */}
                       ​
@@ -227,14 +199,6 @@ export default function AcceptOffer({ open = false, contract = '', tokenId = '',
                     <td>{offer.amount}</td>
                     <td>{(offer.priceMutez / 1_000_000).toLocaleString()}</td>
                     <td>{offer.nonce}</td>
-                    <td>
-                      <PixelButton
-                        size="xs"
-                        onClick={() => acceptOffer(offer)}
-                      >
-                        ACCEPT
-                      </PixelButton>
-                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -252,6 +216,14 @@ export default function AcceptOffer({ open = false, contract = '', tokenId = '',
                 ))}
               </Pagination>
             )}
+            <div style={{ marginTop: '1rem', display: 'flex', gap: '0.6rem' }}>
+              <PixelButton disabled={offers.length === 0} onClick={cancelSingle}>
+                CANCEL OFFER
+              </PixelButton>
+              <PixelButton disabled={offers.length === 0} onClick={cancelAll}>
+                CANCEL ALL
+              </PixelButton>
+            </div>
           </>
         )}
         {ov.open && (
@@ -266,19 +238,17 @@ export default function AcceptOffer({ open = false, contract = '', tokenId = '',
   );
 }
 
-AcceptOffer.propTypes = {
+CancelOffer.propTypes = {
   open    : PropTypes.bool,
   contract: PropTypes.string,
   tokenId : PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
   onClose : PropTypes.func,
 };
 
-/* What changed & why: initial creation of AcceptOffer component.
-   This pop‑out overlay fetches active offers via the
-   get_offers_for_token view and displays them in a table with
-   pagination.  Sellers can accept an offer by clicking the
-   corresponding button, which dispatches an accept_offer
-   transaction via the marketplace using withContractCall.  A
-   progress overlay shows transaction status and offers are
-   removed from the list upon success. */
+/* What changed & why: initial creation of CancelOffer component.
+   This modal lists the buyer's own offers on the current token
+   and allows them to withdraw the offer via withdraw_offer.  It
+   uses withContractCall to dispatch the transaction and shows
+   a progress overlay.  Cancelling any offer removes all offers
+   made by the buyer on that token. */
 /* EOF */

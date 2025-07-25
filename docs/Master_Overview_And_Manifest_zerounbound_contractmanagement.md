@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────────
 Developed by @jams2blues – ZeroContract Studio
 File: docs/Master_Overview_And_Manifest_zerounbound_contractmanagement.md
-Rev : r1021 2025‑07‑24 UTC
-Summary: removed remote forge service; unified single-stage origination; updated manifest, invariants, and source-tree map; moved forge_service_node to graveyard; polished token and marketplace features.
+Rev : r1022 2025‑07‑24 UTC
+Summary: integrated live ZeroSum marketplace with buy/list/offer/cancel/accept functionality; added /explore/listings page; updated invariants and source-tree map; introduced CancelListing.jsx and AcceptOffer.jsx entrypoints; revised marketplace guidance.
 ──────────────────────────────────────────────────────────────────/
 
 ════════════════════════════════════════════════════════════════
@@ -95,6 +95,11 @@ Taquito for all wallets (remote forge service removed).
 • src/utils/sliceCache.js … shared resumable‑upload cache logic (I60‑I61)
 • src/core/batchV4a.js … v4a dynamic storageLimit (I89)
 • src/utils/sleepV4a.js … Promise‑based async delay (I90)
+• src/core/marketplace.js … ZeroSum contract utils
+• src/ui/MarketplaceBar.jsx … token-detail action bar
+• src/ui/Entrypoints/CancelListing.jsx … cancel marketplace listing entrypoint
+• src/ui/Entrypoints/AcceptOffer.jsx … accept marketplace offer entrypoint
+• src/pages/explore/listings.jsx … listings page showing tokens with active marketplace listings
 
 ───────────────────────────────────────────────────────────────
 2 · INVARIANTS 🔒 (scope tags: [F]rontend | [C]ontract | [E]ngine | [I]nfra)
@@ -247,7 +252,7 @@ I108 [F] Token‑ID filter UX — collection detail pages expose a <TokenIdSelec
 I109 [F,E] Live on‑chain stats — token & owner counts shown in any UI derive from countTokens.js / countOwners.js and must not rely on static total_supply; until the async fetch resolves, the UI displays an ellipsis “…” placeholder.
 I110 [F] Integrity badge standardisation — every component that presents token or collection media must render an <IntegrityBadge status=…/>; the adjacent tooltip / title conveys the long‑form label from constants/integrityBadges.js.
 I111 [F,C,E,I] Don't use "global" in any comments or line summaries, it messes with yarn lint and throws false warnings.
-I112 [F,E] Marketplace dialogs (buy/list/offer) must call feeEstimator.js and display <OperationOverlay/> before dispatching any transaction.
+I112 [F,E] Marketplace dialogs (buy/list/offer/cancel listing/accept offer) must call feeEstimator.js and display <OperationOverlay/> before dispatching any transaction using ZeroSum helpers.
 I113 [F] Unified Consent Management — all consent decisions use useConsent hook with standardized keys: 'nsfw' (for content), 'flash' (for flashing), 'scripts:{contractAddress}' (per‑contract script execution). Consent state syncs across components via CustomEvent broadcasting and always requires explicit user acknowledgment through PixelConfirmDialog with checkbox agreement to terms.
 I114 [F] Portal‑Based Draggable Windows — draggable preview windows use createPortal(component, document.body) for z‑index isolation. Draggable state managed through useRef pattern with randomized start positions (60 + Math.random()30) to prevent stacking. SSR compatibility: typeof document === 'undefined' ? body : createPortal(body, document.body).
 I115 [F] Hazard Detection & Content Protection — all media rendering components must call detectHazards(metadata) before display. Hazard types: { nsfw, flashing, scripts }. Script hazards detect HTML MIME types, JavaScript URIs, SVG with <script> tags. Obfuscation overlays block content until explicit user consent with age verification (18+) for NSFW.
@@ -258,8 +263,10 @@ I119 [F] On‑chain integrity scanning must treat remote domain patterns case‑
 I120 [F] Development scripts must propagate the selected network into both build‑time and runtime via environment variables (process.env.NETWORK and NEXT_PUBLIC_NETWORK), using the DEV_PORT exported from deployTarget.js; scripts/startDev.js must spawn Next.js via shell mode on the correct port and set these variables before execution.
 I121 [F] Explore grids and collection/token pages must derive their TzKT API base URL (TZKT_API) and other network parameters from src/config/deployTarget.js rather than hard‑coding Ghostnet or Mainnet domains (extends I10 and I105).
 I122 [F] Token metadata panels must decode contract metadata fully via decodeHexFields/decodeHexJson, fallback through imageUri, logo, artifactUri and thumbnailUri, and display the human‑readable collection name (name → symbol → title → collectionName → short address). Tags must appear with a “Tags:” label and wrap neatly in a single row; meta fields align responsively across breakpoints.
-I123 [F] Marketplace actions (BUY/LIST/OFFER) must use a unified MarketplaceBar.jsx overlay stub that informs users that ZeroSum functionality is still under development and directs them to objkt.com. Direct marketplace operations are disabled until the native marketplace contract is ready.
+I123 [F] Marketplace actions (BUY/LIST/OFFER/CANCEL LISTING/ACCEPT OFFER) must integrate with the ZeroSum marketplace via src/core/marketplace.js and call the respective entrypoint UI components (BuyDialog, ListTokenDialog, MakeOfferDialog, CancelListing.jsx, AcceptOffer.jsx). MarketplaceBar.jsx must display the lowest active listing price, open the appropriate dialog, and rely on feeEstimator.js and OperationOverlay for transaction feedback. The legacy stub overlay directing users off‑site has been removed.
 I124 [E,F] Local development must support concurrent Ghostnet and Mainnet instances by using yarn set:<network> && yarn dev:current; the dev:current script must honour the selected network and port (3000 for ghostnet, 4000 for mainnet) without resetting TARGET (build script remains unchanged). Clearing local storage may be necessary after network switches to prevent stale data.
+I125 [F] Listings page – the /explore/listings route must display all tokens with active ZeroSum marketplace listings. It loads contract addresses from hashMatrix.json, fetches live token IDs and lowest listing prices via listLiveTokenIds() and fetchLowestListing(), and renders each token in a responsive grid. Each card must include MarketplaceBar controls. Placeholder messages are not permitted.
+
 /
 Note: Invariant I118 is now retired. Earlier revisions used dual‑stage
 origination (FAST_ORIGIN) and a remote forging backend to circumvent
@@ -370,7 +377,7 @@ zerounbound/src/contexts/WalletContext.js – Beacon wallet ctx; Imports: react,
 zerounbound/src/core/batch.js – batch ops (v1‑v4); Imports: @taquito/utils,net.js; Exports: forgeBatch,sendBatch,buildAppendTokenMetaCalls,sliceHex,splitPacked
 zerounbound/src/core/batchV4a.js – v4a‑specific batch ops; Imports: @taquito/taquito; Exports: SLICE_SAFE_BYTES,sliceHex,buildAppendTokenMetaCalls
 zerounbound/src/core/feeEstimator.js – chunk‑safe fee/burn estimator; Imports: @taquito/taquito; Exports: estimateChunked,calcStorageMutez,toTez
-zerounbound/src/core/marketplace.js – ZeroSum helpers; Imports: net.js,@taquito/taquito; Exports: buildBuyParams,buildListParams,buildOfferParams
++zerounbound/src/core/marketplace.js – ZeroSum helpers; Imports: net.js,@taquito/taquito; Exports: getMarketContract,fetchListings,fetchLowestListing,buildBuyParams,buildListParams,buildOfferParams
 zerounbound/src/core/net.js – network helpers (jFetch, forgeOrigination, injectSigned). This module now always uses local forging and injection via Taquito's LocalForger/TezosToolkit; remote forging support has been removed. Imports: Parser,@taquito/michelson-encoder,deployTarget; Exports: jFetch,forgeOrigination,injectSigned
 zerounbound/src/core/validator.js – JSON‑schema helpers; Imports: ajv; Exports: validateContract,validateToken
 
@@ -387,6 +394,7 @@ zerounbound/src/hooks/useTxEstimate.js – dry‑run gas/fee; Imports: @taquito/
 ╭── src/pages (Next.js) ─────────────────────────────────────────────────────╮
 zerounbound/src/pages/contracts/[addr].jsx – collection detail page; Imports: ContractMetaPanelContracts,TokenCard,hazards.js; Exports: ContractPage
 zerounbound/src/pages/explore/[[...filter]].jsx – dynamic explore grid; Imports: CollectionCard,useConsent; Exports: Explore
+zerounbound/src/pages/explore/listings.jsx – marketplace listings page; Imports: React,hashMatrix.json,listLiveTokenIds.js,fetchLowestListing,TokenCard,MarketplaceBar,ExploreNav,LoadingSpinner; Exports: ListingsPage
 zerounbound/src/pages/explore/search.jsx (retired 10d92ac) – former advanced token search; Imports:· Exports:·
 zerounbound/src/pages/tokens/[addr]/[tokenId].jsx – responsive token-detail page that fetches collection and token metadata, displays media preview with hazard overlays, and moves script enable/disable and fullscreen controls into the metadata panel; integrates ExploreNav without search for global hazard toggles; re‑renders preview on script permission changes; clamps sidebar width and media height; Imports: React,useRouter,styled-components,ExploreNav,PixelButton,RenderMedia,FullscreenModal,MAINTokenMetaPanel,detectHazards,useConsent,useWalletContext,jFetch,TZKT_API,decodeHexFields,decodeHexJson; Exports: TokenDetailPage
 zerounbound/src/pages/_app.js – root providers; Imports: ThemeContext,WalletContext,GlobalStyles; Exports: MyApp
@@ -429,7 +437,7 @@ zerounbound/src/ui/ContractMetaPanelContracts.jsx – banner panel on /contracts
 zerounbound/src/ui/DeployCollectionForm.jsx – collection deploy UI; Imports: react,validator,OperationOverlay; Exports: DeployCollectionForm
 zerounbound/src/ui/BuyDialog.jsx – buy confirmation dialog; Imports: React,OperationConfirmDialog,feeEstimator.js; Exports: BuyDialog
 zerounbound/src/ui/ListTokenDialog.jsx – listing dialog; Imports: React,OperationOverlay,PixelInput; Exports: ListTokenDialog
-zerounbound/src/ui/MarketplaceBar.jsx – token action bar; Imports: React,PixelButton; Exports: MarketplaceBar
+zerounbound/src/ui/MarketplaceBar.jsx – token action bar; Imports: React,PixelButton,BuyDialog,ListTokenDialog,MakeOfferDialog; Exports: MarketplaceBar; shows lowest listing price and opens buy/list/offer dialogs via ZeroSum
 zerounbound/src/ui/GlobalSnackbar.jsx – global toast host; Imports: React; Exports: GlobalSnackbar
 zerounbound/src/ui/MakeOfferDialog.jsx - add amount and make your bid; Imports: React,styledPkg,PixelInput,PixelButton,useWalletContext; Exports: MakeOfferDialog
 zerounbound/src/ui/TokenCard.jsx – token preview card; Imports: React,hazards,useConsent; Exports: TokenCard
@@ -458,6 +466,8 @@ zerounbound/src/ui/Entrypoints/Mint.jsx – main mint flow (mint NFTs); collects
 zerounbound/src/ui/Entrypoints/MintV4a.jsx – v4a mint UI; Imports: batchV4a.js,sliceCacheV4a.js,feeEstimator.js,sleepV4a.js; Exports: MintV4a
 zerounbound/src/ui/Entrypoints/MintPreview.jsx – pre‑mint gallery; Imports: react,RenderMedia; Exports: MintPreview
 zerounbound/src/ui/Entrypoints/MintUpload.jsx – drag/upload step; Imports: react,PixelButton,mimeTypes.js,PixelConfirmDialog.jsx,onChainValidator.js; Exports: MintUpload
+zerounbound/src/ui/Entrypoints/CancelListing.jsx – cancel marketplace listing entrypoint; Imports: react,OperationOverlay,feeEstimator.js; Exports: CancelListing
+zerounbound/src/ui/Entrypoints/AcceptOffer.jsx – accept marketplace offer entrypoint; Imports: react,OperationOverlay,feeEstimator.js; Exports: AcceptOffer
 zerounbound/src/ui/Entrypoints/RepairUri.jsx – diff repair (I60); Imports: batch,sliceCache,useTxEstimate; Exports: RepairUri
 zerounbound/src/ui/Entrypoints/RepairUriV4a.jsx – v4a diff repair; Imports: batchV4a.js,sliceCacheV4a.js,useTxEstimate; Exports: RepairUriV4a
 zerounbound/src/ui/Entrypoints/Transfer.jsx – FA2 transfer; Imports: react; Exports: Transfer
@@ -560,6 +570,7 @@ B. entrypointRegistry.json, contains all Entrypoints used across our supported 
 ─────────────────────────────────────────────────────────────
 CHANGELOG
 ─────────────────────────────────────────────────────────────/
+• r1022 2025‑07‑24 UTC — integrated live ZeroSum marketplace: implemented buy/list/offer/cancel listing/accept offer via new helpers in core/marketplace.js; added new entrypoint components CancelListing.jsx and AcceptOffer.jsx; created /explore/listings page to display all tokens with active marketplace listings; updated invariants I112/I123 and added I125; expanded Critical‑Entry Index and Source‑Tree Map accordingly; revised manifest summary to reflect marketplace integration.
 • r1021 2025‑07‑24 UTC — removed the remote forge service and FAST_ORIGIN flag; unified single‑stage origination via Taquito’s wallet.originate() for all wallets; updated manifest, invariants, and source‑tree map to reflect removal; moved forge_service_node to graveyard; polished token metadata and marketplace features.
 • r1020 2025‑07‑23 UTC — refined token-detail UX: stacked script toggle and labelled fullscreen button above description; ensured previews re-render when toggling scripts; updated ExploreNav to hide search bar when hideSearch prop is set and include hazard consent prompts; updated Mint flow with authors hints and tokenUrl; added token link support to OperationOverlay; revised manifest summary and source-tree map accordingly.
 • r1019 2025‑07‑23 UTC — repositioned token-level script toggle and fullscreen controls on token detail pages; moved controls into MAINTokenMetaPanel; removed script overlay and bottom-left icons; added auto-refresh of token previews upon script permission changes; updated manifest summary and source-tree map accordingly.

@@ -1,21 +1,20 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/ExploreNav.jsx
-  Rev :    r19    2025‑07‑25 UTC
-  Summary: Global navigation bar for explore pages and personalized
-           sections.  Adds buttons for My Collections, My Tokens
-           and My Offers alongside existing navigation.  Includes
-           search bar (optional) and hazard toggles.
+  Rev :    r20    2025‑07‑26 UTC
+  Summary: Temporarily disables “My …” links; clicking any of
+           them now opens a stub overlay informing users that the
+           new marketplace contract is under construction.
 ─────────────────────────────────────────────────────────────*/
 
-import { useState }  from 'react';
-import { useRouter } from 'next/router';
-import styledPkg     from 'styled-components';
+import { useState }    from 'react';
+import { useRouter }   from 'next/router';
+import styledPkg       from 'styled-components';
 
-import PixelButton         from './PixelButton.jsx';
-import PixelInput          from './PixelInput.jsx';
-import PixelConfirmDialog  from './PixelConfirmDialog.jsx';
-import useConsent          from '../hooks/useConsent.js';
+import PixelButton          from './PixelButton.jsx';
+import PixelInput           from './PixelInput.jsx';
+import PixelConfirmDialog   from './PixelConfirmDialog.jsx';
+import useConsent           from '../hooks/useConsent.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -35,9 +34,9 @@ const Bar = styled.nav`
 
 /**
  * Explore navigation bar with optional search suppression.
- * This component renders navigation buttons, a search field and
- * hazard toggles.  New buttons for personalised content (My Collections,
- * My Tokens, My Offers) are included after the Listings button.
+ * NOTE (r20): All personalised “My …” links are temporarily
+ * routed to a stub notice while the new marketplace contract
+ * is being deployed.
  *
  * @param {Object} props
  * @param {boolean} [props.hideSearch=false] whether to hide the search bar
@@ -46,11 +45,14 @@ export default function ExploreNav({ hideSearch = false }) {
   const [q, setQ] = useState('');
   const router     = useRouter();
 
+  /* stub‑overlay state */
+  const [stubOpen , setStubOpen ] = useState(false);
+
   /* hazard‑consent flags */
   const [allowNSFW , setAllowNSFW ] = useConsent('nsfw' , false);
   const [allowFlash, setAllowFlash] = useConsent('flash', false);
 
-  /* confirm‑dialog state */
+  /* confirm‑dialog state for hazard toggles */
   const [dlg,      setDlg]      = useState(null);   // 'nsfw' | 'flash' | null
   const [termsOK,  setTermsOK]  = useState(false);
 
@@ -58,6 +60,7 @@ export default function ExploreNav({ hideSearch = false }) {
   const isTokensCtx = router.asPath.toLowerCase().includes('/tokens')
                     || String(router.query.cmd).toLowerCase() === 'tokens';
 
+  /*──────────────── search ────────────────────────────────*/
   const go = (e) => {
     e.preventDefault();
     const v = q.trim();
@@ -79,7 +82,7 @@ export default function ExploreNav({ hideSearch = false }) {
     setQ('');
   };
 
-  /*─ handlers ─*/
+  /*──────────────── hazard toggles ───────────────────────*/
   const requestToggle = (flag) => {
     if ((flag === 'nsfw'  && !allowNSFW)
      || (flag === 'flash' && !allowFlash)) {
@@ -89,7 +92,6 @@ export default function ExploreNav({ hideSearch = false }) {
       if (flag === 'flash') setAllowFlash(false);
     }
   };
-
   const confirmEnable = () => {
     if (!termsOK) return;
     if (dlg === 'nsfw')  setAllowNSFW(true);
@@ -97,38 +99,26 @@ export default function ExploreNav({ hideSearch = false }) {
     setDlg(null); setTermsOK(false);
   };
 
-  /*──────── render ─────────────────────────────────────────*/
+  /*──────────────── render ───────────────────────────────*/
   return (
     <>
       <Bar aria-label="Explore navigation">
         <PixelButton as="a" href="/explore">COLLECTIONS</PixelButton>
         <PixelButton as="a" href="/explore?cmd=tokens">TOKENS</PixelButton>
         <PixelButton as="a" href="/explore/listings">LISTINGS</PixelButton>
-        {/* personalised pages */}
-        {/* Highlight personal pages with the warning prop to provide
-            a contrasting accent colour.  These buttons link to the
-            user-centric “My” pages (collections, tokens, offers). */}
-        <PixelButton
-          as="a"
-          href="/my/collections"
-          style={{ background: 'var(--zu-accent-sec)', color: 'var(--zu-btn-fg)', borderColor: 'var(--zu-accent-sec-hover)' }}
-        >
-          MY COLLECTIONS
-        </PixelButton>
-        <PixelButton
-          as="a"
-          href="/my/tokens"
-          style={{ background: 'var(--zu-accent-sec)', color: 'var(--zu-btn-fg)', borderColor: 'var(--zu-accent-sec-hover)' }}
-        >
-          MY TOKENS
-        </PixelButton>
-        <PixelButton
-          as="a"
-          href="/my/offers"
-          style={{ background: 'var(--zu-accent-sec)', color: 'var(--zu-btn-fg)', borderColor: 'var(--zu-accent-sec-hover)' }}
-        >
-          MY OFFERS
-        </PixelButton>
+
+        {/* personalised pages – now stubbed */}
+        {['MY COLLECTIONS', 'MY TOKENS', 'MY OFFERS'].map((lbl) => (
+          <PixelButton
+            key={lbl}
+            as="a"
+            href="#"
+            onClick={(e) => { e.preventDefault(); setStubOpen(true); }}
+            style={{ background:'var(--zu-accent-sec)', color:'var(--zu-btn-fg)', borderColor:'var(--zu-accent-sec-hover)' }}
+          >
+            {lbl}
+          </PixelButton>
+        ))}
 
         {!hideSearch && (
           <form onSubmit={go}>
@@ -161,7 +151,7 @@ export default function ExploreNav({ hideSearch = false }) {
         </PixelButton>
       </Bar>
 
-      {/* confirm‑dialog */}
+      {/* hazard confirm‑dialog */}
       {dlg && (
         <PixelConfirmDialog
           open
@@ -171,14 +161,12 @@ export default function ExploreNav({ hideSearch = false }) {
               <p style={{ margin:'0 0 8px' }}>
                 Warning: You are about to allow <strong>Not‑Safe‑For‑Work (NSFW)</strong>{' '}
                 content across Zero Unbound. This may include explicit nudity,
-                sexual themes, graphic violence or other mature material. Viewer
-                discretion is advised.
+                sexual themes, graphic violence or other mature material.
               </p>
             ) : (
               <p style={{ margin:'0 0 8px' }}>
-                Warning: You are about to allow content that contains{' '}
-                flashing or strobe effects. This may trigger photosensitive
-                reactions in some viewers. Proceed with caution.
+                Warning: You are about to allow content that contains flashing or
+                strobe effects. This may trigger photosensitive reactions.
               </p>
             )}
             <label style={{ display:'flex',alignItems:'center' }}>
@@ -187,19 +175,37 @@ export default function ExploreNav({ hideSearch = false }) {
                 checked={termsOK}
                 onChange={(e) => setTermsOK(e.target.checked)}
               />
-              <span style={{ marginLeft:'0.4rem' }}>I have read and accept these terms</span>
+              <span style={{ marginLeft:'0.4rem' }}>I accept the terms</span>
             </label>
           </>)}
           onConfirm={confirmEnable}
           onCancel={() => { setDlg(null); setTermsOK(false); }}
         />
       )}
+
+      {/* marketplace stub overlay */}
+      {stubOpen && (
+        <PixelConfirmDialog
+          open
+          title="Marketplace upgrade in progress"
+          message={(
+            <p style={{ margin:0 }}>
+              New ZeroSum marketplace contract is under construction.<br/>
+              Please list or manage offers on&nbsp;
+              <a href="https://objkt.com" target="_blank" rel="noopener noreferrer">OBJKT</a>{' '}
+              for now and check back soon!
+            </p>
+          )}
+          confirmLabel="OK"
+          onConfirm={() => setStubOpen(false)}
+          onCancel={() => setStubOpen(false)}
+        />
+      )}
     </>
   );
 }
 
-/* What changed & why: New ExploreNav component r19 adds personalized
-   navigation buttons (My Collections, My Tokens, My Offers) to the
-   existing explore navigation.  Keeps search bar and hazard toggles
-   functionality. */
+ExploreNav.propTypes = { hideSearch: Boolean };
+/* What changed & why: r20 replaces all “My …” navigation links with a stub
+   overlay to prevent users from accessing disabled marketplace features. */
 /* EOF */

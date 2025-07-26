@@ -1,8 +1,10 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/TokenCard.jsx
-  Rev :    r37    2025‑10‑17
-  Summary: detailed hazard disclaimers + wrap fix
+  Rev :    r38    2025‑07‑26 UTC
+  Summary: Temporarily disables Make Offer; tiny “OFFER” button
+           now opens the same construction stub overlay used in
+           MarketplaceBar & ExploreNav.
 ──────────────────────────────────────────────────────────────*/
 import {
   useState, useMemo, useEffect,
@@ -16,7 +18,6 @@ import RenderMedia               from '../utils/RenderMedia.jsx';
 import { getIntegrityInfo }      from '../constants/integrityBadges.js';
 import { checkOnChainIntegrity } from '../utils/onChainValidator.js';
 import PixelButton               from './PixelButton.jsx';
-import MakeOfferBtn              from './MakeOfferBtn.jsx';
 import IntegrityBadge            from './IntegrityBadge.jsx';
 import { shortKt }               from '../utils/formatAddress.js';
 import countAmount               from '../utils/countAmount.js';
@@ -161,9 +162,12 @@ export default function TokenCard({
   const [thumbOk, setThumbOk]   = useState(true);
   const [fs,      setFs]        = useState(false);
 
-   /* reveal dialog */
+  /* reveal dialog */
   const [revealType, setRevealType] = useState(null);   // 'nsfw' | 'flash' | null
   const [termsOk,    setTermsOk]    = useState(false);
+
+  /* marketplace stub overlay */
+  const [stubOpen , setStubOpen ] = useState(false);
 
   /* author / creator merge + “more…” toggle */
   const authors  = authorArray(meta);
@@ -317,7 +321,7 @@ export default function TokenCard({
               </p>
             )}
 
-          {/* optional creators line (when authors present & differ) */}
+          {/* optional creators line */}
           {showCreatorsLine && (
             <p style={{ opacity:.8 }}>
               Creator&nbsp;
@@ -340,8 +344,15 @@ export default function TokenCard({
           <Stat>Owners&nbsp;{owners}</Stat>
           {priceTez && <Stat>Price&nbsp;{priceTez}&nbsp;ꜩ</Stat>}
 
+          {/* stubbed offer button */}
           <div style={{ marginTop:'4px' }}>
-            <MakeOfferBtn contract={contractAddress} tokenId={token.tokenId} label="OFFER" />
+            <PixelButton
+              size="sm"
+              onClick={() => setStubOpen(true)}
+              title="Offer temporarily disabled"
+            >
+              OFFER
+            </PixelButton>
           </div>
 
           <p style={{ marginTop:'4px' }}>
@@ -402,26 +413,15 @@ export default function TokenCard({
             <>
               {revealType === 'nsfw' ? (
                 <p style={{ margin:'0 0 8px' }}>
-                  This asset is flagged as <strong>Not‑Safe‑For‑Work (NSFW)</strong>. It may
-                  contain explicit nudity, sexual content, graphic violence or other
-                  mature themes. Viewer discretion is advised.
+                  This asset is flagged as <strong>Not‑Safe‑For‑Work (NSFW)</strong>.
                 </p>
               ) : (
                 <p style={{ margin:'0 0 8px' }}>
-                  This asset contains <strong>rapid flashing or strobing effects</strong>{' '}
-                  which may trigger seizures for people with photosensitive epilepsy.
-                  Learn more&nbsp;
-                  <a href="https://kb.daisy.org/publishing/docs/metadata/schema.org/accessibilityHazard.html#value"
-                     target="_blank" rel="noopener noreferrer">
-                    here
-                  </a>.
+                  This asset contains <strong>rapid flashing effects</strong>.
                 </p>
               )}
               <label style={{
-                display:'flex',
-                gap:'6px',
-                alignItems:'center',
-                flexWrap:'wrap',
+                display:'flex',gap:'6px',alignItems:'center',flexWrap:'wrap',
               }}>
                 <input
                   type="checkbox"
@@ -440,6 +440,25 @@ export default function TokenCard({
           onCancel={() => { setRevealType(null); setTermsOk(false); }}
         />
       )}
+
+      {/* marketplace stub overlay */}
+      {stubOpen && (
+        <PixelConfirmDialog
+          open
+          title="Marketplace upgrade in progress"
+          message={(
+            <p style={{ margin:0 }}>
+              New ZeroSum marketplace contract is under construction.<br/>
+              Please list or manage offers on&nbsp;
+              <a href="https://objkt.com" target="_blank" rel="noopener noreferrer">OBJKT</a>{' '}
+              for now and check back soon!
+            </p>
+          )}
+          confirmLabel="OK"
+          onConfirm={() => setStubOpen(false)}
+          onCancel={() => setStubOpen(false)}
+        />
+      )}
     </>
   );
 }
@@ -455,8 +474,8 @@ TokenCard.propTypes = {
   contractName   : PropTypes.string,
   contractAdmin  : PropTypes.string,
 };
-/* What changed & why (r37):
-   • Added rich NSFW / flashing disclaimers with epilepsy link.
-   • Wrapped checkbox label to flex‑wrap avoiding overflow.
-   • Core logic untouched. */
+/* What changed & why: r38 removes MakeOfferBtn (now disabled) and
+   replaces it with a PixelButton that opens the same construction
+   stub overlay used across the UI while the marketplace upgrade
+   is in flight. */
 /* EOF */

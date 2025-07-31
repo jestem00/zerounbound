@@ -1,20 +1,12 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/explore/[[...filter]].jsx
-  Rev :    r1    2025‑07‑30
-  Summary: Combined explore grid for collections, tokens and
-           marketplace listings.  This dynamic catch‑all page
-           derives the current mode from the URL and renders
-           either the existing token/collection explorer or the
-           marketplace listings view.  When the first segment of
-           the pathname is “listings” (or cmd/listings is set)
-           the page delegates to the dedicated listings component
-           imported from `./listings.jsx`.  Otherwise it falls
-           back to the collections/tokens loader defined in the
-           original catch‑all.  This preserves the behaviour of
-           the explore grid for collections and tokens while
-           enabling a functional marketplace listings page.
-─────────────────────────────────────────────────────────────*/
+  Rev :    r3    2025‑07‑31
+  Summary: Combined explore grid for collections, tokens and listings.
+           Always apply ZeroContract typeHash filter when an admin filter
+           is present to exclude non‑ZeroContract collections.  Restored
+           original explore grid structure and markup.
+────────────────────────────────────────────────────────────*/
 
 import React, {
   useCallback,
@@ -30,15 +22,6 @@ import CollectionCard from '../../ui/CollectionCard.jsx';
 import TokenCard from '../../ui/TokenCard.jsx';
 import ExploreNav from '../../ui/ExploreNav.jsx';
 import PixelButton from '../../ui/PixelButton.jsx';
-
-// Import marketplace listings page.  This component handles
-// discovery of active marketplace listings, including network
-// fallbacks and token enumeration.  It renders its own
-// ExploreNav and grid layout.  See `src/pages/explore/listings.jsx`.
-// Note: listings are now handled by a nested route at
-// src/pages/explore/listings/index.jsx.  The optional catch‑all
-// route here no longer imports or delegates to listings; Next.js
-// will automatically route to the more specific listings page.
 
 // Helpers for collections and tokens
 import hashMatrix from '../../data/hashMatrix.json';
@@ -103,7 +86,8 @@ const isZeroToken = (t) => {
   if (!meta.artifactUri?.startsWith('data:')) return true;
   if (detectHazards(meta).broken) return true;
   // Mutate metadata in place to avoid recomputing later
-  t.metadata = meta; // eslint-disable-line no-param-reassign
+  // eslint-disable-next-line no-param-reassign
+  t.metadata = meta;
   return false;
 };
 
@@ -128,8 +112,6 @@ export default function ExploreGrid() {
     ? adminFilterRaw
     : '';
 
-  // Listings page is handled by src/pages/explore/listings/index.jsx.
-
   // State management for collections and tokens.  These state
   // variables mirror those used in the original explore grid.  When
   // not in listings mode, the component loads collections or
@@ -145,6 +127,8 @@ export default function ExploreGrid() {
 
   // Fetch helper for collections.  Pulls active ZeroContract
   // collections from TzKT in batches, sorted by firstActivityTime.
+  // When an admin filter is provided we still restrict to ZeroContract
+  // versions by appending the typeHash.in parameter alongside creator.eq.
   const fetchBatchCollections = useCallback(
     async (off) => {
       const qs = new URLSearchParams({
@@ -152,8 +136,11 @@ export default function ExploreGrid() {
         offset     : off,
         'sort.desc': 'firstActivityTime',
       });
-      if (adminFilter) qs.append('creator.eq', adminFilter);
-      else             qs.append('typeHash.in', VERSION_HASHES);
+      // Always restrict to recognised ZeroContract versions.
+      qs.append('typeHash.in', VERSION_HASHES);
+      if (adminFilter) {
+        qs.append('creator.eq', adminFilter);
+      }
       return jFetch(`${TZKT}/contracts?${qs}`).catch(() => []);
     },
     [adminFilter],
@@ -229,7 +216,6 @@ export default function ExploreGrid() {
   );
 
   // Reset collections/tokens on mode or admin filter change.
-  // Listings are handled by a separate route, so no special case here.
   useEffect(() => {
     if (!router.isReady) return;
     setTokens([]);
@@ -265,7 +251,9 @@ export default function ExploreGrid() {
               contractName={t.contract?.metadata?.name}
             />
           ))
-        : collections.map((c) => <CollectionCard key={c.address} contract={c} />)
+        : collections.map((c) => (
+            <CollectionCard key={c.address} contract={c} />
+          ))
     ),
     [isTokensMode, tokens, collections],
   );
@@ -310,7 +298,12 @@ export default function ExploreGrid() {
       <Grid>{cardList}</Grid>
       {!end && (
         <Center>
-          <PixelButton type="button" onClick={() => loadBatch(DESIRED_BATCH)} disabled={loading} size="sm">
+          <PixelButton
+            type="button"
+            onClick={() => loadBatch(DESIRED_BATCH)}
+            disabled={loading}
+            size="sm"
+          >
             {loading ? 'Loading…' : 'Load More 🔻'}
           </PixelButton>
         </Center>
@@ -319,14 +312,8 @@ export default function ExploreGrid() {
   );
 }
 
-/* What changed & why: Introduced a new dynamic route under
-   src/pages/explore/[[...filter]].jsx that merges the existing
-   explore grid functionality with a proper marketplace listings
-   implementation.  The component now inspects the URL to
-   determine when the user is viewing /explore/listings and
-   delegates to the ListingsPage component in that case.  In all
-   other modes, it retains the original behaviour of loading
-   collections or tokens via TzKT and supports infinite
-   scrolling.  This approach ensures that the marketplace
-   listings page works without breaking token or collection
-   browsing. */
+/* What changed & why: Restored the complete explore grid component structure
+   and UI markup, fixing previous syntax truncations.  Added typeHash.in
+   filter to fetchBatchCollections so that ZeroContract collections are
+   still enforced when an admin filter is active. */
+/* EOF */

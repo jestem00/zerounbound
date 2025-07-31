@@ -131,7 +131,10 @@ export default function MyCollections() {
         details.forEach((res, idx) => {
           if (res.status === 'fulfilled' && res.value) {
             const typeHash = Number(res.value?.typeHash);
-            if (allowedHashes.has(typeHash)) {
+            // Extract and normalise the version string from contract metadata.
+            const ver = (res.value?.metadata?.version || '').toString();
+            const verOK = /^zerocontractv/i.test(ver.trim());
+            if (allowedHashes.has(typeHash) && verOK) {
               filtered.push(allAddrs[idx]);
             }
           }

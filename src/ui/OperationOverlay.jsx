@@ -1,12 +1,15 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/OperationOverlay.jsx
-  Rev :    r965   2025-07-23
-  Summary: unified progress overlay for origination, mint,
-           repair and append.  Restores success view,
-           wallet hints, timeout messaging and cache clearing on close.
-           Adds optional tokenUrl support to render a
-           “View Token” button on success.
+  Rev :    r966   2025-07-31
+  Summary: Unified progress overlay for origination, mint, repair
+           and append. Restores success view, wallet hints,
+           timeout messaging and cache clearing on close. Adds
+           optional tokenUrl support to render a “View Token”
+           button on success. Adds a legacy `label` prop as an
+           alias for `status` so callers still using `label`
+           display the intended message instead of the default
+           “Preparing request…”.
 ──────────────────────────────────────────────────────────────*/
 
 import React, {
@@ -142,6 +145,13 @@ const List = styled.ul.attrs((p)=>({$n:p.$n}))`
 /*════════ component ════════════════════════════════════*/
 export default function OperationOverlay({
   status    = '',
+  /**
+   * Optional legacy prop used by older components.  When provided
+   * and status is empty, this value is used for the progress
+   * message.  New code should pass `status` instead.  Kept for
+   * backward compatibility with existing marketplace dialogs.
+   */
+  label,
   progress: progressProp = 0,
   error,
   kt1,
@@ -268,7 +278,8 @@ export default function OperationOverlay({
   }
 
   /*──────── progress / error branch ─────*/
-  const caption = error ? status : (status||'Preparing request…');
+  // Prefer the explicit status; fall back to label for legacy callers.
+  const caption = error ? (status || label) : ((status || label) || 'Preparing request…');
   const walletHint = /wallet/i.test(caption)&&!error;
   const showSig    = total>1 && !error;
   const isTimeout = /timeout|took more time/i.test(caption);
@@ -343,9 +354,9 @@ export default function OperationOverlay({
   );
 }
 
-/* What changed & why: Restored full success and progress UI from r955,
-   unifying it with dual-stage origination.  Handles mint, repair and
-   append workflows by showing correct success view (with kt1/opHash
-   links), progress indicators for multi-signature operations and error
-   hints.  Added cache/service-worker clearing on close.
-*/
+/* What changed & why: Added optional legacy `label` prop as an alias
+   for `status` so that older marketplace dialogs continue to display
+   their progress messages.  The overlay now derives its caption
+   from status, then label, falling back to the default message.
+   The rest of the UI (success view, confetti, fun lines, cache
+   clearing) remains intact from r965. */

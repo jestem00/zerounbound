@@ -36,7 +36,7 @@ Summary: Revert to a static TARGET constant so scripts/setTarget.js
 // 'mainnet' or 'ghostnet' as appropriate; deployTarget.js is the sole
 // diverging file between network branches.  During development, the
 // scripts/setTarget.js helper rewrites this line to toggle networks.
-export const TARGET = 'mainnet';
+export const TARGET = 'ghostnet';
 
 // ---------------------------------------------------------------------------
 // Per‑network configuration
@@ -156,6 +156,26 @@ export const FACTORY_ADDRESSES = {
 // fallback to direct origination.
 export const FACTORY_ADDRESS = FACTORY_ADDRESSES[TARGET];
 
+// ---------------------------------------------------------------------------
+// Remote forge service
+//
+// Remote forging and injection were removed from the ZeroUnbound
+// platform in r1015; however, some legacy modules still import
+// FORGE_SERVICE_URL from deployTarget.js.  To maintain backward
+// compatibility and avoid build errors we export a constant that
+// always resolves to an empty string.  Additional URLs could be
+// mapped per network if remote forging is ever reintroduced.
+const FORGE_URLS = {
+  ghostnet: '',
+  mainnet:  '',
+};
+
+// Deprecated: always returns an empty string.  Remote forge services are
+// permanently disabled; client code should fall back to local forging via
+// Taquito’s LocalForger.  This export is retained solely to satisfy
+// existing imports.
+export const FORGE_SERVICE_URL = '';
+
 /**
  * Utility to select the fastest reachable RPC endpoint.  Given an array of
  * endpoints (RPC_URLS), this function pings each endpoint concurrently and
@@ -200,4 +220,7 @@ export const DEFAULT_NETWORK = TARGET;
      the committed TARGET value in each branch.
    • Updated header and revision to explain the rationale and restore
      compatibility with scripts/setTarget.js and updatePkgName.js.
+   • Restored FORGE_SERVICE_URL export (always empty) and its
+     associated mapping to prevent build errors in modules that still
+     import this constant.  Remote forging is deprecated.
 */

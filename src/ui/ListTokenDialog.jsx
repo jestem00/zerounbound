@@ -1,19 +1,19 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/ListTokenDialog.jsx
-  Rev :    r17    2025‑07‑25 UTC
-  Summary: pop‑out listing dialog with explicit labels, owned
-           and listed counts; integrates on‑chain balance
-           detection via off‑chain views (balance_of and
-           get_balance) with TzKT fallback.  Uses object
-           parameters for get_balance view (owner, token_id) for
-           compatibility; installs Tzip16Module to enable these
-           views; fetches off‑chain listed counts; grants
-           marketplace operator rights via update_operators before
-           listing.  Dispatches the batch via wallet.batch()
-           using withContractCall() to ensure correct
-           operation kinds; no gas simulation or confirm step.
-─────────────────────────────────────────────────────────────*/
+  Rev :    r19    2025‑07‑31 UTC
+  Summary: pop‑out listing dialog with improved listing count
+           detection and clearer display.  Uses on‑chain views
+           first to derive the total number of editions for sale
+           and falls back to off‑chain views or TzKT as needed.
+           Shows the owned count and total editions listed
+           alongside the number of listing entries (nonces), so
+           users understand when a single listing covers many
+           editions.  Retains balance detection, TzKT fallback,
+           update_operators permissioning and batched listing
+           transaction.  Integrates OperationOverlay for
+           progress feedback.
+────────────────────────────────────────────────────────────*/
 
 import React, { useState, useEffect } from 'react';
 import PropTypes                       from 'prop-types';
@@ -27,6 +27,7 @@ import { useWalletContext } from '../contexts/WalletContext.js';
 import {
   buildListParams,
   fetchListings,
+  fetchOnchainListings,
   getMarketContract,
 } from '../core/marketplace.js';
 
@@ -77,8 +78,10 @@ export default function ListTokenDialog({ open, contract, tokenId, onClose = () 
   const [amount, setAmount] = useState('1');
   // Maximum editions the user owns (determined via on‑chain view or TzKT)
   const [maxAmount, setMaxAmount] = useState(1);
-  // Number of editions currently listed for sale (off‑chain view)
+  // Number of editions currently listed for sale (sum of amounts across all listings)
   const [listedCount, setListedCount] = useState(0);
+  // Number of individual listing entries (each with its own nonce)
+  const [listedEntries, setListedEntries] = useState(0);
   // Operation overlay state
   const [ov, setOv] = useState({ open: false, label: '' });
 
@@ -101,6 +104,7 @@ export default function ListTokenDialog({ open, contract, tokenId, onClose = () 
       setMaxAmount(1);
       setAmount('1');
       setListedCount(0);
+      setListedEntries(0);
       // Declare balance outside the try-catch so it is available for fallback check
       let bal = 0;
       try {
@@ -174,19 +178,45 @@ export default function ListTokenDialog({ open, contract, tokenId, onClose = () 
           }
         }
       }
-      // Fetch the total number of editions currently listed via off‑chain view
+      // Fetch the total number of editions currently listed.  Prefer the on‑chain view
+      // and fall back to the off‑chain view when on‑chain results are empty.  Sum
+      // the amount field for each listing with amount > 0; do not rely on the
+      // `active` flag, which may lag behind actual state.
       try {
-        const listings = await fetchListings({ toolkit, nftContract: contract, tokenId });
-        let total = 0;
-        if (Array.isArray(listings)) {
-          for (const l of listings) {
-            if (l.active && l.amount > 0) total += Number(l.amount);
+        let listingArr = [];
+        try {
+          listingArr = await fetchOnchainListings({ toolkit, nftContract: contract, tokenId });
+        } catch {
+          listingArr = [];
+        }
+        if (!listingArr || listingArr.length === 0) {
+          try {
+            listingArr = await fetchListings({ toolkit, nftContract: contract, tokenId });
+          } catch {
+            listingArr = [];
           }
         }
-        if (!cancel) setListedCount(total);
+        let total = 0;
+        let entries = 0;
+        if (Array.isArray(listingArr)) {
+          for (const l of listingArr) {
+            const amt = Number(l.amount);
+            if (amt > 0) {
+              total += amt;
+              entries += 1;
+            }
+          }
+        }
+        if (!cancel) {
+          setListedCount(total);
+          setListedEntries(entries);
+        }
       } catch (e) {
-        console.warn('Failed to fetch listing count:', e);
-        if (!cancel) setListedCount(0);
+      console.warn('Failed to fetch listing count:', e);
+        if (!cancel) {
+          setListedCount(0);
+          setListedEntries(0);
+        }
       }
     })();
     return () => {
@@ -326,9 +356,18 @@ export default function ListTokenDialog({ open, contract, tokenId, onClose = () 
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
           />
-          {/* Owned and listed counts */}
+          {/* Owned and listed counts.  Display the total number of editions for sale
+             and the number of distinct listings (nonces) to avoid confusion when
+             multiple editions are sold under a single listing. */}
           <p style={{ fontSize: '0.7rem', marginTop: '0.3rem', opacity: 0.8 }}>
-            Owned: {maxAmount} | Listed: {listedCount}
+            Owned: {maxAmount} | For Sale: {listedCount}
+            {listedEntries > 0 && (
+              <span>
+                {' '}(
+                {listedEntries} listing{listedEntries !== 1 ? 's' : ''}
+                )
+              </span>
+            )}
           </p>
           <PixelButton disabled={disabled} onClick={handleList}>
             LIST&nbsp;TOKEN
@@ -360,15 +399,14 @@ ListTokenDialog.propTypes = {
   onClose : PropTypes.func,
 };
 
-/* What changed & why: updated to r17 – fixed “bal is not defined”
-   bug by moving the bal declaration outside the try/catch and
-   improved on‑chain balance detection by passing a named object
-   (owner, token_id) to the get_balance view.  Also updated the
-   listing dispatch to use wallet.batch().withContractCall() for
-   correct operation kinds, avoiding InvalidOperationKindError.
-   The dialog remains a pop‑out overlay with labelled fields;
-   installs Tzip16Module, falls back to TzKT gracefully, fetches
-   listed counts, validates inputs and sends a batch of
-   update_operators + list_token with 100 % sale split.  State
-   resets on close. */
-/* EOF */
+/* What changed & why: Introduced on‑chain listing count detection in
+   ListTokenDialog.  The component now calls fetchOnchainListings
+   first to obtain all marketplace listings for the specified
+   token, falling back to fetchListings (off‑chain view) when
+   necessary.  It sums the amount for each listing with amount > 0
+   and records the number of distinct listing entries.  The UI
+   shows the number of editions for sale alongside the number of
+   listing entries so users understand when one listing covers
+   many editions.  The remainder of the dialog retains the
+   existing balance detection, TzKT fallback and transaction
+   batching logic. */

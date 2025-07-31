@@ -1,13 +1,15 @@
 /*─────────────────────────────────────────────────────────────────
 Developed by @jams2blues – ZeroContract Studio
 File: src/config/deployTarget.js
-Rev : r1155    2025‑07‑31
+Rev : r1156    2025‑07‑31
 Summary: Revert to a static TARGET constant so scripts/setTarget.js
-         can rewrite it.  This file once again serves as the sole
-         branch‑diverging configuration.  Local development uses
-         scripts/setTarget.js and scripts/startDev.js to inject
-         environment variables, while Vercel builds rely on the
-         committed value of TARGET in each branch.*/
+         can rewrite it and centralise marketplace contract
+         addresses.  This file once again serves as the sole
+         branch‑diverging configuration, exposing factory and
+         marketplace address maps keyed by network.  Local
+         development uses scripts/setTarget.js and scripts/startDev.js
+         to inject environment variables, while Vercel builds rely
+         on the committed value of TARGET in each branch.*/
 
 // ---------------------------------------------------------------------------
 // Network target selection
@@ -36,7 +38,7 @@ Summary: Revert to a static TARGET constant so scripts/setTarget.js
 // 'mainnet' or 'ghostnet' as appropriate; deployTarget.js is the sole
 // diverging file between network branches.  During development, the
 // scripts/setTarget.js helper rewrites this line to toggle networks.
-export const TARGET = 'ghostnet';
+export const TARGET = 'mainnet';
 
 // ---------------------------------------------------------------------------
 // Per‑network configuration
@@ -157,6 +159,27 @@ export const FACTORY_ADDRESSES = {
 export const FACTORY_ADDRESS = FACTORY_ADDRESSES[TARGET];
 
 // ---------------------------------------------------------------------------
+// Marketplace contract addresses
+//
+// The ZeroSum marketplace lives at different addresses on Ghostnet and
+// Mainnet.  Rather than hard‑coding these values in multiple modules, we
+// centralise them here alongside other per‑network configuration.  Each
+// entry corresponds to the canonical marketplace contract for the given
+// network.  These values should be kept identical across branches, with
+// `deployTarget.js` remaining the sole diverging file between Ghostnet and
+// Mainnet.  See src/core/marketplace.js for usage.
+export const MARKETPLACE_ADDRESSES = {
+  ghostnet: 'KT1R1PzLhBXEd98ei72mFuz4FrUYEcuV7t1p',
+  mainnet : 'KT19kipdLiWyBZvP7KWCPdRbDXuEiu3gfjBR',
+};
+
+// Selected marketplace address based on the active TARGET.  Use this
+// constant when you need the marketplace contract for a given network.
+// If no entry exists for a network, the value will be undefined and
+// calling code should handle that case appropriately.
+export const MARKETPLACE_ADDRESS = MARKETPLACE_ADDRESSES[TARGET];
+
+// ---------------------------------------------------------------------------
 // Remote forge service
 //
 // Remote forging and injection were removed from the ZeroUnbound
@@ -223,4 +246,10 @@ export const DEFAULT_NETWORK = TARGET;
    • Restored FORGE_SERVICE_URL export (always empty) and its
      associated mapping to prevent build errors in modules that still
      import this constant.  Remote forging is deprecated.
+   • Added MARKETPLACE_ADDRESSES and MARKETPLACE_ADDRESS exports to
+     centralise ZeroSum marketplace contract addresses for ghostnet
+     and mainnet.  This ensures that modules like marketplace.js
+     import network-specific addresses from a single source instead
+     of hard-coding them, preventing cross‑network mixups.  Keep
+     these values consistent across branches.
 */

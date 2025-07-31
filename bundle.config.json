@@ -87,9 +87,6 @@
         "src/ui/IntegrityBadge.jsx",
         "src/config/**/*.js",
         "src/data/**/*.json"
-        
-
-        
       ]
     },
     {

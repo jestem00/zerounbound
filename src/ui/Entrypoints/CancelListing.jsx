@@ -1,16 +1,17 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/CancelListing.jsx
-  Rev :    r4    2025‑07‑25 UTC
-  Summary: pop‑out UI for cancelling active marketplace listings.
-           Fetches the seller’s active listings via off‑chain view,
-           displays them in a paginated table with checkboxes, and
-           allows canceling selected listings or all listings in
-           one operation.  Removed per‑row cancel buttons per user
-           request.  Uses a modal overlay consistent with other
-           entry‑point dialogs and batches cancel calls in a
-           single operation.
-─────────────────────────────────────────────────────────────*/
+  Rev :    r6    2025‑07‑31 UTC
+  Summary: pop‑out UI for cancelling marketplace listings. Now
+           prioritises on‑chain views over off‑chain views to
+           detect new listings immediately, filters by seller
+           address and amount>0 instead of relying on the
+           sometimes‑stale `active` flag, and resets state when
+           wallet changes.  Presents listings in a paginated
+           table with checkboxes and batches cancel calls in a
+           single operation.  Uses OperationOverlay’s `status`
+           prop for progress feedback.
+────────────────────────────────────────────────────────────*/
 
 import React, { useEffect, useState, useMemo } from 'react';
 import PropTypes                                from 'prop-types';
@@ -20,7 +21,12 @@ import PixelHeading       from '../PixelHeading.jsx';
 import PixelButton        from '../PixelButton.jsx';
 import OperationOverlay   from '../OperationOverlay.jsx';
 import { useWalletContext } from '../../contexts/WalletContext.js';
-import { fetchListings, buildCancelParams } from '../../core/marketplace.js';
+import {
+  fetchListings,
+  fetchOnchainListings,
+  marketplaceAddr,
+  buildCancelParams,
+} from '../../core/marketplace.js';
 
 // styled-components helper
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
@@ -88,15 +94,101 @@ export default function CancelListing({ open, contract, tokenId, onClose = () =>
     window.dispatchEvent(new CustomEvent('zu:snackbar', { detail: { message: msg, severity: sev } }));
   };
 
-  // Fetch active listings when dialog opens
+  // Fetch listings when dialog opens. Prefer on‑chain views for
+  // freshness and fall back to off‑chain views only when on‑chain
+  // returns nothing or fails. Results are filtered by seller
+  // address and non‑zero amount instead of the sometimes‑stale
+  // `active` flag.
   useEffect(() => {
     let cancel = false;
     (async () => {
       if (!open || !toolkit || !contract || tokenId == null) return;
       try {
-        const all = await fetchListings({ toolkit, nftContract: contract, tokenId });
-        // Filter to active listings owned by the connected wallet
-        const filtered = (all || []).filter((l) => l.active && l.seller && walletAddr && l.seller.toLowerCase() === walletAddr.toLowerCase());
+        let all;
+        // Prefer on‑chain view for accuracy; fallback to off‑chain if it fails or is empty
+        try {
+          all = await fetchOnchainListings({ toolkit, nftContract: contract, tokenId });
+        } catch {
+          all = [];
+        }
+        if (!all || all.length === 0) {
+          try {
+            all = await fetchListings({ toolkit, nftContract: contract, tokenId });
+          } catch {
+            all = [];
+          }
+        }
+        // Filter listings owned by this wallet with non‑zero amount
+        let filtered = (all || []).filter((l) => {
+          if (!l || !l.seller || !walletAddr) return false;
+          const sameSeller = l.seller.toLowerCase() === walletAddr.toLowerCase();
+          const amount     = Number(l.amount);
+          return sameSeller && amount > 0;
+        });
+
+        // Fallback: if no listings were found via on/off‑chain views but a wallet address exists,
+        // query TzKT’s seller_listings big‑map directly.  This uses the network from the toolkit
+        // to construct the base API URL and resolves the marketplace address via marketplaceAddr().
+        if (filtered.length === 0 && walletAddr) {
+          try {
+            const netType = toolkit?._network?.type ?? 'mainnet';
+            const marketAddr = marketplaceAddr(netType);
+            const base = /mainnet/i.test(netType) ? 'https://api.tzkt.io' : 'https://api.ghostnet.tzkt.io';
+            // Resolve the seller_listings big‑map pointer
+            const mapsRes = await fetch(`${base}/v1/contracts/${marketAddr}/bigmaps?path=seller_listings`);
+            const maps = await mapsRes.json();
+            let ptr;
+            if (Array.isArray(maps) && maps.length > 0) {
+              const match = maps.find((m) => (m.path || m.name) === 'seller_listings');
+              ptr = match ? (match.ptr ?? match.id) : undefined;
+            }
+            if (ptr != null) {
+              // Fetch all keys (sellers) and filter by our wallet address
+              const keysRes = await fetch(`${base}/v1/bigmaps/${ptr}/keys?active=true`);
+              const keys = await keysRes.json();
+              const fallbacks = [];
+              for (const entry of keys) {
+                let keyAddr;
+                const k = entry.key;
+                if (typeof k === 'string') {
+                  keyAddr = k;
+                } else if (k && typeof k.address === 'string') {
+                  keyAddr = k.address;
+                } else if (k && typeof k.value === 'string') {
+                  keyAddr = k.value;
+                }
+                if (!keyAddr || keyAddr.toLowerCase() !== walletAddr.toLowerCase()) continue;
+                const val = entry.value;
+                const items = Array.isArray(val) ? val : [];
+                for (const item of items) {
+                  // Each item may include nft_contract, token_id, nonce, price, amount, active, seller
+                    const itemContract = item.nft_contract || (item.contract && item.contract.address);
+                    const itemTokenId  = item.token_id ?? item.tokenId;
+                    const nonce        = item.nonce ?? item.listing_nonce;
+                    const price        = item.price;
+                    const amountVal    = item.amount;
+                    const isActive     = item.active;
+                    if (!itemContract || nonce == null) continue;
+                    if (itemContract === contract && Number(itemTokenId) === Number(tokenId) && Number(amountVal) > 0) {
+                      fallbacks.push({
+                        nonce      : Number(nonce),
+                        priceMutez : Number(price),
+                        amount     : Number(amountVal),
+                        seller     : walletAddr,
+                        active     : isActive,
+                      });
+                    }
+                }
+              }
+              if (fallbacks.length > 0) {
+                filtered = fallbacks;
+              }
+            }
+          } catch (fallbackErr) {
+            console.error('TzKT fallback failed:', fallbackErr);
+          }
+        }
+
         if (!cancel) {
           setListings(filtered);
           // Reset selection and page when new listings are loaded
@@ -170,29 +262,21 @@ export default function CancelListing({ open, contract, tokenId, onClose = () =>
     }
   }
 
-
   // Do not render when closed
   if (!open) return null;
 
   return (
     <ModalOverlay onClick={onClose}>
       <ModalBox onClick={(e) => e.stopPropagation()} data-modal="cancel-listing">
-        <PixelHeading level={3}>Cancel Listings</PixelHeading>
+        <PixelHeading>Cancel Listings</PixelHeading>
         {listings.length === 0 ? (
-          <p style={{ marginTop: '0.8rem' }}>No active listings to cancel.</p>
+          <p>No active listings to cancel.</p>
         ) : (
           <>
             <Table>
               <thead>
                 <tr>
-                  <th>
-                    <input
-                      type="checkbox"
-                      onChange={toggleAll}
-                      checked={pageListings.every((l) => selected[l.nonce])}
-                      aria-label="Select all listings on this page"
-                    />
-                  </th>
+                  <th><input type="checkbox" onChange={toggleAll} checked={pageListings.every((l) => selected[l.nonce])} /></th>
                   <th>Nonce</th>
                   <th>Amount</th>
                   <th>Price (ꜩ)</th>
@@ -201,63 +285,33 @@ export default function CancelListing({ open, contract, tokenId, onClose = () =>
               <tbody>
                 {pageListings.map((l) => (
                   <tr key={l.nonce}>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={!!selected[l.nonce]}
-                        onChange={() => toggle(l.nonce)}
-                        aria-label={`Select listing ${l.nonce}`}
-                      />
-                    </td>
+                    <td><input type="checkbox" checked={!!selected[l.nonce]} onChange={() => toggle(l.nonce)} /></td>
                     <td>{l.nonce}</td>
                     <td>{l.amount}</td>
                     <td>{(l.priceMutez / 1_000_000).toLocaleString()}</td>
-                    {/* Per-row cancel button */}
                   </tr>
                 ))}
               </tbody>
             </Table>
             {pages > 1 && (
               <Pagination>
-                {[...Array(pages)].map((_, idx) => (
-                  <PixelButton
-                    key={idx}
-                    warning={idx === page}
-                    onClick={() => setPage(idx)}
-                  >
-                    {idx + 1}
-                  </PixelButton>
+                {Array.from({ length: pages }, (_, i) => (
+                  <PixelButton key={i} onClick={() => setPage(i)} disabled={i === page}>{i + 1}</PixelButton>
                 ))}
               </Pagination>
             )}
-            <div style={{ marginTop: '1rem', display: 'flex', gap: '0.6rem' }}>
-              <PixelButton disabled={!hasSelected} onClick={handleCancel}>
-                CANCEL SELECTED
-              </PixelButton>
-              <PixelButton
-                disabled={listings.length === 0}
-                onClick={() => {
-                  // Select all for cancel
-                  const allSel = {};
-                  listings.forEach((l) => {
-                    allSel[l.nonce] = true;
-                  });
-                    setSelected(allSel);
-                    handleCancel();
-                }}
-              >
-                CANCEL ALL
-              </PixelButton>
+            <div style={{ display:'flex', gap:'0.8rem', marginTop:'1rem' }}>
+              <PixelButton onClick={handleCancel} disabled={!hasSelected}>Cancel Selected</PixelButton>
+              <PixelButton onClick={onClose}>Close</PixelButton>
             </div>
           </>
         )}
         {ov.open && (
           <OperationOverlay
-            label={ov.label}
-            onClose={() => setOv({ open: false, label: '' })}
+            status={ov.label}
+            onCancel={() => setOv({ open: false, label: '' })}
           />
         )}
-        <PixelButton style={{ marginTop: '1rem' }} onClick={onClose}>Close</PixelButton>
       </ModalBox>
     </ModalOverlay>
   );
@@ -270,8 +324,13 @@ CancelListing.propTypes = {
   onClose : PropTypes.func,
 };
 
-/* What changed & why: updated to r4 – removed the per‑row cancel
-   buttons after user feedback; the dialog now relies solely on
-   checkboxes to select listings for cancellation or the Cancel All
-   button.  Updated revision and summary accordingly. */
-/* EOF */
+/* What changed & why: Switched to prioritising on‑chain views over
+   off‑chain views to pick up newly created listings.  Added a TzKT
+   fallback: when both off‑chain and on‑chain views return no
+   listings for a token, the component queries the marketplace
+   seller_listings big‑map via the TzKT API and extracts any
+   matching listings for the connected wallet.  Filtering now
+   relies on matching the seller address and a non‑zero amount
+   rather than the sometimes‑stale `active` flag.  Updated revision
+   and summary accordingly and retained OperationOverlay status
+   support. */

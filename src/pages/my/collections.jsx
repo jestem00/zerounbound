@@ -17,7 +17,6 @@ import { useWalletContext } from '../../contexts/WalletContext.js';
 import { TZKT_API }          from '../../config/deployTarget.js';
 import ExploreNav            from '../../ui/ExploreNav.jsx';
 import PixelHeading          from '../../ui/PixelHeading.jsx';
-import PixelButton           from '../../ui/PixelButton.jsx';
 // Note: CollectionCard is imported from the full UI.  It may not
 // exist in this minimal environment but is required in the full
 // application.  If missing, the page will still compile in the

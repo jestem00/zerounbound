@@ -7,7 +7,7 @@
            name; decode collection metadata and tags; maintain
            hazard and consent logic; fix inline style syntax.
 ──────────────────────────────────────────────────────────────*/
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import PropTypes                    from 'prop-types';
 import { format }                   from 'date-fns';
 import styledPkg                    from 'styled-components';
@@ -22,7 +22,7 @@ import { checkOnChainIntegrity }    from '../utils/onChainValidator.js';
 import { getIntegrityInfo }         from '../constants/integrityBadges.js';
 import detectHazards                from '../utils/hazards.js';
 import useConsent                   from '../hooks/useConsent.js';
-import { shortKt, copyToClipboard } from '../utils/formatAddress.js';
+import { shortKt, copyToClipboard, shortAddr } from '../utils/formatAddress.js';
 import {
   EnableScriptsToggle,
   EnableScriptsOverlay,
@@ -31,6 +31,10 @@ import PixelConfirmDialog           from './PixelConfirmDialog.jsx';
 import countAmount                  from '../utils/countAmount.js';
 import hashMatrix                   from '../data/hashMatrix.json';
 import decodeHexFields, { decodeHexJson } from '../utils/decodeHexFields.js';
+
+// Import domain resolution helper and network key for reverse lookups.
+import { resolveTezosDomain } from '../utils/resolveTezosDomain.js';
+import { NETWORK_KEY }           from '../config/deployTarget.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -260,6 +264,118 @@ export default function MAINTokenMetaPanel({
     || collObj.collectionName
     || shortKt(collection.address);
 
+  // --------------------------------------------------------------
+  // Domain resolution state for authors and creators.  We cache
+  // resolved .tez domains using lowercased keys.  Lookups are
+  // performed on demand in a useEffect below.
+  const [domains, setDomains] = useState({});
+  const [showAllAuthors, setShowAllAuthors] = useState(false);
+  const [showAllCreators, setShowAllCreators] = useState(false);
+
+  // Extract authors and creators lists from token metadata.  If no
+  // authors exist, fall back to artists; if still empty, fall back
+  // to creators.  The returned arrays may contain strings that are
+  // Tezos addresses or human names.
+  const authorsList = useMemo(() => {
+    const meta = token.metadata || {};
+    let list = meta.authors || meta.artists || [];
+    if (!Array.isArray(list)) list = typeof list === 'string' ? list.split(/[,;]\s*/) : [];
+    return list;
+  }, [token.metadata]);
+  const creatorsList = useMemo(() => {
+    const meta = token.metadata || {};
+    let list = meta.creators || [];
+    if (!Array.isArray(list)) list = typeof list === 'string' ? list.split(/[,;]\s*/) : [];
+    return list;
+  }, [token.metadata]);
+
+  // Resolve domain names for each address in authorsList and
+  // creatorsList.  Only Tezos addresses (tz*/KT*) are queried.  The
+  // resolver caches results keyed by lowercase address to avoid
+  // duplicate requests.
+  useEffect(() => {
+    const addrs = new Set();
+    [...authorsList, ...creatorsList].forEach((val) => {
+      if (!val || typeof val !== 'string') return;
+      const v = val.trim();
+      if (/^(tz|kt)/i.test(v)) addrs.add(v);
+    });
+    addrs.forEach((addr) => {
+      const key = addr.toLowerCase();
+      if (domains[key] !== undefined) return;
+      (async () => {
+        const name = await resolveTezosDomain(addr, NETWORK_KEY);
+        setDomains((prev) => {
+          if (prev[key] !== undefined) return prev;
+          return { ...prev, [key]: name };
+        });
+      })();
+    });
+  }, [authorsList, creatorsList]);
+
+  // Format an entry: use resolved domain if present; if the string
+  // contains a dot, return it verbatim (likely a custom name or
+  // domain); otherwise, truncate Tezos addresses via shortAddr().
+  const formatEntry = useCallback(
+    (val) => {
+      if (!val || typeof val !== 'string') return String(val || '');
+      const v = val.trim();
+      const key = v.toLowerCase();
+      const dom = domains[key];
+      if (dom) return dom;
+      if (v.includes('.')) return v;
+      return shortAddr(v);
+    },
+    [domains],
+  );
+
+  // Render a comma-separated list with optional toggle.  When not
+  // expanded and more than 3 items exist, append a “More” toggle.
+  const renderList = useCallback(
+    (list, showAll, setShowAll) => {
+      const slice = showAll ? list : list.slice(0, 3);
+      const elems = [];
+      slice.forEach((item, idx) => {
+        const prefix = idx > 0 ? ', ' : '';
+        const formatted = formatEntry(item);
+        const isAddr = typeof item === 'string' && /^(tz|kt)/i.test(item.trim());
+        elems.push(
+          isAddr ? (
+            <a
+              key={item}
+              href={`/explore?cmd=tokens&admin=${item}`}
+              style={{ color: 'var(--zu-accent-sec,#6ff)', textDecoration: 'none', wordBreak: 'break-all' }}
+            >
+              {prefix}
+              {formatted}
+            </a>
+          ) : (
+            <span key={item} style={{ wordBreak: 'break-all' }}>
+              {prefix}{formatted}
+            </span>
+          ),
+        );
+      });
+      if (list.length > 3 && !showAll) {
+        elems.push(
+          <>
+            …&nbsp;
+            <button
+              type="button"
+              aria-label="Show all entries"
+              onClick={(e) => { e.preventDefault(); setShowAll(true); }}
+              style={{ background: 'none', border: 'none', color: 'inherit', font: 'inherit', cursor: 'pointer', padding: 0 }}
+            >
+              🔻More
+            </button>
+          </>,
+        );
+      }
+      return elems;
+    },
+    [formatEntry],
+  );
+
   /* clipboard copy */
   const copyAddr = () => {
     copyToClipboard(collection.address);
@@ -408,17 +524,29 @@ export default function MAINTokenMetaPanel({
           </Section>
         )}
 
+        {/* author and creator lists, separate from meta grid */}
+        {(authorsList.length > 0 || creatorsList.length > 0) && (
+          <Section>
+            {authorsList.length > 0 && (
+              <p style={{ fontSize: '.8rem', margin: 0 }}>
+                <strong>Author(s)</strong>:&nbsp;
+                {renderList(authorsList, showAllAuthors, setShowAllAuthors)}
+              </p>
+            )}
+            {creatorsList.length > 0 && (
+              <p style={{ fontSize: '.8rem', margin: 0, opacity: authorsList.length > 0 ? 0.85 : 1 }}>
+                <strong>Creator(s)</strong>:&nbsp;
+                {renderList(creatorsList, showAllCreators, setShowAllCreators)}
+              </p>
+            )}
+          </Section>
+        )}
+
         {/* misc meta */}
         <Section>
           <MetaGrid>
             <dt>MIME Type</dt>
             <dd>{token.metadata?.mimeType || 'N/A'}</dd>
-            <dt>Creator(s)</dt>
-            <dd>{(() => {
-              const a = token.metadata || {};
-              const s = a.authors || a.artists || a.creators || [];
-              return Array.isArray(s) ? s.join(', ') : s;
-            })()}</dd>
             {token.metadata?.rights && (
               <>
                 <dt>Rights</dt>

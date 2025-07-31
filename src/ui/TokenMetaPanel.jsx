@@ -6,7 +6,11 @@
            never clipped on any viewport
 ──────────────────────────────────────────────────────────────*/
 import React, {
-  useEffect, useMemo, useState, useRef, useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useRef,
+  useCallback,
 } from 'react';
 import styledPkg            from 'styled-components';
 
@@ -19,6 +23,10 @@ import PixelButton          from './PixelButton.jsx';
 import { checkOnChainIntegrity } from '../utils/onChainValidator.js';
 import { getIntegrityInfo }      from '../constants/integrityBadges.js';
 import IntegrityBadge       from './IntegrityBadge.jsx';
+// Import helpers for Tezos domain resolution and address formatting
+import { resolveTezosDomain } from '../utils/resolveTezosDomain.js';
+import { shortAddr } from '../utils/formatAddress.js';
+import { NETWORK_KEY } from '../config/deployTarget.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -69,6 +77,9 @@ const sz = (v) =>
     : typeof v === 'number'            ? v
     : v && typeof v.int === 'string'   ? parseInt(v.int, 10)
     : 0;
+
+/* href helper for linking to admin‑filtered explore pages */
+const hrefFor = (addr = '') => `/explore?cmd=tokens&admin=${addr}`;
 
 /*──────── styled shells ─────────────────────────────────────*/
 const Card = styled.div`
@@ -153,6 +164,122 @@ export default function TokenMetaPanel({
   const [rel,    setRel]    = useState({ coll:0, parent:0, child:0 });
   const [copied, setCopied] = useState(false);
 
+  /* domain resolution state. Holds resolved .tez names keyed by lowercase address. */
+  const [domains, setDomains] = useState({});
+  /* toggles for showing full lists of authors and creators */
+  const [showAllAuthors, setShowAllAuthors] = useState(false);
+  const [showAllCreators, setShowAllCreators] = useState(false);
+
+  /* Authors and creators arrays extracted from metadata.  Authors fallback
+   * to artists if authors are not defined.  Creators are read from
+   * metadata.creators.  Each entry can be a string, array or object.
+   */
+  const authorsList = useMemo(() => {
+    const a = metaObj.authors ?? metaObj.artists ?? [];
+    if (Array.isArray(a)) return a;
+    if (typeof a === 'string') {
+      try { const j = JSON.parse(a); return Array.isArray(j) ? j : [a]; }
+      catch { return [a]; }
+    }
+    if (a && typeof a === 'object') return Object.values(a);
+    return [];
+  }, [metaObj]);
+  const creatorsList = useMemo(() => {
+    const c = metaObj.creators ?? [];
+    if (Array.isArray(c)) return c;
+    if (typeof c === 'string') {
+      try { const j = JSON.parse(c); return Array.isArray(j) ? j : [c]; }
+      catch { return [c]; }
+    }
+    if (c && typeof c === 'object') return Object.values(c);
+    return [];
+  }, [metaObj]);
+
+  /* Resolve Tezos domains for all addresses in authorsList and creatorsList.
+   * Only addresses matching tz* /KT* patterns are looked up.  Cache results
+   * by lowercased address.  Use the global NETWORK_KEY so resolution
+   * honours the current network (mainnet vs ghostnet).  */
+  useEffect(() => {
+    const addrs = new Set();
+    authorsList.forEach((item) => {
+      if (typeof item === 'string' && /^(tz|kt)/i.test(item.trim())) {
+        addrs.add(item);
+      }
+    });
+    creatorsList.forEach((item) => {
+      if (typeof item === 'string' && /^(tz|kt)/i.test(item.trim())) {
+        addrs.add(item);
+      }
+    });
+    addrs.forEach((addr) => {
+      const key = addr.toLowerCase();
+      if (domains[key] !== undefined) return;
+      (async () => {
+        const name = await resolveTezosDomain(addr, NETWORK_KEY);
+        setDomains((prev) => {
+          if (prev[key] !== undefined) return prev;
+          return { ...prev, [key]: name };
+        });
+      })();
+    });
+  }, [authorsList, creatorsList, domains]);
+
+  /* Format a single author/creator entry.  If a domain has been
+   * resolved for the address, return that domain.  Otherwise, if the
+   * value contains a dot, treat it as a human name or domain and
+   * return it unchanged.  Addresses (tz* or KT*) are truncated via
+   * shortAddr for readability. */
+  const formatEntry = useCallback((val) => {
+    if (!val || typeof val !== 'string') return String(val || '');
+    const v = val.trim();
+    const key = v.toLowerCase();
+    if (domains[key]) return domains[key];
+    if (v.includes('.')) return v;
+    if (/^(tz|kt)/i.test(v) && v.length > 12) return shortAddr(v);
+    return v;
+  }, [domains]);
+
+  /* Render a comma-separated list of entries.  When the list has more
+   * than three items and showAll is false, only the first three are
+   * displayed followed by a “More” toggle.  Each address-like entry
+   * becomes a clickable link to the admin filter route. */
+  const renderEntryList = useCallback((list, showAll, toggleFn) => {
+    const display = showAll ? list : list.slice(0, 3);
+    const items = [];
+    display.forEach((item, idx) => {
+      const prefix = idx > 0 ? ', ' : '';
+      const formatted = formatEntry(item);
+      const isAddr = typeof item === 'string' && /^(tz|kt)/i.test(item.trim());
+      items.push(
+        isAddr ? (
+          <a
+            key={`${item}-${idx}`}
+            href={hrefFor(item)}
+            style={{ color: 'var(--zu-accent-sec,#6ff)', textDecoration: 'none', wordBreak: 'break-all' }}
+          >
+            {prefix}{formatted}
+          </a>
+        ) : (
+          <span key={`${item}-${idx}`} style={{ wordBreak: 'break-all' }}>{prefix}{formatted}</span>
+        ),
+      );
+    });
+    if (list.length > 3 && !showAll) {
+      items.push(
+        <>
+          … 
+          <button
+            type="button"
+            aria-label="Show all entries"
+            onClick={() => toggleFn(true)}
+            style={{ background: 'none', border: 'none', color: 'inherit', font: 'inherit', cursor: 'pointer', padding: 0 }}
+          >🔻More</button>
+        </>,
+      );
+    }
+    return items;
+  }, [formatEntry]);
+
   /* suppress repeat warnings after user dismiss */
   const supRef = useRef(new Set());
   const suppressWarn = useCallback((r) => {
@@ -202,10 +329,13 @@ export default function TokenMetaPanel({
 
   const kvPairs = useMemo(() => {
     const aKey = primaryAuthorKey(metaObj);
+    // Build a list of metadata keys excluding authors/artists and creators.  These
+    // fields are rendered separately with domain resolution.  See
+    // formatEntry/renderEntryList implementations below.
     const keys = [
-      'name','description','mimeType',aKey,'creators','rights',
-      'royalties','mintingTool','accessibility','contentRating',
-      'tags','attributes','decimals',
+      'name', 'description', 'mimeType', 'rights',
+      'royalties', 'mintingTool', 'accessibility', 'contentRating',
+      'tags', 'attributes', 'decimals',
     ];
     return keys
       .filter((k)=>metaObj[k]!==undefined)
@@ -368,6 +498,21 @@ export default function TokenMetaPanel({
           style={heroStyle}
           onInvalid={(r) => { supRef.current.add('hero'); suppressWarn(r); }}
         />
+      )}
+
+      {/* authors and creators lines displayed with domain resolution.  These
+         sections appear below the hero preview and above the metadata grid. */}
+      {authorsList.length > 0 && (
+        <p style={{ wordBreak: 'break-all' }}>
+          Author(s)&nbsp;
+          {renderEntryList(authorsList, showAllAuthors, setShowAllAuthors)}
+        </p>
+      )}
+      {creatorsList.length > 0 && (
+        <p style={{ wordBreak: 'break-all', opacity: authorsList.length > 0 ? 0.85 : 1 }}>
+          Creator(s)&nbsp;
+          {renderEntryList(creatorsList, showAllCreators, setShowAllCreators)}
+        </p>
       )}
 
       {warn && (

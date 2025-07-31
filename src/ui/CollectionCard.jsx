@@ -5,8 +5,11 @@
   Summary: use deployTarget for network detection and TzKT API
 ─────────────────────────────────────────────────────────────*/
 import {
-  useEffect, useState, useMemo,
-}                                 from 'react';
+  useEffect,
+  useState,
+  useMemo,
+  useCallback,
+} from 'react';
 import PropTypes                  from 'prop-types';
 import styledPkg                  from 'styled-components';
 
@@ -17,6 +20,7 @@ import { getIntegrityInfo }       from '../constants/integrityBadges.js';
 import countOwners                from '../utils/countOwners.js';
 import countTokens                from '../utils/countTokens.js';
 import { shortKt, copyToClipboard } from '../utils/formatAddress.js';
+import { shortAddr } from '../utils/formatAddress.js';
 import RenderMedia                from '../utils/RenderMedia.jsx';
 import PixelButton                from './PixelButton.jsx';
 import { jFetch }                 from '../core/net.js';
@@ -31,6 +35,11 @@ import {
 // resolves to 'mainnet' or 'ghostnet'; TZKT_API provides the base
 // TzKT domain for the selected network.  See src/config/deployTarget.js.
 import { NETWORK_KEY, TZKT_API } from '../config/deployTarget.js';
+
+// Domain resolver for reverse lookups.  This helper queries Tezos
+// Domains via GraphQL and falls back to cached results.  Domains are
+// resolved per-network (mainnet vs ghostnet) using NETWORK_KEY.
+import { resolveTezosDomain } from '../utils/resolveTezosDomain.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -163,6 +172,93 @@ export default function CollectionCard({ contract }) {
       ? meta.authors.split(/[,;]\s*/)
       : [];
 
+  // --------------------------------------------------------------
+  // Domain resolution state.  We cache resolved .tez domains for
+  // author addresses using a lowercase key.  Lookups are performed
+  // only once per address per component instance.
+  const [domains, setDomains] = useState({});
+  const [showAllAuthors, setShowAllAuthors] = useState(false);
+
+  // Resolve domain names for all addresses in the authors list.
+  useEffect(() => {
+    const addrs = new Set();
+    authors.forEach((a) => {
+      if (a && typeof a === 'string' && /^(tz|kt)/i.test(a.trim())) {
+        addrs.add(a);
+      }
+    });
+    addrs.forEach((addr) => {
+      const key = addr.toLowerCase();
+      if (domains[key] !== undefined) return;
+      (async () => {
+        const name = await resolveTezosDomain(addr, NETWORK_KEY);
+        setDomains((prev) => {
+          if (prev[key] !== undefined) return prev;
+          return { ...prev, [key]: name };
+        });
+      })();
+    });
+  }, [authors]);
+
+  // Format a single entry: if a domain is resolved, use it; if the
+  // string contains a dot (likely a custom name or domain) leave it
+  // unmodified; otherwise abbreviate tz/KT addresses via shortAddr().
+  const formatEntry = useCallback(
+    (val) => {
+      if (!val || typeof val !== 'string') return String(val || '');
+      const v = val.trim();
+      const lower = v.toLowerCase();
+      const dom = domains[lower];
+      if (dom) return dom;
+      if (v.includes('.')) return v;
+      return shortAddr(v);
+    },
+    [domains],
+  );
+
+  // Render authors with optional expansion.  When not showing all,
+  // only the first three entries are displayed; a toggle is appended
+  // when more items exist.
+  const renderAuthors = useCallback(() => {
+    const list = showAllAuthors ? authors : authors.slice(0, 3);
+    const elems = [];
+    list.forEach((item, idx) => {
+      const prefix = idx > 0 ? ', ' : '';
+      const formatted = formatEntry(item);
+      const isAddr = typeof item === 'string' && /^(tz|kt)/i.test(item.trim());
+      elems.push(
+        isAddr ? (
+          <a
+            key={item}
+            href={`/explore?cmd=tokens&admin=${item}`}
+            style={{ color: 'var(--zu-accent-sec,#6ff)', textDecoration: 'none' }}
+          >
+            {prefix}
+            {formatted}
+          </a>
+        ) : (
+          <span key={item}>{prefix}{formatted}</span>
+        ),
+      );
+    });
+    if (authors.length > 3 && !showAllAuthors) {
+      elems.push(
+        <>
+          …&nbsp;
+          <button
+            type="button"
+            aria-label="Show all authors"
+            onClick={(e) => { e.preventDefault(); setShowAllAuthors(true); }}
+            style={{ background: 'none', border: 'none', color: 'inherit', font: 'inherit', cursor: 'pointer', padding: 0 }}
+          >
+            🔻More
+          </button>
+        </>,
+      );
+    }
+    return elems;
+  }, [authors, showAllAuthors, formatEntry]);
+
   /* toggle handler */
   const handleToggleScripts = () => {
     if (allowScripts) {
@@ -220,7 +316,12 @@ export default function CollectionCard({ contract }) {
 
         <Meta>
           <h3 title={nameSafe}>{nameSafe}</h3>
-          {authors.length>0 && <p>By {authors.join(', ')}</p>}
+          {authors.length > 0 && (
+            <p style={{ wordBreak: 'break-all' }}>
+              Author(s) 
+              {renderAuthors()}
+            </p>
+          )}
 
           <StatRow>
             <span>{live ?? '…'} Tokens</span>

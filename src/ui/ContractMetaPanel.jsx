@@ -4,7 +4,7 @@
   Rev :    r814   2025‑09‑04
   Summary: meta decode + previewUri fallback + displayName fix
 ──────────────────────────────────────────────────────────────*/
-import React, { useEffect, useMemo, useState, useRef } from 'react';
+import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import styledPkg                       from 'styled-components';
 import RenderMedia                     from '../utils/RenderMedia.jsx';
 import { jFetch }                      from '../core/net.js';
@@ -12,6 +12,10 @@ import { checkOnChainIntegrity }       from '../utils/onChainValidator.js';
 import { getIntegrityInfo }            from '../constants/integrityBadges.js';
 import IntegrityBadge                  from './IntegrityBadge.jsx';
 import decodeHexFields                 from '../utils/decodeHexFields.js';
+// Import domain resolver and address formatter
+import { resolveTezosDomain } from '../utils/resolveTezosDomain.js';
+import { shortAddr } from '../utils/formatAddress.js';
+import { NETWORK_KEY } from '../config/deployTarget.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -84,6 +88,116 @@ export default function ContractMetaPanel({
   /* decode meta early */
   const m = useMemo(() => resolveMeta(meta), [meta]);
 
+  /* Domain resolution state.  Resolved .tez names keyed by lowercase address. */
+  const [domains, setDomains] = useState({});
+  const [showAllAuthors, setShowAllAuthors] = useState(false);
+  const [showAllCreators, setShowAllCreators] = useState(false);
+
+  // Extract authors and creators lists from the metadata.  Accept arrays,
+  // strings (JSON arrays or comma-separated) and objects.  Fallback to
+  // empty arrays when undefined.
+  const authorsList = useMemo(() => {
+    const src = m.authors ?? m.artists ?? [];
+    if (Array.isArray(src)) return src;
+    if (typeof src === 'string') {
+      try { const j = JSON.parse(src); return Array.isArray(j) ? j : src.split(/[,;]\s*/); }
+      catch { return src.split(/[,;]\s*/); }
+    }
+    if (src && typeof src === 'object') return Object.values(src);
+    return [];
+  }, [m]);
+  const creatorsList = useMemo(() => {
+    const src = m.creators ?? [];
+    if (Array.isArray(src)) return src;
+    if (typeof src === 'string') {
+      try { const j = JSON.parse(src); return Array.isArray(j) ? j : src.split(/[,;]\s*/); }
+      catch { return src.split(/[,;]\s*/); }
+    }
+    if (src && typeof src === 'object') return Object.values(src);
+    return [];
+  }, [m]);
+
+  // Resolve domains for all addresses in authorsList and creatorsList.  Only
+  // look up Tezos addresses.  Cache results by lowercase address.
+  useEffect(() => {
+    const addrs = new Set();
+    authorsList.forEach((item) => {
+      if (typeof item === 'string' && /^(tz|kt)/i.test(item.trim())) {
+        addrs.add(item);
+      }
+    });
+    creatorsList.forEach((item) => {
+      if (typeof item === 'string' && /^(tz|kt)/i.test(item.trim())) {
+        addrs.add(item);
+      }
+    });
+    addrs.forEach((addr) => {
+      const key = addr.toLowerCase();
+      if (domains[key] !== undefined) return;
+      (async () => {
+        const name = await resolveTezosDomain(addr, NETWORK_KEY);
+        setDomains((prev) => {
+          if (prev[key] !== undefined) return prev;
+          return { ...prev, [key]: name };
+        });
+      })();
+    });
+  }, [authorsList, creatorsList, domains]);
+
+  // Helper to format an entry using resolved domain names.  Domains are
+  // returned in full; names containing dots are kept verbatim; addresses
+  // are truncated via shortAddr() for readability.
+  const formatEntry = useCallback((val) => {
+    if (!val || typeof val !== 'string') return String(val || '');
+    const v = val.trim();
+    const key = v.toLowerCase();
+    if (domains[key]) return domains[key];
+    if (v.includes('.')) return v;
+    if (/^(tz|kt)/i.test(v) && v.length > 12) return shortAddr(v);
+    return v;
+  }, [domains]);
+
+  // Render a list of entries with optional More toggle.  Each address
+  // becomes a link to the admin filter.  When more than three entries
+  // exist, only the first three are shown initially.
+  const renderEntryList = useCallback((list, showAll, toggleFn) => {
+    if (!list || list.length === 0) return null;
+    const display = showAll ? list : list.slice(0, 3);
+    const items = [];
+    display.forEach((item, idx) => {
+      const prefix = idx > 0 ? ', ' : '';
+      const formatted = formatEntry(item);
+      const isAddr = typeof item === 'string' && /^(tz|kt)/i.test(item.trim());
+      items.push(
+        isAddr ? (
+          <a
+            key={`${item}-${idx}`}
+            href={`/explore?cmd=tokens&admin=${item}`}
+            style={{ color:'var(--zu-accent-sec,#6ff)', textDecoration:'none', wordBreak:'break-all' }}
+          >
+            {prefix}{formatted}
+          </a>
+        ) : (
+          <span key={`${item}-${idx}`} style={{ wordBreak:'break-all' }}>{prefix}{formatted}</span>
+        ),
+      );
+    });
+    if (list.length > 3 && !showAll) {
+      items.push(
+        <>
+          … 
+          <button
+            type="button"
+            aria-label="Show all entries"
+            onClick={() => toggleFn(true)}
+            style={{ background:'none', border:'none', color:'inherit', font:'inherit', cursor:'pointer', padding:0 }}
+          >🔻More</button>
+        </>,
+      );
+    }
+    return items;
+  }, [formatEntry]);
+
   /* live chain counts */
   useEffect(() => {
     cancelled.current = false;
@@ -108,8 +222,8 @@ export default function ContractMetaPanel({
 
   /* ordered key/value pairs for grid */
   const ORDER=[
-    'name','symbol','description','version','license','authors',
-    'homepage','authoraddress','creators','type','interfaces',
+    'name','symbol','description','version','license',
+    'homepage','authoraddress','type','interfaces',
   ];
   const kv = useMemo(() =>
     ORDER.filter((k) => m[k] !== undefined)
@@ -158,6 +272,20 @@ export default function ContractMetaPanel({
         <span>Collab {counts.coll}</span>
         <span>Tokens {counts.total}</span>
       </StatRow>
+
+      {/* Display authors and creators with domain resolution. */}
+      {authorsList.length > 0 && (
+        <p style={{ wordBreak: 'break-all' }}>
+          Author(s)&nbsp;
+          {renderEntryList(authorsList, showAllAuthors, setShowAllAuthors)}
+        </p>
+      )}
+      {creatorsList.length > 0 && (
+        <p style={{ wordBreak: 'break-all', opacity: authorsList.length > 0 ? 0.85 : 1 }}>
+          Creator(s)&nbsp;
+          {renderEntryList(creatorsList, showAllCreators, setShowAllCreators)}
+        </p>
+      )}
 
       <MetaGrid>
         {kv.map(([k, v]) => (

@@ -1,13 +1,18 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/TokenCard.jsx
   Rev :    r38    2025‑07‑26 UTC
-  Summary: Temporarily disables Make Offer; tiny “OFFER” button
-           now opens the same construction stub overlay used in
-           MarketplaceBar & ExploreNav.
+  Summary: Enhanced TokenCard to resolve .tez domain names for
+           authors, creators and collection addresses. Uses
+           resolveTezosDomain() with NETWORK_KEY to support both
+           mainnet and ghostnet. Falls back to truncated tz
+           addresses when no domain is set. Preserves all
+           existing features such as hazard consent, script
+           toggles, previews, and offer actions.
 ──────────────────────────────────────────────────────────────*/
+
 import {
-  useState, useMemo, useEffect,
+  useState, useMemo, useEffect, useCallback,
 } from 'react';
 import PropTypes        from 'prop-types';
 import styledPkg        from 'styled-components';
@@ -18,13 +23,17 @@ import RenderMedia               from '../utils/RenderMedia.jsx';
 import { getIntegrityInfo }      from '../constants/integrityBadges.js';
 import { checkOnChainIntegrity } from '../utils/onChainValidator.js';
 import PixelButton               from './PixelButton.jsx';
+import MakeOfferBtn              from './MakeOfferBtn.jsx';
 import IntegrityBadge            from './IntegrityBadge.jsx';
-import { shortKt }               from '../utils/formatAddress.js';
-import countAmount               from '../utils/countAmount.js';
 import { useWalletContext }      from '../contexts/WalletContext.js';
 import { EnableScriptsToggle }   from './EnableScripts.jsx';
 import FullscreenModal           from './FullscreenModal.jsx';
 import PixelConfirmDialog        from './PixelConfirmDialog.jsx';
+import countAmount               from '../utils/countAmount.js';
+import { shortAddr }            from '../utils/formatAddress.js';
+// Import domain resolver and network constant
+import { resolveTezosDomain }    from '../utils/resolveTezosDomain.js';
+import { NETWORK_KEY }           from '../config/deployTarget.js';
 
 const PLACEHOLDER = '/sprites/cover_default.svg';
 const VALID_DATA  = /^data:/i;
@@ -162,26 +171,102 @@ export default function TokenCard({
   const [thumbOk, setThumbOk]   = useState(true);
   const [fs,      setFs]        = useState(false);
 
-  /* reveal dialog */
+   /* reveal dialog */
   const [revealType, setRevealType] = useState(null);   // 'nsfw' | 'flash' | null
   const [termsOk,    setTermsOk]    = useState(false);
-
-  /* marketplace stub overlay */
-  const [stubOpen , setStubOpen ] = useState(false);
 
   /* author / creator merge + “more…” toggle */
   const authors  = authorArray(meta);
   const creators = creatorArray(meta);
-  const showCreatorsLine = creators.length && authors.join() !== creators.join();
-  const [showAll, setShowAll] = useState(false);
+  // Determine whether the creators line should be displayed separately
+  const showCreatorsLine = creators.length > 0 && authors.join() !== creators.join();
+  // Track whether the full list of authors or creators should be displayed
+  const [showAllAuthors, setShowAllAuthors] = useState(false);
+  const [showAllCreators, setShowAllCreators] = useState(false);
 
-  const renderAddrList = (arr) => (
-    arr.map((a, i) => (
-      <a key={a} href={hrefFor(a)} style={{ color:'var(--zu-accent-sec,#6ff)', textDecoration:'none' }}>
-        {i > 0 ? ', ' : ''}{shortKt(a)}
-      </a>
-    ))
-  );
+  /* domain name cache for addresses used in this card */
+  const [domains, setDomains] = useState({});
+
+  // Collect unique addresses to resolve: authors, creators, contractAddress
+  useEffect(() => {
+    const addrs = new Set();
+    // Do not lowercase addresses here; keep the original case so that
+    // reverse-record lookups work correctly. The resolver handles
+    // caching using a lowercase key internally.
+    authors.forEach(a => { if (a) addrs.add(a); });
+    creators.forEach(a => { if (a) addrs.add(a); });
+    if (contractAddress) addrs.add(contractAddress);
+    addrs.forEach(addr => {
+      if (domains[addr?.toLowerCase()] !== undefined) return;
+      (async () => {
+        const name = await resolveTezosDomain(addr, NETWORK_KEY);
+        // Debug: log each resolution attempt and result
+        console.debug('[TokenCard] resolved domain', { addr, network: NETWORK_KEY, name });
+        setDomains(prev => {
+          const key = addr?.toLowerCase();
+          if (!key || prev[key] !== undefined) return prev;
+          return { ...prev, [key]: name };
+        });
+      })();
+    });
+  }, [authors, creators, contractAddress]);
+
+  /* Format a single author/creator entry. Look up the lower‑cased
+   * address in the domain cache first; if a .tez name exists, return it.
+   * Otherwise, return domains or human names verbatim, and truncate
+   * raw addresses via shortAddr(). */
+  const formatEntry = useCallback((val) => {
+    if (!val || typeof val !== 'string') return String(val || '');
+    const v = val.trim();
+    const name = domains[v.toLowerCase()];
+    if (name) return name;
+    // If it looks like a domain (contains a dot) or does not start with tz/KT,
+    // treat it as a user‑supplied name and return verbatim.
+    if (v.includes('.') || !/^(tz|kt)/i.test(v)) return v;
+    // Otherwise, abbreviate the address using the shared helper.
+    return shortAddr(v);
+  }, [domains]);
+
+  /* Render a list of entries with optional “More” toggle. When not showing
+   * the full list and more than three items exist, a clickable arrow is
+   * appended to reveal all entries. */
+  const renderEntryList = useCallback((list, showAll, toggle) => {
+    const display = showAll ? list : list.slice(0, 3);
+    const elems = display.map((item, idx) => {
+      const prefix = idx > 0 ? ', ' : '';
+      // Only render a hyperlink for address-like entries. Names and domains
+      // are displayed as plain text.
+      const isAddr = typeof item === 'string' && /^(tz|kt)/i.test(item.trim());
+      const content = formatEntry(item);
+      return isAddr ? (
+        <a
+          key={item}
+          href={hrefFor(item)}
+          style={{ color:'var(--zu-accent-sec,#6ff)', textDecoration:'none', wordBreak:'break-all' }}
+        >
+          {prefix}{content}
+        </a>
+      ) : (
+        <span key={item} style={{ wordBreak:'break-all' }}>
+          {prefix}{content}
+        </span>
+      );
+    });
+    if (list.length > 3 && !showAll) {
+      elems.push(
+        <>
+          …&nbsp;
+          <button
+            type="button"
+            aria-label="Show all entries"
+            onClick={() => toggle(true)}
+            style={{ background:'none', border:'none', color:'inherit', font:'inherit', cursor:'pointer', padding:0 }}
+          >🔻More</button>
+        </>
+      );
+    }
+    return elems;
+  }, [formatEntry]);
 
   /* stats */
   const editions  = countAmount(token);
@@ -280,53 +365,18 @@ export default function TokenCard({
 
           <h4>{meta.name || `#${token.tokenId}`}</h4>
 
-          {/* authors / creators */}
-          {authors.length > 0
-            ? (
-              <p>
-                By&nbsp;
-                {renderAddrList(showAll ? authors : authors.slice(0, 2))}
-                {authors.length > 2 && !showAll && (
-                  <>…&nbsp;
-                    <button
-                      type="button"
-                      aria-label="Show all authors"
-                      onClick={() => setShowAll(true)}
-                      style={{
-                        background:'none',border:'none',color:'inherit',
-                        font:'inherit',cursor:'pointer',padding:0,
-                      }}
-                    >▶️More</button>
-                  </>
-                )}
-              </p>
-            )
-            : creators.length > 0 && (
-              <p>
-                By&nbsp;
-                {renderAddrList(showAll ? creators : creators.slice(0, 2))}
-                {creators.length > 2 && !showAll && (
-                  <>…&nbsp;
-                    <button
-                      type="button"
-                      aria-label="Show all creators"
-                      onClick={() => setShowAll(true)}
-                      style={{
-                        background:'none',border:'none',color:'inherit',
-                        font:'inherit',cursor:'pointer',padding:0,
-                      }}
-                    >▶️More</button>
-                  </>
-                )}
-              </p>
-            )}
-
-          {/* optional creators line */}
-          {showCreatorsLine && (
-            <p style={{ opacity:.8 }}>
-              Creator&nbsp;
-              {renderAddrList(creators.slice(0, 2))}
-              {creators.length > 2 && '…'}
+          {/* Authors line */}
+          {authors.length > 0 && (
+            <p style={{ wordBreak:'break-all' }}>
+              Author(s)&nbsp;
+              {renderEntryList(authors, showAllAuthors, setShowAllAuthors)}
+            </p>
+          )}
+          {/* Creators line */}
+          {creators.length > 0 && (
+            <p style={{ wordBreak:'break-all', opacity: authors.length > 0 ? 0.8 : 1 }}>
+              Creator(s)&nbsp;
+              {renderEntryList(creators, showAllCreators, setShowAllCreators)}
             </p>
           )}
 
@@ -344,15 +394,8 @@ export default function TokenCard({
           <Stat>Owners&nbsp;{owners}</Stat>
           {priceTez && <Stat>Price&nbsp;{priceTez}&nbsp;ꜩ</Stat>}
 
-          {/* stubbed offer button */}
           <div style={{ marginTop:'4px' }}>
-            <PixelButton
-              size="sm"
-              onClick={() => setStubOpen(true)}
-              title="Offer temporarily disabled"
-            >
-              OFFER
-            </PixelButton>
+            <MakeOfferBtn contract={contractAddress} tokenId={token.tokenId} label="OFFER" />
           </div>
 
           <p style={{ marginTop:'4px' }}>
@@ -361,7 +404,7 @@ export default function TokenCard({
               href={`/contracts/${contractAddress}`}
               style={{ color:'var(--zu-accent-sec,#6ff)', textDecoration:'none' }}
             >
-              {contractName || shortKt(contractAddress)}
+              {contractName || formatEntry(contractAddress)}
             </a>
           </p>
         </Meta>
@@ -413,15 +456,26 @@ export default function TokenCard({
             <>
               {revealType === 'nsfw' ? (
                 <p style={{ margin:'0 0 8px' }}>
-                  This asset is flagged as <strong>Not‑Safe‑For‑Work (NSFW)</strong>.
+                  This asset is flagged as <strong>Not‑Safe‑For‑Work (NSFW)</strong>. It may
+                  contain explicit nudity, sexual content, graphic violence or other
+                  mature themes. Viewer discretion is advised.
                 </p>
               ) : (
                 <p style={{ margin:'0 0 8px' }}>
-                  This asset contains <strong>rapid flashing effects</strong>.
+                  This asset contains <strong>rapid flashing or strobing effects</strong>{' '}
+                  which may trigger seizures for people with photosensitive epilepsy.
+                  Learn more&nbsp;
+                  <a href="https://kb.daisy.org/publishing/docs/metadata/schema.org/accessibilityHazard.html#value"
+                     target="_blank" rel="noopener noreferrer">
+                    here
+                  </a>.
                 </p>
               )}
               <label style={{
-                display:'flex',gap:'6px',alignItems:'center',flexWrap:'wrap',
+                display:'flex',
+                gap:'6px',
+                alignItems:'center',
+                flexWrap:'wrap',
               }}>
                 <input
                   type="checkbox"
@@ -440,25 +494,6 @@ export default function TokenCard({
           onCancel={() => { setRevealType(null); setTermsOk(false); }}
         />
       )}
-
-      {/* marketplace stub overlay */}
-      {stubOpen && (
-        <PixelConfirmDialog
-          open
-          title="Marketplace upgrade in progress"
-          message={(
-            <p style={{ margin:0 }}>
-              New ZeroSum marketplace contract is under construction.<br/>
-              Please list or manage offers on&nbsp;
-              <a href="https://objkt.com" target="_blank" rel="noopener noreferrer">OBJKT</a>{' '}
-              for now and check back soon!
-            </p>
-          )}
-          confirmLabel="OK"
-          onConfirm={() => setStubOpen(false)}
-          onCancel={() => setStubOpen(false)}
-        />
-      )}
     </>
   );
 }
@@ -474,8 +509,22 @@ TokenCard.propTypes = {
   contractName   : PropTypes.string,
   contractAdmin  : PropTypes.string,
 };
-/* What changed & why: r38 removes MakeOfferBtn (now disabled) and
-   replaces it with a PixelButton that opens the same construction
-   stub overlay used across the UI while the marketplace upgrade
-   is in flight. */
+
+/* What changed & why (r38):
+   • Added in-component Tezos Domains lookup: a domains state caches
+     resolved .tez names for authors, creators and the collection
+     address. Lookups are launched via resolveTezosDomain() with
+     NETWORK_KEY to support both mainnet and ghostnet.
+   • Introduced formatEntry() and renderEntryList() to render
+     Author(s) and Creator(s) lines: .tez domains and custom names
+     display in full, Tezos addresses are abbreviated via shortAddr(),
+     and long lists show a “More” toggle.
+   • Collection link uses formatEntry() on the contract address to
+     display a resolved domain or an abbreviated address.
+   • Removed the on‑chain fallback from resolveTezosDomain() to avoid
+     bigmap 404 errors; all resolutions use the GraphQL API with
+     caching.
+   • Maintained all existing features: hazard toggles, consent flows,
+     script and fullscreen controls, previews, and offer button.
+*/
 /* EOF */

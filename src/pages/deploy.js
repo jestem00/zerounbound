@@ -1,12 +1,41 @@
-/*──────── src/pages/deploy.js ────────*/
-/*──────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
-  File:    src/pages/deploy.js
-  Rev :    r1127‑a2   2025‑07‑24
-  Summary: Remove Temple warning banner and remote‑forge pipeline; all
-           wallets originate via single‑stage Taquito flow.  FAST_ORIGIN
-           and Temple detection removed.
-──────────────────────────────────────────────────────────────*/
+/*─────────────────────────────────────────────────────────────────
+  Deploy Page for Zero Unbound (Factory v4)
+
+  This module implements a single–stage deployment flow that
+  interacts with the registry‑aware contract factory.  The
+  factory’s only entrypoint is `%deploy` and it expects a single
+  bytes parameter.  The parameter is ignored by the Michelson
+  code; sending an empty byte string (`0x`) satisfies the type
+  checker.  The deployment sequence mirrors the legacy flow but
+  updates the wallet connection and contract address resolution
+  logic to work with the new factory.
+
+  The sequence of actions:
+    • Collect metadata via DeployCollectionForm and build an
+      ordered metadata object conforming to the TZIP invariants
+      (TZIP‑16 contract metadata + off‑chain views + imageUri).
+    • Encode the full metadata JSON into a bytes value using
+      char2Bytes().  The factory builds the storage itself, so
+      only metadata is sent as the parameter; no storage pairs
+      are included in this payload.
+    • Call the factory’s `%deploy` entrypoint (or its
+      equivalent) with the encoded metadata bytes.  Taquito
+      dynamically resolves the correct entrypoint whether
+      compiled in legacy or modern syntax.
+    • Wait for confirmation and resolve the newly originated
+      contract address using the on‑chain view `get_last`, RPC
+      parsing, block scanning and a TzKT API fallback.  This
+      resolution logic mirrors the robust implementation from
+      the legacy deploy page.
+    • Display progress, errors and the final contract address via
+      OperationOverlay.
+
+  The component preserves the multi‑step progress overlay and
+  retry/cancel mechanics from earlier revisions.  It also
+  supports direct origination when the factory address is
+  undefined, falling back to `wallet.originate()` with the full
+  contract code and storage.
+──────────────────────────────────────────────────────────────────*/
 
 import React, { useRef, useState } from 'react';
 import { MichelsonMap } from '@taquito/michelson-encoder';
@@ -16,18 +45,13 @@ import { char2Bytes } from '@taquito/utils';
 import DeployCollectionForm from '../ui/DeployCollectionForm.jsx';
 import OperationOverlay     from '../ui/OperationOverlay.jsx';
 
-// The FAST_ORIGIN flag and related remote‑forge helpers were removed
-// when Temple wallet origination was restored.  All wallets now
-// originate via a single‑stage flow using Taquito’s wallet API.
-
-
 // Styled container – centre the page content and provide an opaque
 // background.  Without this wrapper the deploy form would sit
 // directly on the page background, causing the decorative zeros to
-// bleed through.  We mimic the layout used on other pages (e.g.
-// manage.js) by setting a max‑width, centering with margin auto and
-// applying padding.  The z‑index ensures overlays appear above
-// background graphics.
+// bleed through.  We mimic the layout used on other pages by
+// setting a max‑width, centring with margin auto and applying
+// padding.  The z‑index ensures overlays appear above background
+// graphics.
 import styledPkg from 'styled-components';
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -50,24 +74,33 @@ const Wrap = styled.div`
   gap: clamp(0.2rem, 0.45vh, 0.6rem);
 `;
 
-// Removed the warning banner for Temple wallet users.  Temple now
-// supports large payload originations, so no special notice is shown.
-
-// Wallet context
+// Wallet context.  Destructure both `connect` and `retryConnect` to
+// support legacy and modern wallet flows.  The wallet hook may
+// expose only one of these functions depending on the version.
 import { useWallet } from '../contexts/WalletContext.js';
 
-// Contract source and view definitions
-import contractCode from '../../contracts/Zero_Contract_V4.tz';
-import viewsJson    from '../../contracts/metadata/views/Zero_Contract_v4_views.json' assert { type: 'json' };
+// Off‑chain view definitions.  These views are included in the
+// metadata to satisfy TZIP‑16 and TZIP‑12 requirements.  The
+// assert type directive ensures that the JSON is imported as an
+// object rather than compiled by Next.js.
+import viewsJson from '../../contracts/metadata/views/Zero_Contract_v4_views.json' assert { type: 'json' };
 
-// Network helper for throttled sleep.  Remote forging helpers are
-// unused now that all wallets use single‑stage origination.
+// Import the full contract code.  This is used for direct
+// origination when the factory is unavailable.  See
+// originateViaDirect() for usage.
+import contractCode from '../../contracts/Zero_Contract_V4.tz';
+
+// Network helper for throttled sleep.  Used when polling for the
+// contract address if Taquito fails to populate it.
 import { sleep } from '../core/net.js';
 
-// Signing type constant from Beacon
-import { SigningType } from '@airgap/beacon-sdk';
+// Factory address and API endpoint for the current network.  See
+// deployTarget.js for definitions.  When FACTORY_ADDRESS is defined,
+// origination is routed through the factory; otherwise direct
+// origination is used.
+import { FACTORY_ADDRESS, TZKT_API } from '../config/deployTarget.js';
 
-/*──────── helpers ───────────────────────────────────────────*/
+/*──────── helper functions ─────────────────────────────────────────*/
 
 /**
  * Normalise and deduplicate interface strings.  Always includes
@@ -91,37 +124,36 @@ const uniqInterfaces = (src = []) => {
 const HEX = Array.from({ length: 256 }, (_, i) => i.toString(16).padStart(2, '0'));
 
 /**
- * Encode a UTF‑8 string into a hex string with a 0x prefix.  A
- * callback receives progress percentage (0–100) at coarse steps,
- * allowing the UI to update while large payloads are encoded.
+ * Convert UTF‑8 string to hex with an optional progress callback.
+ * The result is prefixed with `0x` for compatibility with Taquito.
  *
- * @param {string} str The string to encode
- * @param {function} cb Progress callback
- * @returns {string} Hex representation prefixed with 0x
+ * @param {string} str UTF‑8 string
+ * @param {function(number):void} cb progress callback
+ * @returns {string} Hex string prefixed with 0x
  */
-const utf8ToHex = (str, cb) => {
+function utf8ToHex(str, cb = () => {}) {
   const bytes = new TextEncoder().encode(str);
-  const { length } = bytes;
-  let hex = '';
-  const STEP = 4096;
+  let hex     = '';
+  const length = bytes.length;
+  const STEP   = 16;
   for (let i = 0; i < length; i += 1) {
     hex += HEX[bytes[i]];
     if ((i & (STEP - 1)) === 0) cb((i / length) * 100);
   }
   cb(100);
   return `0x${hex}`;
-};
+}
 
-/*──────── constants ─────────────────────────────────────────*/
-
-// Burn address constant used by the ZeroContract storage
-const BURN = 'tz1burnburnburnburnburnburnburjAYjjX';
-
-// Template for initial storage fields; metadata and admin will be set
+/**
+ * Template for initial storage fields.  Only the admin and
+ * metadata fields will be populated; all other maps and sets
+ * remain empty.  contract_id encodes the human‑readable label
+ * “ZeroContract” as a byte sequence.
+ */
 export const STORAGE_TEMPLATE = {
   active_tokens    : [],
   admin            : '',
-  burn_address     : BURN,
+  burn_address     : 'tz1burnburnburnburnburnburnburjAYjjX',
   children         : [],
   collaborators    : [],
   contract_id      : `0x${char2Bytes('ZeroContract')}`,
@@ -137,122 +169,402 @@ export const STORAGE_TEMPLATE = {
   total_supply     : new MichelsonMap(),
 };
 
-/*──────── component ───────────────────────────────────────*/
+/**
+ * Build the v4 storage object.  This helper constructs a fresh
+ * copy of STORAGE_TEMPLATE and fills in the admin and metadata
+ * fields.  It does not mutate the original template.
+ *
+ * @param {string} admin Connected wallet address
+ * @param {MichelsonMap} md MichelsonMap with metadata entries
+ * @returns {Object} Full storage object
+ */
+function buildStorage(admin, md) {
+  return { ...STORAGE_TEMPLATE, admin, metadata: md };
+}
 
 /**
- * DeployPage orchestrates the origination of a new ZeroContract
- * collection.  All wallets originate directly via Taquito’s wallet
- * API; remote forging and Temple‑specific logic have been removed.
- * Progress and error states are reported via an overlay.
+ * Encode the collection metadata with required fields and views.
+ * Accepts arrays or comma‑separated strings for authors,
+ * authoraddress, creators and tags.  Removes undefined values
+ * and empty arrays from the final object.  Always normalises
+ * interfaces to include TZIP‑012 and TZIP‑016.
+ *
+ * @param {Object} meta Metadata from the form
+ * @returns {Object} Encoded metadata object
  */
-export default function DeployPage() {
-  const { toolkit, address, connect, wallet } = useWallet();
-  // Refs and state for progress tracking
-  const rafRef    = useRef(0);
-  const [step, setStep]   = useState(-1);
-  const [pct, setPct]     = useState(0);
-  const [label, setLabel] = useState('');
-  const [kt1, setKt1]     = useState('');
-  const [err, setErr]     = useState('');
-  // Removed useBackend and isTempleWallet states.  The application
-  // no longer distinguishes between Temple and other wallets.  All
-  // origination logic flows through originateSingleStage().
+function buildMetaObject(meta) {
+  const {
+    name,
+    symbol,
+    description,
+    authors,
+    authoraddress,
+    creators,
+    license,
+    homepage,
+    type,
+    interfaces = [],
+    imageUri,
+    tags,
+  } = meta;
+  // Normalise values into arrays of trimmed strings.  Accept
+  // comma‑separated strings or arrays.
+  const normArray = (val) => {
+    if (Array.isArray(val)) {
+      return val.map((x) => String(x).trim()).filter(Boolean);
+    }
+    if (typeof val === 'string') {
+      return val
+        .split(',')
+        .map((x) => x.trim())
+        .filter(Boolean);
+    }
+    return undefined;
+  };
+  // Construct metadata object in the order required by the
+  // TZIP invariants (name, symbol, description, version,
+  // license, authors, homepage, authoraddress, creators, type,
+  // interfaces, imageUri, tags).  Undefined or empty values
+  // will be pruned below.
+  const md = {};
+  md.name        = name;
+  md.symbol      = symbol;
+  md.description = description;
+  md.version     = 'ZeroContractV4';
+  md.license     = license;
+  md.authors     = normArray(authors);
+  md.homepage    = homepage;
+  md.authoraddress = normArray(authoraddress);
+  md.creators    = normArray(creators);
+  md.type        = type;
+  md.interfaces  = uniqInterfaces(interfaces);
+  md.imageUri    = imageUri;
+  // Tags are optional and appended after required keys
+  md.tags        = normArray(tags);
+  // Remove undefined or empty array properties to avoid
+  // serialising empty fields
+  Object.keys(md).forEach((k) => {
+    if (md[k] === undefined || (Array.isArray(md[k]) && md[k].length === 0)) {
+      delete md[k];
+    }
+  });
+  return md;
+}
+
+/*──────── main component ─────────────────────────────────────────*/
+
+export default function Deploy() {
+  // Extract wallet properties.  Some versions of the wallet hook
+  // expose `connect`, others expose `retryConnect`; we attempt to
+  // destructure both.  The toolkit (TezosToolkit) and current
+  // address are always present.
+  const {
+    toolkit,
+    address,
+    connect: connectWallet,
+    retryConnect,
+  } = useWallet();
+
+  // Component state: step/progress, label/status, error message and
+  // resulting contract address.  Step begins at -1 (idle).
+  const [step, setStep]     = useState(-1);
+  const [pct, setPct]       = useState(0);
+  const [label, setLabel]   = useState('');
+  const [err, setErr]       = useState('');
+  const [kt1, setKt1]       = useState('');
+  // Save the latest metadata for retry; resets on success or cancel.
+  const metaRef = useRef(null);
 
   /**
-   * Reset the component state to its initial values.  Cancels
-   * any pending RAF updates and resets progress.
+   * Reset the component to its initial state.  Clears the stored
+   * metadata and hides the overlay.
    */
   function reset() {
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
     setStep(-1);
     setPct(0);
     setLabel('');
-    setKt1('');
     setErr('');
+    setKt1('');
+    metaRef.current = null;
   }
 
   /**
-   * Attempt to connect the wallet if not already connected.
-   * Retries once on failure.  Returns undefined on success,
-   * otherwise sets error and aborts.
+   * Ensure that a wallet connection is established.  If the
+   * `retryConnect` function is available, use it (legacy wallet
+   * behaviour).  Otherwise fall back to `connect`.  If no
+   * connection method is available, throw an error.
    */
-  async function retryConnect() {
+  async function ensureConnected() {
+    if (address) return;
+    if (typeof retryConnect === 'function') {
+      await retryConnect();
+    } else if (typeof connectWallet === 'function') {
+      await connectWallet();
+    } else {
+      throw new Error('Wallet connection function not available');
+    }
+  }
+
+  /**
+   * Originate via the contract factory.  Accepts metadata from the
+   * deployment form, constructs storage and calls the factory’s
+   * `deploy` entrypoint with an empty bytes parameter.  Resolves
+   * the newly originated contract address using on‑chain views,
+   * RPC parsing and TzKT fallback.  Updates progress and error
+   * state accordingly.
+   *
+   * @param {Object} meta Metadata collected from the form
+   */
+  async function originateViaFactory(meta) {
+    metaRef.current = meta;
     try {
-      if (!address) await connect();
+      await ensureConnected();
     } catch (e) {
       setErr(e.message || String(e));
+      setLabel(e.message || String(e));
+      return;
+    }
+    if (!address) return;
+    // Build metadata object and inject views.  For the
+    // registry‑aware factory, the parameter must be the full
+    // contract metadata JSON (including off‑chain views and
+    // imageUri) encoded as a bytes string.  The factory builds
+    // storage internally, so we do not include the storage in
+    // this payload.
+    const mdObj       = buildMetaObject(meta);
+    const mdObjWithViews = { ...mdObj, views: viewsJson.views };
+    const paramBytes  = '0x' + char2Bytes(JSON.stringify(mdObjWithViews));
+    // Begin origination via factory
+    setErr('');
+    setStep(1);
+    setLabel('Origination (factory call)');
+    setPct(0.25);
+    try {
+      const factory = await toolkit.wallet.at(FACTORY_ADDRESS);
+      // Send call to the factory’s deploy entrypoint.  Use
+      // whichever method is available: deploy, default or the
+      // first entrypoint.  This guards against differences in
+      // contract compilation (legacy vs modern syntax).
+      let method;
+      if (factory.methods && typeof factory.methods.deploy === 'function') {
+        method = factory.methods.deploy(paramBytes);
+      } else if (factory.methods && typeof factory.methods.default === 'function') {
+        method = factory.methods.default(paramBytes);
+      } else if (factory.methods) {
+        const keys = Object.keys(factory.methods);
+        if (keys.length > 0) {
+          method = factory.methods[keys[0]](paramBytes);
+        } else {
+          throw new Error('No callable entrypoints found on factory');
+        }
+      } else {
+        throw new Error('Factory contract methods unavailable');
+      }
+      const op = await method.send();
+      setStep(2);
+      setLabel('Waiting for confirmation');
+      setPct(0.5);
+      // Wait for the operation to be included.  Ignore errors
+      // during confirmation (Taquito may throw on timeouts but the
+      // operation might still be injected).
+      try { await op.confirmation(); } catch {}
+      let contractAddr;
+      // First attempt: query the factory’s on‑chain view `get_last`.
+      try {
+        const fContract = await toolkit.contract.at(FACTORY_ADDRESS);
+        const last = await fContract.contractViews.get_last().executeView({ viewCaller: FACTORY_ADDRESS });
+        if (last) {
+          if (typeof last === 'string') {
+            contractAddr = last;
+          } else if (last.string) {
+            contractAddr = last.string;
+          } else if (last.some) {
+            const entry = last.some;
+            if (entry && typeof entry.contract_address === 'string') {
+              contractAddr = entry.contract_address;
+            } else if (typeof entry === 'string') {
+              contractAddr = entry;
+            }
+          }
+        }
+      } catch {
+        /* Ignore view errors; fall back to RPC parsing */
+      }
+      // Second attempt: parse the operation result from RPC
+      if (!contractAddr) {
+        try {
+          const opHash   = op.opHash || op.hash || op.operationHash || op.operation_hash;
+          const opResult = await toolkit.rpc.getOperation(opHash);
+          const contents = opResult.contents || [];
+          outer: for (const c of contents) {
+            const arrays = [];
+            const md = c.metadata || {};
+            if (Array.isArray(md.internal_operation_results)) {
+              arrays.push(md.internal_operation_results);
+            }
+            const opRes = md.operation_result;
+            if (opRes && Array.isArray(opRes.internal_operation_results)) {
+              arrays.push(opRes.internal_operation_results);
+            }
+            for (const arr of arrays) {
+              for (const res of arr) {
+                const origin = res?.result?.originated_contracts;
+                if (Array.isArray(origin) && origin.length > 0) {
+                  contractAddr = origin[0];
+                  break outer;
+                }
+              }
+            }
+          }
+        } catch {
+          /* ignore errors in RPC parsing */
+        }
+      }
+      // Third attempt: scan recent blocks for the operation hash
+      if (!contractAddr) {
+        let resolved = '';
+        const opHash = op.opHash || op.hash || op.operationHash || op.operation_hash;
+        for (let i = 0; i < 20 && !resolved; i += 1) {
+          await sleep(3000);
+          try {
+            const block = await toolkit.rpc.getBlock();
+            for (const opGroup of block.operations.flat()) {
+              if (opGroup.hash === opHash) {
+                for (const c of opGroup.contents) {
+                  const md = c.metadata || {};
+                  const arrays = [];
+                  if (Array.isArray(md.internal_operation_results)) {
+                    arrays.push(md.internal_operation_results);
+                  }
+                    const opRes = md.operation_result;
+                    if (opRes && Array.isArray(opRes.internal_operation_results)) {
+                      arrays.push(opRes.internal_operation_results);
+                    }
+                  for (const arr of arrays) {
+                    for (const ir of arr) {
+                      const origin = ir?.result?.originated_contracts;
+                      if (Array.isArray(origin) && origin.length > 0) {
+                        resolved = origin[0];
+                        break;
+                      }
+                    }
+                    if (resolved) break;
+                  }
+                  if (resolved) break;
+                }
+              }
+              if (resolved) break;
+            }
+          } catch {
+            /* ignore block polling errors */
+          }
+        }
+        contractAddr = resolved || contractAddr;
+      }
+      // Final fallback: query TzKT API for the operation
+      if (!contractAddr) {
+        const opHash = op.opHash || op.hash || op.operationHash || op.operation_hash;
+        let resolved = '';
+        try {
+          const apiUrl = `${TZKT_API}/v1/operations/${opHash}`;
+          const res = await fetch(apiUrl);
+          if (res.ok) {
+            const ops = await res.json();
+            const findOrigin = (opsList) => {
+              for (const item of opsList) {
+                // Direct origination
+                if (
+                  item.type === 'origination' &&
+                  item.originatedContract &&
+                  item.originatedContract.address
+                ) {
+                  return item.originatedContract.address;
+                }
+                // Internal operations may be nested under 'internals'
+                if (Array.isArray(item.internals)) {
+                  for (const inner of item.internals) {
+                    if (
+                      inner.type === 'origination' &&
+                      inner.originatedContract &&
+                      inner.originatedContract.address
+                    ) {
+                      return inner.originatedContract.address;
+                    }
+                  }
+                }
+              }
+              return '';
+            };
+            const tzktAddress = findOrigin(ops);
+            if (tzktAddress) {
+              resolved = tzktAddress;
+            }
+          }
+        } catch {
+          /* ignore errors from TzKT fallback */
+        }
+        contractAddr = resolved || contractAddr;
+      }
+      if (!contractAddr) {
+        const msg = 'Could not resolve contract address after origination.';
+        setErr(msg);
+        setLabel(msg);
+        return;
+      }
+      // Success: update final state
+      setKt1(contractAddr);
+      setErr('');
+      setStep(5);
+      setPct(1);
+      setLabel('Origination confirmed');
+    } catch (err2) {
+      const msg = err2.message || String(err2);
+      setErr(msg);
+      setLabel(msg);
     }
   }
 
   /**
-   * Build full metadata object.  Trims and normalises fields and
-   * includes full views from viewsJson.
+   * Originate directly via wallet.originate().  This function is
+   * retained for completeness and mirrors the legacy flow.  It
+   * originates the contract without using the factory, embedding
+   * the full contract code.  This path is executed when
+   * FACTORY_ADDRESS is undefined.
+   *
+   * @param {Object} meta Metadata from the form
    */
-  function buildMetaObject(meta) {
-    return {
-      name        : meta.name.trim(),
-      symbol      : meta.symbol.trim(),
-      description : meta.description.trim(),
-      license     : meta.license.trim(),
-      authors     : Array.isArray(meta.authors)
-        ? meta.authors.map((a) => String(a).trim()).filter(Boolean)
-        : meta.authors ? [String(meta.authors).trim()] : undefined,
-      authoraddress: Array.isArray(meta.authoraddress)
-        ? meta.authoraddress.map((a) => String(a).trim()).filter(Boolean)
-        : meta.authoraddress ? [String(meta.authoraddress).trim()] : undefined,
-      creators    : Array.isArray(meta.creators)
-        ? meta.creators.map((c) => String(c).trim()).filter(Boolean)
-        : meta.creators ? [String(meta.creators).trim()] : undefined,
-      type        : meta.type?.trim(),
-      homepage    : meta.homepage?.trim() || undefined,
-      interfaces  : uniqInterfaces(meta.interfaces),
-      imageUri    : meta.imageUri?.trim() || undefined,
-      views       : viewsJson.views,
-    };
-  }
-
-  // Removed buildFastMetaObject().  FAST_ORIGIN and truncated views
-  // are no longer supported now that Temple can handle large payloads.
-
-  /**
-   * Originate via single‑stage Taquito wallet API.  Used for
-   * Kukai/Umami and other non‑Temple wallets.
-   */
-  async function originateSingleStage(meta) {
-    // Ensure wallet connection
-    if (!address) {
-      await retryConnect();
-      if (!address) return;
+  async function originateViaDirect(meta) {
+    metaRef.current = meta;
+    try {
+      await ensureConnected();
+    } catch (e) {
+      setErr(e.message || String(e));
+      setLabel(e.message || String(e));
+      return;
     }
-    const mdObj  = buildMetaObject(meta);
+    if (!address) return;
+    // Build metadata object and inject views
+    const mdObj       = buildMetaObject(meta);
+    const mdViews     = { ...viewsJson };
+    const mdObjWithViews = { ...mdObj, views: mdViews.views };
     const headerBytes = '0x' + char2Bytes('tezos-storage:content');
-    const bodyHex     = utf8ToHex(JSON.stringify(mdObj), () => {});
-    const md = new MichelsonMap();
+    const bodyHex     = utf8ToHex(JSON.stringify(mdObjWithViews), () => {});
+    const md          = new MichelsonMap();
     md.set('', headerBytes);
     md.set('content', bodyHex);
-    const storage = { ...STORAGE_TEMPLATE, admin: address, metadata: md };
-    // Step 1: originate via wallet API
-    // Clear any previous error before starting
+    const storage = buildStorage(address, md);
+    // Begin direct origination
     setErr('');
     setStep(1);
     setLabel('Origination (wallet)');
     setPct(0.25);
     try {
-      // Use toolkit.wallet.originate() instead of wallet.originate().
-      // The wallet object from useWallet() may not implement originate().
-      // Send the origination operation via wallet API
-      const op = await toolkit.wallet
-        .originate({ code: contractCode, storage })
-        .send();
+      const op = await toolkit.wallet.originate({ code: contractCode, storage }).send();
       setStep(2);
       setLabel('Waiting for confirmation');
       setPct(0.5);
-      // Wait for at least one confirmation before retrieving the contract address
-      try {
-        await op.confirmation();
-      } catch {}
+      try { await op.confirmation(); } catch {}
       let contractAddr = op.contractAddress;
-      // Attempt to resolve the contract address via Taquito helpers
       if (!contractAddr) {
         try {
           const c = await (op.contract?.());
@@ -270,19 +582,16 @@ export default function DeployPage() {
         } catch {}
       }
       if (!contractAddr) {
-        // Fallback: scan recent blocks for the origination result using opHash
         let resolved = '';
         const opHash = op.opHash || op.hash || op.operationHash || op.operation_hash;
-        for (let i = 0; i < 20; i++) {
+        for (let i = 0; i < 20 && !resolved; i += 1) {
           await sleep(3000);
           try {
             const block = await toolkit.rpc.getBlock();
             for (const opGroup of block.operations.flat()) {
               if (opGroup.hash === opHash) {
                 const res = opGroup.contents.find((c) => c.kind === 'origination');
-                if (
-                  res?.metadata?.operation_result?.originated_contracts?.length
-                ) {
+                if (res?.metadata?.operation_result?.originated_contracts?.length) {
                   resolved = res.metadata.operation_result.originated_contracts[0];
                   break;
                 }
@@ -299,9 +608,7 @@ export default function DeployPage() {
         }
         contractAddr = resolved;
       }
-      // Set the resolved contract address
       setKt1(contractAddr);
-      // Clear error on success
       setErr('');
       setStep(5);
       setPct(1);
@@ -313,32 +620,28 @@ export default function DeployPage() {
     }
   }
 
-  // The remote forge origination path has been removed.  All wallets
-  // originate via originateSingleStage() using Taquito’s wallet API.
-
   /**
-   * Originate a new contract.  Chooses between the remote forge
-   * service and direct wallet origination based on the connected
-   * wallet’s capabilities.  Temple wallet users will use the
-   * backend forge service; others will originate directly via
-   * Taquito’s wallet API.
+   * Choose origination method based on factory availability.  If
+   * FACTORY_ADDRESS is defined, route through the factory;
+   * otherwise perform a direct origination.
    *
-   * @param {Object} meta Metadata from form
+   * @param {Object} meta Metadata from the form
    */
   async function originate(meta) {
-    // Always use the single‑stage origination flow for all wallets.
-    // Remote forging and special cases have been removed.
-    await originateSingleStage(meta);
+    if (FACTORY_ADDRESS) {
+      await originateViaFactory(meta);
+    } else {
+      await originateViaDirect(meta);
+    }
   }
 
   /*──────── render ─────────────────────────────────────────*/
   return (
     <Wrap>
-      {/* No warning banner.  Temple now supports large contract originations. */}
       {/* Deploy form collects metadata and triggers origination.  Use
-          the expected onDeploy prop instead of onSubmit; DeployCollectionForm
-          invokes this callback with the user’s metadata when the form
-          submits. */}
+          the expected onDeploy prop instead of onSubmit; the
+          DeployCollectionForm invokes this callback with the user’s
+          metadata when the form submits. */}
       <DeployCollectionForm onDeploy={originate} />
       {/* Show the overlay whenever a step is in progress or an error
           has occurred.  The overlay will cover the parent wrapper and
@@ -350,12 +653,10 @@ export default function DeployPage() {
           error={!!err}
           kt1={kt1}
           onCancel={reset}
-          onRetry={() => {
+          onRetry={metaRef.current ? () => {
             reset();
-            // Re-initiate origination when retrying; use stored
-            // metadata if available.  For simplicity we rely on the
-            // form to re-submit metadata on user action.
-          }}
+            originate(metaRef.current);
+          } : undefined}
           step={step}
           total={1}
         />
@@ -365,15 +666,33 @@ export default function DeployPage() {
 }
 
 /* What changed & why:
-   • Removed the Temple warning banner and associated state/detection.
-     Temple wallet now supports large payloads, so no special notice
-     or blocking is required.
-   • Removed the FAST_ORIGIN flag, buildFastMetaObject() and the
-     originateViaForgeService() remote‑forge pipeline.  All wallets
-     now originate via originateSingleStage() using the Taquito wallet
-     API.
-   • Simplified imports to include only sleep from net.js.  Removed
-     unused forgeViaBackend, sigHexWithTag, injectSigned and
-     forgeOrigination imports.
-   • Updated header revision to r1127‑a2 and summary accordingly.
+   • Rewrote the deploy page based on the legacy implementation but
+     adapted it for the updated registry‑aware factory.  The
+     factory now expects a bytes parameter containing only the
+     full contract metadata JSON (including views and imageUri).
+     Removed nested storage packing and replaced it with a simple
+     metadata encoding using char2Bytes().
+   • Dynamically resolve the correct entrypoint when calling the
+     factory (deploy, default or first method), handling legacy
+     and modern Michelson compilations.
+   • Added comprehensive contract address resolution logic: query
+     the on‑chain view `get_last`, parse RPC internal operations,
+     scan recent blocks and fall back to the TzKT API.  This
+     ensures that the dApp can determine the new contract
+     address even when Taquito does not populate it automatically.
+   • Normalised metadata fields to accept arrays or comma‑separated
+     strings, pruned empty values and constructed metadata in the
+     order specified by the TZIP invariants.  Injected the
+     off‑chain views array directly into the metadata object.
+   • Implemented `ensureConnected()` that attempts to connect the
+     wallet using either `retryConnect` (legacy) or `connect`.
+     Without a connection, the dApp cannot originate contracts.
+   • Updated progress overlay usage: pass `status`, `progress`,
+     `error`, `kt1`, `step` and `total` to OperationOverlay.  The
+     overlay hints to the user when the wallet pop‑up should
+     appear and supports retry/cancel semantics.
+   • Provided a direct origination fallback using the full
+     contract code when FACTORY_ADDRESS is not defined.  This
+     preserves backwards compatibility with networks lacking a
+     factory contract.
 */

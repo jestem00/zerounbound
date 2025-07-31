@@ -5,7 +5,7 @@
   Summary: hazards + script‑toggle, shortKt, copyable addr,
            fallback preview support (ipfs/http), confirm dlg
 ──────────────────────────────────────────────────────────────*/
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import PropTypes                    from 'prop-types';
 import styledPkg                    from 'styled-components';
 
@@ -17,12 +17,19 @@ import useConsent                   from '../hooks/useConsent.js';
 import IntegrityBadge               from './IntegrityBadge.jsx';
 import PixelButton                  from './PixelButton.jsx';
 import PixelConfirmDialog           from './PixelConfirmDialog.jsx';
-import { shortKt, copyToClipboard } from '../utils/formatAddress.js';
+import { shortKt, copyToClipboard, shortAddr } from '../utils/formatAddress.js';
 import {
   EnableScriptsToggle,
   EnableScriptsOverlay,
 } from './EnableScripts.jsx';
 import decodeHexFields,{decodeHexJson} from '../utils/decodeHexFields.js';
+
+// Import domain resolver and network key for reverse lookups.  These helpers
+// allow conversion of Tezos addresses to .tez domains when a reverse
+// record exists.  shortAddr() abbreviates tz/KT addresses.  See
+// resolveTezosDomain.js for implementation details.
+import { resolveTezosDomain } from '../utils/resolveTezosDomain.js';
+import { NETWORK_KEY } from '../config/deployTarget.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -104,8 +111,163 @@ export default function ContractMetaPanelContracts({
   const askEnable = () => {setTerms(false);setDlg(true);};
   const enable = () => {if(!terms)return;setAllowScr(true);setDlg(false);};
 
+  // --------------------------------------------------------------
+  // Address parsing and domain resolution logic.  The contract
+  // metadata may include fields such as authors, authoraddress and
+  // creators containing comma‑separated addresses or arrays.  We
+  // normalise these fields into arrays, resolve any Tezos addresses
+  // to .tez domains where possible, and provide optional copy
+  // functionality.  See resolveTezosDomain.js for details.
+
+  // Helper to parse a metadata field into an array of strings.
+  const parseField = useCallback((field) => {
+    if (!field) return [];
+    if (Array.isArray(field)) return field.map((x) => String(x).trim()).filter(Boolean);
+    if (typeof field === 'string') return field.split(/[,;]\s*/).map((s) => s.trim()).filter(Boolean);
+    if (typeof field === 'object') return Object.values(field).map((s) => String(s).trim()).filter(Boolean);
+    return [];
+  }, []);
+
+  // Extract arrays for authors, admin (authoraddress) and creators.
+  const authorsArr = useMemo(() => [], []);
+  const adminArr   = useMemo(() => parseField(metaObj.authoraddress), [metaObj.authoraddress, parseField]);
+  const creatorsArr= useMemo(() => parseField(metaObj.creators), [metaObj.creators, parseField]);
+
+  // Domain cache and list expansion flags.
+  const [domains, setDomains] = useState({});
+  const [showAllAuthors, setShowAllAuthors] = useState(false);
+  const [showAllAdmins, setShowAllAdmins]   = useState(false);
+  const [showAllCreators, setShowAllCreators] = useState(false);
+
+  // Derive a user‑friendly version label from the contract metadata.
+  // If the metadata includes a "version" key (e.g. "ZeroContractV4a"),
+  // extract the suffix after "ZeroContract" and lower‑case it (e.g. "v4a").
+  // Otherwise, leave blank.  This will be appended next to the contract
+  // address in parentheses.  A missing or malformed version yields an
+  // empty string so nothing extra is shown.
+  const verLabel = useMemo(() => {
+    const ver = String(metaObj.version || '').trim();
+    if (!ver) return '';
+    const lower = ver.toLowerCase();
+    const prefix = 'zerocontract';
+    const idx = lower.indexOf(prefix);
+    if (idx >= 0) {
+      const suffix = lower.slice(idx + prefix.length);
+      // ensure suffix starts with 'v'; if not, prepend 'v'
+      const trimmed = suffix.replace(/^v?/i, '');
+      return `v${trimmed}`;
+    }
+    return '';
+  }, [metaObj.version]);
+
+  // Resolve domain names for all addresses in the lists.  We use
+  // NETWORK_KEY to choose the correct Tezos Domains endpoint (mainnet
+  // or ghostnet).  The lookup only runs once per unique address.
+  useEffect(() => {
+    const addrs = new Set();
+    [...authorsArr, ...adminArr, ...creatorsArr].forEach((val) => {
+      if (!val || typeof val !== 'string') return;
+      const v = val.trim();
+      if (/^(tz|kt)/i.test(v)) addrs.add(v);
+    });
+    addrs.forEach((addr) => {
+      const key = addr.toLowerCase();
+      if (domains[key] !== undefined) return;
+      (async () => {
+        const name = await resolveTezosDomain(addr, NETWORK_KEY);
+        setDomains((prev) => {
+          if (prev[key] !== undefined) return prev;
+          return { ...prev, [key]: name };
+        });
+      })();
+    });
+  }, [authorsArr, adminArr, creatorsArr]);
+
+  // Format a single value: return the resolved domain if present;
+  // return the value verbatim if it contains a dot (likely a name);
+  // otherwise abbreviate tz/KT addresses via shortAddr().
+  const formatVal = useCallback((val) => {
+    if (!val || typeof val !== 'string') return String(val || '');
+    const v = val.trim();
+    const key = v.toLowerCase();
+    const dom = domains[key];
+    if (dom) return dom;
+    if (v.includes('.')) return v;
+    return shortAddr(v);
+  }, [domains]);
+
+  // Render a list of values with optional copy buttons.  When
+  // showAll is false and more than three entries exist, append a
+  // toggle to reveal the remainder.  Addresses are linked to the
+  // explore filter page.  Names/domains are rendered as plain text.
+  const renderList = useCallback(
+    (list, showAll, setShowAll, allowCopy) => {
+      const display = showAll ? list : list.slice(0, 3);
+      const elems = [];
+      display.forEach((item, idx) => {
+        const prefix = idx > 0 ? ', ' : '';
+        const formatted = formatVal(item);
+        const isAddr = typeof item === 'string' && /^(tz|kt)/i.test(item.trim());
+        elems.push(
+          <React.Fragment key={`${item}-${idx}`}>
+            {prefix}
+            {isAddr ? (
+              <>
+                <a
+                  href={`/explore?cmd=tokens&admin=${item}`}
+                  style={{ color: 'var(--zu-accent-sec,#6ff)', textDecoration: 'none', wordBreak: 'break-all' }}
+                >
+                  {formatted}
+                </a>
+                {allowCopy && (
+                  <PixelButton
+                    size="xs"
+                    title="Copy address"
+                    onClick={(e) => {
+                      e.preventDefault(); e.stopPropagation(); copyToClipboard(item);
+                    }}
+                  >📋</PixelButton>
+                )}
+              </>
+            ) : (
+              <span style={{ wordBreak: 'break-all' }}>{formatted}</span>
+            )}
+          </React.Fragment>,
+        );
+      });
+      if (list.length > 3 && !showAll) {
+        elems.push(
+          <>
+            …&nbsp;
+            <button
+              type="button"
+              aria-label="Show all entries"
+              onClick={(e) => { e.preventDefault(); setShowAll(true); }}
+              style={{ background: 'none', border: 'none', color: 'inherit', font: 'inherit', cursor: 'pointer', padding: 0 }}
+            >
+              🔻More
+            </button>
+          </>,
+        );
+      }
+      return elems;
+    },
+    [formatVal],
+  );
+
   return (
     <>
+      {/*
+        Contract metadata panel for marketplace collections. Displays
+        a preview thumbnail, collection title with integrity badge,
+        contract address (abbreviated KT1 + copy button), admin
+        addresses with domain resolution and copy icons, and
+        additional metadata fields such as symbol, version, type,
+        license, homepage, authors and creators.  Author/creator
+        lists support multiple entries with "More" toggles and link
+        to the explore filter page.  All fields are optional and
+        hidden when absent.
+      */}
       <Card>
         <ThumbBox>
           {hazards.scripts&&(
@@ -140,11 +302,64 @@ export default function ContractMetaPanelContracts({
           </TitleRow>
 
           <AddrRow>
-            <code title={contractAddress}>{shortKt(contractAddress)}</code>
+            <code title={contractAddress}>
+              {shortKt(contractAddress)}
+              {verLabel ? ` (${verLabel})` : ''}
+            </code>
             <PixelButton size="xs" onClick={copy}>📋</PixelButton>
           </AddrRow>
 
-          {metaObj.description&&<Desc>{metaObj.description}</Desc>}
+          {/* admin row with domain resolution and copy buttons */}
+          {adminArr.length > 0 && (
+            <AddrRow>
+              <span>Admin:&nbsp;</span>
+              {renderList(adminArr, showAllAdmins, setShowAllAdmins, true)}
+            </AddrRow>
+          )}
+
+          {/* optional metadata fields */}
+          {metaObj.symbol && (
+            <p style={{ fontSize: '.75rem', margin: '0 0 2px' }}>
+              <strong>Symbol</strong>: {metaObj.symbol}
+            </p>
+          )}
+          {metaObj.version && (
+            <p style={{ fontSize: '.75rem', margin: '0 0 2px' }}>
+              <strong>Version</strong>: {metaObj.version}
+            </p>
+          )}
+          {metaObj.type && (
+            <p style={{ fontSize: '.75rem', margin: '0 0 2px' }}>
+              <strong>Type</strong>: {metaObj.type}
+            </p>
+          )}
+          {metaObj.license && (
+            <p style={{ fontSize: '.75rem', margin: '0 0 2px' }}>
+              <strong>License</strong>: {metaObj.license}
+            </p>
+          )}
+          {metaObj.homepage && (
+            <p style={{ fontSize: '.75rem', margin: '0 0 2px' }}>
+              <strong>Homepage</strong>:&nbsp;
+              {/^https?:\/\//i.test(metaObj.homepage) ? (
+                <a href={metaObj.homepage} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--zu-accent-sec,#6ff)', textDecoration: 'underline' }}>
+                  {metaObj.homepage}
+                </a>
+              ) : (
+                metaObj.homepage
+              )}
+            </p>
+          )}
+
+          {/* creator list (authors suppressed) */}
+          {creatorsArr.length > 0 && (
+            <p style={{ fontSize: '.75rem', margin: '0 0 2px' }}>
+              <strong>Creator(s)</strong>:&nbsp;
+              {renderList(creatorsArr, showAllCreators, setShowAllCreators, false)}
+            </p>
+          )}
+
+          {metaObj.description && <Desc>{metaObj.description}</Desc>}
 
           <StatRow>
             <span>{stats.tokens} Tokens</span>

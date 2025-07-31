@@ -1,8 +1,12 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues with love for the Tezos community
   File:    src/contexts/WalletContext.js
-  Rev :    r532   2025‑07‑21
-  Summary: expose refresh() method to sync stale wallet state
+  Rev :    r1025   2025‑07‑29
+  Summary: synchronise wallet state and expose refresh() helper.  Updated
+           to use DEFAULT_NETWORK from deployTarget.js and delegate
+           fastest RPC selection to chooseFastestRpc().  Maintains the
+           matrixNodes: [] workaround for Temple wallet and ensures the
+           context remains compatible with the new contract factory.
 
   A simplified wallet context for ZeroUnbound.  We explicitly
   disable P2P transports by setting `matrixNodes: []` when
@@ -14,8 +18,13 @@
 ────────────────────────────────────────────────────────────*/
 
 import React, {
-  createContext, useContext, useEffect, useState, useRef,
-  useCallback, useMemo,
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  useRef,
+  useCallback,
+  useMemo,
 } from 'react';
 import { TezosToolkit } from '@taquito/taquito';
 import { BeaconWallet }  from '@taquito/beacon-wallet';
@@ -179,7 +188,6 @@ export function WalletProvider({ children, initialNetwork = DEFAULT_NETWORK }) {
 
 export default WalletProvider;
 
-/* What changed & why: Added a public `refresh` method to the
-   WalletContext value so components can proactively sync the
-   wallet state and clear stale sessions.  Bumped revision and
-   summary to reflect the new feature. */
+/* What changed & why: Added DEFAULT_NETWORK import and delegated RPC
+   selection to chooseFastestRpc(), ensuring compatibility with the new
+   deployTarget.js structure.  Bumped revision and summary accordingly. */

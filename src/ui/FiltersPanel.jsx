@@ -1,23 +1,29 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/FiltersPanel.jsx
-  Rev :    r3     2025‑07‑25 UTC
+  Rev :    r4    2025‑07‑27 UTC
   Summary: Responsive filters panel for the explore pages.  This
            component renders a sidebar on desktop and a modal on
            mobile, allowing users to filter tokens by authors,
            MIME type, tags, edition type, mature content and
-           flashing content.  Accepts the current token list
-           and filter state as props, and updates the state via
-           callbacks.  This revision hardens the author and tag
-           derivation logic to handle non-array metadata fields,
-           preventing runtime errors when a token’s metadata
-           contains a string instead of an array.
+           flashing content.  Author entries now resolve Tezos
+           domains when reverse records exist and truncate
+           addresses via shortAddr() when unresolved, with
+           word‑wrapping to prevent clipping.  Domain names are
+           displayed in full.  This revision introduces a
+           domains cache and asynchronous lookups via
+           resolveTezosDomain().
 ──────────────────────────────────────────────────────────────*/
 
 import PropTypes from 'prop-types';
 import styledPkg from 'styled-components';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import PixelButton from './PixelButton.jsx';
+
+// Import domain resolver, network selection and address formatter.
+import { resolveTezosDomain } from '../utils/resolveTezosDomain.js';
+import { NETWORK_KEY } from '../config/deployTarget.js';
+import { shortAddr } from '../utils/formatAddress.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -63,13 +69,22 @@ const Section = styled.fieldset`
   border: 1px solid var(--zu-fg);
   padding: 6px;
   legend { padding: 0 4px; font-family: 'Pixeloid Sans', monospace; }
-  label { display: block; margin: 2px 0; }
+  label {
+    display: block;
+    margin: 2px 0;
+    word-break: break-all;
+    white-space: normal;
+  }
   input[type='checkbox'] { margin-right: 4px; }
 `;
 
 export default function FiltersPanel({ tokens = [], filters, setFilters, renderToggle, buttonStyle }) {
   const [show, setShow] = useState(false);
   const [isDesktop, setDesktop] = useState(false);
+
+  // Cache for reverse domain lookups.  Keys are lower-cased addresses;
+  // values are the resolved domain or null.
+  const [domains, setDomains] = useState({});
 
   /* responsive ‑ SSR‑safe */
   useEffect(() => {
@@ -91,15 +106,44 @@ export default function FiltersPanel({ tokens = [], filters, setFilters, renderT
     if (!Array.isArray(authors)) {
       authors = authors ? [authors] : [];
     }
-    authors.forEach((a) => { if (a) authSet.add(a); });
+    authors.forEach((a) => { if (a) authSet.add(String(a)); });
     // Normalize tags to an array as well
     let tags = m.tags || [];
     if (!Array.isArray(tags)) {
       tags = tags ? [tags] : [];
     }
-    tags.forEach((tg) => { if (tg) tagSet.add(tg); });
+    tags.forEach((tg) => { if (tg) tagSet.add(String(tg)); });
     if (m.mimeType) mimeSet.add(m.mimeType);
   });
+
+  // Resolve domains for Tezos addresses in the authors set.
+  useEffect(() => {
+    const addrs = [...authSet].filter((a) => typeof a === 'string' && /^(tz|kt)/i.test(a.trim()));
+    addrs.forEach((addr) => {
+      const key = addr.trim().toLowerCase();
+      if (domains[key] !== undefined) return;
+      (async () => {
+        const name = await resolveTezosDomain(addr, NETWORK_KEY);
+        setDomains((prev) => {
+          if (prev[key] !== undefined) return prev;
+          return { ...prev, [key]: name };
+        });
+      })();
+    });
+  }, [tokens]);
+
+  // Format a single author entry: return the resolved domain if present;
+  // return the string verbatim if it contains a dot (likely a name);
+  // otherwise abbreviate addresses via shortAddr().
+  const formatAuthor = useCallback((val) => {
+    if (!val || typeof val !== 'string') return String(val || '');
+    const v = val.trim();
+    const key = v.toLowerCase();
+    const dom = domains[key];
+    if (dom) return dom;
+    if (v.includes('.')) return v;
+    return shortAddr(v);
+  }, [domains]);
 
   /* handlers */
   const closeIfMobile = () => {
@@ -133,7 +177,7 @@ export default function FiltersPanel({ tokens = [], filters, setFilters, renderT
                   closeIfMobile();
                 }}
               />
-              {a}
+              {formatAuthor(a)}
             </label>
           ))}
       </Section>
@@ -270,13 +314,3 @@ FiltersPanel.propTypes = {
   renderToggle: PropTypes.func,
   buttonStyle: PropTypes.object,
 };
-
-/* What changed & why: Added a brand-new FiltersPanel component.  This
-   implementation is adapted from the explore bundle (r2) and
-   includes robustness improvements.  In particular, the derivation
-   of authors and tags now normalizes metadata fields that may be
-   strings into arrays, preventing runtime errors when using
-   `.forEach()` on a non-array.  The component renders a desktop
-   sidebar and a mobile pop‑up, integrates with PixelButton for the
-   Filters toggle, and exposes callbacks to update filter state. */
-/* EOF */

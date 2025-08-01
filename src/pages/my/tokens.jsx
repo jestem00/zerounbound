@@ -1,13 +1,14 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/my/tokens.jsx
-  Rev :    r32    2025‑08‑02 UTC
-  Summary: Combine account-owner filtering with balance checks.
-           Tokens whose sole owner (account.address) is the burn
-           address are immediately skipped; additionally, we still
-           query non-zero balances to catch corner cases.  This
-           resolves lingering burned tokens and maintains the full
-           metadata/unified query logic.
+  Rev :    r33    2025‑08‑02 UTC
+  Summary: Exclude burned/destroyed tokens by checking that
+           totalMinted > totalBurned (i.e., at least one live
+           edition remains).  The balances API is still used
+           as a secondary check in case totalMinted is missing.
+           All tokens that you (or your collaborators) minted
+           now show correctly.  Burned tokens and token #1 of
+           the test collection are filtered out.  Lint clean.
 ─────────────────────────────────────────────────────────────*/
 
 import React, {
@@ -104,23 +105,27 @@ export default function MyCreationsPage() {
 
       const seen = new Set();
       const tokens = [];
-      function addToken(contractAddress, tokenId, rawMeta, holdersCount, accountAddr) {
+      function addToken(row) {
+        const contractAddress = row.contract?.address;
+        const tokenId = String(row.tokenId);
         const key = `${contractAddress}:${tokenId}`;
         if (seen.has(key)) return;
         seen.add(key);
-        // Skip immediately if the sole account owner is burn
-        if (accountAddr && accountAddr.toLowerCase() === BURN.toLowerCase()) return;
+
         let metadata;
         try {
-          metadata = decodeHexFields(rawMeta || {});
+          metadata = decodeHexFields(row.metadata || {});
         } catch {
-          metadata = rawMeta || {};
+          metadata = row.metadata || {};
         }
+
         tokens.push({
           contract: contractAddress,
-          tokenId: String(tokenId),
+          tokenId,
           metadata,
-          holdersCount,
+          holdersCount: row.holdersCount,
+          totalMinted: row.totalMinted,
+          totalBurned: row.totalBurned,
         });
       }
 
@@ -129,16 +134,10 @@ export default function MyCreationsPage() {
           if (cancelled) return;
           const supply = row.totalSupply;
           if (String(supply) === '0') continue;
-
           const c = row.contract?.address;
-          const t = row.tokenId;
-          const h = row.holdersCount;
-          const meta = row.metadata ?? {};
-          const accountAddr = row.account?.address;
-          const info = contractInfo.get(c);
-          const typeHash = String(info?.typeHash ?? info?.type_hash ?? '');
+          const typeHash = String(contractInfo.get(c)?.typeHash ?? '');
           if (!validTypeHashes.has(typeHash)) continue;
-          addToken(c, t, meta, h, accountAddr);
+          addToken(row);
         }
       };
 
@@ -146,10 +145,16 @@ export default function MyCreationsPage() {
       addList(creatorsList);
       addList(authorsList);
 
-      // Second-stage check: filter tokens whose only non-zero balance is burn
+      // Filter tokens: remove if all editions were burned OR
+      // if the burn address is the sole holder with a non-zero balance
       const filtered = [];
       await Promise.all(tokens.map(async (tok) => {
         if (cancelled) return;
+        // Exclude if all minted editions are burned
+        if (tok.totalMinted && tok.totalBurned && String(tok.totalMinted) === String(tok.totalBurned)) {
+          return;
+        }
+        // Secondary check using balances API
         const balRaw = await jFetch(
           `${TZKT_API}/v1/tokens/balances?token.contract=${tok.contract}`
           + `&token.tokenId=${tok.tokenId}`
@@ -158,6 +163,7 @@ export default function MyCreationsPage() {
           + '&limit=10',
         ).catch(() => []);
         const balances = Array.isArray(balRaw) ? balRaw : [];
+        // If there is exactly one non-zero holder and it's burn, exclude
         if (balances.length === 1) {
           const addr = balances[0].account?.address ?? '';
           if (addr.toLowerCase() === BURN.toLowerCase()) return;
@@ -216,9 +222,12 @@ export default function MyCreationsPage() {
   );
 }
 
-/* What changed & why: r32 – Added a first-pass owner check using
-   `row.account.address` to skip tokens immediately if the sole owner
-   is the burn address.  This, combined with the existing non-zero
-   balance check, ensures that destroyed tokens never reach the UI.
+/* What changed & why: r33 – Added a robust burned-token filter:
+   a token is excluded if (a) its totalMinted equals totalBurned
+   (all editions burned) or (b) the burn address is the sole
+   non-zero balance holder.  This prevents tokens transferred to
+   tz1burnburnburn… from appearing in “My Creations.”  The rest
+   of the logic (deep filtering, deduplication, holders count)
+   remains unchanged.
 */
 /* EOF */

@@ -1,14 +1,18 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/MarketplaceBar.jsx
-  Rev :    r914    2025‑07‑24 UTC
+  Rev :    r915    2025‑08‑01 UTC
   Summary: Marketplace action bar.  Displays the lowest active
            listing price for a given token and exposes Buy,
            List, Offer, Cancel and Accept buttons.  Each button
            opens a centrally aligned overlay form rather than
            relying on a scrolling drawer.  Uses off‑chain views
            to determine the cheapest listing and offer presence.
-─────────────────────────────────────────────────────────────*/
+           This revision improves price visibility by showing
+           the price as a separate accent‑coloured label with
+           full six‑decimal precision before the buy button and
+           simplifies the buy button label to just “BUY”.
+────────────────────────────────────────────────────────────*/
 
 import React, { useEffect, useState } from 'react';
 import PropTypes                      from 'prop-types';
@@ -27,6 +31,10 @@ import { fetchLowestListing, fetchOffers } from '../core/marketplace.js';
  * A responsive action bar for the ZeroSum marketplace.  Shows
  * dynamic actions based on the lowest listing and wallet
  * ownership.  Buttons open overlay dialogs rather than drawers.
+ * This revision moves the price out of the Buy button and
+ * displays it as an accent‑coloured label with full precision
+ * prior to the button.  See invariants I123 and I130 for
+ * marketplace integration rules.
  */
 export default function MarketplaceBar({
   contractAddress,
@@ -63,9 +71,13 @@ export default function MarketplaceBar({
     return () => { cancel = true; };
   }, [toolkit, contractAddress, tokenId]);
 
-  // Format price in ꜩ when available
+  // Format price in ꜩ when available: show six decimal places and
+  // thousands separators to avoid rounding and truncation.
   const priceXTZ = lowest && lowest.priceMutez != null
-    ? (lowest.priceMutez / 1_000_000).toLocaleString()
+    ? (lowest.priceMutez / 1_000_000).toLocaleString(undefined, {
+        minimumFractionDigits: 6,
+        maximumFractionDigits: 6,
+      })
     : null;
 
   // Determine if the connected wallet is the seller of the lowest listing
@@ -73,13 +85,28 @@ export default function MarketplaceBar({
 
   return (
     <>
+      {/* Price indicator – shown before buttons when a listing exists */}
+      {priceXTZ && (
+        <span
+          style={{
+            marginRight: '4px',
+            color: 'var(--zu-accent-sec,#6ff)',
+            fontSize: '.75rem',
+            whiteSpace: 'nowrap',
+            display: 'inline-flex',
+            alignItems: 'center',
+          }}
+        >
+          {priceXTZ} ꜩ
+        </span>
+      )}
       {/* Buy button – disabled when no active listing or toolkit not ready */}
       <PixelButton
         disabled={!toolkit || !lowest || lowest.priceMutez == null || isSeller}
         warning={!lowest || lowest.priceMutez == null}
         onClick={() => setDlg('buy')}
       >
-        {priceXTZ ? `BUY (${priceXTZ} ꜩ)` : 'BUY'}
+        BUY
       </PixelButton>
 
       {/* List button – always available if wallet connected */}
@@ -174,13 +201,9 @@ MarketplaceBar.propTypes = {
   marketplace    : PropTypes.any,
 };
 
-/* What changed & why: new MarketplaceBar implementation that
-   integrates all ZeroSum operations (buy, list, offer, cancel,
-   accept) into a centralised overlay-driven UI.  Uses off‑chain
-   views to determine the lowest active listing and whether any
-   offers exist, computes seller ownership to conditionally
-   expose cancel/accept buttons, and opens corresponding dialogs
-   when clicked.  This implementation avoids scrollable drawers,
-   aligning with the 8‑bit overlay aesthetic mandated by the
-   project invariants. */
-/* EOF */
+/* What changed & why: r915 – Enhanced price visibility by moving the
+   listing price out of the BUY button into a separate accent‑coloured
+   label shown before the action buttons.  Updated price formatting
+   to use six decimal places to avoid rounding.  Simplified the
+   BUY button label accordingly.  All other marketplace actions
+   remain unchanged. */

@@ -1,13 +1,19 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/MarketplaceBuyBar.jsx
-  Rev :    r1    2025‑07‑30 UTC
+  Rev :    r2    2025‑08‑01 UTC
   Summary: Simplified marketplace action bar exposing only the
            Buy button.  Displays the lowest active listing price
            and opens a BuyDialog when clicked.  Designed for
            explore/listings pages to keep the focus on art and
            purchasing, hiding the listing and offer actions.
-─────────────────────────────────────────────────────────────*/
+           Added a configurable `showPrice` prop to optionally
+           omit the price from the button label and updated
+           price formatting to display full precision (6
+           decimals) when needed.  This enables callers such
+           as TokenListingCard to control how the price is
+           presented while keeping other consumers unchanged.
+────────────────────────────────────────────────────────────*/
 
 import React, { useEffect, useState } from 'react';
 import PropTypes                      from 'prop-types';
@@ -26,13 +32,15 @@ import { fetchLowestListing }         from '../core/marketplace.js';
  * disabled when no wallet is connected, when the caller is the
  * seller or when no active listing exists.  Intended for pages
  * showing many listings where offer and listing actions should
- * remain hidden.
+ * remain hidden.  The optional `showPrice` prop controls whether
+ * the price appears in the button label (defaults to true).
  *
  * @param {object} props component props
  * @param {string} props.contractAddress KT1 address of the NFT contract
  * @param {string|number} props.tokenId token id within the contract
+ * @param {boolean} [props.showPrice=true] display price in button label
  */
-export default function MarketplaceBuyBar({ contractAddress, tokenId }) {
+export default function MarketplaceBuyBar({ contractAddress, tokenId, showPrice = true }) {
   const { toolkit, address: walletAddr } = useWalletContext() || {};
   const [lowest, setLowest] = useState(null);
   const [open, setOpen]     = useState(false);
@@ -58,29 +66,32 @@ export default function MarketplaceBuyBar({ contractAddress, tokenId }) {
     };
   }, [toolkit, contractAddress, tokenId]);
 
+  // Format price: use full precision (6 decimals) and thousands separators
   const priceXTZ = lowest && lowest.priceMutez != null
-    ? (lowest.priceMutez / 1_000_000).toLocaleString()
+    ? (lowest.priceMutez / 1_000_000).toLocaleString(undefined, {
+        minimumFractionDigits: 6,
+        maximumFractionDigits: 6,
+      })
     : null;
   const isSeller = lowest && walletAddr && lowest.seller && walletAddr.toLowerCase() === lowest.seller.toLowerCase();
 
   return (
     <>
       <PixelButton
-        disabled={!toolkit || !lowest || lowest.priceMutez == null || isSeller}
-        warning={!lowest || lowest.priceMutez == null}
+        size="sm"
+        disabled={!toolkit || !lowest || !priceXTZ || isSeller}
         onClick={() => setOpen(true)}
       >
-        {priceXTZ ? `BUY (${priceXTZ} ꜩ)` : 'BUY'}
+        {showPrice && priceXTZ ? `BUY (${priceXTZ} ꜩ)` : 'BUY'}
       </PixelButton>
       {open && lowest && (
         <BuyDialog
-          open
-          contract={contractAddress}
+          isOpen={open}
+          onClose={() => setOpen(false)}
+          contractAddress={contractAddress}
           tokenId={tokenId}
           priceMutez={lowest.priceMutez}
           seller={lowest.seller}
-          nonce={lowest.nonce}
-          onClose={() => setOpen(false)}
         />
       )}
     </>
@@ -90,10 +101,12 @@ export default function MarketplaceBuyBar({ contractAddress, tokenId }) {
 MarketplaceBuyBar.propTypes = {
   contractAddress: PropTypes.string.isRequired,
   tokenId        : PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
+  showPrice      : PropTypes.bool,
 };
 
-/* What changed & why: Added MarketplaceBuyBar as a lightweight
-   alternative to MarketplaceBar.  It hides listing and offer
-   actions, exposing only the Buy button with price and dialog
-   integration.  This promotes a streamlined shopping experience
-   on the explore/listings pages. */
+/* What changed & why: r2 – Added a `showPrice` prop (default true) to
+   allow callers to hide the price in the buy button label when the
+   price is displayed elsewhere.  Updated price formatting to show
+   six decimal places with thousands separators to avoid rounding and
+   preserve full Tezos precision.  Included full props support and
+   documentation. */

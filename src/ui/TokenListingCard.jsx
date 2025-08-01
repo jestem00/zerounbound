@@ -1,7 +1,7 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/TokenListingCard.jsx
-  Rev :    r5    2025‑07‑30 UTC
+  Rev :    r6    2025‑08‑01 UTC
   Summary: Enhanced listing card for the marketplace.  Fetches
            metadata from TzKT, resolves .tez domains for
            authors/creators, renders creators as clickable
@@ -9,8 +9,13 @@
            button linking to the token detail page and displays
            hazard consent overlays (NSFW, flashing, scripts).
            Shows image, price, token id, authors, creators,
-           MIME type and a buy button via MarketplaceBuyBar.
-─────────────────────────────────────────────────────────────*/
+           MIME type and a buy button via MarketplaceBuyBar.  This
+           revision hides the price in the buy button, displays
+           the price with full precision (six decimals) in a
+           contrasting accent colour and passes showPrice={false}
+           to MarketplaceBuyBar.  It also formats prices
+           consistently without rounding.
+────────────────────────────────────────────────────────────*/
 
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import PropTypes from 'prop-types';
@@ -201,7 +206,10 @@ export default function TokenListingCard({ contract, tokenId, priceMutez }) {
   const blocked    = needsNSFW || needsFlash;
   // Convert price in mutez to tez for display; leave null when unknown
   const priceXTZ = priceMutez != null
-    ? (priceMutez / 1_000_000).toLocaleString()
+    ? (priceMutez / 1_000_000).toLocaleString(undefined, {
+        minimumFractionDigits: 6,
+        maximumFractionDigits: 6,
+      })
     : null;
   // Determine image URI; prefer on‑chain data URIs, fallback to placeholder
   const imageUri = useMemo(() => pickDataUri(meta) || PLACEHOLDER, [meta]);
@@ -336,7 +344,7 @@ export default function TokenListingCard({ contract, tokenId, priceMutez }) {
           {title}
         </h4>
         {priceXTZ && (
-          <p style={{ margin: 0, fontSize: '.68rem', lineHeight: 1.25 }}>
+          <p style={{ margin: 0, fontSize: '.68rem', lineHeight: 1.25, color: 'var(--zu-accent-sec,#6ff)' }}>
             {priceXTZ} ꜩ
           </p>
         )}
@@ -378,7 +386,7 @@ export default function TokenListingCard({ contract, tokenId, priceMutez }) {
       </div>
       {/* Buy bar */}
       <div style={{ padding: '6px 8px 8px' }}>
-        <MarketplaceBuyBar contractAddress={contract} tokenId={tokenId} />
+        <MarketplaceBuyBar contractAddress={contract} tokenId={tokenId} showPrice={false} />
       </div>
     </article>
   );
@@ -390,10 +398,9 @@ TokenListingCard.propTypes = {
   priceMutez: PropTypes.number,
 };
 
-/* What changed & why: Rewrote TokenListingCard to remove the
-   dependency on TokenCard (which is unavailable in this
-   bundle).  The component now fetches token metadata from the
-   TzKT API, chooses the first on‑chain image URI, displays
-   the token name and price, and includes a Buy button.  This
-   ensures that marketplace listings render correctly and
-   consistently even in a minimal environment. */
+/* What changed & why: r6 – Adjusted TokenListingCard to display the price
+   with full precision and accent colour, and to hide the price inside
+   the Buy button by passing showPrice={false} to MarketplaceBuyBar.
+   Updated price formatting to avoid rounding and changed the Buy
+   button label behaviour accordingly.  Also bumped the revision and
+   summary to reflect these improvements. */

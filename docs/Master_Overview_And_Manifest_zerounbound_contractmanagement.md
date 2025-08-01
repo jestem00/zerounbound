@@ -2,22 +2,8 @@
 /*─────────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    docs/Master_Overview_And_Manifest_zerounbound_contractmanagement.txt
-  Rev :    r1160    2025‑08‑01 UTC
-  Summary: unify the minted and firstMinter queries on the My Tokens page and
-           parse JSON‑encoded creators arrays.  This revision rolls up
-           everything learned from the deep dive into TzKT metadata:
-           minted tokens are now fetched via both the creator and
-           firstMinter fields, tokens referencing the wallet in
-           metadata.creators or metadata.authors arrays are included,
-           metadata is decoded from hex and JSON‑encoded creators arrays
-           are parsed into true arrays, and final results are filtered
-           by requiring at least one live balance holder other than the
-           canonical burn address.  Heavy contract‑wide scans are
-           avoided for responsiveness.  A new invariant (I130) formalises
-           these rules.  The source‑tree map entry for
-           src/pages/my/tokens.jsx has been updated accordingly and the
-           change log records this revision.  All other sections are
-           preserved verbatim to maintain a complete history.
+  Rev :    r1161    2025‑08‑01 UTC
+  Summary: update network configuration exports (DOMAIN_CONTRACTS and FALLBACK_RPCS) in deployTarget.js; improve resolveTezosDomain.js to skip KT1 addresses, import network constants and avoid 400 errors; add Invariant I131 to formalize Tezos domain resolution rules.  This revision amends the source‑tree map entries for deployTarget.js and resolveTezosDomain.js, extends the invariants list to I131, and appends a changelog entry.  All other sections are preserved verbatim to maintain a complete history.
 ──────────────────────────────────────────────────────────────────*/
 
 ════════════════════════════════════════════════════════════════
@@ -54,7 +40,7 @@ TABLE OF CONTENTS
 0 · Global Rules & Meta Docs
 1 · High‑Level Architecture
 1·5 Critical‑Entry Index
-2 · Invariants (I00 – I130)
+2 · Invariants (I00 – I131)
 3 · Reserved
 4 · Source‑Tree Map (per‑file description + imports/exports)
 5 · Bundle Index
@@ -123,8 +109,10 @@ constructing buy, list and offer parameters.
 marketplace interactions.
 • src/ui/Entrypoints/CancelListing.jsx,
 AcceptOffer.jsx – marketplace entrypoint components.
-• src/utils/resolveTezosDomain.js – network‑aware resolver used
-throughout the UI to display .tez domains for addresses.
+• src/utils/resolveTezosDomain.js – reverse resolver used
+throughout the UI to display .tez domains for addresses; now
+imports network‑specific constants from deployTarget.js and
+skips contract addresses (see I131).
 • src/utils/decodeHexFields.js – deep UTF‑8 repair for
 on‑chain metadata.
 • src/utils/hazards.js – MIME‑level hazard detection.
@@ -314,26 +302,29 @@ I129 [F] Marketplace action components (CancelListing.jsx,
 AcceptOffer.jsx) must call feeEstimator.js and display
 OperationOverlay before dispatching any transaction.
 I130 [F,E] MyTokens unified mint & metadata filtering — the
-my/tokens page must fetch tokens minted by the connected wallet
-via both the creator and firstMinter TzKT queries, and it must
-also fetch tokens where the wallet appears in metadata.creators or
-metadata.authors arrays.  Results from these queries are merged
-and deduplicated using a Map keyed by contract:tokenId.  When
-ingesting each token, the UI must decode metadata using
-decodeHexFields and, when the metadata.creators field is a
-JSON‑encoded string, parse it into an array.  Tokens with zero
-totalSupply are skipped up front.  A type‑hash guard must exclude
-contracts whose typeHash is not present in hashMatrix.json.  A
-second‑stage live‑balance filter must include only tokens that
-have at least one non‑burn holder according to
-/v1/tokens/balances?token.contract=…&token.tokenId=…&balance.ne=0.  If
-the balance query fails, the token is included by default.  Heavy
-contract‑wide scans (e.g., scanning all tokens in a contract to
-find metadata matches) are prohibited; responsiveness must be
-maintained.  See src/pages/my/tokens.jsx for reference.  This
-invariant ensures the My Tokens page consistently discovers all
-tokens minted or authored by the wallet across FA2 versions and
-accurately filters out burn‑only tokens.
+    my/tokens page must fetch tokens minted by the connected wallet
+    via both the creator and firstMinter TzKT queries, and it must
+    also fetch tokens where the wallet appears in metadata.creators or
+    metadata.authors arrays.  Results from these queries are merged
+    and deduplicated using a Map keyed by contract:tokenId.  When
+    ingesting each token, the UI must decode metadata using
+    decodeHexFields and, when the metadata.creators field is a
+    JSON‑encoded string, parse it into an array.  Tokens with zero
+    totalSupply are skipped up front.  A type‑hash guard must exclude
+    contracts whose typeHash is not present in hashMatrix.json.  A
+    second‑stage live‑balance filter must include only tokens that
+    have at least one non‑burn holder according to
+    /v1/tokens/balances?token.contract=…&token.tokenId=…&balance.ne=0.  If
+    the balance query fails, the token is included by default.  Heavy
+    contract‑wide scans (e.g., scanning all tokens in a contract to
+    find metadata matches) are prohibited; responsiveness must be
+    maintained.  See src/pages/my/tokens.jsx for reference.  This
+    invariant ensures the My Tokens page consistently discovers all
+    tokens minted or authored by the wallet across FA2 versions and
+    accurately filters out burn‑only tokens.
+
+    I131 [F] Domain resolution environment — .tez domain lookups must be performed only for Tezos tz addresses (tz1, tz2, tz3) and skipped for KT1 contract addresses.  The resolver (src/utils/resolveTezosDomain.js) must import DOMAIN_CONTRACTS and FALLBACK_RPCS constants from src/config/deployTarget.js (Invariant I10) instead of hard‑coding them, use network‑aware GET‑based GraphQL queries to https://api.tezos.domains/graphql, cache results, suppress errors, and avoid 400 responses.  On‑chain fallback remains disabled by default.  This ensures reliable domain resolution across networks without spamming the console.
+
 
 ───────────────────────────────────────────────────────────────
 3 · reserved for future research notes
@@ -429,7 +420,12 @@ zerounbound/public/sprites/logo.psd – logo source PSD; Imports:· Exports:·
 zerounbound/public/sprites/logo.svg – Zero logo; Imports:· Exports:·
 
 ╭── src/config ──────────────────────────────────────────────────────────────╮
-zerounbound/src/config/deployTarget.js – network configuration and single divergence point; defines TARGET, DEFAULT_NETWORK, NET, NETWORK_KEY, RPC lists, TzKT API domains, theme and site values for Ghostnet and Mainnet; exposes FACTORY_ADDRESSES and FACTORY_ADDRESS for contract factory selection; provides selectFastestRpc() helper for RPC failover.
+zerounbound/src/config/deployTarget.js – network configuration and single
+    divergence point; defines TARGET, DEFAULT_NETWORK, NET, NETWORK_KEY, RPC lists,
+    TzKT API domains, theme and site values for Ghostnet and Mainnet; exposes
+    FACTORY_ADDRESSES and FACTORY_ADDRESS for contract factory selection; provides
+    selectFastestRpc() helper for RPC failover; now exports DOMAIN_CONTRACTS and
+    FALLBACK_RPCS for Tezos Domains reverse lookups.
 zerounbound/src/config/networkConfig.js – RPC endpoints map; Imports:· Exports: NETWORKS
 
 ╭── src/constants ───────────────────────────────────────────────────────────╮
@@ -569,7 +565,11 @@ zerounbound/src/utils/toNat.js – address → nat util; Imports:· Exports:
 zerounbound/src/utils/uriHelpers.js – base64/data‑URI helpers; Imports:· Exports: ensureDataUri,getMime
 zerounbound/src/utils/useIsoLayoutEffect.js – SSR‑safe layout effect; Imports: react; Exports: useIsoLayoutEffect
 zerounbound/src/utils/useWheelTunnel.js – wheel event tunnel (I64); Imports: react; Exports: useWheelTunnel
-zerounbound/src/utils/resolveTezosDomain.js – reverse resolver with network‑aware GraphQL and on‑chain fallback; Imports: useState,useEffect,deployTarget,taquito modules; Exports: resolveTezosDomain
+zerounbound/src/utils/resolveTezosDomain.js – reverse resolver with
+    network‑aware GraphQL and on‑chain fallback; imports DOMAIN_CONTRACTS,
+    FALLBACK_RPCS and RPC_URLS from deployTarget.js, skips KT1 addresses, uses
+    GET-based GraphQL queries, caches results and suppresses errors; Exports:
+    resolveTezosDomain
 zerounbound/src/pages/tokens/[addr]/[tokenId].jsx – responsive token-detail page that fetches collection and token metadata, displays media preview with hazard overlays, and moves script enable/disable and fullscreen controls into the metadata panel; integrates ExploreNav without search for global hazard toggles; re‑renders preview on script permission changes; clamps sidebar width and media height; Imports: React,useRouter,styled-components,ExploreNav,PixelButton,RenderMedia,FullscreenModal,MAINTokenMetaPanel,detectHazards,useConsent,useWalletContext,jFetch,TZKT_API,decodeHexFields,decodeHexJson; Exports: TokenDetailPage
 
 ╭── src/workers ─────────────────────────────────────────────────────────────╮
@@ -587,7 +587,7 @@ zerounbound/summarized_files/explore_bundle.txt – additional explore pages and
 
 ───────────────────────────────────────────────────────────────
 5 · BUNDLE INDEX (How to read) — each text-dump lives in summarized_files/
-───────────────────────────────────────────────────────────────/
+───────────────────────────────────────────────────────────────
 contracts_bundle.txt → Michelson sources + views
 assets_bundle.txt  → fonts, sprites, sw.js
 engine_bundle.txt  → scripts/, core/, data/, config/, constants/, utils/
@@ -597,7 +597,7 @@ master_bundle.txt → contains everything in all the above bundles.
 
 ───────────────────────────────────────────────────────────────
 6 · QUICK‑START & CI PIPELINE — updated commands
-───────────────────────────────────────────────────────────────/
+───────────────────────────────────────────────────────────────
 corepack enable && corepack prepare yarn@4.9.1 --activate
 yarn install
 
@@ -639,16 +639,20 @@ between switches to avoid stale data.
 
 ───────────────────────────────────────────────────────────────
 7 · APPENDICES (How to read) — machine‑readables live in code
-───────────────────────────────────────────────────────────────/
-A. hashMatrix.json, contains all the typeHashes' generated by tzkt used in filtering and labeling contract versions and more (unchanged).
+───────────────────────────────────────────────────────────────
+A. hashMatrix.json, contains all the typeHashes' generated by tzkt used in
+filtering and labeling contract versions and more (unchanged).
 
-B. entrypointRegistry.json, contains all Entrypoints used across our supported v1-v4d contracts (unchanged).
+B. entrypointRegistry.json, contains all Entrypoints used across our
+supported v1-v4d contracts (unchanged).
 
-─────────────────────────────────────────────────────────────
+───────────────────────────────────────────────────────────────
 CHANGELOG
-─────────────────────────────────────────────────────────────/
-...
-r1160 – 2025‑08‑01 UTC – unified mint and metadata filtering for My Tokens page, parsing JSON‑encoded creators and live‑balance filtering; added Invariant I130 to codify these requirements; updated src/pages/my/tokens.jsx description in the source‑tree map. This revision ensures all tokens minted or authored by the connected wallet are discovered across FA2 versions while excluding burn‑only tokens and removing heavy contract‑wide scans.
-r1159 – 2025‑07‑31 UTC – incorporate the latest contract deployments and UI corrections. The marketplace contract on mainnet is now KT19kipdLiWyBZvP7KWCPdRbDXuEiu3gfjBR (ZeroSum v2) and the network‑aware contract factory has been renamed to “ZeroWorks”; its addresses are KT1Wg1FSTfgX2rjfJQoiVxTccbGu58Qegwun on Ghostnet and KT1RETf8b8iJfoG8ekuwDm5jGQuUKrjkJXTG on Mainnet. Duplicate Next.js page definitions for /explore/listings were removed by deleting src/pages/explore/listings.jsx; only the nested listings/index.jsx remains. Updated deployTarget.js values remain unchanged as they already point to the new factory addresses. Added changelog entry r1159.
-... (earlier entries unchanged)
-/* EOF */
+───────────────────────────────────────────────────────────────
+…
+    r1161 – 2025‑08‑01 UTC – added DOMAIN_CONTRACTS and FALLBACK_RPCS exports in deployTarget.js; updated resolveTezosDomain.js to import these constants, skip KT1 contract addresses and avoid 400 errors; added Invariant I131 to formalize domain resolution rules; updated source‑tree map entries.
+    r1160 – 2025‑08‑01 UTC – unified mint and metadata filtering for My Tokens page, parsing JSON‑encoded creators and live‑balance filtering; added Invariant I130 to codify these requirements; updated src/pages/my/tokens.jsx description in the source‑tree map. This revision ensures all tokens minted or
+    authored by the connected wallet are discovered across FA2 versions while
+    excluding burn‑only tokens and removing heavy contract‑wide scans.
+    r1159 – 2025‑07‑31 UTC – incorporate the latest contract deployments and UI
+…

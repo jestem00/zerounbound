@@ -1,29 +1,28 @@
 /*─────────────────────────────────────────────────────────────────
-Developed by @jams2blues – ZeroContract Studio
-File: src/config/deployTarget.js
-Rev : r1156    2025‑07‑31
-Summary: Revert to a static TARGET constant so scripts/setTarget.js
-         can rewrite it and centralise marketplace contract
-         addresses.  This file once again serves as the sole
-         branch‑diverging configuration, exposing factory and
-         marketplace address maps keyed by network.  Local
-         development uses scripts/setTarget.js and scripts/startDev.js
-         to inject environment variables, while Vercel builds rely
-         on the committed value of TARGET in each branch.*/
+  Developed by @jams2blues – ZeroContract Studio
+  File:    src/config/deployTarget.js
+  Rev :    r1157    2025‑08‑01
+  Summary: Updated network configuration constants to include
+           DOMAIN_CONTRACTS and FALLBACK_RPCS exports used by
+           resolveTezosDomain.js.  These values centralise the
+           Tezos Domains registry contract addresses and fallback
+           RPC endpoints per network, adhering to invariant I10.
+           All other configuration remains identical to r1156.
+*/
 
 // ---------------------------------------------------------------------------
 // Network target selection
 //
 // The ZeroUnbound platform supports multiple Tezos networks.  During
 // development the target network is usually switched by running one of
-// the provided yarn scripts (e.g. `yarn set:ghostnet` or `yarn set:mainnet`).
+// the provided yarn scripts (e.g. yarn set:ghostnet or yarn set:mainnet).
 // Historically, these scripts rewrote a hard‑coded TARGET constant in this
 // file.  A recent revision replaced the constant with a dynamic lookup
-// against `process.env.NEXT_PUBLIC_NETWORK`, which broke the rewrite logic
+// against process.env.NEXT_PUBLIC_NETWORK, which broke the rewrite logic
 // and caused the dev server to always default to the ghostnet configuration.
 //
 // To maintain compatibility with both approaches we define a
-// `TARGET_FALLBACK` constant that represents the last network chosen by
+// TARGET_FALLBACK constant that represents the last network chosen by
 // scripts/setTarget.js.  If the NEXT_PUBLIC_NETWORK environment variable
 // is defined at runtime it takes precedence; otherwise the fallback is
 // used.  This hybrid approach lets developers switch networks via the
@@ -31,8 +30,8 @@ Summary: Revert to a static TARGET constant so scripts/setTarget.js
 
 // NOTE: The value of TARGET is overwritten by scripts/setTarget.js.  Do not
 // edit it manually.  If you wish to change the default network for your
-// environment, run `yarn set:<network>` (e.g. `yarn set:mainnet` or
-// `yarn set:ghostnet`).  This constant defines the active Tezos
+// environment, run yarn set:<network> (e.g. yarn set:mainnet or
+// yarn set:ghostnet).  This constant defines the active Tezos
 // network for the entire application.  Branches destined for Vercel
 // deployments should commit a version of this file with TARGET set to
 // 'mainnet' or 'ghostnet' as appropriate; deployTarget.js is the sole
@@ -47,7 +46,7 @@ export const TARGET = 'mainnet';
 // API domains and other variables.  The fastest reachable RPC is selected
 // at runtime via selectFastestRpc().  Adjust these values as necessary
 // when adding or updating networks.  The devPort property determines
-// the port used by `yarn dev:current`; ghostnet defaults to 3000 and
+// the port used by yarn dev:current; ghostnet defaults to 3000 and
 // mainnet defaults to 4000.
 
 const nets = {
@@ -166,7 +165,7 @@ export const FACTORY_ADDRESS = FACTORY_ADDRESSES[TARGET];
 // centralise them here alongside other per‑network configuration.  Each
 // entry corresponds to the canonical marketplace contract for the given
 // network.  These values should be kept identical across branches, with
-// `deployTarget.js` remaining the sole diverging file between Ghostnet and
+// deployTarget.js remaining the sole diverging file between Ghostnet and
 // Mainnet.  See src/core/marketplace.js for usage.
 export const MARKETPLACE_ADDRESSES = {
   ghostnet: 'KT1R1PzLhBXEd98ei72mFuz4FrUYEcuV7t1p',
@@ -178,6 +177,24 @@ export const MARKETPLACE_ADDRESSES = {
 // If no entry exists for a network, the value will be undefined and
 // calling code should handle that case appropriately.
 export const MARKETPLACE_ADDRESS = MARKETPLACE_ADDRESSES[TARGET];
+
+// ---------------------------------------------------------------------------
+// Tezos Domain registry addresses and fallback RPCs
+//
+// DOMAIN_CONTRACTS exposes the NameRegistry contract addresses used by the
+// Tezos Domains project to store reverse record mappings.  FALLBACK_RPCS
+// lists network-specific endpoints for on‑chain domain lookup when
+// RPC_URLS is unavailable.  Both exports are consumed by
+// resolveTezosDomain.js to perform optional on-chain resolution.
+export const DOMAIN_CONTRACTS = {
+  ghostnet: 'KT1REqKBXwULnmU6RpZxnRBUgcBmESnXhCWs',
+  mainnet:  'KT1GBZmSxmnKJXGMdMLbugPfLyUPmuLSMwKS',
+};
+
+export const FALLBACK_RPCS = {
+  ghostnet: 'https://ghostnet.tezos.marigold.dev',
+  mainnet:  'https://mainnet.api.tez.ie',
+};
 
 // ---------------------------------------------------------------------------
 // Remote forge service
@@ -233,23 +250,10 @@ export async function selectFastestRpc(timeout = 2000) {
 export const DEFAULT_NETWORK = TARGET;
 
 /* What changed & why:
-   • Reverted network selection to use a single static TARGET constant
-     that scripts/setTarget.js can rewrite.  This mirrors the original
-     design where deployTarget.js is the only diverging file between
-     ghostnet and mainnet branches.
-   • Removed the dynamic environment fallback.  Development scripts now
-     control environment variables (NETWORK and NEXT_PUBLIC_NETWORK)
-     through scripts/startDev.js; production builds on Vercel rely on
-     the committed TARGET value in each branch.
-   • Updated header and revision to explain the rationale and restore
-     compatibility with scripts/setTarget.js and updatePkgName.js.
-   • Restored FORGE_SERVICE_URL export (always empty) and its
-     associated mapping to prevent build errors in modules that still
-     import this constant.  Remote forging is deprecated.
-   • Added MARKETPLACE_ADDRESSES and MARKETPLACE_ADDRESS exports to
-     centralise ZeroSum marketplace contract addresses for ghostnet
-     and mainnet.  This ensures that modules like marketplace.js
-     import network-specific addresses from a single source instead
-     of hard-coding them, preventing cross‑network mixups.  Keep
-     these values consistent across branches.
+   • Added DOMAIN_CONTRACTS and FALLBACK_RPCS exports.  These new constants
+     centralise the Tezos Domains registry contract addresses and fallback
+     RPC endpoints per network.  resolveTezosDomain.js imports them to
+     perform network-aware on-chain lookups and avoid hard‑coded values,
+     complying with invariant I10.
+   • Added a revision header noting the new revision r1157 on 2025‑08‑01.
 */

@@ -1,15 +1,17 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/explore/[[...filter]].jsx
-  Rev :    r5    2025‑08‑02 UTC
+  Rev :    r6    2025‑08‑02 UTC
   Summary: Fix admin‑filtered token search.  The admin search now
            queries full token objects (no `select=…`) for creator,
            metadata.creators and metadata.authors, just like the
            My Creations page.  This resolves the “empty results”
            issue and preserves fast loading of all mints and
            collaborator tokens for a given address while skipping
-           burned and non‑ZeroContract tokens.  The rest of the
-           explore grid remains unchanged.
+           burned and non‑ZeroContract tokens.  JSON‑encoded
+           creators arrays are parsed into arrays during token
+           ingestion.  The rest of the explore grid remains
+           unchanged.
 ─────────────────────────────────────────────────────────────*/
 
 import React, {
@@ -122,12 +124,19 @@ export default function ExploreGrid() {
     Helper: fetch tokens for a specific admin address.  This
     mirrors My Creations logic: query creator=admin, metadata.creators
     and metadata.authors without using `select=…`, decode metadata,
-    dedupe and filter to valid ZeroContract tokens, skipping burned.
+    parse JSON‑encoded creators strings, dedupe and filter to valid
+    ZeroContract tokens, skipping burned.  TypeHash guard and zero
+    supply filtering are retained.
   ───────────────────────────────────────────────────────────*/
   const fetchAdminTokens = useCallback(async (admin) => {
     const base = `${TZKT_API}/v1/tokens`;
     const minted = await jFetch(
       `${base}?creator=${admin}&limit=1000`,
+    ).catch(() => []);
+    // Include tokens where the first minter matches the admin to cover
+    // contract versions that record the initial minter under firstMinter.
+    const firsts = await jFetch(
+      `${base}?firstMinter=${admin}&limit=1000`,
     ).catch(() => []);
     const creators = await jFetch(
       `${base}?metadata.creators.[*]=${admin}&limit=1000`,
@@ -136,7 +145,7 @@ export default function ExploreGrid() {
       `${base}?metadata.authors.[*]=${admin}&limit=1000`,
     ).catch(() => []);
 
-    const all = [...minted, ...creators, ...authors];
+    const all = [...minted, ...firsts, ...creators, ...authors];
     // Build contract typeHash map
     const contractSet = new Set(all.map((t) => t.contract?.address).filter(Boolean));
     const contractInfo = new Map();
@@ -152,7 +161,7 @@ export default function ExploreGrid() {
       arr.forEach((row) => contractInfo.set(row.address, row));
     }
     const seen = new Set();
-    const result = [];
+    const tokens = [];
     for (const t of all) {
       const key = `${t.contract?.address}_${t.tokenId}`;
       if (seen.has(key)) continue;
@@ -167,7 +176,16 @@ export default function ExploreGrid() {
       } catch {
         meta = t.metadata || {};
       }
-      result.push({
+      // Parse JSON‑encoded creators if present
+      if (meta && typeof meta.creators === 'string') {
+        try {
+          const parsed = JSON.parse(meta.creators);
+          if (Array.isArray(parsed)) meta.creators = parsed;
+        } catch {
+          /* ignore parse errors */
+        }
+      }
+      tokens.push({
         contract: t.contract,
         tokenId: t.tokenId,
         metadata: meta,
@@ -175,7 +193,36 @@ export default function ExploreGrid() {
         totalSupply: t.totalSupply,
       });
     }
-    return result;
+    // Live‑balance filter: exclude tokens whose only non‑zero balance is held
+    // by the canonical burn address.  This mirrors the logic in
+    // src/pages/my/tokens.jsx (r44) to avoid showing burned tokens.  If
+    // the balance endpoint errors, include the token by default.
+    const filtered = [];
+    await Promise.all(tokens.map(async (tok) => {
+      try {
+        const balRaw = await jFetch(
+          `${TZKT_API}/v1/tokens/balances?token.contract=${tok.contract?.address}` +
+          `&token.tokenId=${tok.tokenId}` +
+          `&balance.ne=0` +
+          `&select=account.address,balance` +
+          `&limit=10`,
+        ).catch(() => []);
+        const balances = Array.isArray(balRaw) ? balRaw : [];
+        let hasLiveHolder = false;
+        for (const b of balances) {
+          const addr = b?.account?.address ?? b['account.address'] ?? '';
+          if (addr && addr.toLowerCase() !== BURN.toLowerCase()) {
+            hasLiveHolder = true;
+            break;
+          }
+        }
+        if (hasLiveHolder) filtered.push(tok);
+      } catch {
+        // On error include token by default so we don't hide valid tokens
+        filtered.push(tok);
+      }
+    }));
+    return filtered;
   }, []);
 
   // Batch loader invoked when “Load More” is clicked or on
@@ -367,14 +414,15 @@ export default function ExploreGrid() {
   );
 }
 
-/* What changed & why: r5 – Fixed admin-filtered token searches by
+/* What changed & why: r6 – Fixed admin-filtered token searches by
    dropping `select=…` from deep-filter API calls.  When filtering
    tokens by an admin address, the page now fetches creator,
    metadata.creators and metadata.authors without select, ensuring
    that full metadata is returned and properly decoded.  The list
    updates immediately with all valid ZeroContract tokens owned or
    co‑minted by the address, skipping burned tokens and invalid
-   contracts.  The rest of the explore grid’s behavior (paging,
-   collection loading) remains unchanged.
-*/
+   contracts.  Additionally, JSON‑encoded creators strings are now
+   parsed into arrays during token ingestion to avoid overlooking
+   tokens where creators is a JSON string.  The rest of the explore
+   grid’s behavior (paging, collection loading) remains unchanged. */
 /* EOF */

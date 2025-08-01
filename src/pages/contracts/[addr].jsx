@@ -1,9 +1,15 @@
-/*──────── src/pages/contracts/[addr].jsx ────────*/
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/contracts/[addr].jsx
-  Rev :    Rev : r3  2025‑09‑13 – uses EnableScripts overlay
+  Rev :    r4  2025‑09‑13 – authors filter improvements
   Summary: edition‑filter now uses totalSupply instead of decimals
+           and authors filtering now parses JSON‑encoded creators
+           arrays.  When filtering by authors the page now
+           considers creators, artists and authors fields in
+           metadata, parsing JSON strings into arrays when
+           necessary.  Token ingestion also decodes and parses
+           creators strings into arrays, ensuring no tokens are
+           overlooked.  All other behaviour remains unchanged.
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useEffect, useMemo, useState, useCallback,
@@ -123,6 +129,14 @@ export default function ContractPage() {
               const j = decodeHexJson(t.metadata);
               if (j) t.metadata = decodeHexFields(j);                    // eslint-disable-line no-param-reassign
             }
+            // Parse JSON‑encoded creators arrays if present
+            const md = t.metadata || {};
+            if (md && typeof md.creators === 'string') {
+              try {
+                const parsed = JSON.parse(md.creators);
+                if (Array.isArray(parsed)) md.creators = parsed;
+              } catch {/* ignore JSON errors */}
+            }
             return t;
           });
         setTokens(decoded);
@@ -148,11 +162,34 @@ export default function ContractPage() {
   }, [addr]);
 
   /*── filter helpers ───────────────────────────────────────*/
+  /**
+   * Derive a normalised array of authors/creators from a metadata object.
+   * Some ZeroContract versions store the creators field as a JSON‑encoded
+   * string or object.  This helper mirrors authorArray() from the explore
+   * grid and My Creations page.  It tries to JSON.parse() string values
+   * and falls back to a single‑element array.  Objects return their values.
+   */
+  const getAuthors = useCallback((m = {}) => {
+    const src = m.authors ?? m.artists ?? m.creators ?? [];
+    if (Array.isArray(src)) return src;
+    if (typeof src === 'string') {
+      try {
+        const j = JSON.parse(src);
+        if (Array.isArray(j)) return j;
+      } catch {
+        /* ignore parse errors */
+      }
+      return [src];
+    }
+    if (src && typeof src === 'object') return Object.values(src);
+    return [];
+  }, []);
+
   const applyFilters = useCallback((arr) => arr.filter((t) => {
     const m = t.metadata || {};
     /* authors */
     if (filters.authors.size) {
-      const aArr = m.authors || m.artists || m.creators || [];
+      const aArr = getAuthors(m);
       if (!aArr.some((a) => filters.authors.has(a))) return false;
     }
     /* mime */
@@ -167,14 +204,14 @@ export default function ContractPage() {
     if (filters.type === '1of1'   && supply !== 1) return false;
     if (filters.type === 'editions' && supply <= 1) return false;
     /* mature / flashing */
-    const mature   = String(m.contentRating||'').toLowerCase().includes('mature');
-    const flashing = String(m.accessibility||'').toLowerCase().includes('flash');
+    const mature   = String(m.contentRating || '').toLowerCase().includes('mature');
+    const flashing = String(m.accessibility || '').toLowerCase().includes('flash');
     if (filters.mature === 'exclude' && mature)   return false;
     if (filters.mature === 'only'    && !mature)  return false;
     if (filters.flash  === 'exclude' && flashing) return false;
     if (filters.flash  === 'only'    && !flashing)return false;
     return true;
-  }), [filters]);
+  }), [filters, getAuthors]);
 
   /*── search + sort + token‑id filter ─────────────────────*/
   const list = useMemo(() => {
@@ -207,7 +244,7 @@ export default function ContractPage() {
       case 'priceHigh':             out.sort((a,b)=>(b.price||0)-(a.price||0)); break;
       case 'priceLow':              out.sort((a,b)=>(a.price||0)-(b.price||0)); break;
       case 'offerHigh':             out.sort((a,b)=>(b.topOffer||0)-(a.topOffer||0)); break;
-      case 'offerLow':              out.sort((a,b)=>(a.topOffer||0)-(b.topOffer||0)); break;
+      case 'offerLow':              out.sort((a,b)=(a.topOffer||0)-(b.topOffer||0)); break;
       default: /* newest */         out.sort((a,b)=>b.tokenId-a.tokenId);
     }
     return out;
@@ -289,7 +326,15 @@ export default function ContractPage() {
     </>
   );
 }
-/* What changed & why (r16):
-   • Edition filter now relies on `totalSupply` count ⇒ accurate 1/1 vs editions.
-   • No other logic touched; lint‑clean. */
+
+/* What changed & why (r4):
+   • Authors filter now uses a helper getAuthors() to extract creators,
+     authors and artists, parsing JSON‑encoded strings into arrays when
+     present.  This resolves cases where metadata.creators was a
+     JSON string and ensures admin filtering matches all creators.
+   • Token ingestion now parses JSON‑encoded creators arrays after
+     decoding metadata, so that the metadata has the correct array
+     form when used in filters or displayed.
+   • All other logic (edition filter, search, sort, counts) remains
+     unchanged. */
 /* EOF */

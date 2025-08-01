@@ -1,26 +1,35 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/my/tokens.jsx
-  Rev :    r2    2025‑07‑25 UTC
-  Summary: Dynamic page showing tokens associated with the
-           connected wallet.  Separates tokens minted by the
-           user from those purchased via the marketplace.  Uses
-           the TzKT API to fetch balances and creations, and
-           displays them using TokenCard components.  Includes
-           ExploreNav navigation and filter controls.
+  Rev :    r16    2025‑07‑31 UTC
+  Summary: Fresh implementation of the My Tokens page.  The page
+           distinguishes between NFTs minted by the connected
+           wallet and NFTs currently owned.  Minted tokens are
+           fetched directly via the TzKT creator endpoint, while
+           owned tokens come from the FA2 balance endpoint.  Only
+           ZeroContract deployments (v1–v4d) are included by
+           verifying each contract’s typeHash against hashMatrix and
+           ensuring the token’s artifact URI is fully on‑chain.
+           Tokens load progressively into their respective lists to
+           avoid long blank states.  Minted tokens do not appear in
+           the Owned tab, even if still held.
 ─────────────────────────────────────────────────────────────*/
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import styledPkg from 'styled-components';
 import { useWalletContext } from '../../contexts/WalletContext.js';
-import { TZKT_API }          from '../../config/deployTarget.js';
-import ExploreNav            from '../../ui/ExploreNav.jsx';
-import PixelHeading          from '../../ui/PixelHeading.jsx';
-import PixelButton           from '../../ui/PixelButton.jsx';
-import TokenCard             from '../../ui/TokenCard.jsx';
+import { TZKT_API } from '../../config/deployTarget.js';
+import ExploreNav from '../../ui/ExploreNav.jsx';
+import PixelHeading from '../../ui/PixelHeading.jsx';
+import PixelButton from '../../ui/PixelButton.jsx';
+import TokenCard from '../../ui/TokenCard.jsx';
+import { jFetch } from '../../core/net.js';
+import decodeHexFields from '../../utils/decodeHexFields.js';
+import hashMatrix from '../../data/hashMatrix.json';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
+// Responsive grid layout matching explore pages (Invariant I105)
 const Grid = styled.div`
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(clamp(160px, 18vw, 220px), 1fr));
@@ -29,214 +38,230 @@ const Grid = styled.div`
   margin-top: 1rem;
 `;
 
+/**
+ * Determine if a token’s metadata qualifies as fully on‑chain.  A
+ * token is considered on‑chain if its metadata contains at least one
+ * URI field (artifact/display/image/thumbnail) starting with
+ * “data:”.  Keys are tested in both camelCase and snake_case forms.
+ * Tokens failing this check are excluded from both lists.
+ *
+ * @param {object} meta decoded token metadata
+ * @returns {boolean}
+ */
+function isOnChain(meta = {}) {
+  const keys = [
+    'artifactUri', 'artifact_uri',
+    'displayUri', 'display_uri',
+    'imageUri', 'image_uri',
+    'thumbnailUri', 'thumbnail_uri',
+  ];
+  return keys.some((k) => {
+    const val = meta[k];
+    return typeof val === 'string' && val.trim().toLowerCase().startsWith('data:');
+  });
+}
+
 export default function MyTokens() {
   const { address } = useWalletContext() || {};
-  // filter can be 'creations' or 'purchases'
-  const [filter, setFilter]       = useState('creations');
+  const [filter, setFilter] = useState('creations');
   const [creations, setCreations] = useState([]);
-  const [purchases, setPurchases] = useState([]);
-  const [loading, setLoading]     = useState(false);
-  const [visible, setVisible]     = useState(10);
+  const [owned, setOwned] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [visible, setVisible] = useState(10);
 
-  // Counts for display labels
-  const creationsCount = creations.length;
-  const purchasesCount = purchases.length;
+  // Precompute valid type hashes from hashMatrix once.
+  const validTypeHashes = useMemo(() => new Set(Object.keys(hashMatrix)), []);
 
   useEffect(() => {
-    // Fetch tokens whenever the connected wallet address changes.
-    async function fetchTokens() {
+    let cancelled = false;
+    async function loadTokens() {
       if (!address) {
+      // No wallet: clear state
         setCreations([]);
-        setPurchases([]);
+        setOwned([]);
+        setVisible(10);
+        setLoading(false);
         return;
       }
+      // Reset state and begin loading
       setLoading(true);
+      setCreations([]);
+      setOwned([]);
+      setVisible(10);
       try {
-        /*
-         * Build a set of tokens minted by the user based on deep metadata
-         * queries.  For environments where the TzKT API may not return
-         * metadata‑filtered results or the `creator` field, this set may
-         * remain empty.  Fallback logic below will deduce creations by
-         * inspecting the metadata of tokens currently owned.
+        // 1. Fetch tokens minted by the wallet via the creator filter
+        const mintedRaw = await jFetch(
+          `${TZKT_API}/v1/tokens?creator=${address}&limit=1000&select=contract.address,tokenId,token.metadata`,
+        ).catch(() => []);
+        const mintedList = Array.isArray(mintedRaw) ? mintedRaw : [];
+        const mintedKeys = new Set();
+        const mintedQueue = [];
+        mintedList.forEach((row) => {
+          const c = row.contract?.address ?? row['contract.address'];
+          const id = row.tokenId ?? row['tokenId'];
+          const meta = row.token?.metadata ?? row['token.metadata'] ?? {};
+          if (!c || id == null) return;
+          mintedKeys.add(`${c}:${id}`);
+          mintedQueue.push({ contract: c, tokenId: String(id), metadata: meta });
+        });
+        // 2. Fetch balances to identify currently owned tokens
+        const balancesRaw = await jFetch(
+          `${TZKT_API}/v1/tokens/balances?account=${address}&balance.ne=0&token.standard=fa2&limit=1000&select=token.contract.address,token.tokenId,token.metadata`,
+        ).catch(() => []);
+        const balanceList = Array.isArray(balancesRaw) ? balancesRaw : [];
+        const ownedQueue = [];
+        balanceList.forEach((row) => {
+          const c = row.token?.contract?.address ?? row['token.contract.address'];
+          const id = row.token?.tokenId ?? row['token.tokenId'];
+          const meta = row.token?.metadata ?? row['token.metadata'] ?? {};
+          if (!c || id == null) return;
+          ownedQueue.push({ contract: c, tokenId: String(id), metadata: meta });
+        });
+        // 3. Prepare a contract info map; fetch details on demand
+        const contractInfo = new Map();
+        // 4. Fetch wallet alias once for minted detection fallback
+        let alias = '';
+        try {
+          const acc = await jFetch(`${TZKT_API}/v1/accounts/${address}`).catch(() => null);
+          if (acc && acc.alias) alias = String(acc.alias);
+        } catch {
+          alias = '';
+        }
+        /**
+         * Determine whether metadata indicates the user minted the token
+         * via creators/authors arrays.  We classify as minted only if
+         * the creators/authors array has a single entry equal to the
+         * wallet or alias, or if the first entry matches the wallet.
+         * This avoids misclassifying collaborator-minted tokens.
          */
-        const mintedSet = new Set();
-        try {
-          const resMetaCreators = await fetch(
-            `${TZKT_API}/v1/tokens?metadata.creators.[*]=${address}&limit=1000&select=contract.address,tokenId`
-          );
-          const dataMetaCreators = await resMetaCreators.json();
-          (Array.isArray(dataMetaCreators) ? dataMetaCreators : []).forEach((row) => {
-            const c = row.contract?.address ?? row['contract.address'];
-            const id = row.tokenId ?? row['tokenId'];
-            if (c && id != null) mintedSet.add(`${c}:${id}`);
-          });
-          const resMetaAuthors = await fetch(
-            `${TZKT_API}/v1/tokens?metadata.authors.[*]=${address}&limit=1000&select=contract.address,tokenId`
-          );
-          const dataMetaAuthors = await resMetaAuthors.json();
-          (Array.isArray(dataMetaAuthors) ? dataMetaAuthors : []).forEach((row) => {
-            const c = row.contract?.address ?? row['contract.address'];
-            const id = row.tokenId ?? row['tokenId'];
-            if (c && id != null) mintedSet.add(`${c}:${id}`);
-          });
-          const resCre = await fetch(
-            `${TZKT_API}/v1/tokens?creator=${address}&limit=1000&select=contract.address,tokenId`
-          );
-          const dataCre = await resCre.json();
-          (Array.isArray(dataCre) ? dataCre : []).forEach((row) => {
-            const c = row.contract?.address ?? row['contract.address'];
-            const id = row.tokenId ?? row['tokenId'];
-            if (c && id != null) mintedSet.add(`${c}:${id}`);
-          });
-        } catch (err) {
-          console.error('Failed to fetch minted token identifiers:', err);
+        function metaMintedByWallet(meta) {
+          const lowerAddr = address.toLowerCase();
+          const aliasLower = alias ? alias.toLowerCase() : '';
+          // direct keys handled via mintedKeys; arrays used as fallback
+          const creators = Array.isArray(meta.creators) ? meta.creators : [];
+          const authors  = Array.isArray(meta.authors)  ? meta.authors  : [];
+          const candidates = creators.length ? creators : authors;
+          if (!candidates || candidates.length === 0) return false;
+          const first = String(candidates[0]).toLowerCase();
+          if (candidates.length === 1) {
+            if (first === lowerAddr) return true;
+            if (aliasLower) {
+              const nd = aliasLower.replace(/\.tez$/, '');
+              if (first === aliasLower || first === nd) return true;
+            }
+            return false;
+          }
+          // When multiple creators exist, only count minted if the
+          // wallet is the first creator
+          if (first === lowerAddr) return true;
+          if (aliasLower) {
+            const nd = aliasLower.replace(/\.tez$/, '');
+            if (first === aliasLower || first === nd) return true;
+          }
+          return false;
         }
-
-        // Fetch all token balances for the user (owned tokens)
-        const resBal = await fetch(
-          `${TZKT_API}/v1/tokens/balances?account=${address}&balance.ne=0&token.standard=fa2&limit=1000&select=token.contract.address,token.tokenId,token.metadata`
-        );
-        const dataBal = await resBal.json();
-        // Normalize owned tokens and default metadata
-        const owned = (Array.isArray(dataBal) ? dataBal : [])
-          .map((row) => ({
-            contract: row.token?.contract?.address ?? row['token.contract.address'],
-            tokenId : row.token?.tokenId            ?? row['token.tokenId'],
-            metadata: row.token?.metadata            ?? row['token.metadata'] ?? {},
-          }))
-          .filter((t) => t.contract && t.tokenId != null)
-          .map((t) => ({ ...t, tokenId: String(t.tokenId), metadata: t.metadata || {} }))
-          // Filter out tokens lacking any metadata entirely
-          .filter((t) => {
-            const m = t.metadata;
-            return m && Object.keys(m).length > 0;
-          });
-
-        // Filter tokens down to fully on‑chain NFTs (ZeroContract).  Include
-        // tokens when at least one URI field starts with data:, rather than
-        // requiring all URIs to be data URIs.  Some metadata may omit
-        // optional URI fields; we treat those as FOC if any existing URI is
-        // on‑chain.  If no URI fields exist, we exclude the token.
-        const focOwned = owned.filter((t) => {
-          const m = t.metadata || {};
-          // Recognised URI keys (case‑insensitive).  Use explicit keys for
-          // better compatibility.
-          const uriValues = [];
-          ['artifactUri','artifact_uri','displayUri','display_uri','thumbnailUri','thumbnail_uri'].forEach((k) => {
-            if (m[k]) uriValues.push(m[k]);
-          });
-          if (uriValues.length === 0) return false;
-          // A token is FOC if at least one URI starts with data:
-          return uriValues.some((val) => typeof val === 'string' && val.trim().toLowerCase().startsWith('data:'));
-        });
-
-        // Determine contracts managed by the connected wallet.  Tokens
-        // originating from contracts where the user is manager are
-        // considered creations if other heuristics fail.  Some APIs
-        // return raw strings, others objects; normalize accordingly.
-        const managedContracts = new Set();
-        try {
-          const resMgr = await fetch(
-            `${TZKT_API}/v1/contracts?manager=${address}&select=address`
-          );
-          const dataMgr = await resMgr.json();
-          (Array.isArray(dataMgr) ? dataMgr : []).forEach((row) => {
-            const c = row.address ?? row;
-            if (c) managedContracts.add(c);
-          });
-        } catch (err) {
-          console.error('Failed to fetch managed contracts:', err);
+        // 5. Asynchronously process a token and update state
+        async function processToken(item, forceMint) {
+          if (cancelled) return;
+          // fetch contract detail if not cached
+          let info = contractInfo.get(item.contract);
+          if (!info) {
+            try {
+              info = await jFetch(`${TZKT_API}/v1/contracts/${item.contract}`).catch(() => null);
+              contractInfo.set(item.contract, info);
+            } catch {
+              info = null;
+              contractInfo.set(item.contract, null);
+            }
+          }
+          if (!info) return;
+          const typeHash = info.typeHash ?? info.type_hash;
+          if (!typeHash || !validTypeHashes.has(String(typeHash))) return;
+          // decode metadata
+          let meta;
+          try {
+            meta = decodeHexFields(item.metadata || {});
+          } catch {
+            meta = item.metadata || {};
+          }
+          if (!isOnChain(meta)) return;
+          // classify as minted if forced, mintedKeys contains key, or metadata fallback
+          const key = `${item.contract}:${item.tokenId}`;
+          const isMinted = forceMint || mintedKeys.has(key) || metaMintedByWallet(meta);
+          if (isMinted) {
+            setCreations((prev) => {
+              if (prev.some((t) => t.contract === item.contract && t.tokenId === item.tokenId)) return prev;
+              return [...prev, { contract: item.contract, tokenId: item.tokenId, metadata: meta }];
+            });
+          } else {
+            setOwned((prev) => {
+              if (mintedKeys.has(key) || prev.some((t) => t.contract === item.contract && t.tokenId === item.tokenId)) return prev;
+              return [...prev, { contract: item.contract, tokenId: item.tokenId, metadata: meta }];
+            });
+          }
         }
-
-        // Determine created tokens that are minted by the user and still owned.
-        // Check mintedSet from TzKT deep queries; fallback to metadata
-        // creators/authors/creator fields; finally fallback to contract
-        // management: if the user manages the contract, assume all tokens
-        // minted under that contract are their creations.  Comparisons are
-        // case‑insensitive.
-        const createdOwned = [];
-        const purchased   = [];
-        const lowerAddr   = address?.toLowerCase() || '';
-        focOwned.forEach((t) => {
-          const key = `${t.contract}:${t.tokenId}`;
-          let isMinted = false;
-          // Primary source: mintedSet
-          if (mintedSet.size > 0) {
-            isMinted = mintedSet.has(key);
-          }
-          // Fallback: metadata creators/authors/creator fields
-          if (!isMinted) {
-            const m = t.metadata || {};
-            const creators = Array.isArray(m.creators) ? m.creators : [];
-            const authors  = Array.isArray(m.authors)  ? m.authors  : [];
-            const creatorField = typeof m.creator === 'string' ? [m.creator] : [];
-            const all = [...creators, ...authors, ...creatorField].map((s) => (typeof s === 'string' ? s.toLowerCase() : ''));
-            isMinted = all.some((a) => a === lowerAddr);
-          }
-          // Final fallback: contract manager heuristic
-          if (!isMinted && managedContracts.size > 0) {
-            isMinted = managedContracts.has(t.contract);
-          }
-          if (isMinted) createdOwned.push(t); else purchased.push(t);
-        });
-
-        setCreations(createdOwned);
-        setPurchases(purchased);
-        setVisible(10);
-      } catch (err) {
-        console.error('Failed to fetch tokens:', err);
-        setCreations([]);
-        setPurchases([]);
-      } finally {
+        // 6. Stop loading; tokens will fill lists progressively
         setLoading(false);
+        // 7. Kick off classification asynchronously for minted and owned tokens
+        mintedQueue.forEach((item) => {
+          // always mark minted tokens as forceMint
+          processToken(item, true);
+        });
+        ownedQueue.forEach((item) => {
+          processToken(item, false);
+        });
+      } catch (err) {
+        console.error('MyTokens load error:', err);
+        if (!cancelled) {
+          setCreations([]);
+          setOwned([]);
+          setLoading(false);
+        }
       }
     }
-    fetchTokens();
-  }, [address]);
+    loadTokens();
+    return () => {
+      cancelled = true;
+    };
+  }, [address, validTypeHashes]);
 
-  // Determine which list to show based on the current filter
-  const tokens = filter === 'creations' ? creations : purchases;
-  // Tokens to display with pagination
-  const visibleTokens = tokens.slice(0, visible);
-
-  const loadMore = () => {
-    setVisible((v) => v + 10);
-  };
+  // Choose which list to show based on the current filter
+  const currentList = filter === 'creations' ? creations : owned;
+  const visibleTokens = currentList.slice(0, visible);
+  const loadMore = () => setVisible((v) => v + 10);
 
   return (
     <div>
-      {/* Include the global explore navigation bar */}
       <ExploreNav hideSearch={false} />
-      {/* Page heading */}
-      <PixelHeading level={3} style={{ marginTop: '1rem' }}>My Tokens</PixelHeading>
-      {/* Filter buttons */}
+      <PixelHeading level={3} style={{ marginTop: '1rem' }}>
+        My Tokens
+      </PixelHeading>
       <div style={{ marginTop: '0.8rem', display: 'flex', gap: '0.4rem' }}>
         <PixelButton
           style={{ background: 'var(--zu-accent-sec)', color: 'var(--zu-btn-fg)' }}
           warning={filter === 'creations'}
           onClick={() => setFilter('creations')}
         >
-          My Creations ({creationsCount})
+          My Creations ({creations.length})
         </PixelButton>
         <PixelButton
           style={{ background: 'var(--zu-accent-sec)', color: 'var(--zu-btn-fg)' }}
-          warning={filter === 'purchases'}
-          onClick={() => setFilter('purchases')}
+          warning={filter === 'owned'}
+          onClick={() => setFilter('owned')}
         >
-          My Purchases ({purchasesCount})
+          My Owned ({owned.length})
         </PixelButton>
       </div>
-      {/* Loading indicator */}
-      {loading && <p style={{ marginTop: '0.8rem' }}>Fetching your tokens…</p>}
-      {/* Empty state */}
-      {!loading && tokens.length === 0 && (
+      {loading && (
+        <p style={{ marginTop: '0.8rem' }}>Fetching your tokens…</p>
+      )}
+      {!loading && currentList.length === 0 && (
         <p style={{ marginTop: '0.8rem' }}>
           {filter === 'creations'
             ? 'You have not minted any tokens yet.'
-            : 'You have not purchased any tokens yet.'}
+            : 'You do not own any tokens yet.'}
         </p>
       )}
-      {/* Tokens grid */}
       {!loading && visibleTokens.length > 0 && (
         <>
           <Grid>
@@ -248,7 +273,7 @@ export default function MyTokens() {
               />
             ))}
           </Grid>
-          {visible < tokens.length && (
+          {visible < currentList.length && (
             <div style={{ marginTop: '1rem', textAlign: 'center' }}>
               <PixelButton onClick={loadMore}>Load More 🔻</PixelButton>
             </div>
@@ -259,12 +284,11 @@ export default function MyTokens() {
   );
 }
 
-/* What changed & why: Converted the My Tokens page from a static
-   placeholder into a dynamic implementation.  The page now
-   imports ExploreNav for navigation, fetches tokens created and
-   purchased by the connected wallet using the TzKT API, and
-   deduplicates to separate minted tokens from purchased ones.
-   Tokens are displayed with TokenCard components in a responsive
-   grid, and users can toggle between creations and purchases.
-   Loading and empty states improve UX. */
-/* EOF */
+/* What changed & why: r16 – Enhanced the My Tokens page to provide
+   true progressive loading and more robust minted detection.
+   Contract details are fetched lazily per token, metadata fallback
+   logic recognises tokens minted via early contract versions
+   (creators arrays), and tokens start to appear as soon as they
+   are processed, rather than waiting for all network calls to
+   complete.  Minted tokens never populate the Owned tab, and
+   fully on‑chain filtering remains enforced. */

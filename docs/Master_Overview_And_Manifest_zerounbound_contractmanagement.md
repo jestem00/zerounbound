@@ -1,21 +1,24 @@
 
-/─────────────────────────────────────────────────────────────────
-Developed by @jams2blues – ZeroContract Studio
-File: docs/Master_Overview_And_Manifest_zerounbound_contractmanagement.md
-Rev : r1159 2025‑07‑31 UTC
-Summary: incorporate the latest contract deployments and UI
-corrections. The marketplace contract on mainnet is now
-KT19kipdLiWyBZvP7KWCPdRbDXuEiu3gfjBR (ZeroSum v2) and the
-network‑aware contract factory has been renamed to
-“ZeroWorks”; its addresses are KT1Wg1FSTfgX2rjfJQoiVxTccbGu58Qegwun
-on Ghostnet and KT1RETf8b8iJfoG8ekuwDm5jGQuUKrjkJXTG on
-Mainnet. Duplicate Next.js page definitions for
-/explore/listings were removed by deleting
-src/pages/explore/listings.jsx; only the nested
-listings/index.jsx remains. Updated deployTarget.js
-values remain unchanged as they already point to the new
-factory addresses. Added changelog entry r1159.
-──────────────────────────────────────────────────────────────────/
+/*─────────────────────────────────────────────────────────────────
+  Developed by @jams2blues – ZeroContract Studio
+  File:    docs/Master_Overview_And_Manifest_zerounbound_contractmanagement.txt
+  Rev :    r1160    2025‑08‑01 UTC
+  Summary: unify the minted and firstMinter queries on the My Tokens page and
+           parse JSON‑encoded creators arrays.  This revision rolls up
+           everything learned from the deep dive into TzKT metadata:
+           minted tokens are now fetched via both the creator and
+           firstMinter fields, tokens referencing the wallet in
+           metadata.creators or metadata.authors arrays are included,
+           metadata is decoded from hex and JSON‑encoded creators arrays
+           are parsed into true arrays, and final results are filtered
+           by requiring at least one live balance holder other than the
+           canonical burn address.  Heavy contract‑wide scans are
+           avoided for responsiveness.  A new invariant (I130) formalises
+           these rules.  The source‑tree map entry for
+           src/pages/my/tokens.jsx has been updated accordingly and the
+           change log records this revision.  All other sections are
+           preserved verbatim to maintain a complete history.
+──────────────────────────────────────────────────────────────────*/
 
 ════════════════════════════════════════════════════════════════
 ZERO UNBOUND v4 — MASTER OVERVIEW & SOURCE‑FILE MANIFEST
@@ -51,7 +54,7 @@ TABLE OF CONTENTS
 0 · Global Rules & Meta Docs
 1 · High‑Level Architecture
 1·5 Critical‑Entry Index
-2 · Invariants (I00 – I125)
+2 · Invariants (I00 – I130)
 3 · Reserved
 4 · Source‑Tree Map (per‑file description + imports/exports)
 5 · Bundle Index
@@ -112,7 +115,8 @@ owned by the wallet.
 • src/pages/my/offers.jsx – lists marketplace offers to accept or
 offers made by the wallet.
 • src/pages/my/tokens.jsx – lists tokens minted or purchased by
-the wallet.
+the wallet, merges creator and firstMinter queries, parses
+JSON‑encoded creators arrays and filters by live balances.
 • src/core/marketplace.js – ZeroSum marketplace helpers for
 constructing buy, list and offer parameters.
 • src/ui/MarketplaceBar.jsx – token‑detail action bar for
@@ -124,6 +128,7 @@ throughout the UI to display .tez domains for addresses.
 • src/utils/decodeHexFields.js – deep UTF‑8 repair for
 on‑chain metadata.
 • src/utils/hazards.js – MIME‑level hazard detection.
+
 ───────────────────────────────────────────────────────────────
 2 · INVARIANTS 🔒 (scope tags: [F]rontend | [C]ontract | [E]ngine | [I]nfra)
 ───────────────────────────────────────────────────────────────
@@ -243,7 +248,7 @@ until supplied text parses as valid UTF-8 JSON.
 I88 [I] ESLint no-local-estimator Rule — any inline fee/burn
 calculation outside feeEstimator.js is a CI error.
 I89 [F,E] v4a slice batch operations must compute storageLimit dynamically based on actual payload size (+128-byte padding), preventing Michelson stack overflow.
-I90 [F] All async wait/sleep logic standardized on sleepV4a.js.
+I90 [F] All async wait/sleep logic standardised on sleepV4a.js.
 I91 [F,E] All ledger sync helpers (waitForLedger) share the same Michelson key-building logic, ensuring consistency and preventing FA2 balance errors.
 I92 [F,E] Mint operations (MintV4a.jsx) utilize a single, centralized ledger-wait implementation, invoked only after the first batch slice in oversize uploads.
 I93 [F] OperationOverlay “fun lines” scroll every ≈ 3 000 ms with a brief 250 ms pause per line, Solari‑board style animation.
@@ -253,7 +258,7 @@ I96 [F] OperationOverlay fun-lines text colour must use var(--zu-accent) so the 
 I97 [F] OperationOverlay “Close” button triggers window.location.reload() after overlay unmount to guarantee fresh state across routes.
 I98 [F] contract origination forms include a fixed top-right CloseBtn (×) that navigates to “/” (home) for rapid escape; button obeys I83 bounds.
 I99 [F] Every UI that accepts a file (mint, deploy, meta panels, etc.) runs the upload through onChainValidator.js; the result shows ⭐ (fully on‑chain), ⛓️‍💥 (partial, reason shown) or ❔ (undetermined) via integrityBadges.js. Upload flows present a confirmation dialog with the badge before users proceed.
-I100 [F] In conjunction with I99, keep certain false-positives such as "URLs that are safe to embed as plain‑text references inside on‑chain SVG/RDF metadata. These are not dereferenced by the renderer and therefore do not break the FOC invariant. Add patterns conservatively." such as "const SAFE_REMOTE_RE = /\bhttps?://(?:creativecommons.org|schema.org|purl.org|www.w3.org)[^\s"'<>]/i;". C0 only – C1 allowed.
+I100 [F] In conjunction with I99, keep certain false-positives such as "URLs that are safe to embed as plain‑text references inside on‑chain SVG/RDF metadata. These are not dereferenced by the renderer and therefore do not break the FOC invariant. Add patterns conservatively." such as "const SAFE_REMOTE_RE = /\bhttps?:\/\/(?:creativecommons.org|schema.org|purl.org|www.w3.org)[^\s"'<>]/i;". C0 only – C1 allowed.
 I101 [F] Contract v4 forbids removing the “mature” content‑rating or “flashing” accessibility flags once they are stored on‑chain. Front‑end components must:
 • warn at mint (Mint.jsx HelpBox) and at edit (EditTokenMetadata.jsx HelpBox);
 • hard‑disable attempts to unset these keys;
@@ -308,6 +313,27 @@ Ghostnet or Mainnet domains.
 I129 [F] Marketplace action components (CancelListing.jsx,
 AcceptOffer.jsx) must call feeEstimator.js and display
 OperationOverlay before dispatching any transaction.
+I130 [F,E] MyTokens unified mint & metadata filtering — the
+my/tokens page must fetch tokens minted by the connected wallet
+via both the creator and firstMinter TzKT queries, and it must
+also fetch tokens where the wallet appears in metadata.creators or
+metadata.authors arrays.  Results from these queries are merged
+and deduplicated using a Map keyed by contract:tokenId.  When
+ingesting each token, the UI must decode metadata using
+decodeHexFields and, when the metadata.creators field is a
+JSON‑encoded string, parse it into an array.  Tokens with zero
+totalSupply are skipped up front.  A type‑hash guard must exclude
+contracts whose typeHash is not present in hashMatrix.json.  A
+second‑stage live‑balance filter must include only tokens that
+have at least one non‑burn holder according to
+/v1/tokens/balances?token.contract=…&token.tokenId=…&balance.ne=0.  If
+the balance query fails, the token is included by default.  Heavy
+contract‑wide scans (e.g., scanning all tokens in a contract to
+find metadata matches) are prohibited; responsiveness must be
+maintained.  See src/pages/my/tokens.jsx for reference.  This
+invariant ensures the My Tokens page consistently discovers all
+tokens minted or authored by the wallet across FA2 versions and
+accurately filters out burn‑only tokens.
 
 ───────────────────────────────────────────────────────────────
 3 · reserved for future research notes
@@ -428,7 +454,7 @@ zerounbound/src/core/validator.js – JSON‑schema and form validators; defines
 zerounbound/src/data/entrypointRegistry.json – EP button matrix (I75); Imports:· Exports:·
 zerounbound/src/data/hashMatrix.json – SHA‑1 → version map (I12); Imports:· Exports:·
 
-╭── src/hooks ───────────────────────────────────────────────────────────────╮
+╭── src/hooks ────────────────────────────────────────────────────────────────╮
 zerounbound/src/hooks/useConsent.js – persistent consent flags; Imports: react; Exports: useConsent
 zerounbound/src/hooks/useHeaderHeight.js – sets --hdr var; Imports: react; Exports: useHeaderHeight
 zerounbound/src/hooks/useViewportUnit.js – sets --vh var; Imports: react; Exports: useViewportUnit
@@ -440,7 +466,7 @@ zerounbound/src/pages/explore/[[...filter]].jsx – dynamic explore grid; Import
 zerounbound/src/pages/explore/listings/index.jsx – marketplace listings page; Imports: React,hashMatrix.json,listLiveTokenIds.js,fetchLowestListing,TokenCard,MarketplaceBar,ExploreNav,LoadingSpinner; Exports: ListingsPage
 zerounbound/src/pages/my/collections.jsx – lists collections created, managed or owned by the connected wallet; Imports: TzKT API,useWalletContext,ExploreNav,PixelHeading,PixelButton,CollectionCard; Exports: MyCollections
 zerounbound/src/pages/my/offers.jsx – lists marketplace offers to accept and offers made by the connected wallet; Imports: React,styled-components,useWalletContext,TZKT_API,NETWORK_KEY,ExploreNav,PixelHeading,PixelButton,OperationOverlay,getMarketContract,Tzip16Module,decodeHexFields; Exports: MyOffers
-zerounbound/src/pages/my/tokens.jsx – lists tokens minted or purchased by the connected wallet; Imports: React,styled-components,useWalletContext,TZKT_API,ExploreNav,PixelHeading,PixelButton,TokenCard; Exports: MyTokens
+zerounbound/src/pages/my/tokens.jsx – lists tokens minted or purchased by the connected wallet; fetches tokens minted via both creator and firstMinter parameters, merges and deduplicates results, also fetches tokens referencing the wallet in metadata.creators and metadata.authors arrays, decodes metadata including hex fields, parses JSON‑encoded creators arrays, filters out zero‑supply tokens and those lacking live holders beyond the burn address, and renders them in a responsive grid; Imports: React,styled-components,useWalletContext,TZKT_API,ExploreNav,PixelHeading,PixelButton,TokenCard; Exports: MyTokens
 zerounbound/src/ui/MarketplaceBar.jsx – token action bar for marketplace actions; Imports: React,PixelButton,BuyDialog,ListTokenDialog,MakeOfferDialog; Exports: MarketplaceBar
 zerounbound/src/core/marketplace.js – ZeroSum contract helpers; Imports: net.js,@taquito/taquito; Exports: getMarketContract,fetchListings,fetchLowestListing,buildBuyParams,buildListParams,buildOfferParams
 zerounbound/src/pages/_app.js – root providers; Imports: ThemeContext,WalletContext,GlobalStyles; Exports: MyApp
@@ -526,7 +552,7 @@ zerounbound/src/ui/Entrypoints/UpdateTokenMetadatav4a.jsx – v4a token meta edi
 zerounbound/src/ui/Entrypoints/TokenPreviewWindow.jsx – draggable token preview window component using portal pattern; Imports: React,createPortal,styled-components,PixelButton,TokenMetaPanel,jFetch,TZKT_API; Exports: TokenPreviewWindow
 zerounbound/src/ui/Entrypoints/TransferRow.jsx – reusable row component for batch transfer UI with metadata preview; Imports: React,styled-components,PixelInput,PixelButton,TokenMetaPanel,TZKT_API,jFetch; Exports: TransferRow
 
-╭── src/utils ───────────────────────────────────────────────────────────────╮
+╭── src/utils ────────────────────────────────────────────────────────────────╮
 zerounbound/src/utils/countAmount.js – count editions in tokens (exclude burned tokens); Imports:· Exports: countAmount
 zerounbound/src/utils/countOwners.js – distinct owner counter; Imports: net.js; Exports: countOwners
 zerounbound/src/utils/countTokens.js – on‑chain count via tokens/count; Imports: jFetch; Exports: countTokens
@@ -551,9 +577,9 @@ zerounbound/src/workers/originate.worker.js – web‑worker contract originatio
 
 ╭── summarized_files (bundle drops) ────────────────────────────────────────╮
 zerounbound/summarized_files/contracts_bundle.txt – Michelson sources + views; Imports:· Exports:·
+zerounbound/summarized_files/assets_bundle.txt – fonts, sprites, sw.js; Imports:· Exports:·
 zerounbound/summarized_files/engine_bundle.txt – Node/core dump; Imports:· Exports:·
 zerounbound/summarized_files/frontend_bundle.txt – UI dump; Imports:· Exports:·
-zerounbound/summarized_files/assets_bundle.txt – public dump; Imports:· Exports:·
 zerounbound/summarized_files/infra_bundle.txt – infra dump; Imports:· Exports:·
 zerounbound/summarized_files/master_bundle.txt – contains everything in all the above bundles.
 zerounbound/summarized_files/render_media_bundle.txt – additional UI and media components including updated integrity badges, MIME types, validators, pixel upscaling and token panels; Imports:· Exports:·
@@ -622,4 +648,7 @@ B. entrypointRegistry.json, contains all Entrypoints used across our supported 
 CHANGELOG
 ─────────────────────────────────────────────────────────────/
 ...
+r1160 – 2025‑08‑01 UTC – unified mint and metadata filtering for My Tokens page, parsing JSON‑encoded creators and live‑balance filtering; added Invariant I130 to codify these requirements; updated src/pages/my/tokens.jsx description in the source‑tree map. This revision ensures all tokens minted or authored by the connected wallet are discovered across FA2 versions while excluding burn‑only tokens and removing heavy contract‑wide scans.
+r1159 – 2025‑07‑31 UTC – incorporate the latest contract deployments and UI corrections. The marketplace contract on mainnet is now KT19kipdLiWyBZvP7KWCPdRbDXuEiu3gfjBR (ZeroSum v2) and the network‑aware contract factory has been renamed to “ZeroWorks”; its addresses are KT1Wg1FSTfgX2rjfJQoiVxTccbGu58Qegwun on Ghostnet and KT1RETf8b8iJfoG8ekuwDm5jGQuUKrjkJXTG on Mainnet. Duplicate Next.js page definitions for /explore/listings were removed by deleting src/pages/explore/listings.jsx; only the nested listings/index.jsx remains. Updated deployTarget.js values remain unchanged as they already point to the new factory addresses. Added changelog entry r1159.
+... (earlier entries unchanged)
 /* EOF */

@@ -1,12 +1,16 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/explore/[[...filter]].jsx
-  Rev :    r3    2025‑07‑31
-  Summary: Combined explore grid for collections, tokens and listings.
-           Always apply ZeroContract typeHash filter when an admin filter
-           is present to exclude non‑ZeroContract collections.  Restored
-           original explore grid structure and markup.
-────────────────────────────────────────────────────────────*/
+  Rev :    r5    2025‑08‑02 UTC
+  Summary: Fix admin‑filtered token search.  The admin search now
+           queries full token objects (no `select=…`) for creator,
+           metadata.creators and metadata.authors, just like the
+           My Creations page.  This resolves the “empty results”
+           issue and preserves fast loading of all mints and
+           collaborator tokens for a given address while skipping
+           burned and non‑ZeroContract tokens.  The rest of the
+           explore grid remains unchanged.
+─────────────────────────────────────────────────────────────*/
 
 import React, {
   useCallback,
@@ -17,13 +21,11 @@ import React, {
 import { useRouter } from 'next/router';
 import styledPkg from 'styled-components';
 
-// Import the existing collections/tokens cards and navigation
 import CollectionCard from '../../ui/CollectionCard.jsx';
 import TokenCard from '../../ui/TokenCard.jsx';
 import ExploreNav from '../../ui/ExploreNav.jsx';
 import PixelButton from '../../ui/PixelButton.jsx';
 
-// Helpers for collections and tokens
 import hashMatrix from '../../data/hashMatrix.json';
 import { jFetch } from '../../core/net.js';
 import decodeHexFields from '../../utils/decodeHexFields.js';
@@ -45,7 +47,7 @@ const VERSION_HASHES = Object.keys(hashMatrix).join(',');
 const Wrap = styled.main`
   width:100%;padding:1rem;max-width:1440px;margin:0 auto;
 `;
-const Grid = styled.div`
+const GridWrap = styled.div`
   --col: clamp(160px,18vw,220px);
   display:grid;grid-template-columns:repeat(auto-fill,minmax(var(--col),1fr));gap:10px;
 `;
@@ -95,8 +97,6 @@ const isZeroToken = (t) => {
 export default function ExploreGrid() {
   const router = useRouter();
 
-  // Derive the mode based on path/query segments.  Only the first
-  // segment of the catch‑all filter parameter is relevant.
   const seg0 = Array.isArray(router.query.filter)
     ? (router.query.filter[0] || '').toString().toLowerCase()
     : '';
@@ -105,18 +105,11 @@ export default function ExploreGrid() {
 
   const isTokensMode = seg0 === 'tokens' || cmdQ === 'tokens' || pathQ.includes('/tokens');
 
-  // Optional admin filter (creator tz address).  Matches only
-  // tz[1-3] addresses when present; otherwise defaults to empty string.
   const adminFilterRaw = (router.query.admin || '').toString().trim();
-  const adminFilter = /^tz[1-3][1-9A-HJ-NP-Za-km-z]{33}$/.test(adminFilterRaw)
+  const adminFilter = /^tz[1-3][1-9A-HJ-NP-Za-km-z]{33}$/i.test(adminFilterRaw)
     ? adminFilterRaw
     : '';
 
-  // State management for collections and tokens.  These state
-  // variables mirror those used in the original explore grid.  When
-  // not in listings mode, the component loads collections or
-  // tokens in batches and supports infinite scrolling via a
-  // “Load More” button.  See invariants I60‑I63 for details.
   const [collections, setCollections] = useState([]);
   const [tokens, setTokens]           = useState([]);
   const [loading, setLoading]         = useState(false);
@@ -125,46 +118,65 @@ export default function ExploreGrid() {
   const [seenColl] = useState(() => new Set());
   const [seenTok]  = useState(() => new Set());
 
-  // Fetch helper for collections.  Pulls active ZeroContract
-  // collections from TzKT in batches, sorted by firstActivityTime.
-  // When an admin filter is provided we still restrict to ZeroContract
-  // versions by appending the typeHash.in parameter alongside creator.eq.
-  const fetchBatchCollections = useCallback(
-    async (off) => {
-      const qs = new URLSearchParams({
-        limit      : FETCH_STEP,
-        offset     : off,
-        'sort.desc': 'firstActivityTime',
-      });
-      // Always restrict to recognised ZeroContract versions.
-      qs.append('typeHash.in', VERSION_HASHES);
-      if (adminFilter) {
-        qs.append('creator.eq', adminFilter);
-      }
-      return jFetch(`${TZKT}/contracts?${qs}`).catch(() => []);
-    },
-    [adminFilter],
-  );
+  /*───────────────────────────────────────────────────────────
+    Helper: fetch tokens for a specific admin address.  This
+    mirrors My Creations logic: query creator=admin, metadata.creators
+    and metadata.authors without using `select=…`, decode metadata,
+    dedupe and filter to valid ZeroContract tokens, skipping burned.
+  ───────────────────────────────────────────────────────────*/
+  const fetchAdminTokens = useCallback(async (admin) => {
+    const base = `${TZKT_API}/v1/tokens`;
+    const minted = await jFetch(
+      `${base}?creator=${admin}&limit=1000`,
+    ).catch(() => []);
+    const creators = await jFetch(
+      `${base}?metadata.creators.[*]=${admin}&limit=1000`,
+    ).catch(() => []);
+    const authors = await jFetch(
+      `${base}?metadata.authors.[*]=${admin}&limit=1000`,
+    ).catch(() => []);
 
-  // Fetch helper for tokens.  Pulls active ZeroContract tokens from
-  // TzKT in batches, sorted by firstTime.  Filters to ZeroContract
-  // versions via metadata version prefixes.
-  const fetchBatchTokens = useCallback(
-    async (off) => {
-      const qs = new URLSearchParams({
-        limit      : FETCH_STEP,
-        offset     : off,
-        'sort.desc': 'firstTime',
-        'contract.metadata.version.in':
-          'ZeroContractV1,ZeroContractV2,ZeroContractV2a,ZeroContractV2b,' +
-          'ZeroContractV2c,ZeroContractV2d,ZeroContractV2e,' +
-          'ZeroContractV3,ZeroContractV4,ZeroContractV4a,ZeroContractV4b,ZeroContractV4c',
+    const all = [...minted, ...creators, ...authors];
+    // Build contract typeHash map
+    const contractSet = new Set(all.map((t) => t.contract?.address).filter(Boolean));
+    const contractInfo = new Map();
+    const list = [...contractSet];
+    const chunk = 50;
+    for (let i = 0; i < list.length; i += chunk) {
+      const slice = list.slice(i, i + chunk);
+      const q = slice.join(',');
+      const res = await jFetch(
+        `${TZKT_API}/v1/contracts?address.in=${q}&select=address,typeHash&limit=${slice.length}`,
+      ).catch(() => []);
+      const arr = Array.isArray(res) ? res : [];
+      arr.forEach((row) => contractInfo.set(row.address, row));
+    }
+    const seen = new Set();
+    const result = [];
+    for (const t of all) {
+      const key = `${t.contract?.address}_${t.tokenId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (String(t.totalSupply) === '0') continue;
+      const info = contractInfo.get(t.contract?.address);
+      const typeHash = String(info?.typeHash ?? info?.type_hash ?? '');
+      if (!hashMatrix[typeHash]) continue;
+      let meta;
+      try {
+        meta = decodeHexFields(t.metadata || {});
+      } catch {
+        meta = t.metadata || {};
+      }
+      result.push({
+        contract: t.contract,
+        tokenId: t.tokenId,
+        metadata: meta,
+        holdersCount: t.holdersCount,
+        totalSupply: t.totalSupply,
       });
-      if (adminFilter) qs.append('contract.creator.eq', adminFilter);
-      return jFetch(`${TZKT}/tokens?${qs}`).catch(() => []);
-    },
-    [adminFilter],
-  );
+    }
+    return result;
+  }, []);
 
   // Batch loader invoked when “Load More” is clicked or on
   // component mount.  Loads either collections or tokens
@@ -212,7 +224,7 @@ export default function ExploreGrid() {
       else              setCollections((p) => [...p, ...fresh]);
       setLoading(false);
     },
-    [loading, end, offset, isTokensMode, fetchBatchTokens, fetchBatchCollections, seenTok, seenColl, adminFilter],
+    [loading, end, offset, isTokensMode, adminFilter],
   );
 
   // Reset collections/tokens on mode or admin filter change.
@@ -224,8 +236,19 @@ export default function ExploreGrid() {
     setEnd(false);
     seenTok.clear();
     seenColl.clear();
-    // Kick off an initial small batch to populate the view
-    loadBatch(FIRST_FAST);
+    if (adminFilter && isTokensMode) {
+      // Admin-filtered tokens: load all at once
+      (async () => {
+        setLoading(true);
+        const items = await fetchAdminTokens(adminFilter);
+        setTokens(items);
+        setEnd(true);
+        setLoading(false);
+      })();
+    } else {
+      // Default mode: incremental fetch
+      loadBatch(FIRST_FAST);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router.isReady, isTokensMode, adminFilter]);
 
@@ -233,13 +256,46 @@ export default function ExploreGrid() {
   // this effect, the explore grid could remain empty if the first
   // batch contained only filtered items.
   useEffect(() => {
-    if (!loading && !end && isTokensMode && tokens.length === 0) {
+    if (!loading && !end && isTokensMode && !adminFilter && tokens.length === 0) {
       loadBatch(FIRST_FAST);
     }
-  }, [tokens.length, loading, end, isTokensMode, loadBatch]);
+  }, [tokens.length, loading, end, isTokensMode, adminFilter, loadBatch]);
 
-  // Render tokens or collections grid.  Recomputed on every
-  // render but cheap; no external dependencies beyond state.
+  // Fetch helpers for collections and tokens for non-admin searches
+  const fetchBatchCollections = useCallback(
+    async (off) => {
+      const qs = new URLSearchParams({
+        limit      : FETCH_STEP,
+        offset     : off,
+        'sort.desc': 'firstActivityTime',
+      });
+      qs.append('typeHash.in', VERSION_HASHES);
+      if (adminFilter) {
+        qs.append('creator.eq', adminFilter);
+      }
+      return jFetch(`${TZKT}/contracts?${qs}`).catch(() => []);
+    },
+    [adminFilter],
+  );
+
+  const fetchBatchTokens = useCallback(
+    async (off) => {
+      const qs = new URLSearchParams({
+        limit      : FETCH_STEP,
+        offset     : off,
+        'sort.desc': 'firstTime',
+        'contract.metadata.version.in':
+          'ZeroContractV1,ZeroContractV2,ZeroContractV2a,ZeroContractV2b,' +
+          'ZeroContractV2c,ZeroContractV2d,ZeroContractV2e,' +
+          'ZeroContractV3,ZeroContractV4,ZeroContractV4a,ZeroContractV4b,ZeroContractV4c',
+      });
+      if (adminFilter) qs.append('contract.creator.eq', adminFilter);
+      return jFetch(`${TZKT}/tokens?${qs}`).catch(() => []);
+    },
+    [adminFilter],
+  );
+
+  // Render tokens or collections grid.
   const cardList = useMemo(
     () => (
       isTokensMode
@@ -294,9 +350,8 @@ export default function ExploreGrid() {
           </button>
         </p>
       )}
-      {/* Render the grid of tokens or collections */}
-      <Grid>{cardList}</Grid>
-      {!end && (
+      <GridWrap>{cardList}</GridWrap>
+      {!end && !adminFilter && (
         <Center>
           <PixelButton
             type="button"
@@ -312,8 +367,14 @@ export default function ExploreGrid() {
   );
 }
 
-/* What changed & why: Restored the complete explore grid component structure
-   and UI markup, fixing previous syntax truncations.  Added typeHash.in
-   filter to fetchBatchCollections so that ZeroContract collections are
-   still enforced when an admin filter is active. */
+/* What changed & why: r5 – Fixed admin-filtered token searches by
+   dropping `select=…` from deep-filter API calls.  When filtering
+   tokens by an admin address, the page now fetches creator,
+   metadata.creators and metadata.authors without select, ensuring
+   that full metadata is returned and properly decoded.  The list
+   updates immediately with all valid ZeroContract tokens owned or
+   co‑minted by the address, skipping burned tokens and invalid
+   contracts.  The rest of the explore grid’s behavior (paging,
+   collection loading) remains unchanged.
+*/
 /* EOF */

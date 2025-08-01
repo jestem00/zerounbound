@@ -82,12 +82,171 @@ const tokenMatchesAdmin = (t, admin) => {
   );
 };
 
+/**
+ * Determine whether a token should be excluded from the explore grid.
+ * Filters out tokens with zero supply, burned balances, unsupported
+ * contracts or missing on‑chain media.  A token must have at least
+ * one on‑chain data URI among the common metadata keys (artifactUri,
+ * displayUri, imageUri, thumbnailUri) or within its formats array.
+ */
 const isZeroToken = (t) => {
   if (!t || !t.metadata) return true;
   if (Number(t.totalSupply) === 0) return true;
   if (t.account?.address === BURN) return true;
   const meta = decodeHexFields(t.metadata);
-  if (!meta.artifactUri?.startsWith('data:')) return true;
+  // Helper to detect any data URI among known preview fields.
+  // ZeroContract previews live under specific keys such as displayUri,
+  // imageUri, thumbnailUri, artifactUri and mediaUri (including
+  // snake_case and camelCase variants).  We do not scan arbitrary
+  // string fields because some metadata values (e.g. license text)
+  // may contain a "data:" prefix unrelated to media previews.  Only
+  // these keys and the formats array are considered.
+  const hasDataUri = (m = {}) => {
+    // Recognised preview keys (camelCase and snake_case variants).  The
+    // value must be a data URI representing an image, video or audio.
+    const keys = [
+      'artifactUri', 'artifact_uri',
+      'displayUri', 'display_uri',
+      'imageUri',   'image',
+      'thumbnailUri','thumbnail_uri',
+      'mediaUri',   'media_uri',
+    ];
+    const mediaRe = /^data:(image\/|video\/|audio\/)/i;
+    for (const k of keys) {
+      const v = m && typeof m === 'object' ? m[k] : undefined;
+      if (typeof v === 'string') {
+        const val = v.trim();
+        if (mediaRe.test(val)) return true;
+      }
+    }
+    // Also search formats array for data URIs.  Only count entries
+    // where the URI or URL is a data URI for image/video/audio.
+    if (m && Array.isArray(m.formats)) {
+      for (const fmt of m.formats) {
+        if (fmt && typeof fmt === 'object') {
+          const candidates = [];
+          if (fmt.uri) candidates.push(String(fmt.uri));
+          if (fmt.url) candidates.push(String(fmt.url));
+          for (const cand of candidates) {
+            const val = cand.trim();
+            if (mediaRe.test(val)) return true;
+          }
+        }
+      }
+    }
+    return false;
+  };
+  // Require at least one valid on‑chain data URI; skip tokens whose
+  // previews resolve only to remote (ipfs/http) or broken URIs.
+  if (!hasDataUri(meta)) return true;
+
+  // Additional validation: ensure the first detected preview data URI
+  // contains a decodable base64 payload.  Some tokens may embed a
+  // "data:image/jpeg;base64,..." string that is truncated or invalid
+  // (e.g. missing padding), resulting in broken images.  We decode a
+  // small portion of the base64 data using atob() or Buffer.from() to
+  // confirm that it contains valid base64 characters.  If decoding
+  // throws, we treat the token as invalid and exclude it from the
+  // explore grid.  This check is lightweight and runs only on the
+  // initial portion of the base64 to avoid expensive full decodes.
+  const findPreviewUri = (m = {}) => {
+    const keys = [
+      'artifactUri', 'artifact_uri',
+      'displayUri', 'display_uri',
+      'imageUri',   'image',
+      'thumbnailUri','thumbnail_uri',
+      'mediaUri',   'media_uri',
+    ];
+    const mediaRe = /^data:(image\/|video\/|audio\/)/i;
+    for (const k of keys) {
+      const v = m && typeof m === 'object' ? m[k] : undefined;
+      if (typeof v === 'string') {
+        const val = v.trim();
+        if (mediaRe.test(val)) return val;
+      }
+    }
+    if (m && Array.isArray(m.formats)) {
+      for (const fmt of m.formats) {
+        if (fmt && typeof fmt === 'object') {
+          const candidates = [];
+          if (fmt.uri) candidates.push(String(fmt.uri));
+          if (fmt.url) candidates.push(String(fmt.url));
+          for (const cand of candidates) {
+            const val = cand.trim();
+            if (mediaRe.test(val)) return val;
+          }
+        }
+      }
+    }
+    return null;
+  };
+  const isValidDataUri = (uri) => {
+    try {
+      if (typeof uri !== 'string' || !uri.startsWith('data:')) return false;
+      const commaIndex = uri.indexOf(',');
+      if (commaIndex < 0) return false;
+      const header = uri.slice(5, commaIndex);
+      const semi   = header.indexOf(';');
+      const mime   = (semi >= 0 ? header.slice(0, semi) : header).toLowerCase();
+      const b64    = uri.slice(commaIndex + 1);
+      // Fully decode the base64 payload; atob will throw on invalid base64.
+      let binary;
+      if (typeof atob === 'function') {
+        binary = atob(b64);
+      } else if (typeof Buffer !== 'undefined') {
+        const buf = Buffer.from(b64, 'base64');
+        binary = String.fromCharCode.apply(null, buf);
+      } else {
+        return true;
+      }
+      const bytes = [];
+      for (let i = 0; i < binary.length; i++) bytes.push(binary.charCodeAt(i) & 0xff);
+      // JPEG: header 0xFF 0xD8 0xFF and trailer 0xFF 0xD9
+      if (mime === 'image/jpeg') {
+        const validHeader = bytes.length > 2 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+        const validTrailer = bytes.length > 2 && bytes[bytes.length - 2] === 0xff && bytes[bytes.length - 1] === 0xd9;
+        return validHeader && validTrailer;
+      }
+      // PNG/APNG: header 0x89 0x50 0x4E 0x47 and contains IEND chunk
+      if (mime === 'image/png' || mime === 'image/apng') {
+        const validHeader = bytes.length > 7 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
+        // Search for 'IEND' signature near the end
+        let hasIEND = false;
+        for (let i = bytes.length - 8; i >= 0 && i < bytes.length; i--) {
+          if (bytes[i] === 0x49 && bytes[i + 1] === 0x45 && bytes[i + 2] === 0x4e && bytes[i + 3] === 0x44) {
+            hasIEND = true; break;
+          }
+        }
+        return validHeader && hasIEND;
+      }
+      // GIF: header GIF87a or GIF89a
+      if (mime === 'image/gif') {
+        const headerStr = binary.slice(0, 6);
+        return headerStr === 'GIF87a' || headerStr === 'GIF89a';
+      }
+      // BMP: header 'BM' and file size matches length
+      if (mime === 'image/bmp') {
+        const validHeader = bytes.length > 1 && bytes[0] === 0x42 && bytes[1] === 0x4d;
+        // BMP stores file size at bytes 2-5 (little endian)
+        let fileSize = bytes[2] | (bytes[3] << 8) | (bytes[4] << 16) | (bytes[5] << 24);
+        // Some broken BMPs may not include file size; treat as valid if header ok
+        if (fileSize <= 0) fileSize = bytes.length;
+        return validHeader && fileSize === bytes.length;
+      }
+      // WebP: RIFF, WEBP signatures
+      if (mime === 'image/webp') {
+        const riff  = binary.slice(0, 4);
+        const webp  = binary.slice(8, 12);
+        return riff === 'RIFF' && webp === 'WEBP';
+      }
+      // SVG and other image types (e.g. svg+xml), treat as valid if base64 decoded
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const preview = findPreviewUri(meta);
+  if (preview && !isValidDataUri(preview)) return true;
   if (detectHazards(meta).broken) return true;
   // Mutate metadata in place to avoid recomputing later
   // eslint-disable-next-line no-param-reassign

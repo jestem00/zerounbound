@@ -1,15 +1,15 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/contracts/[addr].jsx
-  Rev :    r4  2025‑09‑13 – authors filter improvements
-  Summary: edition‑filter now uses totalSupply instead of decimals
-           and authors filtering now parses JSON‑encoded creators
-           arrays.  When filtering by authors the page now
-           considers creators, artists and authors fields in
-           metadata, parsing JSON strings into arrays when
-           necessary.  Token ingestion also decodes and parses
-           creators strings into arrays, ensuring no tokens are
-           overlooked.  All other behaviour remains unchanged.
+  Rev :    r5  2025‑08‑XX – robust broken‑preview filtering
+  Summary: In addition to parsing JSON‑encoded creators and decoding
+           metadata, this version filters out tokens whose on‑chain
+           previews are invalid or truncated.  It validates data
+           URIs for JPEG, PNG/APNG, GIF, BMP, and WebP by checking
+           header and trailer signatures, mirroring the explore
+           grid’s logic.  Only tokens with intact previews or
+           non‑image media are shown, preventing broken images in
+           contract pages.  Authors filtering remains unchanged.
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useEffect, useMemo, useState, useCallback,
@@ -121,7 +121,95 @@ export default function ContractPage() {
         ]);
         if (cancel) return;
         const allow = new Set(live.map((o) => +o.id));
-        const decoded = (raw || []).filter((t) => allow.has(+t.tokenId))
+        // Helper to validate data URI previews.  Mirrors the robust checks
+        // used in the explore grid: JPEG must start with FFD8FF and end
+        // with FFD9; PNG/APNG must have an IEND chunk; GIF must have a
+        // proper header; BMP must begin with BM; WebP must be RIFF/WEBP.
+        const isValidPreview = (m = {}) => {
+          const keys = [
+            'artifactUri', 'artifact_uri',
+            'displayUri', 'display_uri',
+            'imageUri',   'image',
+            'thumbnailUri','thumbnail_uri',
+            'mediaUri',   'media_uri',
+          ];
+          const mediaRe = /^data:(image\/|video\/|audio\/)/i;
+          // Find the first preview data URI
+          let uri = null;
+          for (const k of keys) {
+            const v = m && typeof m === 'object' ? m[k] : undefined;
+            if (typeof v === 'string') {
+              const val = v.trim();
+              if (mediaRe.test(val)) { uri = val; break; }
+            }
+          }
+          if (!uri && Array.isArray(m.formats)) {
+            for (const fmt of m.formats) {
+              if (fmt && typeof fmt === 'object') {
+                const candidates = [];
+                if (fmt.uri) candidates.push(String(fmt.uri));
+                if (fmt.url) candidates.push(String(fmt.url));
+                for (const cand of candidates) {
+                  const val = cand.trim();
+                  if (mediaRe.test(val)) { uri = val; break; }
+                }
+              }
+              if (uri) break;
+            }
+          }
+          if (!uri) return false;
+          try {
+            const commaIndex = uri.indexOf(',');
+            if (commaIndex < 0) return false;
+            const header = uri.slice(5, commaIndex);
+            const semi = header.indexOf(';');
+            const mime = (semi >= 0 ? header.slice(0, semi) : header).toLowerCase();
+            const b64 = uri.slice(commaIndex + 1);
+            // decode entire base64; will throw on invalid base64
+            let binary;
+            if (typeof atob === 'function') {
+              binary = atob(b64);
+            } else {
+              const buf = Buffer.from(b64, 'base64');
+              binary = String.fromCharCode.apply(null, buf);
+            }
+            const bytes = [];
+            for (let i = 0; i < binary.length; i++) bytes.push(binary.charCodeAt(i) & 0xff);
+            if (mime === 'image/jpeg') {
+              return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff &&
+                     bytes[bytes.length - 2] === 0xff && bytes[bytes.length - 1] === 0xd9;
+            }
+            if (mime === 'image/png' || mime === 'image/apng') {
+              const headerOk = bytes[0] === 0x89 && bytes[1] === 0x50 &&
+                               bytes[2] === 0x4e && bytes[3] === 0x47;
+              let hasIEND = false;
+              for (let i = bytes.length - 8; i >= 0; i--) {
+                if (bytes[i] === 0x49 && bytes[i + 1] === 0x45 &&
+                    bytes[i + 2] === 0x4e && bytes[i + 3] === 0x44) {
+                  hasIEND = true;
+                  break;
+                }
+              }
+              return headerOk && hasIEND;
+            }
+            if (mime === 'image/gif') {
+              const hdr = binary.slice(0, 6);
+              return hdr === 'GIF87a' || hdr === 'GIF89a';
+            }
+            if (mime === 'image/bmp') {
+              return bytes[0] === 0x42 && bytes[1] === 0x4d;
+            }
+            if (mime === 'image/webp') {
+              return binary.slice(0, 4) === 'RIFF' && binary.slice(8, 12) === 'WEBP';
+            }
+            // Accept other media types (audio/video/svg, etc.)
+            return true;
+          } catch {
+            return false;
+          }
+        };
+        const decoded = (raw || [])
+          .filter((t) => allow.has(+t.tokenId))
           .map((t) => {
             if (t.metadata && typeof t.metadata === 'object') {
               t.metadata = decodeHexFields(t.metadata);                  // eslint-disable-line no-param-reassign
@@ -129,7 +217,6 @@ export default function ContractPage() {
               const j = decodeHexJson(t.metadata);
               if (j) t.metadata = decodeHexFields(j);                    // eslint-disable-line no-param-reassign
             }
-            // Parse JSON‑encoded creators arrays if present
             const md = t.metadata || {};
             if (md && typeof md.creators === 'string') {
               try {
@@ -138,7 +225,9 @@ export default function ContractPage() {
               } catch {/* ignore JSON errors */}
             }
             return t;
-          });
+          })
+          // Filter out tokens without valid previews
+          .filter((t) => isValidPreview(t.metadata));
         setTokens(decoded);
         setTokOpts(live);
       } catch (err) {
@@ -147,7 +236,9 @@ export default function ContractPage() {
           setTokens([]);
           setTokOpts([]);
         }
-      } finally { if (!cancel) setLoading(false); }
+      } finally {
+        if (!cancel) setLoading(false);
+      }
     })();
 
     /* 3 · counts */
@@ -244,7 +335,7 @@ export default function ContractPage() {
       case 'priceHigh':             out.sort((a,b)=>(b.price||0)-(a.price||0)); break;
       case 'priceLow':              out.sort((a,b)=>(a.price||0)-(b.price||0)); break;
       case 'offerHigh':             out.sort((a,b)=>(b.topOffer||0)-(a.topOffer||0)); break;
-      case 'offerLow':              out.sort((a,b)=(a.topOffer||0)-(b.topOffer||0)); break;
+      case 'offerLow':              out.sort((a,b)=>(a.topOffer||0)-(b.topOffer||0)); break;
       default: /* newest */         out.sort((a,b)=>b.tokenId-a.tokenId);
     }
     return out;
@@ -327,14 +418,15 @@ export default function ContractPage() {
   );
 }
 
-/* What changed & why (r4):
-   • Authors filter now uses a helper getAuthors() to extract creators,
-     authors and artists, parsing JSON‑encoded strings into arrays when
-     present.  This resolves cases where metadata.creators was a
-     JSON string and ensures admin filtering matches all creators.
-   • Token ingestion now parses JSON‑encoded creators arrays after
-     decoding metadata, so that the metadata has the correct array
-     form when used in filters or displayed.
-   • All other logic (edition filter, search, sort, counts) remains
-     unchanged. */
+/* What changed & why (r5):
+   • Added isValidPreview() helper and applied it during token
+     ingestion.  This function ensures that JPEG images start with
+     0xFFD8FF and end with 0xFFD9, PNG/APNG images include an IEND
+     chunk, GIFs have valid headers, BMPs begin with 'BM' and
+     WebP files contain RIFF/WEBP signatures.  Data URIs that do
+     not pass these checks are considered invalid and the token
+     is excluded from the contract page.
+   • Preserved existing authors filtering logic and metadata
+     decoding, including JSON‑encoded creators parsing.  Only the
+     preview validation logic was added. */
 /* EOF */

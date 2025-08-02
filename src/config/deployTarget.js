@@ -37,7 +37,7 @@
 // 'mainnet' or 'ghostnet' as appropriate; deployTarget.js is the sole
 // diverging file between network branches.  During development, the
 // scripts/setTarget.js helper rewrites this line to toggle networks.
-export const TARGET = 'mainnet';
+export const TARGET = 'ghostnet';
 
 // ---------------------------------------------------------------------------
 // Per‑network configuration

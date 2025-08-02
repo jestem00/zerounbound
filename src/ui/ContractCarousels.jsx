@@ -1,8 +1,13 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/ContractCarousels.jsx
-  Rev :    r761-a2   2025-07-23
-  Summary: preserve cards on refresh; added storage listener to sync hidden and cache changes, triggering refresh and updating hidden state; improved show-hidden label and fixed padding syntax.
+  Rev :    r761-a7   2025-08-02
+  Summary: include factory‑originated contracts using initiator search; restore
+           original SlideCard layout and toggles; remove the duplicate Reset
+           Carousels button inside this component; place the show‑hidden
+           checkbox between the page‑level reset and the carousels; centre and
+           stylise instructions with icons; retain MAX_W/GUTTER container,
+           spinner and other improvements.
 ─────────────────────────────────────────────────────────────*/
 
 import React, {
@@ -24,6 +29,7 @@ import PixelButton from './PixelButton.jsx';
 import detectHazards from '../utils/hazards.js';
 import useConsent from '../hooks/useConsent.js';
 import IntegrityBadge from './IntegrityBadge.jsx';
+// Pull in both the overlay and toggle components for script opt‑in functionality.
 import { EnableScriptsOverlay, EnableScriptsToggle } from './EnableScripts.jsx';
 import { checkOnChainIntegrity } from '../utils/onChainValidator.js';
 import PixelConfirmDialog from './PixelConfirmDialog.jsx';
@@ -110,20 +116,73 @@ async function withRetry(fn, max = RETRY_MAX, delay = RETRY_DELAY) {
 }
 
 /*──────── tzkt discovery helpers ───────────────────────────*/
+/**
+ * Fetch contracts originated by a wallet.  This helper now queries both
+ * the legacy /contracts endpoint (creator filter) and the modern
+ * /operations/originations endpoint (initiator filter) to capture
+ * collections deployed via the contract factory.  Results are
+ * deduplicated by address and include typeHash/timestamp when available.
+ *
+ * @param {string} addr Wallet address
+ * @param {string} net  Network key ('ghostnet' or 'mainnet')
+ * @returns {Promise<Array<{address:string,typeHash:number|undefined,timestamp:any}>>}
+ */
 async function fetchOriginated(addr, net) {
   if (!addr) return [];
   const base   = `${TZKT[net]}/contracts?creator=${addr}&limit=400`;
   const hashQS = mkHash(HASHES[net]);
   const url1   = `${base}&typeHash.in=${hashQS}`;
+  // First attempt: query contracts by creator filtered by known typeHash values.
   const rows1 = await jFetch(url1, 3).catch(() => []);
   const rows  = rows1.length
     ? rows1
     : await jFetch(base, 3).catch(() => []);
-  return rows.map((c) => ({
+  const legacyList = rows.map((c) => ({
     address  : c.address,
     typeHash : c.typeHash,
     timestamp: c.lastActivityTime || c.firstActivityTime,
   }));
+  // Second attempt: query originations by initiator to capture factory‑originated contracts.
+  let opRows = [];
+  try {
+    const opUrl = `${TZKT[net]}/operations/originations?initiator=${addr}&limit=400`;
+    opRows = await jFetch(opUrl, 3).catch(() => []);
+  } catch {/* ignore network errors */}
+  const allowedHashes = new Set(Object.values(HASHES[net]));
+  const opList = [];
+  for (const row of opRows) {
+    const oc = row?.originatedContract || row?.originated_contract;
+    if (!oc) continue;
+    // Only include asset contracts that match FA2 type or known typeHash values.
+    const okKind = oc.kind === 'asset';
+    const tzips  = Array.isArray(oc.tzips) ? oc.tzips : [];
+    const okTzip = tzips.includes('fa2');
+    const thash  = oc.typeHash ?? oc.type_hash;
+    const okHash = thash !== undefined && allowedHashes.has(Number(thash));
+    if (okKind && (okTzip || okHash)) {
+      opList.push({
+        address  : oc.address,
+        typeHash : thash,
+        timestamp: row.timestamp || null,
+      });
+    }
+  }
+  // Merge and deduplicate by address.  Prefer entries with a timestamp and typeHash.
+  const merged = new Map();
+  for (const it of [...legacyList, ...opList]) {
+    if (!it || !it.address) continue;
+    const prev = merged.get(it.address);
+    if (!prev) {
+      merged.set(it.address, it);
+    } else {
+      // If the new entry has a timestamp or typeHash not present on the previous
+      // one, merge those fields in.  Keep the earliest timestamp for sort.
+      const ts   = it.timestamp || prev.timestamp;
+      const tHash= it.typeHash !== undefined ? it.typeHash : prev.typeHash;
+      merged.set(it.address, { address: it.address, typeHash: tHash, timestamp: ts });
+    }
+  }
+  return Array.from(merged.values());
 }
 
 /* URL encode key for /keys/{key} endpoint */
@@ -566,16 +625,16 @@ const Rail = React.memo(function Rail({
 }) {
   return (
     <>
-      <h4
+      <div
         style={{
           margin: '.9rem 0 .2rem',
-          fontFamily: 'PixeloidSans',
           textAlign: 'center',
+          fontFamily: 'PixeloidSans',
         }}
       >
-        {label}
+        <span style={{ fontSize: '1rem', fontWeight: 700 }}>{label}</span>
         <CountBox>{data.length}</CountBox>
-      </h4>
+      </div>
       <p
         style={{
           margin: '0 0 .45rem',
@@ -585,9 +644,8 @@ const Rail = React.memo(function Rail({
           fontWeight: 700,
         }}
       >
-        ↔ drag/swipe • hold ◀ ▶ • Click ↻ to LOAD CONTRACT • /️ hide/unhide
+        ↔ drag/swipe • hold ◀ ▶ • Click ↻ to LOAD CONTRACT • /️ 🙈👁️hide/unhide
       </p>
-
       <div
         style={{
           position: 'relative',
@@ -611,7 +669,6 @@ const Rail = React.memo(function Rail({
             <PixelButton onClick={onRetry}>Retry</PixelButton>
           </ErrorWrap>
         )}
-
         <ArrowBtn
           $left
           onMouseDown={() => holdPrev.start('prev')}
@@ -620,13 +677,11 @@ const Rail = React.memo(function Rail({
         >
           ◀
         </ArrowBtn>
-
         <Viewport ref={emblaRef}>
           <Container>
             {data.length ? (
               data.map((c) => (
                 <SlideCard
-                  key={c.address}
                   contract={c}
                   hidden={hidden}
                   toggleHidden={toggleHidden}
@@ -634,11 +689,12 @@ const Rail = React.memo(function Rail({
                 />
               ))
             ) : (
-              !busy && !error && <p style={{ margin: '5rem auto', textAlign: 'center' }}>None found.</p>
+              !busy && !error && (
+                <p style={{ margin: '5rem auto', textAlign: 'center' }}>None found.</p>
+              )
             )}
           </Container>
         </Viewport>
-
         <ArrowBtn
           onMouseDown={() => holdNext.start('next')}
           onMouseUp={holdNext.stop}
@@ -843,47 +899,45 @@ const ContractCarouselsComponent = forwardRef(function ContractCarousels({ onSel
 
   return (
     <>
+      {/* Show hidden checkbox centered (placed between the global reset button and the carousels) */}
       <label
         style={{
-          display:'block',
-          margin:'.6rem 0',
-          textAlign:'center',
-          color:'var(--zu-accent)',
-          fontWeight:'700',
+          display: 'block',
+          margin: '.6rem 0 .4rem',
+          textAlign: 'center',
+          color: 'var(--zu-accent)',
+          fontWeight: 700,
         }}
       >
         <input
           type="checkbox"
           checked={showHidden}
           onChange={(e) => setShowHidden(e.target.checked)}
-        />
-        {' '}
+        />{' '}
         Show hidden
       </label>
-
       <Rail
-        label="Originated"
+        label="Created"
         data={visOrig}
         emblaRef={emblaRefO}
         hidden={hidden}
         toggleHidden={toggleHidden}
         load={onSelect}
-        busy={busy && !visOrig.length}
-        error={error}
+        busy={busy && !orig.length && !error}
+        error={stage === 'error' ? error : null}
         holdPrev={holdOprev}
         holdNext={holdOnext}
         onRetry={() => refresh(true)}
       />
-
       <Rail
-        label="Collaborative"
+        label="Collaborating"
         data={visColl}
         emblaRef={emblaRefC}
         hidden={hidden}
         toggleHidden={toggleHidden}
         load={onSelect}
-        busy={busy && !visColl.length}
-        error={error}
+        busy={busy && !coll.length && !error}
+        error={stage === 'error' ? error : null}
         holdPrev={holdCprev}
         holdNext={holdCnext}
         onRetry={() => refresh(true)}
@@ -895,6 +949,26 @@ const ContractCarouselsComponent = forwardRef(function ContractCarousels({ onSel
 export default ContractCarouselsComponent;
 
 /* What changed & why:
-   • Added accent colour and bold font weight to the Show-hidden label to improve visibility.
-   • Updated revision and summary accordingly.
+   • Added initiator‑based originations search and deduplication to fetchOriginated(),
+     ensuring that collections deployed via the contract factory appear in the
+     carousel.  Results from the traditional creator filter and the new
+     initiator filter are merged and deduplicated.
+   • Restored the SlideCard component to its original design with a Slide wrapper,
+     proper media rendering, script enable/disable toggle, token count and
+     integrity badge.  Removed the card‑level onClick and redundant extra Slide
+     wrappers in Rail.
+   • Reintroduced the loading spinner with image, MAX_W/GUTTER container and
+     correct use of constants in Rail.  Updated the header revision and summary.
+   • Restored centred Show hidden checkbox and renamed the refresh button to
+     “RESET CAROUSELS”, centring it below the checkbox.  Enlarged and centred
+     the carousel instruction text, applied an accent‑contrasting colour and
+     re‑added hide/unhide icons.
+   • Updated the RESET CAROUSELS button to clear the contract and hidden
+     caches (localStorage entries) and reset the hidden state before
+     triggering a hard refresh of the carousels.  Centrally aligned the
+     Created/Collaborating headings.
+   • Removed the duplicate Reset Carousels button from within the component
+     (the page-level reset remains).  Positioned the Show hidden checkbox
+     between the global reset and the carousels.  Adjusted the summary and
+     revision accordingly.
 */

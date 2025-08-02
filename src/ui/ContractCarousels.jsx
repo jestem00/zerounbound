@@ -1,13 +1,15 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/ContractCarousels.jsx
-  Rev :    r761-a7   2025-08-02
+  Rev :    r761-a8   2025-08-02
   Summary: include factory‑originated contracts using initiator search; restore
            original SlideCard layout and toggles; remove the duplicate Reset
            Carousels button inside this component; place the show‑hidden
            checkbox between the page‑level reset and the carousels; centre and
            stylise instructions with icons; retain MAX_W/GUTTER container,
-           spinner and other improvements.
+           spinner and other improvements.  Filter legacy and factory
+           originations to only include contracts whose typeHash is listed in
+           hashMatrix.json (v1–v4d), excluding unrelated FA2 collections.
 ─────────────────────────────────────────────────────────────*/
 
 import React, {
@@ -137,29 +139,33 @@ async function fetchOriginated(addr, net) {
   const rows  = rows1.length
     ? rows1
     : await jFetch(base, 3).catch(() => []);
-  const legacyList = rows.map((c) => ({
-    address  : c.address,
-    typeHash : c.typeHash,
-    timestamp: c.lastActivityTime || c.firstActivityTime,
-  }));
+  // Filter legacy results to include only contracts whose typeHash is present in
+  // hashMatrix.json (allowedHashes).  Without this guard, unrelated FA2
+  // collections (e.g. Objkt IPFS collections) may appear in the carousel.
+  const allowedHashes = new Set(Object.values(HASHES[net]).map(Number));
+  const legacyList = rows
+    .filter((c) => c.typeHash !== undefined && allowedHashes.has(Number(c.typeHash)))
+    .map((c) => ({
+      address  : c.address,
+      typeHash : c.typeHash,
+      timestamp: c.lastActivityTime || c.firstActivityTime,
+    }));
   // Second attempt: query originations by initiator to capture factory‑originated contracts.
   let opRows = [];
   try {
     const opUrl = `${TZKT[net]}/operations/originations?initiator=${addr}&limit=400`;
     opRows = await jFetch(opUrl, 3).catch(() => []);
   } catch {/* ignore network errors */}
-  const allowedHashes = new Set(Object.values(HASHES[net]));
+  const allowedHashes2 = new Set(Object.values(HASHES[net]).map(Number));
   const opList = [];
   for (const row of opRows) {
     const oc = row?.originatedContract || row?.originated_contract;
     if (!oc) continue;
-    // Only include asset contracts that match FA2 type or known typeHash values.
+    // Only include asset contracts whose typeHash matches one of our known versions.
     const okKind = oc.kind === 'asset';
-    const tzips  = Array.isArray(oc.tzips) ? oc.tzips : [];
-    const okTzip = tzips.includes('fa2');
     const thash  = oc.typeHash ?? oc.type_hash;
-    const okHash = thash !== undefined && allowedHashes.has(Number(thash));
-    if (okKind && (okTzip || okHash)) {
+    const okHash = thash !== undefined && allowedHashes2.has(Number(thash));
+    if (okKind && okHash) {
       opList.push({
         address  : oc.address,
         typeHash : thash,
@@ -971,4 +977,8 @@ export default ContractCarouselsComponent;
      (the page-level reset remains).  Positioned the Show hidden checkbox
      between the global reset and the carousels.  Adjusted the summary and
      revision accordingly.
+   • Updated fetchOriginated() to filter both legacy and operations‑based
+     lists by typeHash against hashMatrix.json.  Only contracts whose
+     typeHash appears in our known versions (v1–v4d) are included, preventing
+     unrelated IPFS/Objkt FA2 collections from showing up in the carousels.
 */

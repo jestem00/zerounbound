@@ -36,6 +36,8 @@
         "src/ui/Entrypoints/AppendExtraUri.jsx",
         "src/ui/Entrypoints/RepairUri.jsx",
         "src/ui/Entrypoints/Mint.jsx",
+        "src/ui/OperationOverlay.jsx",
+        "src/data/**",
         "src/utils/**"
       ]
     },
@@ -215,7 +217,14 @@
       "bundleName": "manage_contracts_bundle",
       "patterns": [
         "src/pages/manage.js",
+        "src/ui/Entrypoints/Mint.jsx",
         "src/ui/ContractCarousels.jsx",
+        "src/core/feeEstimator.js",
+        "src/hooks/useTxEstimate.js",
+        "src/core/**",
+        "src/ui/OperationOverlay.jsx",
+        "src/ui/GlobalSnackbar.jsx",
+        "src/utils/**",
         "src/ui/PixelHeading.jsx",
         "src/ui/PixelInput.jsx",
         "src/ui/PixelButton.jsx",
@@ -223,20 +232,13 @@
         "src/utils/RenderMedia.jsx",
         "src/ui/LoadingSpinner.jsx",
         "src/contexts/WalletContext.js",
-        "src/core/net.js",
-        "src/data/hashMatrix.json",
-        "src/utils/countTokens.js",
-        "src/utils/hazards.js",
+        "src/data/**",
         "src/hooks/useConsent.js",
         "src/ui/IntegrityBadge.jsx",
         "src/ui/EnableScripts.jsx",
         "src/utils/onChainValidator.js",
         "src/ui/PixelConfirmDialog.jsx",
-        "src/constants/integrityBadges.js",
-        "src/utils/countAmount.js",
-        "src/utils/countOwners.js",
-        "Src/utils,countTokens.js",
-        "src/utils/formatAddress.js" 
+        "src/constants/**"
       ]
     },
     {

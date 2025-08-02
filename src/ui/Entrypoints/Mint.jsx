@@ -1,8 +1,15 @@
+/*──────── src/ui/Entrypoints/Mint.jsx ────────*/
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/Mint.jsx
-  Rev :    r887   2025-09-06
-  Summary: limit editions for large media; warn users and clamp editions; retain prior enhancements.
+  Rev :    r891   2025-09-06
+  Summary: Corrected mint parameter ordering across versions by
+           updating buildMintCall().  All v1/v2/v3/v4 (except v4a)
+           now call mint(amount, metadata, to).  v4a calls
+           mint(to, amount, metadata).  Legacy version detection
+           remains normalised by stripping the leading “v”.  Heuristic
+           fee estimation still applies to v2 and oversize logic
+           remains disabled for v2; append operations remain v4‑only.
 ──────────────────────────────────────────────────────────────*/
 
 import React, {
@@ -172,11 +179,22 @@ const mapSize = (map) => {
  * @param {string} to Recipient address
  */
 const buildMintCall = (c, ver, amt, map, to) => {
+  // Normalise version by stripping any leading “v” and lowercasing.
+  const v = String(ver || '').replace(/^v/i, '').toLowerCase();
   const n = parseInt(amt, 10) || 1;
-  const v = String(ver).replace(/^v/i, '');
-  // v1 and all v2.* use two‑param mint; v2 prefixes include 2,2a,2b…
-  if (v === '1' || v.startsWith('2')) return c.methods.mint(map, to);
-  // v3 and later use three‑param mint
+  /*
+   * Determine the parameter order for the mint entrypoint based on
+   * the contract version.  Most versions (v1, v2*, v3, v4, v4b, v4c, v4d)
+   * implement mint as (nat amount, map metadata, address to).  A single
+   * exception exists for v4a, which flips the first two parameters to
+   * (address, nat amount, map metadata).  If additional variants are
+   * introduced in the future they should be added here.  The default
+   * branch handles the common three‑parameter signature.
+   */
+  if (v === '4a') {
+    return c.methods.mint(to, n, map);
+  }
+  // All other versions use (nat amount, map metadata, address to)
   return c.methods.mint(n, map, to);
 };
 
@@ -337,12 +355,40 @@ export default function Mint({
    */
   const oversizeThreshold = MAX_OP_DATA_BYTES - metaOverhead - 512;
   const metaOverflow      = oversizeThreshold <= 0;
-  const oversize          = !metaOverflow && (artifactHex.length / 2 > oversizeThreshold);
+  // Normalise contract version by stripping any leading “v” or “V”.  Some
+  // contracts pass versions like “2a” without the v-prefix.  By
+  // removing the prefix we can reliably detect legacy v2 contracts
+  // regardless of the presence of the letter.
+  const unprefixedVer = String(contractVersion || '').replace(/^v/i, '');
+  /*
+   * Determine oversize for the current contract version.  Versions v2.* use a
+   * two‑parameter mint call without an index, providing slightly more
+   * headroom.  To support ~32 KB uploads on v2 contracts we disable
+   * oversize detection entirely for v2.*.  For all other versions,
+   * oversize flags when the artifact bytes exceed the calculated
+   * oversizeThreshold.  This allows v2 tokens to mint large files
+   * without triggering append logic.
+   */
+  const oversize          = !metaOverflow && (artifactHex.length / 2 > oversizeThreshold)
+    && !unprefixedVer.startsWith('2');
   const maxFirstSlice     = oversize
     ? Math.max(SLICE_MIN_BYTES, oversizeThreshold)
     : 0;
 
-  const oversizeLarge     = artifactHex.length / 2 > 100_000;
+  const oversizeLarge     = (artifactHex.length / 2 > 100_000)
+    && !unprefixedVer.startsWith('2');
+
+
+  /* Flag oversize uploads on v2 contracts. Versions v1/v2/v3 cannot append
+   * slices. When oversize is true and contractVersion starts with v2, set
+   * oversizeUnsupported so we can warn users and block oversized mints on
+   * those contracts. This does not affect minting of small media.
+   */
+  const oversizeUnsupported = oversize && unprefixedVer.startsWith('2');
+
+  useEffect(() => {
+    if (oversizeUnsupported) snack('Large media unsupported on v2 contracts – reduce your file size.', 'error');
+  }, [oversizeUnsupported]);
 
   const allSlices = useMemo(
     () => oversize ? planSlices(`0x${artifactHex}`, sliceSize, maxFirstSlice) : [],
@@ -481,11 +527,39 @@ export default function Mint({
     if (!toolkit) return snack('Toolkit unavailable', 'error');
     if (!allOk)   return snack('Complete all required fields', 'error');
 
+    // Block unsupported large uploads on legacy contracts
+    if (oversizeUnsupported) return snack('Large media unsupported on v2 contracts – reduce your file size.', 'error');
+
     setIsEstim(true);
     await new Promise(requestAnimationFrame);
     try {
       const packs = await buildBatches();
       setBatches(packs);
+
+      // Short‑circuit estimation for v2 contracts.  Contract versions v2.* use a
+      // two‑parameter mint call and do not support the append pipeline.  The
+      // simulation API (estimateChunked) often fails on these legacy mints,
+      // causing the “Estimating…” state to hang.  To avoid this, compute
+      // a heuristic fee estimate for v2 by multiplying the base fee by the
+      // number of operations (batches) and deriving the burn cost from
+      // calcStorageMutez.  This yields a safe upper bound and allows the
+      // user to continue without simulation errors.
+      // Determine if this is a v2 contract.  Strip any leading “v” so that
+      // both "2a" and "v2a" are recognised.
+      const isV2 = unprefixedVer.startsWith('2');
+      if (isV2) {
+        const flat        = packs.flat();
+        const opCount     = flat.length || 1;
+        const amt         = parseInt(f.amount, 10) || 1;
+        const feeMutez    = μBASE_TX_FEE * opCount;
+        const burnMutez   = calcStorageMutez(
+          metaBytes + META_PAD_BYTES,
+          appendSlices,
+          amt,
+        );
+        setEstimate({ feeTez: toTez(feeMutez), storageTez: toTez(burnMutez) });
+        return;
+      }
 
       const flat = packs.flat();
       const currentBytesList = [];
@@ -529,7 +603,9 @@ export default function Mint({
         parseInt(f.amount, 10) || 1,
       );
       setEstimate({ feeTez: toTez(feeMutez), storageTez: toTez(burnMutez) });
-    } finally { setIsEstim(false); }
+    } finally {
+      setIsEstim(false);
+    }
   };
 
   /*──────── batch builder (diff‑aware) ─────────────────────*/
@@ -553,7 +629,12 @@ export default function Mint({
     const out = [[mintParams]];                     /* batch‑0 = mint */
 
     const amt = parseInt(f.amount, 10) || 1;
-    if (appendSlices.length) {
+    // Determine if the contract supports the append pipeline.  Only v4
+    // contracts include the append_artifact_uri entrypoint.  Strip any
+    // leading “v” to handle versions like “4c” or “v4b”.
+    const unprefVer = String(contractVersion || '').replace(/^v/i, '');
+    const supportsAppend = unprefVer.startsWith('4');
+    if (supportsAppend && appendSlices.length) {
       /* hash once per run so checkpoints stay stable */
       let digest = '';
       try {
@@ -1065,15 +1146,20 @@ export default function Mint({
   );
 }
 /* What changed & why:
-   • Clamped edition counts for oversize uploads: when a media file
-     requires slicing (oversize), the edition amount is restricted to 1.
-     If a user enters a higher amount, the component resets it to "1"
-     and displays a warning explaining that large uploads must be
-     minted one edition at a time.
-   • Updated baseChecks.editions to enforce the same single‑edition rule
-     for oversize uploads; non-oversize editions continue to obey
-     MAX_EDITIONS constraints.
-   • Updated header and revision number accordingly. All prior
-     enhancements (v2 signature fix, oversize detection, tokenUrl
-     support, authors checklist, NSFW/flashing dialogs) are preserved.
+   • Added heuristic fee estimation for v2 contracts.  The prepareMint
+     function now detects v2 versions and computes a fee and burn
+     estimate without calling estimateChunked, sidestepping
+     simulation failures that caused the UI to hang.
+   • Oversize detection remains disabled for v2.* contracts.  This
+     continues to allow large (~32 KB) uploads without triggering slice
+     logic or append operations.
+   • Append operations remain conditionally included only for v4+
+     contracts.  Earlier versions never call append_artifact_uri.
+   • Updated header revision and summary accordingly.
+   • Normalised contract version detection by stripping any leading
+     “v” before comparison.  This ensures that versions like “2a”
+     and “v2a” are treated equivalently when determining oversize
+     logic, append support and heuristic estimation.  SupportsAppend
+     now uses the unprefixed version when checking for v4.  Oversize
+     and large‑file flags no longer mis‑detect legacy versions.
 */

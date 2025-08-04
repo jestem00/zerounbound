@@ -1,14 +1,12 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/MakeOfferDialog.jsx
-  Rev :    r1    2025‑07‑25 UTC
-  Summary: Pop‑out modal for making an offer on a token.  Allows
-           buyers to specify an amount and price (ꜩ) to offer for
-           a given NFT token.  Builds the marketplace call using
-           make_offer, dispatches it in a single wallet batch
-           operation (withContractCall for proper kinds), and
-           displays a progress overlay.  Input values are
-           validated before submission.  Closes on success.
+  Rev :    r2    2025‑08‑03 UTC
+  Summary: Pop‑out modal to create offers on tokens.  Buyers enter
+           edition count and price in ꜩ; the dialog builds a
+           make_offer call and sends it directly with the total
+           mutez value.  Progress overlay, input validation and
+           closure on success are maintained.
 ─────────────────────────────────────────────────────────────*/
 
 import React, { useState }      from 'react';
@@ -173,11 +171,9 @@ MakeOfferDialog.propTypes = {
   onClose : PropTypes.func,
 };
 
-/* What changed & why: initial creation of MakeOfferDialog.  This
-   modal replicates the 8‑bit style of other dialogs and
-   provides simple inputs for amount and price.  It validates
-   user input, resolves the marketplace contract via
-   getMarketContract, builds a make_offer call and dispatches
-   the transaction using withContractCall.  Shows a progress
-   overlay during submission and closes on success. */
+/* What changed & why: r2 – Updated the summary to accurately reflect
+   the current implementation.  The dialog still validates input
+   and shows a progress overlay but now notes that it sends the
+   make_offer call via call.send rather than a wallet batch.  No
+   functional changes were made to the component. */
 /* EOF */

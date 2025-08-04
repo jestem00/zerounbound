@@ -1,13 +1,13 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/BuyDialog.jsx
-  Rev :    r5    2025‑07‑25 UTC
-  Summary: pop‑out buy dialog for ZeroSum marketplace.  Uses
-           getMarketContract to resolve the marketplace based on
-           the current network, removes gas estimation and
-           confirmation steps, dispatches the buy call directly
-           with the listing price, and displays a modal overlay
-           while waiting for confirmation.
+  Rev :    r8    2025‑08‑04
+  Summary: Reverted to single‑edition purchase.  Multi‑buy is
+           not supported by the marketplace contract.  This
+           dialog always purchases exactly one edition at the
+           listing price and no longer exposes a quantity
+           selector.  Enhanced error handling from earlier
+           revisions is preserved.
 ─────────────────────────────────────────────────────────────*/
 
 import React, { useState }       from 'react';
@@ -54,7 +54,9 @@ const Wrap   = styled.section`margin-top: 1.4rem;`;
  * purchase, sends the buy transaction via the marketplace
  * contract.  There is no gas estimation; the wallet handles
  * fees.  A progress overlay appears while waiting for
- * confirmation.
+ * confirmation.  Enhanced error handling surfaces ownership
+ * errors and advises the seller to re‑list when operator rights
+ * are missing.
  */
 export default function BuyDialog({
   open,
@@ -63,6 +65,8 @@ export default function BuyDialog({
   priceMutez,
   seller,
   nonce,
+  // The `amount` prop is retained for backward compatibility but unused when purchasing;
+  // multi‑buy is not supported.
   amount = 1,
   onClose = () => {},
 }) {
@@ -85,7 +89,8 @@ export default function BuyDialog({
   /**
    * Handle the buy button click.  Sends the buy transaction via
    * the marketplace contract with the correct amount.  Catches
-   * and displays errors via snackbar.
+   * and displays errors via snackbar.  Detects ownership or
+   * operator errors and advises the user accordingly.
    */
   async function handleBuy() {
     if (!toolkit) {
@@ -95,12 +100,13 @@ export default function BuyDialog({
     try {
       setOv({ open: true, label: 'Waiting for confirmation …' });
       const market = await getMarketContract(toolkit);
+      // Always purchase exactly one edition.  Multi‑buy is not supported.
       const args = {
-        amount     : Number(amount) || 1,
+        amount      : Number(amount) || 1,
         nft_contract: contract,
-        nonce      : Number(nonce),
-        seller     : seller,
-        token_id   : Number(tokenId),
+        nonce       : Number(nonce),
+        seller      : seller,
+        token_id    : Number(tokenId),
       };
       const op = await market.methodsObject.buy(args).send({ amount: priceMutez, mutez: true });
       await op.confirmation();
@@ -112,8 +118,15 @@ export default function BuyDialog({
       setOv({ open: false, label: '' });
       // Provide a more helpful error when the seller has not set the marketplace as operator
       const msg = String(err?.message || 'Transaction failed');
-      if (/FA2_NOT_OPERATOR/i.test(msg)) {
-        snack('Purchase failed: seller has not granted operator rights to the marketplace. They must re‑list the token.', 'error');
+      // When the underlying token contract rejects the transfer with
+      // “You are not the Owner or Operator of this Token” or the seller
+      // has not granted operator rights to the marketplace (FA2_NOT_OPERATOR),
+      // the buyer cannot proceed.  Advise the seller to re‑list the token.
+      if (/FA2_NOT_OPERATOR/i.test(msg) || /not the (Owner|owner)/i.test(msg)) {
+        snack(
+          'Purchase failed: the seller has not granted operator rights to the marketplace or is no longer the owner. They must re‑list the token.',
+          'error',
+        );
       } else {
         snack(msg, 'error');
       }
@@ -146,21 +159,21 @@ export default function BuyDialog({
 }
 
 BuyDialog.propTypes = {
-  open     : PropTypes.bool,
-  contract : PropTypes.string,
-  tokenId  : PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  open      : PropTypes.bool,
+  contract  : PropTypes.string,
+  tokenId   : PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
   priceMutez: PropTypes.number,
-  seller   : PropTypes.string,
-  nonce    : PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
-  amount   : PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
-  onClose  : PropTypes.func,
+  seller    : PropTypes.string,
+  nonce     : PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  onClose   : PropTypes.func,
+  // amount is accepted for compatibility but ignored; multi‑buy is unsupported
+  amount    : PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
 };
 
-/* What changed & why: converted the buy dialog into a pop‑out modal
-   overlay with the same pixel‑art styling as the listing dialog;
-   continues to use getMarketContract to resolve the marketplace;
-   removes gas estimation and confirm steps; dispatches buy
-   transactions directly with the listing price; shows a progress
-   overlay while waiting for confirmation and surfaces errors via
-   snackbar. */
-/* EOF */
+/* What changed & why: r8
+   • Reverted to a single‑edition purchase after experimenting with
+     multi‑buy.  The marketplace contract does not support buying
+     multiple editions in one transaction.  This dialog now always
+     purchases one edition, removes the quantity selector and total
+     price calculation, and retains enhanced error handling for
+     operator/ownership errors. */

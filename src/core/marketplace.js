@@ -1,13 +1,15 @@
 /*─────────────────────────────────────────────────────────────
 Developed by @jams2blues – ZeroContract Studio
 File:    src/core/marketplace.js
-Rev :    r916    2025‑07‑31
-Summary: ZeroSum marketplace helpers.  Centralizes marketplace
-         interactions for both Ghostnet and Mainnet.  Imports
-         network-specific marketplace addresses (MARKETPLACE_ADDRESSES)
-         and NETWORK_KEY from deployTarget.js to select the correct
-         ZeroSum contract.  Falls back to NETWORK_KEY when
-         toolkit._network is undefined to avoid ghostnet/mainnet mixups.
+Rev :    r919    2025‑08‑02
+Summary: Simplify off‑chain view helpers.  To reduce noisy RPC
+         run_code errors in development, fetchListings() and
+         fetchOffers() now bypass TZIP‑16 off‑chain views and rely
+         entirely on their on‑chain counterparts.  If the on‑chain
+         view fails, these helpers return an empty array.  This
+         change preserves fallback behaviour while avoiding
+         repeated 500 error logs.  All other helpers remain
+         unchanged.
 */
 
 import { OpKind } from '@taquito/taquito';
@@ -49,35 +51,16 @@ export async function getMarketContract(toolkit) {
 
 // Fetch all listings for a given token via the off‑chain view.
 export async function fetchListings({ toolkit, nftContract, tokenId }) {
-  const market = await getMarketContract(toolkit);
-  const views  = await market.tzip16().metadataViews();
-  let raw;
+  // Prefer on‑chain view for listings.  Off‑chain views can trigger
+  // RPC run_code errors on certain nodes and clutter the console.  We
+  // therefore attempt the on‑chain view directly and return its
+  // results.  If the on‑chain view fails, fallback to an empty array.
   try {
-    raw = await views.offchain_listings_for_token().executeView({
-      nft_contract: nftContract,
-      token_id    : Number(tokenId),
-    });
+    const results = await fetchOnchainListings({ toolkit, nftContract, tokenId });
+    return Array.isArray(results) ? results : [];
   } catch {
-    // Fallback to positional arguments (legacy contract)
-    raw = await views.offchain_listings_for_token().executeView(
-      String(nftContract),
-      Number(tokenId),
-    );
+    return [];
   }
-  const out = [];
-  const push = (n, o) => out.push({
-    nonce      : Number(n),
-    priceMutez : Number(o.price),
-    amount     : Number(o.amount),
-    seller     : o.seller,
-    active     : o.active,
-  });
-  if (raw?.entries) {
-    for (const [k, v] of raw.entries()) push(k, v);
-  } else if (raw && typeof raw === 'object') {
-    Object.entries(raw).forEach(([k, v]) => push(k, v));
-  }
-  return out;
 }
 
 // Return the cheapest active listing for the given token from off‑chain views.
@@ -102,34 +85,13 @@ export async function fetchLowestListing({ toolkit, nftContract, tokenId }) {
 
 // Fetch all offers for a given token via the off‑chain view.
 export async function fetchOffers({ toolkit, nftContract, tokenId }) {
-  const market = await getMarketContract(toolkit);
-  const views  = await market.tzip16().metadataViews();
-  let raw;
+  // Prefer on‑chain offers view and avoid off‑chain run_code calls.
   try {
-    raw = await views.offchain_offers_for_token().executeView({
-      nft_contract: nftContract,
-      token_id    : Number(tokenId),
-    });
+    const results = await fetchOnchainOffers({ toolkit, nftContract, tokenId });
+    return Array.isArray(results) ? results : [];
   } catch {
-    raw = await views.offchain_offers_for_token().executeView(
-      String(nftContract),
-      Number(tokenId),
-    );
+    return [];
   }
-  const offers = [];
-  const push = (k, o) => offers.push({
-    offeror    : k,
-    priceMutez: Number(o.price),
-    amount    : Number(o.amount),
-    nonce     : Number(o.nonce),
-    accepted  : o.accepted,
-  });
-  if (raw?.entries) {
-    for (const [k, v] of raw.entries()) push(k, v);
-  } else if (raw && typeof raw === 'object') {
-    Object.entries(raw).forEach(([k, v]) => push(k, v));
-  }
-  return offers;
 }
 
 // Fetch detailed listing information via the off‑chain view.

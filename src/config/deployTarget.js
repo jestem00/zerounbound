@@ -134,6 +134,15 @@ export const URL_BCD_BASE = TARGET === 'ghostnet'
 export const URL_OBJKT_BASE = TARGET === 'ghostnet'
   ? 'https://ghostnet.objkt.com/collection/'
   : 'https://objkt.com/collection/';
+
+// Base URL for the Objkt tokens pages.  This constant points to
+// the network-specific site where individual tokens can be listed or
+// viewed.  It is derived from the collection base but exported
+// explicitly for convenience in UIs that need to construct token
+// links.  See ListTokenDialog.jsx for usage.
+export const URL_OBJKT_TOKENS_BASE = TARGET === 'ghostnet'
+  ? 'https://ghostnet.objkt.com/tokens/'
+  : 'https://objkt.com/tokens/';
 export const URL_TZKT_OP_BASE = TARGET === 'ghostnet'
   ? 'https://ghostnet.tzkt.io/'
   : 'https://tzkt.io/';

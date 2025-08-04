@@ -1,23 +1,16 @@
 /*─────────────────────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/utils/marketplaceListings.js
-  Rev :    r3     2025‑07‑30 UTC
-  Summary: Helpers for enumerating active marketplace collections and
-           listings via the TzKT API.  This revision introduces a
-           per‑network TzKT base resolver, ensuring that functions
-           such as `listActiveCollections` and
-           `listListingsForCollectionViaBigmap` query the correct
-           chain regardless of the default build configuration.  It
-           maintains the existing logic for parsing listings and
-           retains the ability to fall back to metadata‑agnostic
-           enumeration when the API fails.  Metadata filtering
-           remains optional and disabled by default.
+  Rev :    r4     2025‑08‑03 UTC
+  Summary: Removed unused TZKT_API import; revision bump; helper logic
+           unchanged.  Maintains the per‑network TzKT resolver and
+           listing enumeration functions.
 
    NOTE: These functions should never throw; they always return
    sensible defaults when the network or API is unreachable.
 ─────────────────────────────────────────────────────────────────────────────*/
 
-import { TZKT_API, NETWORK_KEY } from '../config/deployTarget.js';
+import { NETWORK_KEY } from '../config/deployTarget.js';
 import { marketplaceAddr }       from '../core/marketplace.js';
 
 /*──────── dynamic TzKT base resolver ───────────────────────*/
@@ -220,13 +213,8 @@ export async function listListingsForCollectionViaBigmap(nftContract, net = NETW
   return Array.from(byToken.values());
 }
 
-/* What changed & why: r3 – Added a per‑network TzKT resolver to
-   ensure that API requests are directed at the correct chain
-   based on the supplied network key.  Without this fix,
-   functions like `listActiveCollections` would query the wrong
-   TzKT domain (e.g. ghostnet when the wallet selected mainnet),
-   yielding empty results.  The helper now derives the API base
-   from the network argument and uses it for all big‑map and
-   metadata calls.  Existing enumeration logic and fallbacks
-   remain unchanged. */
+/* What changed & why: r4 – Removed an unused TZKT_API import to clean
+   up the module and bumped the revision.  The helper continues to
+   derive the TzKT base per network and the existing enumeration
+   logic remains unchanged. */
 

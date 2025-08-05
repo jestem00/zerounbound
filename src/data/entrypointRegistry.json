@@ -97,5 +97,9 @@
     "remove_child":false,
     "lock_metadata": false,
     "repair_uri":   false
+  },
+
+  "v4e": {
+    "$extends": "v4"
   }
 }

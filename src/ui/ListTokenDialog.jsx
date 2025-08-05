@@ -1,20 +1,16 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/ListTokenDialog.jsx
-  Rev :    r37    2025‑08‑03
-  Summary: Refine version detection and listing flow.  Uses
-           entrypoint inspection to distinguish FA2 variants:
-            • v4a/v4c/v4d expose append_token_metadata → redirect to Objkt.
-            • v4/v4b expose append_artifact_uri → list via ZeroSum.
-            • v3 exposes add_collaborator → list via ZeroSum.
-            • v2 exposes add_child but not add_collaborator nor
-              append_artifact_uri → redirect to Objkt.
-            • v1 exposes none of these special entrypoints → list via ZeroSum.
-           Listing now always grants operator rights before calling
-           list_token, eliminating insufficient operator errors.  The
-           fallback to altId remains for zero‑indexed contracts.  The
-           dialog offers a “List on Objkt” link for unsupported
-           versions.
+  Rev :    r38    2025‑08‑05
+  Summary: Add optional sale splits.  Users may specify additional
+           addresses and percentages for initial sale proceeds; the
+           remainder goes to the seller.  UI inputs allow adding
+           splits and removing them.  Listing logic builds the
+           sale_splits array from state and defaults to 100 % seller
+           when no splits are provided.  Version detection and
+           operator grant logic remain unchanged.  This update
+           preserves previous features while enabling collaborator
+           payouts on primary sales.
 ────────────────────────────────────────────────────────────*/
 
 import React, { useState, useEffect } from 'react';
@@ -106,6 +102,13 @@ export default function ListTokenDialog({ open, contract, tokenId, onClose = () 
   // Operation overlay state
   const [ov, setOv] = useState({ open: false, label: '' });
 
+  // Optional sale splits.  Users can specify additional recipients for
+  // the sale proceeds on the first sale.  Each entry contains an
+  // address and a percentage expressed in basis points (i.e. percent * 100).
+  const [splits, setSplits] = useState([]);
+  const [newSplitAddr, setNewSplitAddr] = useState('');
+  const [newSplitPct, setNewSplitPct] = useState('');
+
   // Flags indicating whether the NFT contract is a legacy v2 variant or
   // an unsupported v4 derivative (v4a/v4c/v4d).  When `isLegacy` is
   // true the contract is one of the v2 series and should redirect
@@ -114,6 +117,44 @@ export default function ListTokenDialog({ open, contract, tokenId, onClose = () 
   // Supported versions (v1, v3, v4 and v4b) have both flags false.
   const [isLegacy, setIsLegacy] = useState(false);
   const [isUnsupported, setIsUnsupported] = useState(false);
+
+  /**
+   * Add a sale split entry.  The user provides a Tezos address and a
+   * percentage (0–100).  Internally we convert the percentage to
+   * basis points (percent × 100).  Validation ensures that the
+   * address is non‑empty, the percent is positive and finite, and
+   * that the cumulative percent of all splits remains below 100 %.
+   */
+  function addSplit() {
+    const addr = newSplitAddr.trim();
+    const pctFloat = parseFloat(newSplitPct);
+    if (!addr || !Number.isFinite(pctFloat) || pctFloat <= 0) {
+      snack('Enter a valid address and percent', 'error');
+      return;
+    }
+    const basis = Math.floor(pctFloat * 100);
+    // Compute total basis points including the new entry
+    let total = basis;
+    for (const s of splits) {
+      total += s.percent;
+    }
+    if (total >= 10000) {
+      snack('Total sale splits must be less than 100 %', 'error');
+      return;
+    }
+    setSplits([...splits, { address: addr, percent: basis }]);
+    setNewSplitAddr('');
+    setNewSplitPct('');
+  }
+
+  /**
+   * Remove a sale split entry by index.
+   *
+   * @param {number} idx Index of the split to remove
+   */
+  function removeSplit(idx) {
+    setSplits(splits.filter((_, i) => i !== idx));
+  }
 
   // Compute the Objkt token URL.  URL_OBJKT_TOKENS_BASE points directly
   // to the tokens path (e.g. https://ghostnet.objkt.com/tokens/).  When
@@ -471,10 +512,27 @@ export default function ListTokenDialog({ open, contract, tokenId, onClose = () 
         },
       ]);
 
-      // Helper: list token without updating the operator
+      // Helper: list token without updating the operator.  Builds
+      // saleSplits from the component state.  When splits are defined
+      // we allocate the specified basis points to each address and
+      // assign the remainder to the seller.  When no splits are
+      // specified the seller receives 100 % (basis = 10 000).
       async function listOnly(id, qtyUnits) {
         const royaltySplits = [];
-        const saleSplits   = [{ address: seller, percent: 10000 }];
+        let saleSplits = [];
+        if (splits && splits.length > 0) {
+          let total = 0;
+          saleSplits = splits.map(({ address, percent }) => {
+            total += percent;
+            return { address, percent };
+          });
+          const sellerShare = 10000 - total;
+          if (sellerShare > 0) {
+            saleSplits.push({ address: seller, percent: sellerShare });
+          }
+        } else {
+          saleSplits = [{ address: seller, percent: 10000 }];
+        }
         const params = await buildListParams(toolkit, {
           nftContract  : contract,
           tokenId      : id,
@@ -617,6 +675,55 @@ export default function ListTokenDialog({ open, contract, tokenId, onClose = () 
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
           />
+
+          {/* Sale splits section.  Allows the seller to optionally
+             allocate portions of the first sale to other parties.  Each
+             split entry consists of a Tezos address and a percent
+             value (0–100).  The seller automatically receives the
+             remainder up to 100 %. */}
+          <p
+            style={{ fontSize: '0.75rem', marginTop: '0.6rem', marginBottom: '0.2rem', opacity: 0.9 }}
+          >
+            Sale Splits (optional)
+          </p>
+          <PixelInput
+            placeholder="Recipient tz-address"
+            value={newSplitAddr}
+            onChange={(e) => setNewSplitAddr(e.target.value)}
+          />
+          <PixelInput
+            placeholder="Percent (e.g. 10)"
+            type="number"
+            min={0}
+            max={100}
+            step={0.01}
+            value={newSplitPct}
+            onChange={(e) => setNewSplitPct(e.target.value)}
+          />
+          <PixelButton onClick={addSplit} disabled={!newSplitAddr || !newSplitPct}>
+            ADD SPLIT
+          </PixelButton>
+          {/* Display existing sale splits */}
+          {splits && splits.length > 0 && (
+            <div style={{ marginTop: '0.4rem' }}>
+              {splits.map((sp, idx) => (
+                <p
+                  key={idx}
+                  style={{ fontSize: '0.7rem', marginTop: '0.1rem', opacity: 0.9, display: 'flex', alignItems: 'center' }}
+                >
+                  <span style={{ flexGrow: 1 }}>
+                    {sp.address}: {(sp.percent / 100).toFixed(2)}%
+                  </span>
+                  <PixelButton
+                    onClick={() => removeSplit(idx)}
+                    style={{ flexShrink: 0 }}
+                  >
+                    ✕
+                  </PixelButton>
+                </p>
+              ))}
+            </div>
+          )}
           {/* Owned and listed counts.  Display the total number of editions for sale
              and the number of distinct listings (nonces) to avoid confusion when
              multiple editions are sold under a single listing. */}

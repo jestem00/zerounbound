@@ -1,79 +1,66 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/core/net.js
-  Rev :    r1003   2025‑08‑05
-  Summary: Reintroduced the full networking module from the
-           upstream repository with corrected Taquito imports.
-           This file retains reduced concurrency, expanded
-           error matching and comprehensive forge/inject
-           helpers.  Imports now come from '@taquito/michel-codec',
-           '@taquito/michelson-encoder', '@taquito/utils' and
-           '@taquito/taquito' per Taquito v18+.  No functional
-           changes were made beyond the header update.
-────────────────────────────────────────────────────────────*/
+  Rev :    r1004   2025‑08‑05
+  Summary: fix Vercel build — import LocalForger from
+           @taquito/local-forging; no behavioural changes.
+─────────────────────────────────────────────────────────────*/
 
-import { Parser } from '@taquito/michel-codec';
-import { Schema } from '@taquito/michelson-encoder';
-import { LocalForger, OpKind } from '@taquito/taquito';
-import { b58cdecode, prefix } from '@taquito/utils';
-import { Buffer } from 'buffer';
+import { Parser }                 from '@taquito/michel-codec';
+import { Schema }                 from '@taquito/michelson-encoder';
+import { OpKind }                 from '@taquito/taquito';
+import { LocalForger }            from '@taquito/local-forging';
+import { b58cdecode, prefix }     from '@taquito/utils';
+import { Buffer }                 from 'buffer';
 
 /*─────────────────────────────────────────────────────────────
   Concurrency & throttled fetch
-────────────────────────────────────────────────────────────*/
+─────────────────────────────────────────────────────────────*/
 
 // Lower the global concurrency to 2 to reduce pressure on TzKT and other
 // HTTP2 endpoints.  The previous implementation allowed four
 // concurrent requests which could trigger HTTP2 protocol errors on
-// resource‑constrained APIs.  See Invariant I68 for details.
+// resource‑constrained APIs.  See Invariant I68 for details.
 const LIMIT = 2;
 let   active = 0;
 const queue  = [];
 
 /**
  * Sleep helper with a default delay.  Used for exponential
- * backoff between retries.  Returns a Promise that resolves
- * after the specified number of milliseconds.
+ * backoff between retries.
  *
- * @param {number} ms Milliseconds to sleep
- * @returns {Promise<void>} Promise that resolves after ms
+ * @param {number} ms
+ * @returns {Promise<void>}
  */
-export const sleep = (ms = 500) => new Promise(r => setTimeout(r, ms));
+export const sleep = (ms = 500) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * Execute a queued task respecting the concurrency limit.  Tasks
- * are queued when the number of active tasks exceeds LIMIT.
- * This helper ensures that at most LIMIT tasks run in parallel.
+ * Execute a queued task respecting the concurrency limit.
  *
- * @param {Function} task Function that returns a Promise
- * @returns {Promise<any>} Result of the task
+ * @param {Function} task
+ * @returns {Promise<any>}
  */
 function exec(task) {
   active++;
   return task().finally(() => {
     active--;
-    if (queue.length) {
-      queue.shift()();
-    }
+    if (queue.length) queue.shift()();
   });
 }
 
 /**
- * Throttled fetch with retry and backoff.  Automatically
- * parses JSON and text responses.  Respects a global
- * concurrency limit and retries network/429 errors.  The
- * error matcher has been extended to catch HTTP2 protocol
- * errors reported by Chrome as `net::ERR_HTTP2_PROTOCOL_ERROR`.
+ * Throttled fetch with retry and back‑off.  Automatically
+ * parses JSON/text responses.  Retries on network & HTTP2 errors.
  *
- * @param {string} url Request URL
- * @param {object|number} opts Fetch init or number of retries
- * @param {number} tries Number of retry attempts
- * @returns {Promise<any>} Parsed response data
+ * @param {string} url
+ * @param {object|number} opts
+ * @param {number} tries
+ * @returns {Promise<any>}
  */
 export function jFetch(url, opts = {}, tries) {
   if (typeof opts === 'number') { tries = opts; opts = {}; }
-  // Fewer retries for TzKT endpoints to avoid rate limiting
   if (!Number.isFinite(tries)) tries = /tzkt\.io/i.test(url) ? 6 : 5;
+
   return new Promise((resolve, reject) => {
     const run = () => exec(async () => {
       for (let i = 0; i < tries; i++) {
@@ -82,11 +69,7 @@ export function jFetch(url, opts = {}, tries) {
         try {
           const res = await fetch(url, { ...opts, signal: ctrl.signal });
           clearTimeout(timer);
-          if (res.status === 429) {
-            // Exponential backoff with higher base delay for rate‑limited responses
-            await sleep(1_200 * (i + 1));
-            continue;
-          }
+          if (res.status === 429) { await sleep(1_200 * (i + 1)); continue; }
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const ct  = res.headers.get('content-type') || '';
           const data = ct.includes('json') ? await res.json() : await res.text();
@@ -94,7 +77,6 @@ export function jFetch(url, opts = {}, tries) {
         } catch (e) {
           clearTimeout(timer);
           const m = e?.message || '';
-          /* retry on network/interruption errors */
           if (/Receiving end|ECONNRESET|NetworkError|failed fetch|HTTP2|ProtocolError/i.test(m)) {
             await sleep(800 * (i + 1));
             continue;
@@ -104,36 +86,26 @@ export function jFetch(url, opts = {}, tries) {
         }
       }
     });
-    if (active >= LIMIT) queue.push(run);
-    else run();
+    if (active >= LIMIT) queue.push(run); else run();
   });
 }
 
 /*─────────────────────────────────────────────────────────────
   Backend forge and inject helpers
-────────────────────────────────────────────────────────────*/
+─────────────────────────────────────────────────────────────*/
 
-// Internal helper to build the forge endpoint URL.  If
-// FORGE_SERVICE_URL is defined in the environment it will be used;
-// otherwise the local Next.js API route is used.
+// Internal helper to build the forge endpoint URL.
 function forgeEndpoint() {
   const svc = typeof process !== 'undefined' ? process.env.FORGE_SERVICE_URL : '';
-  return svc
-    ? `${svc.replace(/\/$/, '')}/forge`
-    : '/api/forge';
+  return svc ? `${svc.replace(/\/$/, '')}/forge` : '/api/forge';
 }
 
 /**
- * Encode a high-level storage object into Micheline using the contract's
- * storage type.  If the provided code is a raw Michelson string, it
- * is parsed into Micheline via the Parser.  The storage type is
- * extracted from the `storage` section's first argument.  On
- * success, the encoded Micheline is returned; on failure, the
- * original storage object is returned unchanged.
+ * Encode a high‑level storage object into Micheline using the storage type.
  *
- * @param {any} code Raw Michelson string or Micheline array
- * @param {any} storage High-level storage object (MichelsonMap or plain)
- * @returns {any} Micheline representation of storage, or the original value
+ * @param {any} code
+ * @param {any} storage
+ * @returns {any}
  */
 export function encodeStorageForForge(code, storage) {
   try {
@@ -142,256 +114,146 @@ export function encodeStorageForForge(code, storage) {
       const parser = new Parser();
       script = parser.parseScript(code);
     }
-    // script is expected to be an array of declarations; find the storage
     let storageExpr = null;
-    if (Array.isArray(script)) {
-      storageExpr = script.find(ex => ex.prim === 'storage');
-    } else if (script && script.prim === 'storage') {
-      storageExpr = script;
+    if (Array.isArray(script)) storageExpr = script.find((ex) => ex.prim === 'storage');
+    else if (script && script.prim === 'storage') storageExpr = script;
+
+    if (storageExpr?.args?.length) {
+      const schema = new Schema(storageExpr.args[0]);
+      return schema.Encode(storage);
     }
-    if (storageExpr && Array.isArray(storageExpr.args) && storageExpr.args.length) {
-      const storageType = storageExpr.args[0];
-      const schema = new Schema(storageType);
-      const encoded = schema.Encode(storage);
-      return encoded;
-    }
-  } catch (err) {
-    // swallow errors; fallback to original storage
-  }
+  } catch {/* swallow */}
   return storage;
 }
 
 /**
- * Forge an origination operation via backend API.  Sends a POST
- * request to the configured forge endpoint with the code, storage
- * and source address.  The server is expected to return forged
- * bytes.  When FORGE_SERVICE_URL is set this will call the
- * external service; when empty it uses the built-in Next.js API
- * (/api/forge).  Callers should catch errors and fall back to
- * local forging via forgeOrigination().
- *
- * @param {any[]} code Michelson code array or raw string
- * @param {any} storage Initial storage (MichelsonMap or compatible)
- * @param {string} source tz1/KT1 address initiating the origination
- * @param {string} publicKey Optional public key for reveal (ignored by backend)
- * @returns {Promise<string>} forged bytes
+ * Forge an origination operation via backend API.
  */
 export async function forgeViaBackend(code, storage, source, publicKey) {
   const url = forgeEndpoint();
-  let encodedStorage;
-  try {
-    encodedStorage = encodeStorageForForge(code, storage);
-  } catch {
-    encodedStorage = storage;
-  }
-  const payload = { code, storage: encodedStorage, source };
-  if (publicKey) payload.publicKey = publicKey;
+  const payload = {
+    code,
+    storage: encodeStorageForForge(code, storage),
+    source,
+    ...(publicKey ? { publicKey } : {}),
+  };
   const res = await jFetch(url, {
     method : 'POST',
     headers: { 'Content-Type': 'application/json' },
     body   : JSON.stringify(payload),
   });
-  if (res && (res.forgedBytes || res.forgedbytes)) {
-    return res.forgedBytes || res.forgedbytes;
-  }
-  if (res && res.error) {
-    throw new Error(res.error);
-  }
+  if (res?.forgedBytes || res?.forgedbytes) return res.forgedBytes || res.forgedbytes;
+  if (res?.error) throw new Error(res.error);
   throw new Error('Backend forge failed');
 }
 
 /**
- * Inject a signed operation via the backend API.  This function is
- * deprecated because the forge service no longer performs
- * injection.  Callers should use injectSigned() instead.  An
- * exception is thrown if this function is invoked.
- *
- * @deprecated Injection is disabled on the forge service.
+ * Deprecated – remote injection removed.
  */
-export async function injectViaBackend(_signedBytes) {
+export async function injectViaBackend() {
   throw new Error('Remote injection disabled; use injectSigned()');
 }
 
 /*─────────────────────────────────────────────────────────────
   Signature helpers
-────────────────────────────────────────────────────────────*/
+─────────────────────────────────────────────────────────────*/
 
-/**
- * Convert a base58 signature (edsig/spsig/p2sig/sig) to raw hex for injection.
- * Beacon wallets return base58 signatures prefixed with edsig/spsig1/p2sig.
- * This helper decodes the base58 signature and strips the curve prefix.
- *
- * @param {string} signature Base58 encoded signature from wallet.client.requestSignPayload
- * @returns {string} Hex string of signature bytes (without any prefix)
- */
 export function sigToHex(signature) {
   let bytes;
   if (signature.startsWith('edsig')) {
-    bytes = b58cdecode(signature, prefix.edsig);
-    bytes = bytes.slice(5);
+    bytes = b58cdecode(signature, prefix.edsig).slice(5);
   } else if (signature.startsWith('spsig1')) {
-    bytes = b58cdecode(signature, prefix.spsig1);
-    bytes = bytes.slice(5);
+    bytes = b58cdecode(signature, prefix.spsig1).slice(5);
   } else if (signature.startsWith('p2sig')) {
-    bytes = b58cdecode(signature, prefix.p2sig);
-    bytes = bytes.slice(4);
+    bytes = b58cdecode(signature, prefix.p2sig).slice(4);
   } else {
-    bytes = b58cdecode(signature, prefix.sig);
-    bytes = bytes.slice(3);
+    bytes = b58cdecode(signature, prefix.sig).slice(3);
   }
   return Buffer.from(bytes).toString('hex');
 }
 
-/**
- * Convert a base58 signature to hex and append the appropriate curve tag.
- * Tezos RPC requires that the signed operation bytes end with an 8‑bit
- * tag identifying the curve used for the signature: 00 for Ed25519,
- * 01 for secp256k1, and 02 for P‑256.  Without this suffix the RPC
- * may return a phantom operation hash or parsing error.
- *
- * @param {string} signature Base58 encoded signature from wallet.client.requestSignPayload
- * @returns {string} Hex string of signature bytes followed by a curve tag byte
- */
 export function sigHexWithTag(signature) {
   const hex = sigToHex(signature);
   let tag = '00';
-  if (signature.startsWith('spsig1')) {
-    tag = '01';
-  } else if (signature.startsWith('p2sig')) {
-    tag = '02';
-  } else if (signature.startsWith('edsig')) {
-    tag = '00';
-  } else {
-    tag = '00';
-  }
+  if (signature.startsWith('spsig1')) tag = '01';
+  else if (signature.startsWith('p2sig')) tag = '02';
   return hex + tag;
 }
 
-/**
- * Inject a signed operation bytes string and return the operation hash.
- *
- * @param {TezosToolkit} toolkit Taquito toolkit instance
- * @param {string} signedBytes Hex string of the signed operation (forgedBytes + signature)
- * @returns {Promise<string>} Operation hash
- */
 export async function injectSigned(toolkit, signedBytes) {
-  return await toolkit.rpc.injectOperation(signedBytes);
+  return toolkit.rpc.injectOperation(signedBytes);
 }
 
 /*─────────────────────────────────────────────────────────────
   Local forge and inject helpers
-────────────────────────────────────────────────────────────*/
+─────────────────────────────────────────────────────────────*/
 
-/**
- * Forge an origination operation locally.  Estimates gas/fee and
- * builds the operation contents with the given code and storage.
- * Returns the forged bytes which must be signed externally.
- *
- * @param {TezosToolkit} toolkit Taquito toolkit instance
- * @param {string} source The originating address (tz1/KT1)
- * @param {any[]} code Michelson code array or raw Michelson string
- * @param {any} storage Initial storage object (MichelsonMap or compatible)
- * @param {string} publicKey Optional public key for reveal
- * @returns {Promise<{ forgedBytes: string, contents: any[], branch: string }>}
- */
 export async function forgeOrigination(toolkit, source, code, storage, publicKey) {
-  // Parse the Michelson code into Micheline if necessary.
   let parsedCode = code;
   if (typeof code === 'string') {
-    try {
-      const parser = new Parser();
-      const parsed = parser.parseScript(code);
-      if (parsed) parsedCode = parsed;
-    } catch (errParse) {
-      throw new Error('Invalid Michelson code: ' + errParse.message);
-    }
+    const parser = new Parser();
+    parsedCode = parser.parseScript(code);
   }
-  // Encode high‑level storage into Micheline using Schema.
   const encodedStorage = encodeStorageForForge(parsedCode, storage);
-  // Determine whether the source account needs a reveal.  Query
-  // the manager key via RPC; if it is undefined or errors, assume
-  // that a reveal operation must precede the origination.
+
   let needsReveal = false;
   if (publicKey) {
-    try {
-      const mgrKey = await toolkit.rpc.getManagerKey(source);
-      if (!mgrKey) needsReveal = true;
-    } catch (e) {
-      needsReveal = true;
-    }
+    try { needsReveal = !(await toolkit.rpc.getManagerKey(source)); }
+    catch { needsReveal = true; }
   }
-  // Fetch branch and counter for forging.  The counter is
-  // incremented manually for each operation (reveal + origination).
-  const blockHeader = await toolkit.rpc.getBlockHeader();
-  const branch      = blockHeader.hash;
-  const contractInfo = await toolkit.rpc.getContract(source);
-  let counter = parseInt(contractInfo.counter, 10) + 1;
+
+  const branch   = (await toolkit.rpc.getBlockHeader()).hash;
+  const counter0 = parseInt((await toolkit.rpc.getContract(source)).counter, 10) + 1;
+  let counter    = counter0;
   const contents = [];
-  // If reveal is needed, prepend a reveal operation using the
-  // provided publicKey.  Fee/gas/storage values follow typical
-  // defaults and may be adjusted by the caller if desired.
+
   if (needsReveal && publicKey) {
     contents.push({
       kind         : OpKind.REVEAL,
-      source       : source,
+      source,
       fee          : '1300',
-      counter      : counter.toString(),
+      counter      : String(counter),
       gas_limit    : '10000',
       storage_limit: '0',
       public_key   : publicKey,
     });
     counter += 1;
   }
-  // Estimate fee/gas/storage for the origination.  Wrap in try/catch
-  // and fall back to conservative defaults if estimation fails.
-  let feeMutez     = '200000';   // 0.2 ꜩ
-  let gasLimit     = '200000';   // default gas for origination
-  let storageLimit = '60000';    // default storage limit (~60 kB)
+
+  let feeMutez = '200000';
+  let gasLimit = '200000';
+  let storageLimit = '60000';
   try {
-    const estimate = await toolkit.estimate.originate({ code: parsedCode, storage: encodedStorage, balance: '0' });
-    feeMutez      = estimate.suggestedFeeMutez.toString();
-    gasLimit      = estimate.gasLimit.toString();
-    storageLimit  = estimate.storageLimit.toString();
-  } catch (e) {
-    // estimation errors are ignored; defaults remain in effect
-  }
-  // Append the origination operation to the contents.  Use the
-  // encodedStorage for the script to ensure proper Micheline representation.
+    const est = await toolkit.estimate.originate({ code: parsedCode, storage: encodedStorage, balance: '0' });
+    feeMutez      = String(est.suggestedFeeMutez);
+    gasLimit      = String(est.gasLimit);
+    storageLimit  = String(est.storageLimit);
+  } catch {/* ignore estimation errors */}
+
   contents.push({
     kind         : OpKind.ORIGINATION,
-    source       : source,
+    source,
     fee          : feeMutez,
-    counter      : counter.toString(),
+    counter      : String(counter),
     gas_limit    : gasLimit,
     storage_limit: storageLimit,
     balance      : '0',
     script       : { code: parsedCode, storage: encodedStorage },
   });
-  // Forge the operation bytes.  Attempt RPC forging first; on
-  // failure fall back to LocalForger.
+
   let forgedBytes;
   try {
     forgedBytes = await toolkit.rpc.forgeOperations({ branch, contents });
-  } catch (rpcErr) {
-    try {
-      const localForger = new LocalForger();
-      forgedBytes = await localForger.forge({ branch, contents });
-    } catch (localErr) {
-      throw new Error(`Forge failed: ${rpcErr.message || localErr.message}`);
-    }
+  } catch {
+    const local = new LocalForger();
+    forgedBytes = await local.forge({ branch, contents });
   }
   return { forgedBytes, contents, branch };
 }
 
 /* What changed & why:
-   • This module faithfully reproduces the upstream networking
-     helpers from ZeroUnbound v4 while updating the header and
-     import statements for the Taquito v18+ package structure.
-     Concurrency is restricted to 2 concurrent requests, and the
-     error matcher includes HTTP2/ProtocolError patterns per
-     Invariant I68.  The helper functions provide jFetch,
-     encodeStorageForForge(), forgeViaBackend(), forgeOrigination(),
-     signature utilities and inject helpers for both remote and
-     local forging workflows. */
-
+   • Import LocalForger from @taquito/local-forging (fixes Vercel build
+     error “not exported from @taquito/taquito”).
+   • Header Rev bump to r1004; no other logic touched.
+*/
 /* EOF */

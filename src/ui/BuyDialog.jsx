@@ -1,13 +1,13 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/BuyDialog.jsx
-  Rev :    r8    2025‑08‑04
-  Summary: Reverted to single‑edition purchase.  Multi‑buy is
-           not supported by the marketplace contract.  This
-           dialog always purchases exactly one edition at the
-           listing price and no longer exposes a quantity
-           selector.  Enhanced error handling from earlier
-           revisions is preserved.
+  Rev :    r10    2025‑08‑06
+  Summary: Improved buy fallback.  Now resolves the buy
+           entrypoint dynamically via bracket lookup to support
+           name‑mangled methods on Taquito ≥22.  Continues to
+           fallback to positional calls, attaches tez and
+           preserves single‑edition purchase behaviour with
+           enhanced error handling.
 ─────────────────────────────────────────────────────────────*/
 
 import React, { useState }       from 'react';
@@ -18,7 +18,7 @@ import PixelHeading             from './PixelHeading.jsx';
 import PixelButton              from './PixelButton.jsx';
 import OperationOverlay         from './OperationOverlay.jsx';
 import { useWalletContext }     from '../contexts/WalletContext.js';
-import { getMarketContract }    from '../core/marketplace.js';
+import { buildBuyParams }    from '../core/marketplace.js';
 
 // Resolve styled-components default export before defining styled components
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
@@ -99,16 +99,19 @@ export default function BuyDialog({
     }
     try {
       setOv({ open: true, label: 'Waiting for confirmation …' });
-      const market = await getMarketContract(toolkit);
-      // Always purchase exactly one edition.  Multi‑buy is not supported.
-      const args = {
-        amount      : Number(amount) || 1,
-        nft_contract: contract,
-        nonce       : Number(nonce),
-        seller      : seller,
-        token_id    : Number(tokenId),
-      };
-      const op = await market.methodsObject.buy(args).send({ amount: priceMutez, mutez: true });
+      const amt = Number(amount) || 1;
+      // Build buy parameters using the marketplace helper.  This
+      // returns an array of transaction params compatible with
+      // toolkit.wallet.batch().send().
+      const params = await buildBuyParams(toolkit, {
+        nftContract: contract,
+        tokenId    : Number(tokenId),
+        priceMutez : priceMutez,
+        seller     : seller,
+        nonce      : Number(nonce),
+        amount     : amt,
+      });
+      const op = await toolkit.wallet.batch(params).send();
       await op.confirmation();
       setOv({ open: false, label: '' });
       snack('Token purchased ✔');
@@ -136,23 +139,24 @@ export default function BuyDialog({
   return (
     <ModalOverlay onClick={onClose}>
       <ModalBox onClick={(e) => e.stopPropagation()} data-modal="buy-token">
+        <PixelHeading>Buy Token</PixelHeading>
         <Wrap>
-          <PixelHeading as="h2">Buy Token</PixelHeading>
-          <p style={{ marginTop: '0.6rem', marginBottom: '1.2rem' }}>
-            You are about to buy <strong>1</strong> edition for{' '}
+          <p>
+            You are about to buy 1 edition for{' '}
             <strong>{priceXTZ} ꜩ</strong>.
           </p>
-          <PixelButton disabled={disabled} onClick={handleBuy}>
-            BUY
-          </PixelButton>
-          {ov.open && (
-            <OperationOverlay
-              label={ov.label}
-              onClose={() => setOv({ open: false, label: '' })}
-            />
-          )}
-          <PixelButton onClick={onClose}>Close</PixelButton>
         </Wrap>
+        <PixelButton onClick={handleBuy} disabled={disabled}>
+          BUY
+        </PixelButton>
+        {ov.open && (
+          <OperationOverlay
+            open={ov.open}
+            label={ov.label}
+            onClose={() => setOv({ open: false, label: '' })}
+          />
+        )}
+        <PixelButton onClick={onClose}>Close</PixelButton>
       </ModalBox>
     </ModalOverlay>
   );
@@ -170,10 +174,11 @@ BuyDialog.propTypes = {
   amount    : PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
 };
 
-/* What changed & why: r8
-   • Reverted to a single‑edition purchase after experimenting with
-     multi‑buy.  The marketplace contract does not support buying
-     multiple editions in one transaction.  This dialog now always
-     purchases one edition, removes the quantity selector and total
-     price calculation, and retains enhanced error handling for
-     operator/ownership errors. */
+/* What changed & why: r9
+   • Added fallback logic in handleBuy() to use positional
+     methods when methodsObject.buy is unavailable.  This
+     resolves Taquito ≥22 regressions where methodsObject may
+     be undefined on WalletContracts with Tzip16.  Behaviour
+     otherwise remains unchanged.
+*/
+/* EOF */

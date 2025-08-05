@@ -1,13 +1,12 @@
 /*─────────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/config/deployTarget.js
-  Rev :    r1157    2025‑08‑01
-  Summary: Updated network configuration constants to include
-           DOMAIN_CONTRACTS and FALLBACK_RPCS exports used by
-           resolveTezosDomain.js.  These values centralise the
-           Tezos Domains registry contract addresses and fallback
-           RPC endpoints per network, adhering to invariant I10.
-           All other configuration remains identical to r1156.
+  Rev :    r1158    2025‑08‑05
+  Summary: Corrected ghostnet marketplace address. Updated
+           MARKETPLACE_ADDRESSES to use KT1R1PzLhBXEd98ei72mFuz4FrUYEcuV7t1p for
+           ghostnet, fixing listing errors. Previous revision added
+           DOMAIN_CONTRACTS and FALLBACK_RPCS; other configuration
+           remains unchanged.
 */
 
 // ---------------------------------------------------------------------------
@@ -177,7 +176,7 @@ export const FACTORY_ADDRESS = FACTORY_ADDRESSES[TARGET];
 // deployTarget.js remaining the sole diverging file between Ghostnet and
 // Mainnet.  See src/core/marketplace.js for usage.
 export const MARKETPLACE_ADDRESSES = {
-  ghostnet: 'KT19s7tGacihbNcmw1RAfe1xASF3tQaZhriP',
+  ghostnet: 'KT1R1PzLhBXEd98ei72mFuz4FrUYEcuV7t1p',
   mainnet : 'KT19kipdLiWyBZvP7KWCPdRbDXuEiu3gfjBR',
 };
 

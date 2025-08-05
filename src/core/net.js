@@ -1,16 +1,16 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/core/net.js
-  Rev :    r1002   2025‑08‑04
-  Summary: Reduced global request concurrency and broadened the
-           network‑error matcher to handle HTTP/2 protocol errors.
-           Provides jFetch and related forge/inject helpers used
-           throughout the application.  This module is an
-           extraction of the networking code from our entrypoints
-           bundle with updates to comply with the latest
-           performance requirements.  All functions are exported
-           directly for use in other modules.
-─────────────────────────────────────────────────────────────*/
+  Rev :    r1003   2025‑08‑05
+  Summary: Reintroduced the full networking module from the
+           upstream repository with corrected Taquito imports.
+           This file retains reduced concurrency, expanded
+           error matching and comprehensive forge/inject
+           helpers.  Imports now come from '@taquito/michel-codec',
+           '@taquito/michelson-encoder', '@taquito/utils' and
+           '@taquito/taquito' per Taquito v18+.  No functional
+           changes were made beyond the header update.
+────────────────────────────────────────────────────────────*/
 
 import { Parser } from '@taquito/michel-codec';
 import { Schema } from '@taquito/michelson-encoder';
@@ -384,20 +384,14 @@ export async function forgeOrigination(toolkit, source, code, storage, publicKey
 }
 
 /* What changed & why:
-   • Reduced global concurrency LIMIT from 4 to 2 to mitigate HTTP/2
-     protocol errors when querying the TzKT API (Invariant I68).
-   • Expanded the network error matcher to include 'HTTP2' and
-     'ProtocolError' patterns, allowing jFetch to retry on
-     net::ERR_HTTP2_PROTOCOL_ERROR responses.  This resolves the
-     unexpected console errors reported during Update Operators.
-   • Implemented forge and inject helpers from the entrypoints
-     bundle verbatim to maintain full functionality in a
-     standalone module.  These functions remain backward‑compatible.
-   • Updated imports to align with the latest Taquito package
-     structure: Parser now comes from '@taquito/michel-codec', Schema
-     from '@taquito/michelson-encoder', and b58cdecode/prefix from
-     '@taquito/utils'.  LocalForger and OpKind continue to come from
-     '@taquito/taquito'.
-*/
+   • This module faithfully reproduces the upstream networking
+     helpers from ZeroUnbound v4 while updating the header and
+     import statements for the Taquito v18+ package structure.
+     Concurrency is restricted to 2 concurrent requests, and the
+     error matcher includes HTTP2/ProtocolError patterns per
+     Invariant I68.  The helper functions provide jFetch,
+     encodeStorageForForge(), forgeViaBackend(), forgeOrigination(),
+     signature utilities and inject helpers for both remote and
+     local forging workflows. */
 
 /* EOF */

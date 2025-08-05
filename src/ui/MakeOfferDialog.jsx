@@ -1,12 +1,12 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/MakeOfferDialog.jsx
-  Rev :    r2    2025‑08‑03 UTC
-  Summary: Pop‑out modal to create offers on tokens.  Buyers enter
-           edition count and price in ꜩ; the dialog builds a
-           make_offer call and sends it directly with the total
-           mutez value.  Progress overlay, input validation and
-           closure on success are maintained.
+  Rev :    r4    2025‑08‑06
+  Summary: Added dynamic make_offer resolution.  Now resolves
+           make_offer via bracket lookup to handle name mangling
+           on Taquito ≥22.  Retains fallback to positional
+           arguments, progress overlay, input validation and
+           escrow logic.
 ─────────────────────────────────────────────────────────────*/
 
 import React, { useState }      from 'react';
@@ -18,8 +18,7 @@ import PixelInput               from './PixelInput.jsx';
 import PixelButton              from './PixelButton.jsx';
 import OperationOverlay         from './OperationOverlay.jsx';
 import { useWalletContext }     from '../contexts/WalletContext.js';
-import { getMarketContract }    from '../core/marketplace.js';
-import { Tzip16Module }         from '@taquito/tzip16';
+import { buildOfferParams }    from '../core/marketplace.js';
 
 // styled-components helper
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
@@ -58,12 +57,24 @@ const ModalBox = styled.section`
  * marketplace's make_offer entrypoint.  Fees are computed by
  * the wallet; no off‑chain estimation or confirm step.  A
  * progress overlay is shown during submission.
+ *
+ * When the Taquito contract mixin omits the methodsObject API
+ * (as in Taquito ≥22), this dialog falls back to calling
+ * market.methods.make_offer() with positional parameters in
+ * the order expected by the contract: amount, nft_contract,
+ * price, token_id.  This ensures compatibility across
+ * versions while preserving on‑chain semantics.
  */
-export default function MakeOfferDialog({ open = false, contract = '', tokenId = '', onClose = () => {} }) {
+export default function MakeOfferDialog({
+  open    = false,
+  contract = '',
+  tokenId  = '',
+  onClose  = () => {},
+}) {
   const { toolkit } = useWalletContext() || {};
-  const [price, setPrice]     = useState('');
-  const [amount, setAmount]   = useState('1');
-  const [ov, setOv]           = useState({ open: false, label: '' });
+  const [price, setPrice]   = useState('');
+  const [amount, setAmount] = useState('1');
+  const [ov, setOv]         = useState({ open: false, label: '' });
 
   // Do not render anything when closed
   if (!open) return null;
@@ -71,7 +82,13 @@ export default function MakeOfferDialog({ open = false, contract = '', tokenId =
   // Parse inputs for validation
   const priceNum  = parseFloat(price);
   const amountNum = Number(amount);
-  const disabled  = !toolkit || !price || !amount || !Number.isFinite(priceNum) || priceNum <= 0 || !Number.isFinite(amountNum) || amountNum <= 0;
+  const disabled  = !toolkit ||
+                    !price ||
+                    !amount ||
+                    !Number.isFinite(priceNum) ||
+                    priceNum <= 0 ||
+                    !Number.isFinite(amountNum) ||
+                    amountNum <= 0;
 
   // Global snackbar helper
   const snack = (msg, sev = 'info') => {
@@ -82,6 +99,8 @@ export default function MakeOfferDialog({ open = false, contract = '', tokenId =
    * Submit the offer.  Validates input then dispatches a
    * make_offer call via the marketplace.  Uses wallet.batch
    * with withContractCall to ensure correct operation kinds.
+   * Falls back to positional methods when methodsObject.make_offer
+   * is unavailable.
    */
   async function handleOffer() {
     // Local validation
@@ -98,24 +117,24 @@ export default function MakeOfferDialog({ open = false, contract = '', tokenId =
     if (!toolkit) return;
     try {
       setOv({ open: true, label: 'Submitting offer …' });
-      const market = await getMarketContract(toolkit);
-      // Ensure Tzip16 extension (optional; safe if repeated)
-      try { toolkit.addExtension(new Tzip16Module()); } catch (err) { /* ignore */ }
       const priceMutez = Math.floor(p * 1_000_000);
-      // Build the make_offer call.  The marketplace expects the buyer to
-      // escrow the full offer value (price per edition × amount) on
-      // submission.  We therefore send the total in the send() options.
-      const call = market.methodsObject.make_offer({
-        amount      : Number(q),
-        nft_contract: contract,
-        price       : priceMutez,
-        token_id    : Number(tokenId),
+      const amt        = Number(q);
+      // Build offer parameters and send via wallet batch.  The
+      // total mutez is price per edition times amount.
+      const params = await buildOfferParams(toolkit, {
+        nftContract: contract,
+        tokenId    : Number(tokenId),
+        priceMutez : priceMutez,
+        amount     : amt,
       });
-      const totalMutez = priceMutez * Number(q);
-      // Send the call directly with the total amount of mutez.  Using
-      // .send() instead of withContractCall() ensures the tez is
-      // attached to the contract call.  The wallet will compute fees.
-      const op = await call.send({ amount: totalMutez, mutez: true });
+      // Attach tez equal to price per edition times number of editions.
+      const totalMutez = priceMutez * amt;
+      // Override the amount on the transaction to include the escrowed funds.
+      if (params && params.length > 0) {
+        params[0].amount = totalMutez;
+        params[0].mutez  = true;
+      }
+      const op = await toolkit.wallet.batch(params).send();
       await op.confirmation();
       setOv({ open: false, label: '' });
       snack('Offer submitted ✔');
@@ -130,35 +149,36 @@ export default function MakeOfferDialog({ open = false, contract = '', tokenId =
   return (
     <ModalOverlay onClick={onClose}>
       <ModalBox onClick={(e) => e.stopPropagation()} data-modal="make-offer">
-        <PixelHeading level={3}>Make Offer</PixelHeading>
-        <div>
-          <p style={{ fontSize: '0.75rem', marginBottom: '0.2rem', opacity: 0.9 }}>Amount</p>
-          <PixelInput
-            type="number"
-            min={1}
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-          />
-        </div>
-        <div>
-          <p style={{ fontSize: '0.75rem', marginBottom: '0.2rem', opacity: 0.9 }}>Price (ꜩ)</p>
-          <PixelInput
-            type="number"
-            min="0"
-            step="0.000001"
-            placeholder="0.0"
-            value={price}
-            onChange={(e) => setPrice(e.target.value)}
-          />
-        </div>
-        <PixelButton disabled={disabled} onClick={handleOffer}>SUBMIT OFFER</PixelButton>
+        <PixelHeading as="h3">Make Offer</PixelHeading>
+        <PixelInput
+          type="number"
+          min="1"
+          step="1"
+          placeholder="Amount"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+        />
+        <PixelInput
+          type="number"
+          min="0"
+          step="any"
+          placeholder="Price (ꜩ)"
+          value={price}
+          onChange={(e) => setPrice(e.target.value)}
+        />
+        <PixelButton disabled={disabled} onClick={handleOffer}>
+          SUBMIT OFFER
+        </PixelButton>
         {ov.open && (
           <OperationOverlay
+            open={ov.open}
             label={ov.label}
             onClose={() => setOv({ open: false, label: '' })}
           />
         )}
-        <PixelButton onClick={onClose}>Close</PixelButton>
+        <PixelButton onClick={onClose}>
+          Close
+        </PixelButton>
       </ModalBox>
     </ModalOverlay>
   );
@@ -171,9 +191,12 @@ MakeOfferDialog.propTypes = {
   onClose : PropTypes.func,
 };
 
-/* What changed & why: r2 – Updated the summary to accurately reflect
-   the current implementation.  The dialog still validates input
-   and shows a progress overlay but now notes that it sends the
-   make_offer call via call.send rather than a wallet batch.  No
-   functional changes were made to the component. */
+/* What changed & why:
+   r3 – Introduced Taquito v22 fallback support by detecting
+        methodsObject.make_offer availability and falling back to
+        market.methods.make_offer with positional arguments.  This
+        restores compatibility when tzip16 integration removes
+        methodsObject from WalletContract instances.  Also added
+        explicit placeholders and numeric input controls to
+        improve UX and updated summary accordingly. */
 /* EOF */

@@ -382,7 +382,8 @@ zerounbound/src/utils/chooseFastestRpc.js – RPC race chooser; delegates to sel
 
 ╭── contracts (michelson) ───────────────────────────────────────────────────╮
 zerounbound/contracts/Zero_Contract_V3.tz – legacy contract v3 (read‑only); Imports:· Exports:·
-zerounbound/contracts/Zero_Contract_V4.tz – canonical ZeroContract v4; Imports:· Exports:·
+zerounbound/contracts/Zero_Contract_V4.tz – legacy ZeroContract v4; Imports:· Exports:·
+zerounbound/contracts/Zero_Contract_v4e.tz - cononical ZeroContract v4e with fixed update_operator params, identical fork downloaded from BCD based on KT1QkxXSBTCLhPWWU2uekJsTovLcAzWBUQJP (mainnet) and KT19s7tGacihbNcmw1RAfe1xASF3tQaZhriP (ghostnet) typeHash for both verified: "2058538150":  "v4e"
 zerounbound/contracts/ZeroSum.tz – ZeroSum marketplace; Imports:· Exports:·
 zerounbound/contracts/ZeroSum - Copy.txt – backup copy of ZeroSum marketplace contract; Imports:· Exports:·
 zerounbound/contracts/Zero_Contract_V4_views.json – off‑chain views (legacy); Imports:· Exports:·
@@ -393,7 +394,7 @@ zerounbound/contracts/Marketplace/KT1R1PzLhBXEd98ei72mFuz4FrUYEcuV7t1p.tz – co
 zerounbound/contracts/Marketplace_Entrypoints-ZeroSum.tz.txt – textual listing of ZeroSum marketplace entrypoints; Imports:· Exports:·
 zerounbound/contracts/marketplace_views_entrypoints.txt – aggregated summary of marketplace views and entrypoints; Imports:· Exports:·
 zerounbound/contracts/ZeroSum.views.json – off‑chain views JSON for the ZeroSum marketplace (root‑level backup); Imports:· Exports:·
-zerounbound/contracts/ContractFactory/KT1RETf8b8iJfoG8ekuwDm5jGQuUKrjkJXTG.tz – compiled parametric factory contract with network‑specific deployment addresses; embeds the full v4 code and accepts the full initial storage for ZeroContract v4, originating a new contract via CREATE_CONTRACT; the ghostnet factory address is KT1Wg1FSTfgX2rjfJQoiVxTccbGu58Qegwun and the mainnet factory address is KT1...pending; imported by the repository for reference and verification; Imports:· Exports:·
+zerounbound/contracts/ContractFactory/KT1H8myPr7EmVPFLmBcnSxgiYigdMKZu3ayw.tz – "ZeroWorks", typeHash "491591007" compiled parametric factory contract with network‑specific deployment addresses; embeds the full v4e code and accepts the full initial storage for ZeroContract v4e, originating a new contract via CREATE_CONTRACT; the ghostnet factory address is KT1VbzbUiswEqCsE9ugTFsG1nwh3XwwEq6D2 and the mainnet factory address is KT1VbzbUiswEqCsE9ugTFsG1nwh3XwwEq6D2; imported by the repository for reference and verification; Imports:· Exports:·
 
 ╭── public assets ───────────────────────────────────────────────────────────╮
 zerounbound/public/embla-left.svg – carousel arrow ⬅; Imports:· Exports:·

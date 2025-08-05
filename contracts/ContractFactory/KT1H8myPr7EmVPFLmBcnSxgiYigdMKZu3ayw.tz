@@ -98,14 +98,14 @@ code { UNPAIR ;
                                                                               (nat %amount))))))
                                            (list %update_operators (or
                                                                     (pair %add_operator
-                                                                      (address %operator)
+                                                                      (address %owner)
                                                                       (pair
-                                                                        (address %owner)
+                                                                        (address %operator)
                                                                         (nat %token_id)))
                                                                     (pair %remove_operator
-                                                                      (address %operator)
+                                                                      (address %owner)
                                                                       (pair
-                                                                        (address %owner)
+                                                                        (address %operator)
                                                                         (nat %token_id))))))))) ;
                          storage (pair
                                    (pair
@@ -2424,14 +2424,25 @@ code { UNPAIR ;
                                                 PAIR }
                                               { DUP ;
                                                 ITER { IF_LEFT
-                                                         { SENDER ;
-                                                           DUP 2 ;
-                                                           GET 3 ;
+                                                         { DUP 3 ;
+                                                           CAR ;
+                                                           CAR ;
+                                                           CAR ;
+                                                           CDR ;
+                                                           SENDER ;
                                                            COMPARE ;
                                                            EQ ;
                                                            IF
+                                                             { PUSH bool True }
+                                                             { DUP 3 ;
+                                                               CAR ;
+                                                               GET 3 ;
+                                                               CAR ;
+                                                               SENDER ;
+                                                               MEM } ;
+                                                           IF
                                                              {}
-                                                             { PUSH string "FA2_NOT_OWNER" ;
+                                                             { PUSH string "ZERO_NOT_AUTHORIZED_TO_ADD_OPERATOR" ;
                                                                FAILWITH } ;
                                                            DIG 2 ;
                                                            UNPAIR ;
@@ -2442,14 +2453,6 @@ code { UNPAIR ;
                                                            UNPAIR ;
                                                            PUSH (option unit) (Some Unit) ;
                                                            DIG 6 ;
-                                                           DUP ;
-                                                           GET 4 ;
-                                                           SWAP ;
-                                                           DUP ;
-                                                           CAR ;
-                                                           SWAP ;
-                                                           GET 3 ;
-                                                           PAIR 3 ;
                                                            UPDATE ;
                                                            PAIR ;
                                                            PAIR ;
@@ -2458,14 +2461,25 @@ code { UNPAIR ;
                                                            SWAP ;
                                                            PAIR ;
                                                            SWAP }
-                                                         { SENDER ;
-                                                           DUP 2 ;
-                                                           GET 3 ;
+                                                         { DUP 3 ;
+                                                           CAR ;
+                                                           CAR ;
+                                                           CAR ;
+                                                           CDR ;
+                                                           SENDER ;
                                                            COMPARE ;
                                                            EQ ;
                                                            IF
+                                                             { PUSH bool True }
+                                                             { DUP 3 ;
+                                                               CAR ;
+                                                               GET 3 ;
+                                                               CAR ;
+                                                               SENDER ;
+                                                               MEM } ;
+                                                           IF
                                                              {}
-                                                             { PUSH string "FA2_NOT_OWNER" ;
+                                                             { PUSH string "ZERO_NOT_AUTHORIZED_TO_REMOVE_OPERATOR" ;
                                                                FAILWITH } ;
                                                            DIG 2 ;
                                                            UNPAIR ;
@@ -2476,14 +2490,6 @@ code { UNPAIR ;
                                                            UNPAIR ;
                                                            NONE unit ;
                                                            DIG 6 ;
-                                                           DUP ;
-                                                           GET 4 ;
-                                                           SWAP ;
-                                                           DUP ;
-                                                           CAR ;
-                                                           SWAP ;
-                                                           GET 3 ;
-                                                           PAIR 3 ;
                                                            UPDATE ;
                                                            PAIR ;
                                                            PAIR ;

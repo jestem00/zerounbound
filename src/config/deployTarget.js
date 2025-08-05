@@ -152,12 +152,12 @@ export const ztTokenUrl     = (cid, tid) =>
   `${ZT_MINT_URL}&cid=${encodeURIComponent(cid)}&tid=${encodeURIComponent(tid)}`;
 
 // Factory contract addresses per network.  These addresses correspond to
-// factories deployed on 2025‑07‑29.  Ghostnet: KT1JmGrxfje1mEQ87Y6UH63iNf6nbMXUzRyU.
-// Mainnet: KT1Mvu1aBkKiYijNwJ2RZW49vCuzfzE2dQRt.  Both entries must be kept
+// factories deployed on 2025‑07‑29.  Ghostnet: KT1H8myPr7EmVPFLmBcnSxgiYigdMKZu3ayw.
+// Mainnet: KT1VbzbUiswEqCsE9ugTFsG1nwh3XwwEq6D2.  Both entries must be kept
 // identical across branches; deployTarget.js is the sole diverging file.
 export const FACTORY_ADDRESSES = {
-  ghostnet: 'KT1Wg1FSTfgX2rjfJQoiVxTccbGu58Qegwun',
-  mainnet:  'KT1RETf8b8iJfoG8ekuwDm5jGQuUKrjkJXTG',
+  ghostnet: 'KT1H8myPr7EmVPFLmBcnSxgiYigdMKZu3ayw',
+  mainnet:  'KT1VbzbUiswEqCsE9ugTFsG1nwh3XwwEq6D2',
 };
 
 // Selected factory address based on TARGET.  Use this constant to call
@@ -177,7 +177,7 @@ export const FACTORY_ADDRESS = FACTORY_ADDRESSES[TARGET];
 // deployTarget.js remaining the sole diverging file between Ghostnet and
 // Mainnet.  See src/core/marketplace.js for usage.
 export const MARKETPLACE_ADDRESSES = {
-  ghostnet: 'KT1R1PzLhBXEd98ei72mFuz4FrUYEcuV7t1p',
+  ghostnet: 'KT19s7tGacihbNcmw1RAfe1xASF3tQaZhriP',
   mainnet : 'KT19kipdLiWyBZvP7KWCPdRbDXuEiu3gfjBR',
 };
 

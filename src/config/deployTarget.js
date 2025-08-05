@@ -62,8 +62,8 @@ const nets = {
     ogImage:      'https://ghostnet.zerounbound.art/sprites/ghostnetBanner.png',
     startUrl:     '/?source=pwa-ghostnet',
     rpc: [
-      'https://rpc.ghostnet.teztnets.com',
       'https://ghostnet.ecadinfra.com',
+      'https://rpc.ghostnet.teztnets.com',
     ],
     tzkt:         'https://api.ghostnet.tzkt.io',
     redirects: [

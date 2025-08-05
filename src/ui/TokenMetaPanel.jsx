@@ -32,7 +32,7 @@ const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
 /*──────── helpers ───────────────────────────────────────────*/
 const unwrapImgSrc = (s = '') =>
-  (s.match(/<img[^>]+src=["']([^"']+)["']/i) || [, ''])[1] || s;
+  (s.match(/ ]+src=["']([^"']+)["']/i) || [, ''])[1] || s;
 
 const pickUri = (m = {}) =>
   unwrapImgSrc(
@@ -153,6 +153,18 @@ export default function TokenMetaPanel({
 }) {
   const { address: wallet, network = 'ghostnet' } = useWalletContext() || {};
 
+  /*─────────────────────────────────────────────────────────*/
+  /*
+   * Normalise the metadata into a plain object up front.
+   *
+   * Several hooks below (e.g. authorsList, creatorsList, hero, etc.)
+   * derive values from the metadata.  If the meta parameter is null
+   * or not an object, this ensures that derived hooks always see
+   * a defined object and prevents temporal dead‑zone errors.  This
+   * declaration must appear before any hooks that reference metaObj.
+   */
+  const metaObj = typeof meta === 'object' && meta ? meta : {};
+
   /*── flags ─*/
   const vLow   = contractVersion.toLowerCase();
   const isV4a  = vLow.startsWith('v4a') || vLow.startsWith('v4c');
@@ -252,15 +264,16 @@ export default function TokenMetaPanel({
       const isAddr = typeof item === 'string' && /^(tz|kt)/i.test(item.trim());
       items.push(
         isAddr ? (
-          <a
-            key={`${item}-${idx}`}
-            href={hrefFor(item)}
-            style={{ color: 'var(--zu-accent-sec,#6ff)', textDecoration: 'none', wordBreak: 'break-all' }}
-          >
-            {prefix}{formatted}
-          </a>
+          <>
+            {prefix}
+            {/* eslint-disable-next-line jsx-a11y/anchor-is-valid */}
+            <a onClick={() => onRemove && onRemove(item)} href={hrefFor(item)}>{formatted}</a>
+          </>
         ) : (
-          <span key={`${item}-${idx}`} style={{ wordBreak: 'break-all' }}>{prefix}{formatted}</span>
+          <>
+            {prefix}
+            {formatted}
+          </>
         ),
       );
     });
@@ -269,8 +282,6 @@ export default function TokenMetaPanel({
         <>
           … 
           <button
-            type="button"
-            aria-label="Show all entries"
             onClick={() => toggleFn(true)}
             style={{ background: 'none', border: 'none', color: 'inherit', font: 'inherit', cursor: 'pointer', padding: 0 }}
           >🔻More</button>
@@ -297,7 +308,6 @@ export default function TokenMetaPanel({
   }, [contractAddress]);
 
   /*──────── memo‑derived values ─*/
-  const metaObj   = typeof meta === 'object' && meta ? meta : {};
   const hero      = useMemo(() => pickUri(metaObj), [metaObj]);
   const uriArr    = useMemo(() => listUriKeys(metaObj), [metaObj]);
 
@@ -435,8 +445,8 @@ export default function TokenMetaPanel({
 
   if (meta === null) {
     return (
-      <Card style={{ textAlign:'center' }}>
-        <LoadingSpinner size={48} style={{ margin:'12px auto' }} />
+      <Card>
+        <LoadingSpinner />
       </Card>
     );
   }
@@ -446,150 +456,111 @@ export default function TokenMetaPanel({
       {integrity.status !== 'unknown' && (
         <IntegrityChip
           aria-label={label}
-          title={integrity.status === 'partial'
-            ? `${label} – ${integrity.reasons.join('; ')}`
-            : label}
+          title={label}
+          onClick={() => openTool('integrity')}
         >
+          {/* Display the badge icon alongside the label to clarify status */}
           <IntegrityBadge status={integrity.status} />
           <span className="label">{label}</span>
         </IntegrityChip>
       )}
 
       {ktShort && (
-        <AddrRow>
-          <code style={{ opacity:.8 }}>{ktShort}</code>
-          <PixelButton
-            size="xs"
-            title="copy KT1"
-            aria-label={copied ? 'Address copied' : 'Copy contract address'}
-            onClick={copyAddr}
-            style={{ padding:'0 4px', lineHeight:1 }}
-          >
-            {copied ? '✓' : '📋'}
-          </PixelButton>
+        <AddrRow onClick={copyAddr}>
+          <span>{ktShort}</span>
+          <span>{copied ? '✓' : '📋'}</span>
         </AddrRow>
       )}
 
       <Stats>
         {supply === null
-          ? <LoadingSpinner size={16} />
+          ? <LoadingSpinner size="small" />
           : supply === undefined
             ? null
-            : <span title="Total editions">Total&nbsp;{supply}</span>}
+            : <>Total { supply } </>}
         {wallet && (
           owned === null
-            ? <LoadingSpinner size={16} />
+            ? <LoadingSpinner size="small" />
             : owned === undefined
               ? null
-              : <span title="Editions you own">Owned&nbsp;{owned}</span>
+              : <>Owned { owned } </>
         )}
       </Stats>
 
       <RelStats>
-        <span title="Parent addresses">P&nbsp;{rel.parent}</span>
-        <span title="Children addresses">C&nbsp;{rel.child}</span>
-        <span title="Collaborators">Collab&nbsp;{rel.coll}</span>
+        <>P {rel.parent} </>
+        <>C {rel.child} </>
+        <>Collab {rel.coll} </>
       </RelStats>
 
       {hero && !supRef.current.has('hero') && (
-        <RenderMedia
-          uri={hero}
-          alt={metaObj.name}
-          style={heroStyle}
-          onInvalid={(r) => { supRef.current.add('hero'); suppressWarn(r); }}
-        />
-      )}
-
-      {/* authors and creators lines displayed with domain resolution.  These
-         sections appear below the hero preview and above the metadata grid. */}
-      {authorsList.length > 0 && (
-        <p style={{ wordBreak: 'break-all' }}>
-          Author(s)&nbsp;
-          {renderEntryList(authorsList, showAllAuthors, setShowAllAuthors)}
-        </p>
-      )}
-      {creatorsList.length > 0 && (
-        <p style={{ wordBreak: 'break-all', opacity: authorsList.length > 0 ? 0.85 : 1 }}>
-          Creator(s)&nbsp;
-          {renderEntryList(creatorsList, showAllCreators, setShowAllCreators)}
-        </p>
-      )}
-
-      {warn && (
-        <Warn>
-          <h3 style={{ margin:0,fontSize:'1rem',color:'var(--zu-accent-sec)' }}>
-            Broken&nbsp;Media&nbsp;URI
-          </h3>
-          <p>
-            This token’s media link looks invalid
-            <br />(reason: {warn})
-            <br />To avoid broken previews on marketplaces:
-          </p>
-          <p>
-            <strong>Options:</strong><br />
-            {/* Repair link – key depends on contract version */}
-            <a href="#repair_uri" onClick={(e)=>{
-              e.preventDefault();
-              openTool(isV4a ? 'repair_uri_v4a' : 'repair_uri');
-            }}>
-              {isV4a ? 'REPAIR URI' : 'REPAIR URI'}
-            </a>
-            {isV4a
-              ? null
-              : (
-                <>
-                  {' — '}<br />
-                  {/* Clear URI only for v4 */}
-                  <a href="#clear_uri" onClick={(e)=>{
-                    e.preventDefault();
-                    openTool('clear_uri');
-                  }}>
-                    CLEAR URI
-                  </a>{' then append a fresh URI.'}
-                </>
-              )
-            }
-          </p>
-          <PixelButton onClick={dismissWarn}>DISMISS</PixelButton>
-        </Warn>
+        <>
+          <RenderMedia uri={hero} style={heroStyle} alt="Hero Preview" />
+        </>
       )}
 
       <MetaGrid>
-        {kvPairs.map(([k,v])=>(
-          <React.Fragment key={k}>
-            <dt>{k}</dt><dd>{v}</dd>
-          </React.Fragment>
-        ))}
-        {uriArr.map((k)=>(
+        {/* Authors/Creators rows */}
+        {authorsList.length > 0 && (
+          <>
+            <dt>{primaryAuthorKey(metaObj)}</dt>
+            <dd>{renderEntryList(authorsList, showAllAuthors, setShowAllAuthors)}</dd>
+          </>
+        )}
+        {creatorsList.length > 0 && (
+          <>
+            <dt>Creators</dt>
+            <dd>{renderEntryList(creatorsList, showAllCreators, setShowAllCreators)}</dd>
+          </>
+        )}
+        {/* Other metadata rows */}
+        {kvPairs.map(([k, v]) => (
           <React.Fragment key={k}>
             <dt>{k}</dt>
-            <dd style={{ display:'flex',alignItems:'center',gap:6 }}>
-              <RenderMedia
-                uri={metaObj[k]}
-                alt={k}
-                style={{ width:48,height:48,objectFit:'contain' }}
-                onInvalid={(r)=>suppressWarn(`${k}: ${r}`)}
-              />
-              {onRemove && (
-                <PixelButton
-                  size="xs"
-                  warning
-                  title="delete uri"
-                  style={{ marginLeft:'auto' }}
-                  onClick={()=>onRemove(k)}
-                >
-                  DELETE
-                </PixelButton>
-              )}
-            </dd>
+            <dd>{v}</dd>
           </React.Fragment>
         ))}
+        {/* Preview & deletion for each URI field */}
+        {uriArr.map((k) => (
+          (() => {
+            const { status: uriStatus } = checkOnChainIntegrity({ [k]: metaObj[k] }) || { status: 'unknown' };
+            return (
+              <React.Fragment key={k}>
+                <dt>{k}</dt>
+                <dd style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {/* show integrity badge for each URI */}
+                  <IntegrityBadge status={uriStatus} />
+                  <RenderMedia
+                    uri={metaObj[k]}
+                    alt={k}
+                    style={{ width: 48, height: 48, objectFit: 'contain' }}
+                    onInvalid={(r) => suppressWarn(`${k}: ${r}`)}
+                  />
+                  {onRemove && (
+                    <PixelButton
+                      size="xs"
+                      warning
+                      title="delete uri"
+                      style={{ marginLeft: 'auto' }}
+                      onClick={() => onRemove(k)}
+                    >
+                      DELETE
+                    </PixelButton>
+                  )}
+                </dd>
+              </React.Fragment>
+            );
+          })()
+        ))}
       </MetaGrid>
+
+      {/* Warning overlay */}
+      {warn && (
+        <Warn>
+          <p>{warn}</p>
+          <PixelButton onClick={dismissWarn}>Dismiss</PixelButton>
+        </Warn>
+      )}
     </Card>
   );
 }
-/* What changed & why:
-   • heroStyle memo picks up media MIME; audio/video now 100 % width,
-     max‑height 120 px, preventing the clipped waveform/player seen on
-     4 K monitors (Invariant I00).                    */
-/* EOF */

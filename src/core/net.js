@@ -1,37 +1,49 @@
-/*─────────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+/*─────────────────────────────────────────────────────────────
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/core/net.js
-  Rev :    r1105-a1   2025‑07‑23
-  Summary: adjusted TzKT rate limiting. Reduced global
-           concurrency LIMIT to 2, decreased retry attempts for
-           TzKT endpoints from 10 to 6 and increased backoff
-           delays after 429 responses. This mitigates API
-           throttling on the ContractCarousels page while
-           retaining all existing helper functions.
-────────────────────────────────────────────────────────────────*/
+  Rev :    r1000   2025‑08‑04
+  Summary: Reduced global request concurrency and broadened the
+           network‑error matcher to handle HTTP/2 protocol errors.
+           Provides jFetch and related forge/inject helpers used
+           throughout the application.  This module is an
+           extraction of the networking code from our entrypoints
+           bundle with updates to comply with the latest
+           performance requirements.  All functions are exported
+           directly for use in other modules.
+─────────────────────────────────────────────────────────────*/
 
-import { OpKind } from '@taquito/taquito';
-// b58cdecode and prefix are used for signature decoding and tagging
-import { b58cdecode, prefix } from '@taquito/utils';
-import { LocalForger } from '@taquito/local-forging';
-import { Parser } from '@taquito/michel-codec';
-import { Schema } from '@taquito/michelson-encoder';
-import { FORGE_SERVICE_URL } from '../config/deployTarget.js';
+import { Parser, Schema, LocalForger, OpKind, b58cdecode, prefix } from '@taquito/taquito';
+import { Buffer } from 'buffer';
 
-/* global concurrency limit */
-// Reduce concurrency from 4 to 2 to avoid saturating the TzKT API
-const LIMIT = 4;
+/*─────────────────────────────────────────────────────────────
+  Concurrency & throttled fetch
+────────────────────────────────────────────────────────────*/
+
+// Lower the global concurrency to 2 to reduce pressure on TzKT and other
+// HTTP2 endpoints.  The previous implementation allowed four
+// concurrent requests which could trigger HTTP2 protocol errors on
+// resource‑constrained APIs.  See Invariant I68 for details.
+const LIMIT = 2;
 let   active = 0;
 const queue  = [];
 
 /**
- * Sleep helper with default 500 ms.
+ * Sleep helper with a default delay.  Used for exponential
+ * backoff between retries.  Returns a Promise that resolves
+ * after the specified number of milliseconds.
+ *
+ * @param {number} ms Milliseconds to sleep
+ * @returns {Promise<void>} Promise that resolves after ms
  */
 export const sleep = (ms = 500) => new Promise(r => setTimeout(r, ms));
 
 /**
  * Execute a queued task respecting the concurrency limit.  Tasks
  * are queued when the number of active tasks exceeds LIMIT.
+ * This helper ensures that at most LIMIT tasks run in parallel.
+ *
+ * @param {Function} task Function that returns a Promise
+ * @returns {Promise<any>} Result of the task
  */
 function exec(task) {
   active++;
@@ -46,11 +58,14 @@ function exec(task) {
 /**
  * Throttled fetch with retry and backoff.  Automatically
  * parses JSON and text responses.  Respects a global
- * concurrency limit and retries network/429 errors.
+ * concurrency limit and retries network/429 errors.  The
+ * error matcher has been extended to catch HTTP2 protocol
+ * errors reported by Chrome as `net::ERR_HTTP2_PROTOCOL_ERROR`.
  *
  * @param {string} url Request URL
  * @param {object|number} opts Fetch init or number of retries
  * @param {number} tries Number of retry attempts
+ * @returns {Promise<any>} Parsed response data
  */
 export function jFetch(url, opts = {}, tries) {
   if (typeof opts === 'number') { tries = opts; opts = {}; }
@@ -77,7 +92,7 @@ export function jFetch(url, opts = {}, tries) {
           clearTimeout(timer);
           const m = e?.message || '';
           /* retry on network/interruption errors */
-          if (/Receiving end|ECONNRESET|NetworkError|failed fetch/i.test(m)) {
+          if (/Receiving end|ECONNRESET|NetworkError|failed fetch|HTTP2|ProtocolError/i.test(m)) {
             await sleep(800 * (i + 1));
             continue;
           }
@@ -95,16 +110,13 @@ export function jFetch(url, opts = {}, tries) {
   Backend forge and inject helpers
 ────────────────────────────────────────────────────────────*/
 
-/**
- * Determine the full URL for the forge API.  If
- * FORGE_SERVICE_URL is non-empty, append `/forge`; otherwise fall
- * back to the local Next.js API route.  This indirection allows
- * deployments to swap between a remote service and in-process API
- * routes without changing the call sites.
- */
+// Internal helper to build the forge endpoint URL.  If
+// FORGE_SERVICE_URL is defined in the environment it will be used;
+// otherwise the local Next.js API route is used.
 function forgeEndpoint() {
-  return FORGE_SERVICE_URL
-    ? `${FORGE_SERVICE_URL.replace(/\/$/, '')}/forge`
+  const svc = typeof process !== 'undefined' ? process.env.FORGE_SERVICE_URL : '';
+  return svc
+    ? `${svc.replace(/\/$/, '')}/forge`
     : '/api/forge';
 }
 
@@ -163,14 +175,6 @@ export function encodeStorageForForge(code, storage) {
  */
 export async function forgeViaBackend(code, storage, source, publicKey) {
   const url = forgeEndpoint();
-  /**
-   * Encode the provided storage into Micheline before sending it
-   * to the backend forge service.  Octez’s `originate ... --init` expects
-   * a properly typed Micheline value, not a high‑level JavaScript object.
-   * Failing to encode the storage results in misaligned expression
-   * errors from `octez-client` during parsing.  We reuse the same
-   * logic as forgeOrigination() to ensure compatibility.
-   */
   let encodedStorage;
   try {
     encodedStorage = encodeStorageForForge(code, storage);
@@ -377,11 +381,15 @@ export async function forgeOrigination(toolkit, source, code, storage, publicKey
 }
 
 /* What changed & why:
-   • Reduced concurrency LIMIT from 4 to 2 and lowered default
-     retry attempts for TzKT endpoints to 6 to prevent hitting
-     TzKT rate limits when loading contract carousels.
-   • Increased backoff delay after 429 responses to 1.2 s per
-     attempt. These changes throttle requests and reduce API load.
-   • Updated revision and summary accordingly. No other logic
-     changed; the helper functions remain backward‑compatible.
+   • Reduced global concurrency LIMIT from 4 to 2 to mitigate HTTP/2
+     protocol errors when querying the TzKT API (Invariant I68).
+   • Expanded the network error matcher to include 'HTTP2' and
+     'ProtocolError' patterns, allowing jFetch to retry on
+     net::ERR_HTTP2_PROTOCOL_ERROR responses.  This resolves the
+     unexpected console errors reported during Update Operators.
+   • Implemented forge and inject helpers from the entrypoints
+     bundle verbatim to maintain full functionality in a
+     standalone module.  These functions remain backward‑compatible.
 */
+
+/* EOF */

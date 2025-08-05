@@ -1,7 +1,7 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/core/net.js
-  Rev :    r1000   2025‑08‑04
+  Rev :    r1002   2025‑08‑04
   Summary: Reduced global request concurrency and broadened the
            network‑error matcher to handle HTTP/2 protocol errors.
            Provides jFetch and related forge/inject helpers used
@@ -12,7 +12,10 @@
            directly for use in other modules.
 ─────────────────────────────────────────────────────────────*/
 
-import { Parser, Schema, LocalForger, OpKind, b58cdecode, prefix } from '@taquito/taquito';
+import { Parser } from '@taquito/michel-codec';
+import { Schema } from '@taquito/michelson-encoder';
+import { LocalForger, OpKind } from '@taquito/taquito';
+import { b58cdecode, prefix } from '@taquito/utils';
 import { Buffer } from 'buffer';
 
 /*─────────────────────────────────────────────────────────────
@@ -390,6 +393,11 @@ export async function forgeOrigination(toolkit, source, code, storage, publicKey
    • Implemented forge and inject helpers from the entrypoints
      bundle verbatim to maintain full functionality in a
      standalone module.  These functions remain backward‑compatible.
+   • Updated imports to align with the latest Taquito package
+     structure: Parser now comes from '@taquito/michel-codec', Schema
+     from '@taquito/michelson-encoder', and b58cdecode/prefix from
+     '@taquito/utils'.  LocalForger and OpKind continue to come from
+     '@taquito/taquito'.
 */
 
 /* EOF */

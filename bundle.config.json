@@ -78,6 +78,7 @@
         "src/utils/formatAddress.js",
         "src/utils/hazards.js",
         "src/utils/marketplaceListings.js",
+        "src/utils/getLedgerBalanceV2a.cjs",
         "src/utils/resolveTezosDomain.js",
         "src/utils/onChainValidator.js",
         "src/utils/listLiveTokenIds.js",

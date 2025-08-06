@@ -354,21 +354,7 @@ export default function ListTokenDialog({
       const dec      = await getDec(idNum);
       const qtyUnits = dec > 0 ? qEditions * 10 ** dec : qEditions;
 
-      try {
-        await updateAndList(idNum, qtyUnits);
-      } catch {
-        try {
-          const alt = idNum - 1;
-          const decAlt = await getDec(alt);
-          const altQty = decAlt > 0 ? qEditions * 10 ** decAlt : qEditions;
-          await updateAndList(alt, altQty);
-        } catch {
-          const alt2 = idNum + 1;
-          const decAlt2 = await getDec(alt2);
-          const altQty2 = decAlt2 > 0 ? qEditions * 10 ** decAlt2 : qEditions;
-          await updateAndList(alt2, altQty2);
-        }
-      }
+      await updateAndList(idNum, qtyUnits);
 
       setOv({ open: false, label: '' });
       snack('Listing created ✔', 'info'); onClose();

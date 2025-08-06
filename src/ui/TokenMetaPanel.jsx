@@ -227,7 +227,12 @@ export default function TokenMetaPanel({
   /* Render a comma-separated list of entries with an optional More toggle.
    * Each element is wrapped in a React.Fragment with a unique key. */
   const renderEntryList = useCallback((list, showAll, toggleFn) => {
-    const display = showAll ? list : list.slice(0, 3);
+    const arr = Array.isArray(list)
+      ? list
+      : list != null
+        ? [list]
+        : [];
+    const display = showAll ? arr : arr.slice(0, 3);
     const items = [];
     display.forEach((item, idx) => {
       const prefix = idx > 0 ? ', ' : '';
@@ -249,7 +254,7 @@ export default function TokenMetaPanel({
         ),
       );
     });
-    if (list.length > 3 && !showAll) {
+    if (arr.length > 3 && !showAll) {
       items.push(
         <React.Fragment key="more-button">
           … 

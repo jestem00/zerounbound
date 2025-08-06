@@ -1,0 +1,14 @@
+storage pair
+admin address
+ledger big_map(nat, address)
+metadata big_map(string, bytes)
+next_token_id nat
+operators big_map($operators_key, unit)
+token_metadata big_map(nat, $token_metadata_value)
+operators_key pair
+owner address
+operator address
+token_id nat
+token_metadata_value pair
+token_id nat
+token_info map(string, bytes)

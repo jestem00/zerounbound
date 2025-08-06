@@ -1,0 +1,75 @@
+Contract entrypoints
+0.
+balance_of(list<object> requests, contract callback)
+Json schema:
+"schema:object": {
+    "requests:list:object": [
+        {
+            "owner:address": "address",
+            "token_id:nat": "nat"
+        }
+    ],
+    "callback:contract": "contract"
+}
+Michelson type:
+(pair %balance_of (list %requests (pair (address %owner) (nat %token_id)))
+                  (contract %callback (list (pair (pair %request (address %owner) (nat %token_id))
+                                                (nat %balance)))))
+1.
+burn(nat)
+Json schema:
+"schema:nat": "nat"
+Michelson type:
+(nat %burn)
+2.
+mint(map<string, bytes> metadata, address to_)
+Json schema:
+"schema:object": {
+    "metadata:map_flat:string:bytes": {
+        "string": "bytes"
+    },
+    "to_:address": "address"
+}
+Michelson type:
+(pair %mint (map %metadata string bytes) (address %to_))
+3.
+transfer(list<object>)
+Json schema:
+"schema:list:object": [
+    {
+        "from_:address": "address",
+        "txs:list:object": [
+            {
+                "to_:address": "address",
+                "token_id:nat": "nat",
+                "amount:nat": "nat"
+            }
+        ]
+    }
+]
+Michelson type:
+(list %transfer (pair (address %from_)
+                     (list %txs (pair (address %to_) (pair (nat %token_id) (nat %amount))))))
+4.
+update_operators(list<or>)
+Json schema:
+"schema:list:or": [
+    {
+        "add_operator:object": {
+            "owner:address": "address",
+            "operator:address": "address",
+            "token_id:nat": "nat"
+        },
+        "remove_operator:object": {
+            "owner:address": "address",
+            "operator:address": "address",
+            "token_id:nat": "nat"
+        }
+    }
+]
+Michelson type:
+(list %update_operators (or
+                         (pair %add_operator (address %owner)
+                                             (pair (address %operator) (nat %token_id)))
+                         (pair %remove_operator (address %owner)
+                                                (pair (address %operator) (nat %token_id)))))

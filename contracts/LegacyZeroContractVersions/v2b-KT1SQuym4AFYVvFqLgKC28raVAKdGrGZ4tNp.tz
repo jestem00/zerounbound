@@ -1,0 +1,395 @@
+parameter (or
+            (or (or (address %add_child) (address %add_parent))
+                (or
+                  (pair %balance_of
+                    (list %requests (pair (address %owner) (nat %token_id)))
+                    (contract %callback (list (pair
+                                              (pair %request (address %owner)
+                                                             (nat %token_id))
+                                              (nat %balance)))))
+                  (nat %burn)))
+            (or
+              (or (pair %mint (map %metadata string bytes) (address %to_))
+                  (address %remove_child))
+              (or (address %remove_parent)
+                  (or
+                    (list %transfer (pair (address %from_)
+                                         (list %txs (pair (address %to_)
+                                                         (pair (nat %token_id)
+                                                               (nat %amount))))))
+                    (list %update_operators (or
+                                             (pair %add_operator (address %owner)
+                                                                 (pair
+                                                                   (address %operator)
+                                                                   (nat %token_id)))
+                                             (pair %remove_operator (address %owner)
+                                                                    (pair
+                                                                      (address %operator)
+                                                                      (nat %token_id)))))))));
+storage (pair
+          (pair (pair (address %admin) (set %children address))
+                (pair (big_map %ledger nat address) (big_map %metadata string bytes)))
+          (pair
+            (pair (nat %next_token_id)
+                  (big_map %operators
+                    (pair (address %owner) (pair (address %operator) (nat %token_id)))
+                    unit))
+            (pair (set %parents address)
+                  (big_map %token_metadata nat
+                                           (pair (nat %token_id)
+                                                 (map %token_info string bytes))))));
+code { UNPAIR ;
+       IF_LEFT
+         { IF_LEFT
+             { IF_LEFT
+                 { DUP 2 ;
+                   CAR ;
+                   CAR ;
+                   CAR ;
+                   SENDER ;
+                   COMPARE ;
+                   EQ ;
+                   IF
+                     {}
+                     { PUSH string "Only the contract owner can add children" ; FAILWITH } ;
+                   SWAP ;
+                   UNPAIR ;
+                   UNPAIR ;
+                   UNPAIR ;
+                   SWAP ;
+                   PUSH bool True ;
+                   DIG 5 ;
+                   UPDATE ;
+                   SWAP ;
+                   PAIR ;
+                   PAIR ;
+                   PAIR }
+                 { DUP 2 ;
+                   CAR ;
+                   CAR ;
+                   CAR ;
+                   SENDER ;
+                   COMPARE ;
+                   EQ ;
+                   IF
+                     {}
+                     { PUSH string "Only the contract owner can add parents" ; FAILWITH } ;
+                   SWAP ;
+                   DUP ;
+                   GET 5 ;
+                   PUSH bool True ;
+                   DIG 3 ;
+                   UPDATE ;
+                   UPDATE 5 } ;
+               NIL operation }
+             { IF_LEFT
+                 { NIL operation ;
+                   DUP ;
+                   DUP 3 ;
+                   CDR ;
+                   PUSH mutez 0 ;
+                   DUP 5 ;
+                   CAR ;
+                   MAP { DUP 7 ;
+                         GET 3 ;
+                         CAR ;
+                         DUP 2 ;
+                         CDR ;
+                         COMPARE ;
+                         LT ;
+                         IF
+                           {}
+                           { PUSH string "This Token has Undefined Balance" ; FAILWITH } ;
+                         DUP ;
+                         CAR ;
+                         DUP 8 ;
+                         CAR ;
+                         GET 3 ;
+                         DUP 3 ;
+                         CDR ;
+                         GET ;
+                         IF_NONE { PUSH int 152 ; FAILWITH } {} ;
+                         COMPARE ;
+                         EQ ;
+                         IF { PUSH nat 1 } { PUSH nat 0 } ;
+                         SWAP ;
+                         PAIR } ;
+                   DIG 4 ;
+                   DROP ;
+                   DIG 4 ;
+                   DROP ;
+                   TRANSFER_TOKENS ;
+                   CONS }
+                 { DUP 2 ;
+                   GET 3 ;
+                   CAR ;
+                   DUP 2 ;
+                   COMPARE ;
+                   LT ;
+                   IF
+                     {}
+                     { PUSH string "Non-existand Token cannot be Burnt" ; FAILWITH } ;
+                   SENDER ;
+                   DUP 3 ;
+                   CAR ;
+                   GET 3 ;
+                   DUP 3 ;
+                   GET ;
+                   IF_NONE { PUSH int 186 ; FAILWITH } {} ;
+                   COMPARE ;
+                   EQ ;
+                   IF
+                     {}
+                     { PUSH string "You are not the Owner and cannot Burn this Token" ;
+                       FAILWITH } ;
+                   SWAP ;
+                   UNPAIR ;
+                   UNPAIR ;
+                   SWAP ;
+                   UNPAIR ;
+                   NONE address ;
+                   DUP 6 ;
+                   UPDATE ;
+                   PAIR ;
+                   SWAP ;
+                   PAIR ;
+                   PAIR ;
+                   DUP ;
+                   GET 6 ;
+                   NONE (pair nat (map string bytes)) ;
+                   DIG 3 ;
+                   UPDATE ;
+                   UPDATE 6 ;
+                   NIL operation } } }
+         { IF_LEFT
+             { IF_LEFT
+                 { PUSH address "tz1YYJMS1a3JJJs6SRREhZkCMLGuNYuB1YsL" ;
+                   SENDER ;
+                   COMPARE ;
+                   EQ ;
+                   IF
+                     {}
+                     { PUSH string "Only the Collector Owner can Mint Tokens" ; FAILWITH } ;
+                   DUP 2 ;
+                   GET 3 ;
+                   CAR ;
+                   DIG 2 ;
+                   DUP ;
+                   GET 6 ;
+                   DUP 4 ;
+                   CAR ;
+                   DUP 4 ;
+                   PAIR ;
+                   SOME ;
+                   DUP 4 ;
+                   UPDATE ;
+                   UPDATE 6 ;
+                   UNPAIR ;
+                   UNPAIR ;
+                   SWAP ;
+                   UNPAIR ;
+                   DIG 5 ;
+                   CDR ;
+                   SOME ;
+                   DIG 5 ;
+                   UPDATE ;
+                   PAIR ;
+                   SWAP ;
+                   PAIR ;
+                   SWAP ;
+                   UNPAIR ;
+                   UNPAIR ;
+                   PUSH nat 1 ;
+                   ADD ;
+                   PAIR ;
+                   PAIR ;
+                   SWAP ;
+                   PAIR }
+                 { DUP 2 ;
+                   CAR ;
+                   CAR ;
+                   CAR ;
+                   SENDER ;
+                   COMPARE ;
+                   EQ ;
+                   IF
+                     {}
+                     { PUSH string "Only the contract owner can remove children" ;
+                       FAILWITH } ;
+                   SWAP ;
+                   UNPAIR ;
+                   UNPAIR ;
+                   UNPAIR ;
+                   SWAP ;
+                   PUSH bool False ;
+                   DIG 5 ;
+                   UPDATE ;
+                   SWAP ;
+                   PAIR ;
+                   PAIR ;
+                   PAIR } }
+             { IF_LEFT
+                 { DUP 2 ;
+                   CAR ;
+                   CAR ;
+                   CAR ;
+                   SENDER ;
+                   COMPARE ;
+                   EQ ;
+                   IF
+                     {}
+                     { PUSH string "Only the contract owner can remove parents" ;
+                       FAILWITH } ;
+                   SWAP ;
+                   DUP ;
+                   GET 5 ;
+                   PUSH bool False ;
+                   DIG 3 ;
+                   UPDATE ;
+                   UPDATE 5 }
+                 { IF_LEFT
+                     { DUP ;
+                       ITER { DUP ;
+                              CDR ;
+                              ITER { DUP 4 ;
+                                     GET 3 ;
+                                     CAR ;
+                                     DUP 2 ;
+                                     GET 3 ;
+                                     COMPARE ;
+                                     LT ;
+                                     IF
+                                       {}
+                                       { PUSH string "This Token is Undefined for Transfer" ;
+                                         FAILWITH } ;
+                                     SENDER ;
+                                     DUP 3 ;
+                                     CAR ;
+                                     COMPARE ;
+                                     EQ ;
+                                     IF
+                                       { PUSH bool True }
+                                       { DUP 4 ;
+                                         GET 3 ;
+                                         CDR ;
+                                         DUP 2 ;
+                                         GET 3 ;
+                                         SENDER ;
+                                         DUP 5 ;
+                                         CAR ;
+                                         PAIR 3 ;
+                                         MEM } ;
+                                     IF
+                                       {}
+                                       { PUSH string "You are not the Owner or Operator of this Token" ;
+                                         FAILWITH } ;
+                                     PUSH nat 0 ;
+                                     DUP 2 ;
+                                     GET 4 ;
+                                     COMPARE ;
+                                     GT ;
+                                     IF
+                                       { PUSH nat 1 ;
+                                         DUP 2 ;
+                                         GET 4 ;
+                                         COMPARE ;
+                                         EQ ;
+                                         IF
+                                           { DUP 2 ;
+                                             CAR ;
+                                             DUP 5 ;
+                                             CAR ;
+                                             GET 3 ;
+                                             DUP 3 ;
+                                             GET 3 ;
+                                             GET ;
+                                             IF_NONE { PUSH int 129 ; FAILWITH } {} ;
+                                             COMPARE ;
+                                             EQ }
+                                           { PUSH bool False } ;
+                                         IF
+                                           {}
+                                           { PUSH string "You cannot Transfer more Tokens than you Own" ;
+                                             FAILWITH } ;
+                                         DIG 3 ;
+                                         UNPAIR ;
+                                         UNPAIR ;
+                                         SWAP ;
+                                         UNPAIR ;
+                                         DUP 5 ;
+                                         CAR ;
+                                         SOME ;
+                                         DIG 5 ;
+                                         GET 3 ;
+                                         UPDATE ;
+                                         PAIR ;
+                                         SWAP ;
+                                         PAIR ;
+                                         PAIR ;
+                                         DUG 2 }
+                                       { DROP } } ;
+                              DROP } ;
+                       DROP }
+                     { DUP ;
+                       ITER { IF_LEFT
+                                { DUP 3 ;
+                                  CAR ;
+                                  GET 3 ;
+                                  DUP 2 ;
+                                  GET 4 ;
+                                  GET ;
+                                  IF_NONE { PUSH int 76 ; FAILWITH } {} ;
+                                  SENDER ;
+                                  COMPARE ;
+                                  EQ ;
+                                  IF
+                                    {}
+                                    { PUSH string "You are not the Owner of this Token" ;
+                                      FAILWITH } ;
+                                  DIG 2 ;
+                                  UNPAIR ;
+                                  SWAP ;
+                                  UNPAIR ;
+                                  UNPAIR ;
+                                  SWAP ;
+                                  PUSH (option unit) (Some Unit) ;
+                                  DIG 5 ;
+                                  UPDATE ;
+                                  SWAP ;
+                                  PAIR ;
+                                  PAIR ;
+                                  SWAP ;
+                                  PAIR ;
+                                  SWAP }
+                                { DUP 3 ;
+                                  CAR ;
+                                  GET 3 ;
+                                  DUP 2 ;
+                                  GET 4 ;
+                                  GET ;
+                                  IF_NONE { PUSH int 76 ; FAILWITH } {} ;
+                                  SENDER ;
+                                  COMPARE ;
+                                  EQ ;
+                                  IF
+                                    {}
+                                    { PUSH string "You are not the Owner of this Token" ;
+                                      FAILWITH } ;
+                                  DIG 2 ;
+                                  UNPAIR ;
+                                  SWAP ;
+                                  UNPAIR ;
+                                  UNPAIR ;
+                                  SWAP ;
+                                  NONE unit ;
+                                  DIG 5 ;
+                                  UPDATE ;
+                                  SWAP ;
+                                  PAIR ;
+                                  PAIR ;
+                                  SWAP ;
+                                  PAIR ;
+                                  SWAP } } ;
+                       DROP } } } ;
+           NIL operation } ;
+       PAIR }

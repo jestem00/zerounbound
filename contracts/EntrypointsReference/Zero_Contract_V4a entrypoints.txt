@@ -1,0 +1,122 @@
+Contract entrypoints
+0.
+add_collaborators(set<address>)
+Json schema:
+"schema:set:address": [
+    "address"
+]
+Michelson type:
+(set %add_collaborators address)
+1.
+append_token_metadata(string k, nat token_id, bytes v)
+Json schema:
+"schema:object": {
+    "k:string": "string",
+    "token_id:nat": "nat",
+    "v:bytes": "bytes"
+}
+Michelson type:
+(pair %append_token_metadata (string %k) (pair (nat %token_id) (bytes %v)))
+2.
+balance_of(list<object> requests, contract callback)
+Json schema:
+"schema:object": {
+    "requests:list:object": [
+        {
+            "owner:address": "address",
+            "token_id:nat": "nat"
+        }
+    ],
+    "callback:contract": "contract"
+}
+Michelson type:
+(pair %balance_of (list %requests (pair (address %owner) (nat %token_id)))
+                  (contract %callback (list (pair (pair %request (address %owner) (nat %token_id))
+                                                (nat %balance)))))
+3.
+burn(nat amount, nat token_id)
+Json schema:
+"schema:object": {
+    "amount:nat": "nat",
+    "token_id:nat": "nat"
+}
+Michelson type:
+(pair %burn (nat %amount) (nat %token_id))
+4.
+mint(address address, nat amount, map<string, bytes> metadata)
+Json schema:
+"schema:object": {
+    "address:address": "address",
+    "amount:nat": "nat",
+    "metadata:map_flat:string:bytes": {
+        "string": "bytes"
+    }
+}
+Michelson type:
+(pair %mint (address %address) (pair (nat %amount) (map %metadata string bytes)))
+5.
+remove_collaborators(set<address>)
+Json schema:
+"schema:set:address": [
+    "address"
+]
+Michelson type:
+(set %remove_collaborators address)
+6.
+transfer(list<object>)
+Json schema:
+"schema:list:object": [
+    {
+        "from_:address": "address",
+        "txs:list:object": [
+            {
+                "to_:address": "address",
+                "token_id:nat": "nat",
+                "amount:nat": "nat"
+            }
+        ]
+    }
+]
+Michelson type:
+(list %transfer (pair (address %from_)
+                     (list %txs (pair (address %to_) (pair (nat %token_id) (nat %amount))))))
+7.
+update_contract_metadata(bytes)
+Json schema:
+"schema:bytes": "bytes"
+Michelson type:
+(bytes %update_contract_metadata)
+8.
+update_operators(list<or>)
+Json schema:
+"schema:list:or": [
+    {
+        "add_operator:object": {
+            "owner:address": "address",
+            "operator:address": "address",
+            "token_id:nat": "nat"
+        },
+        "remove_operator:object": {
+            "owner:address": "address",
+            "operator:address": "address",
+            "token_id:nat": "nat"
+        }
+    }
+]
+Michelson type:
+(list %update_operators (or
+                         (pair %add_operator (address %owner)
+                                             (pair (address %operator) (nat %token_id)))
+                         (pair %remove_operator (address %owner)
+                                                (pair (address %operator) (nat %token_id)))))
+9.
+update_token_metadata(map<string, bytes> metadata, nat token_id)
+Json schema:
+"schema:object": {
+    "metadata:map_flat:string:bytes": {
+        "string": "bytes"
+    },
+    "token_id:nat": "nat"
+}
+Michelson type:
+(pair %update_token_metadata (map %metadata string bytes) (nat %token_id))

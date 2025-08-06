@@ -1,18 +1,19 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/explore/secondary.jsx
-  Rev :    r3    2025‑07‑30 UTC
+  Rev :    r4    2025‑08‑06 UTC
   Summary: Secondary market page.  Displays listings where the
            seller is not the original creator of the token.
-           Uses on‑chain views, big‑map fallbacks and off‑chain
-           views to discover listings across networks.  A dynamic
-           TzKT API selector ensures metadata is fetched from the
-           correct chain when the connected wallet’s network
-           differs from the default.  Requires a connected
-           wallet because on‑chain views are needed to obtain
-           seller addresses.  Paginated at 10 items per page.
-           Works alongside the primary listings page to
-           differentiate between primary and secondary sales.
+           Aggregates data across multiple marketplace
+           instances using on‑chain views, big‑map fallbacks and
+           off‑chain views. A dynamic TzKT API selector ensures
+           metadata is fetched from the correct chain when the
+           connected wallet’s network differs from the default.
+           Requires a connected wallet because on‑chain views are
+           needed to obtain seller addresses. Paginated at 10
+           items per page and works alongside the primary
+           listings page to differentiate between primary and
+           secondary sales.
 ─────────────────────────────────────────────────────────────*/
 
 import React, { useEffect, useState } from 'react';
@@ -28,12 +29,12 @@ import LoadingSpinner from '../../ui/LoadingSpinner.jsx';
 import TokenListingCard from '../../ui/TokenListingCard.jsx';
 
 // Network configuration for API base URLs
-import { NETWORK_KEY, TZKT_API } from '../../config/deployTarget.js';
+import { NETWORK_KEY } from '../../config/deployTarget.js';
 
 // Marketplace helpers for discovering collections
 import { listActiveCollections, listListingsForCollectionViaBigmap } from '../../utils/marketplaceListings.js';
 // Marketplace helpers for querying on‑chain views
-import { fetchOnchainListingsForCollection, fetchListings, marketplaceAddr } from '../../core/marketplace.js';
+import { fetchOnchainListingsForCollection, fetchListings, marketplaceAddrs } from '../../core/marketplace.js';
 
 // Helper to decode hex-encoded metadata strings
 import decodeHexFields from '../../utils/decodeHexFields.js';
@@ -54,7 +55,7 @@ const Grid = styled.div`
 `;
 
 export default function SecondaryPage() {
-  const { address, toolkit } = useWalletContext() || {};
+  const { toolkit } = useWalletContext() || {};
   const [items, setItems]     = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCount, setShowCount] = useState(10);
@@ -116,7 +117,7 @@ export default function SecondaryPage() {
               const viaBigmap = await listListingsForCollectionViaBigmap(contract, net);
               if (Array.isArray(viaBigmap) && viaBigmap.length) {
                 const fallback = [];
-                for (const { tokenId: id, priceMutez } of viaBigmap) {
+                for (const { tokenId: id } of viaBigmap) {
                   try {
                     const offchain = await fetchListings({
                       toolkit,
@@ -150,45 +151,48 @@ export default function SecondaryPage() {
             // parse listings directly from the marketplace’s listings big‑map.
             if (!listings || listings.length === 0) {
               try {
-                const market = marketplaceAddr(net);
-                // Discover the listings big‑map pointer
-                const maps = await fetch(`${tzktBase}/v1/contracts/${market}/bigmaps?path=listings`).then((r) => r.json());
-                let ptr;
-                if (Array.isArray(maps) && maps.length > 0) {
-                  const match = maps.find((m) => (m.path || m.name) === 'listings');
-                  ptr = match ? (match.ptr ?? match.id) : undefined;
-                }
-                if (ptr != null) {
-                  const entries = await fetch(`${tzktBase}/v1/bigmaps/${ptr}/keys?active=true`).then((r) => r.json());
-                  const aggregated = [];
-                  for (const entry of entries) {
-                    // Each key identifies (nft_contract, token_id); ensure it matches the current collection
-                    const keyAddr = entry.key?.address || entry.key?.value || entry.key;
-                    if (!keyAddr || typeof keyAddr !== 'string' || keyAddr.toLowerCase() !== contract.toLowerCase()) {
-                      continue;
+                const markets = marketplaceAddrs(net);
+                const aggregated = [];
+                for (const market of markets) {
+                  try {
+                    const maps = await fetch(`${tzktBase}/v1/contracts/${market}/bigmaps?path=listings`).then((r) => r.json());
+                    let ptr;
+                    if (Array.isArray(maps) && maps.length > 0) {
+                      const match = maps.find((m) => (m.path || m.name) === 'listings');
+                      ptr = match ? (match.ptr ?? match.id) : undefined;
                     }
-                    const values = entry.value || {};
-                    for (const listing of Object.values(values)) {
-                      if (!listing || typeof listing !== 'object') continue;
-                      const tokenId = Number(listing.token_id ?? listing.tokenId);
-                      let price = listing.price ?? listing.priceMutez;
-                      let amount = listing.amount ?? listing.quantity ?? listing.amountTokens;
-                      price = typeof price === 'string' ? Number(price) : price;
-                      amount = typeof amount === 'string' ? Number(amount) : amount;
-                      const active = listing.active !== false;
-                      if (!active || !Number.isFinite(tokenId) || !Number.isFinite(price) || amount <= 0) continue;
-                      aggregated.push({
-                        tokenId,
-                        seller : listing.seller,
-                        priceMutez: price,
-                        price : price,
-                        amount,
-                        active,
-                      });
+                    if (ptr == null) continue;
+                    const entries = await fetch(`${tzktBase}/v1/bigmaps/${ptr}/keys?active=true`).then((r) => r.json());
+                    for (const entry of entries) {
+                      const keyAddr = entry.key?.address || entry.key?.value || entry.key;
+                      if (!keyAddr || typeof keyAddr !== 'string' || keyAddr.toLowerCase() !== contract.toLowerCase()) {
+                        continue;
+                      }
+                      const values = entry.value || {};
+                      for (const listing of Object.values(values)) {
+                        if (!listing || typeof listing !== 'object') continue;
+                        const tokenId = Number(listing.token_id ?? listing.tokenId);
+                        let price = listing.price ?? listing.priceMutez;
+                        let amount = listing.amount ?? listing.quantity ?? listing.amountTokens;
+                        price = typeof price === 'string' ? Number(price) : price;
+                        amount = typeof amount === 'string' ? Number(amount) : amount;
+                        const active = listing.active !== false;
+                        if (!active || !Number.isFinite(tokenId) || !Number.isFinite(price) || amount <= 0) continue;
+                        aggregated.push({
+                          tokenId,
+                          seller : listing.seller,
+                          priceMutez: price,
+                          price : price,
+                          amount,
+                          active,
+                        });
+                      }
                     }
+                  } catch {
+                    /* ignore individual market errors */
                   }
-                  listings = aggregated;
                 }
+                listings = aggregated;
               } catch {
                 /* ignore TzKT big‑map errors */
               }

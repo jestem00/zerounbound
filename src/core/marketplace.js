@@ -1,11 +1,12 @@
 /*─────────────────────────────────────────────────────────────
 Developed by @jams2blues – ZeroContract Studio
 File:    src/core/marketplace.js
-Rev :    r927    2025‑08‑06
-Summary: Add read/write marketplace address separation and offline
-         balance support. getMarketContract selects write or read
-         instance; fetchListings aggregates across all read
-         addresses; buildListParams accepts an offline_balance flag.
+Rev :    r928    2025‑08‑06
+Summary: Add read/write marketplace address separation, offline
+         balance support and expose marketplaceAddrs helper.
+         getMarketContract selects write or read instance;
+         fetchListings aggregates across all read addresses;
+         buildListParams accepts an offline_balance flag.
 */
 
 import { OpKind } from '@taquito/taquito';
@@ -18,11 +19,14 @@ import {
 } from '../config/deployTarget.js';
 import { jFetch } from './net.js';
 
-// Legacy helper – derive read address for a given network key.
-export const marketplaceAddr = (net = TARGET) => {
+// Resolve read‑only marketplace addresses for a given network key.
+export const marketplaceAddrs = (net = TARGET) => {
   const key = /mainnet/i.test(net) ? 'mainnet' : 'ghostnet';
-  return MARKETPLACE_READ_ADDRESSES[key][0];
+  return MARKETPLACE_READ_ADDRESSES[key];
 };
+
+// Legacy helper – retain single‑address resolver for backward compat.
+export const marketplaceAddr = (net = TARGET) => marketplaceAddrs(net)[0];
 /**
  * Obtain a handle to the ZeroSum marketplace contract for the given toolkit.
  * Registers the TZIP‑16 module so that off‑chain views can be executed.

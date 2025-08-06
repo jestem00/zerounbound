@@ -1,17 +1,17 @@
 /*─────────────────────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/utils/marketplaceListings.js
-  Rev :    r4     2025‑08‑03 UTC
-  Summary: Removed unused TZKT_API import; revision bump; helper logic
-           unchanged.  Maintains the per‑network TzKT resolver and
-           listing enumeration functions.
+  Rev :    r5     2025‑08‑06 UTC
+  Summary: Aggregate listings across all marketplace addresses and
+           expose marketplaceAddrs helper. Maintains per‑network
+           TzKT resolver.
 
    NOTE: These functions should never throw; they always return
    sensible defaults when the network or API is unreachable.
 ─────────────────────────────────────────────────────────────────────────────*/
 
 import { NETWORK_KEY } from '../config/deployTarget.js';
-import { marketplaceAddr }       from '../core/marketplace.js';
+import { marketplaceAddrs } from '../core/marketplace.js';
 
 /*──────── dynamic TzKT base resolver ───────────────────────*/
 // Determine the appropriate TzKT API domain for a given network.  The
@@ -81,58 +81,42 @@ async function isZeroContract(addr, net = NETWORK_KEY) {
  * @returns {Promise<string[]>} list of KT1 addresses with active listings
  */
 export async function listActiveCollections(net = NETWORK_KEY, filterZeroContract = true) {
-  // Determine the correct marketplace contract for the given network.  If
-  // marketplaceAddr() returns an undefined or legacy value, fall back to
-  // the known ghostnet marketplace.  This guard ensures that calls to
-  // TzKT fetch from the intended marketplace contract when the
-  // configuration has not yet been updated.
-  const rawMarket = marketplaceAddr(net);
-  const fallbackMarket =
-    (net && typeof net === 'string' && net.toLowerCase() === 'ghostnet')
-      ? 'KT1R1PzLhBXEd98ei72mFuz4FrUYEcuV7t1p'
-      : undefined;
-  const market = rawMarket || fallbackMarket;
-  const out = [];
-  try {
-    // Determine the API base for the given network.  Do not
-    // reference the static TZKT_API here, as it may point to a
-    // different chain when the wallet selects a network other than
-    // the build‑time default.
-    const base = tzktBaseForNet(net);
-    // Discover the big‑map pointer for collection_listings.  When
-    // requesting TzKT bigmaps by path, the API may return multiple
-    // entries; find the one whose `path` property exactly matches
-    // collection_listings to avoid accidentally picking another
-    // big‑map such as total_listed.  See issue with pointer
-    // selection in r8.
-    const maps = await fetch(`${base}/v1/contracts/${market}/bigmaps?path=collection_listings`).then((r) => r.json());
-    let ptr;
-    if (Array.isArray(maps) && maps.length > 0) {
-      const match = maps.find((m) => (m.path || m.name) === 'collection_listings');
-      ptr = match ? (match.ptr ?? match.id) : undefined;
-    }
-    if (ptr == null) throw new Error('collection_listings bigmap not found');
-    // Retrieve active keys (collection addresses)
-    const keys = await fetch(`${base}/v1/bigmaps/${ptr}/keys?active=true`).then((r) => r.json());
-    for (const entry of keys) {
-      const key = entry.key;
-      // Keys may be strings or objects; normalise to string
-      let addr;
-      if (typeof key === 'string') {
-        addr = key;
-      } else if (key && typeof key.address === 'string') {
-        addr = key.address;
-      } else if (key && typeof key.value === 'string') {
-        addr = key.value;
-      }
-      if (addr && /^KT1[0-9A-Za-z]{33}$/.test(addr)) {
-        out.push(addr);
-      }
-    }
-  } catch {
-    /* ignore network errors; return empty list */
+  // Resolve all marketplace addresses for the given network. Fall back to
+  // the known ghostnet marketplace when unset to preserve legacy behavior.
+  let markets = marketplaceAddrs(net) || [];
+  if (markets.length === 0 && typeof net === 'string' && net.toLowerCase() === 'ghostnet') {
+    markets = ['KT1R1PzLhBXEd98ei72mFuz4FrUYEcuV7t1p'];
   }
-  // Remove duplicates
+  const out = [];
+  const base = tzktBaseForNet(net);
+  for (const market of markets) {
+    try {
+      const maps = await fetch(`${base}/v1/contracts/${market}/bigmaps?path=collection_listings`).then((r) => r.json());
+      let ptr;
+      if (Array.isArray(maps) && maps.length > 0) {
+        const match = maps.find((m) => (m.path || m.name) === 'collection_listings');
+        ptr = match ? (match.ptr ?? match.id) : undefined;
+      }
+      if (ptr == null) continue;
+      const keys = await fetch(`${base}/v1/bigmaps/${ptr}/keys?active=true`).then((r) => r.json());
+      for (const entry of keys) {
+        const key = entry.key;
+        let addr;
+        if (typeof key === 'string') {
+          addr = key;
+        } else if (key && typeof key.address === 'string') {
+          addr = key.address;
+        } else if (key && typeof key.value === 'string') {
+          addr = key.value;
+        }
+        if (addr && /^KT1[0-9A-Za-z]{33}$/.test(addr)) {
+          out.push(addr);
+        }
+      }
+    } catch {
+      /* ignore individual marketplace errors */
+    }
+  }
   const unique = Array.from(new Set(out));
   if (!filterZeroContract) return unique;
   const filtered = [];
@@ -160,61 +144,55 @@ export async function listActiveCollections(net = NETWORK_KEY, filterZeroContrac
  * @returns {Promise<Array<{contract:string, tokenId:number, priceMutez:number}>>}
  */
 export async function listListingsForCollectionViaBigmap(nftContract, net = NETWORK_KEY) {
-  const market = marketplaceAddr(net);
+  let markets = marketplaceAddrs(net) || [];
+  if (markets.length === 0 && typeof net === 'string' && net.toLowerCase() === 'ghostnet') {
+    markets = ['KT1R1PzLhBXEd98ei72mFuz4FrUYEcuV7t1p'];
+  }
   const byToken = new Map();
-  try {
-    // Determine the appropriate TzKT API root for this network.
-    const base = tzktBaseForNet(net);
-    // Locate the listings big‑map pointer.  As with
-    // collection_listings, multiple entries may be returned; find
-    // the entry whose `path` equals 'listings'.
-    const maps = await fetch(`${base}/v1/contracts/${market}/bigmaps?path=listings`).then((r) => r.json());
-    let ptr;
-    if (Array.isArray(maps) && maps.length > 0) {
-      const match = maps.find((m) => (m.path || m.name) === 'listings');
-      ptr = match ? (match.ptr ?? match.id) : undefined;
-    }
-    if (ptr == null) throw new Error('listings bigmap not found');
-    // Fetch all active keys; note that TzKT returns full keys with values
-    const entries = await fetch(`${base}/v1/bigmaps/${ptr}/keys?active=true`).then((r) => r.json());
-    for (const entry of entries) {
-      // Skip keys that do not match the requested collection.  The key
-      // identifies (nft_contract, token_id); the address is a string.
-      const keyAddr = entry.key?.address || entry.key?.value || entry.key;
-      if (
-        !keyAddr ||
-        typeof keyAddr !== 'string' ||
-        keyAddr.toLowerCase() !== nftContract.toLowerCase()
-      ) {
-        continue;
+  const base = tzktBaseForNet(net);
+  for (const market of markets) {
+    try {
+      const maps = await fetch(`${base}/v1/contracts/${market}/bigmaps?path=listings`).then((r) => r.json());
+      let ptr;
+      if (Array.isArray(maps) && maps.length > 0) {
+        const match = maps.find((m) => (m.path || m.name) === 'listings');
+        ptr = match ? (match.ptr ?? match.id) : undefined;
       }
-      const values = entry.value || {};
-      // Each entry.value is a map keyed by listing nonce.  Iterate
-      // through all listing details to process each active listing.
-      for (const listing of Object.values(values)) {
-        if (!listing || typeof listing !== 'object') continue;
-        const tokenId = Number(listing.token_id ?? listing.tokenId);
-        let price = listing.price ?? listing.priceMutez;
-        let amount = listing.amount ?? listing.quantity ?? listing.amountTokens;
-        // Convert numeric strings to numbers
-        price = typeof price === 'string' ? Number(price) : price;
-        amount = typeof amount === 'string' ? Number(amount) : amount;
-        const active = listing.active !== false;
-        if (!active || !Number.isFinite(tokenId) || !Number.isFinite(price) || amount <= 0) continue;
-        const prev = byToken.get(tokenId);
-        if (!prev || price < prev.priceMutez) {
-          byToken.set(tokenId, { contract: nftContract, tokenId, priceMutez: price });
+      if (ptr == null) continue;
+      const entries = await fetch(`${base}/v1/bigmaps/${ptr}/keys?active=true`).then((r) => r.json());
+      for (const entry of entries) {
+        const keyAddr = entry.key?.address || entry.key?.value || entry.key;
+        if (
+          !keyAddr ||
+          typeof keyAddr !== 'string' ||
+          keyAddr.toLowerCase() !== nftContract.toLowerCase()
+        ) {
+          continue;
+        }
+        const values = entry.value || {};
+        for (const listing of Object.values(values)) {
+          if (!listing || typeof listing !== 'object') continue;
+          const tokenId = Number(listing.token_id ?? listing.tokenId);
+          let price = listing.price ?? listing.priceMutez;
+          let amount = listing.amount ?? listing.quantity ?? listing.amountTokens;
+          price = typeof price === 'string' ? Number(price) : price;
+          amount = typeof amount === 'string' ? Number(amount) : amount;
+          const active = listing.active !== false;
+          if (!active || !Number.isFinite(tokenId) || !Number.isFinite(price) || amount <= 0) continue;
+          const prev = byToken.get(tokenId);
+          if (!prev || price < prev.priceMutez) {
+            byToken.set(tokenId, { contract: nftContract, tokenId, priceMutez: price });
+          }
         }
       }
+    } catch {
+      /* ignore individual marketplace errors */
     }
-  } catch {
-    /* ignore network errors; return empty list */
   }
   return Array.from(byToken.values());
 }
 
-/* What changed & why: r4 – Removed an unused TZKT_API import to clean
-   up the module and bumped the revision.  The helper continues to
-   derive the TzKT base per network and the existing enumeration
-   logic remains unchanged. */
+/* What changed & why: r5 – Aggregate over all marketplace instances and
+   expose marketplaceAddrs helper while retaining per‑network TzKT
+   resolution. */
 

@@ -1,9 +1,9 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/ListTokenDialog.jsx
-  Rev :    r44    2025‑08‑06
+  Rev :    r45    2025‑08‑06
   Summary: add v2a offline‑balance guard and dual‑marketplace
-           support. Detects v2a via hashMatrix using getScriptHash,
+           support. Detects v2a via hashMatrix using TzKT typeHash,
            checks TzKT balances, sets offline_balance flag and routes
            write calls to the new marketplace instance.
 ────────────────────────────────────────────────────────────*/
@@ -250,13 +250,14 @@ export default function ListTokenDialog({
 
   /*───────── list click ───────────────────────────────────*/
   async function handleList() {
-    /* detect v2a */
+    /* detect v2a via TzKT typeHash */
     let isV2a = false;
     try {
-      const h = await toolkit.rpc.getScriptHash(contract);
-      isV2a = hashMatrix[String(h)] === 'v2a';
+      const info = await (await fetch(`${TZKT_API}/v1/contracts/${contract}`)).json();
+      const tHash = info?.typeHash ?? info?.type_hash;
+      if (tHash !== undefined) isV2a = hashMatrix[String(tHash)] === 'v2a';
     } catch {
-      /* ignore RPC hash errors */
+      /* ignore fetch errors */
     }
     if (isUnsupported) {
       snack('Unsupported contract – redirecting to Objkt…', 'warning');

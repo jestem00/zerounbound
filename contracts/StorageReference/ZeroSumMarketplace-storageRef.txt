@@ -1,6 +1,7 @@
 storage pair
 admin address
 buyer_offers big_map(address, list($buyer_offers_value_item))
+checklist set(address)
 collection_listings big_map(address, list($collection_listings_value_item))
 collection_offers big_map(address, list($collection_offers_value_item))
 contract_id bytes
@@ -13,21 +14,22 @@ royalty_registry big_map($royalty_registry_key, list($royalty_registry_value_ite
 seller_listings big_map(address, list($seller_listings_value_item))
 total_listed big_map($total_listed_key, nat)
 listings_key pair
-@address_35 address
-@nat_36 nat
+@address_38 address
+@nat_39 nat
 offers_key pair
-@address_71 address
-@nat_72 nat
+@address_74 address
+@nat_75 nat
 pending_balance_checks_key pair
-@address_87 address
-@nat_88 nat
+@address_90 address
+@nat_91 nat
 pending_balance_checks_value pair
 nft_contract address
 nonce nat
+offline_balance bool
 royalty_registry_key pair
-@address_95 address
-@nat_96 nat
+@address_100 address
+@nat_101 nat
 total_listed_key pair
-@address_112 address
-@address_114 address
-@nat_115 nat
+@address_117 address
+@address_119 address
+@nat_120 nat

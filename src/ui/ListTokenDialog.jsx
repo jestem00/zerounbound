@@ -77,6 +77,7 @@ export default function ListTokenDialog({
   const [listedCount, setListedCount]     = useState(0);
   const [listedEntries, setListedEntries] = useState(0);
   const [ov, setOv]                       = useState({ open: false, label: '' });
+  const [resolvedTokenId, setResolvedTokenId] = useState(null);
 
   /* sale‑split state */
   const [splits, setSplits]               = useState([]);
@@ -163,10 +164,11 @@ export default function ListTokenDialog({
     (async () => {
       if (!open || !toolkit || !contract || tokenId == null) return;
 
-      setMaxAmount(1); setAmount('1'); setListedCount(0); setListedEntries(0);
+      setMaxAmount(1); setAmount('1'); setListedCount(0); setListedEntries(0); setResolvedTokenId(Number(tokenId));
 
       const idNum = Number(tokenId);
       let owned   = 0;
+      let resolvedId = idNum;
 
       try {
         const pkh = await toolkit.wallet.pkh();
@@ -190,7 +192,14 @@ export default function ListTokenDialog({
 
         /* direct ledger fallback – v2a */
         if (owned === 0) {
-          owned = await getLedgerBalanceV2a(toolkit, contract, pkh, idNum);
+          const { balance: bal, tokenId: idFound } = await getLedgerBalanceV2a(
+            toolkit,
+            contract,
+            pkh,
+            idNum,
+          );
+          owned = bal;
+          if (idFound != null) resolvedId = idFound;
         }
 
         /* TzKT balances fallback */
@@ -208,16 +217,17 @@ export default function ListTokenDialog({
         }
       } catch { /* ignore */ }
 
-      if (!cancel) setMaxAmount(owned);
+      if (!cancel) { setMaxAmount(owned); setResolvedTokenId(resolvedId); }
 
       /* listing counts */
       try {
-        let arr = await fetchOnchainListings({ toolkit, nftContract: contract, tokenId })
+        const listingId = resolvedId;
+        let arr = await fetchOnchainListings({ toolkit, nftContract: contract, tokenId: listingId })
           .catch(() => []);
         if (!arr.length)
-          arr = await fetchListings({ toolkit, nftContract: contract, tokenId })
+          arr = await fetchListings({ toolkit, nftContract: contract, tokenId: listingId })
             .catch(() => []);
-        const dec   = await getDec(idNum);
+        const dec   = await getDec(listingId);
         const total = arr.reduce(
           (t, l) => t + (dec > 0 ? Math.floor(l.amount / 10 ** dec) : Number(l.amount)),
           0,
@@ -253,11 +263,12 @@ export default function ListTokenDialog({
       snack('Check price & quantity', 'error'); return;
     }
     try {
-      const dec = await getDec(Number(tokenId));
+      const listId = resolvedTokenId ?? Number(tokenId);
+      const dec = await getDec(listId);
       const qtyUnits = dec > 0 ? q * 10 ** dec : q;
       await buildListParams(toolkit, {
         nftContract: contract,
-        tokenId    : Number(tokenId),
+        tokenId    : listId,
         amount     : qtyUnits,
         priceMutez : Math.floor(p * 1_000_000),
       });
@@ -339,17 +350,24 @@ export default function ListTokenDialog({
         await listOnly(id, qtyUnits);
       };
 
-      const idNum    = Number(tokenId);
+      const idNum    = resolvedTokenId ?? Number(tokenId);
       const dec      = await getDec(idNum);
       const qtyUnits = dec > 0 ? qEditions * 10 ** dec : qEditions;
 
       try {
         await updateAndList(idNum, qtyUnits);
       } catch {
-        const alt = idNum + 1;
-        const decAlt = await getDec(alt);
-        const altQty = decAlt > 0 ? qEditions * 10 ** decAlt : qEditions;
-        await updateAndList(alt, altQty);
+        try {
+          const alt = idNum - 1;
+          const decAlt = await getDec(alt);
+          const altQty = decAlt > 0 ? qEditions * 10 ** decAlt : qEditions;
+          await updateAndList(alt, altQty);
+        } catch {
+          const alt2 = idNum + 1;
+          const decAlt2 = await getDec(alt2);
+          const altQty2 = decAlt2 > 0 ? qEditions * 10 ** decAlt2 : qEditions;
+          await updateAndList(alt2, altQty2);
+        }
       }
 
       setOv({ open: false, label: '' });
@@ -368,9 +386,13 @@ export default function ListTokenDialog({
       ? ` | For Sale: ${listedCount} (${listedEntries} listing${listedEntries !== 1 ? 's' : ''})`
       : ` | For Sale: ${listedCount}`;
 
+  const handleOverlayKey = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') onClose();
+  };
+
   return (
-    <ModalOverlay onClick={onClose}>
-      <ModalBox onClick={(e) => e.stopPropagation()} data-modal="list-token">
+    <ModalOverlay onClick={onClose} role="button" tabIndex={0} onKeyDown={handleOverlayKey}>
+      <ModalBox onClick={(e) => e.stopPropagation()} data-modal="list-token" role="presentation">
         <Wrap>
           <PixelHeading level={3}>List Token</PixelHeading>
 

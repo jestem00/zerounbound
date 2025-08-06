@@ -155,7 +155,7 @@ export default function TokenMetaPanel({
   meta            = null,
   tokenId         = '',
   contractAddress = '',
-  contractVersion = '',
+  contractVersion: _contractVersion = '',
   onRemove,
 }) {
   // Access wallet address and network from context. Default to ghostnet.

@@ -179,6 +179,7 @@ export default function TokenCard({
   const authors  = authorArray(meta);
   const creators = creatorArray(meta);
   // Determine whether the creators line should be displayed separately
+  // eslint-disable-next-line no-unused-vars
   const showCreatorsLine = creators.length > 0 && authors.join() !== creators.join();
   // Track whether the full list of authors or creators should be displayed
   const [showAllAuthors, setShowAllAuthors] = useState(false);

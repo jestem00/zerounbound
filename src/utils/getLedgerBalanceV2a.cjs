@@ -13,22 +13,28 @@ async function getLedgerBalanceV2a(toolkit, contract, pkh, id) {
       : 'https://api.tzkt.io';
     const maps = await (await fetch(`${tzkt}/v1/contracts/${contract}/bigmaps`)).json();
     const ledMap = maps.find((m) => m.path === 'ledger');
-    if (!ledMap) return 0;
+    if (!ledMap) return { balance: 0, tokenId: undefined };
     const mapId = ledMap.ptr ?? ledMap.id;
     const attempt = async (tokenId) => {
       const q = `${tzkt}/v1/bigmaps/${mapId}/keys?key.0=${pkh}&key.1=${tokenId}`;
       const rows = await (await fetch(q)).json();
       if (Array.isArray(rows) && rows.length > 0) {
-        return Number(rows[0]?.value ?? 0);
+        return { balance: Number(rows[0]?.value ?? 0), tokenId };
       }
-      return 0;
+      return { balance: 0, tokenId: undefined };
     };
-    const bal = await attempt(id);
-    if (bal > 0) return bal;
-    return await attempt(id + 1);
+    // try provided token_id
+    let res = await attempt(id);
+    if (res.balance > 0) return res;
+    // try token_id - 1 (some v2a collections are 1-based)
+    res = await attempt(id - 1);
+    if (res.balance > 0) return res;
+    // finally try token_id + 1
+    res = await attempt(id + 1);
+    return res;
   } catch {
-    return 0;
+    return { balance: 0, tokenId: undefined };
   }
 }
 module.exports = getLedgerBalanceV2a;
-/* What changed & why: Introduced helper for v2a ledger lookups with token_id+1 fallback. */
+/* What changed & why: return balance with resolved token_id and search token_id±1. */

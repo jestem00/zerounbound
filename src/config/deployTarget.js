@@ -1,12 +1,11 @@
 /*─────────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/config/deployTarget.js
-  Rev :    r1158    2025‑08‑05
-  Summary: Corrected ghostnet marketplace address. Updated
-           MARKETPLACE_ADDRESSES to use KT1R1PzLhBXEd98ei72mFuz4FrUYEcuV7t1p for
-           ghostnet, fixing listing errors. Previous revision added
-           DOMAIN_CONTRACTS and FALLBACK_RPCS; other configuration
-           remains unchanged.
+  Rev :    r1162    2025‑08‑06
+  Summary: Split marketplace addresses into read/write arrays for
+           dual‑instance support. Exposes MARKETPLACE_WRITE_ADDRESSES
+           and MARKETPLACE_READ_ADDRESSES with legacy exports for
+           backward compatibility.
 */
 
 // ---------------------------------------------------------------------------
@@ -175,16 +174,26 @@ export const FACTORY_ADDRESS = FACTORY_ADDRESSES[TARGET];
 // network.  These values should be kept identical across branches, with
 // deployTarget.js remaining the sole diverging file between Ghostnet and
 // Mainnet.  See src/core/marketplace.js for usage.
-export const MARKETPLACE_ADDRESSES = {
+/*‐‐‐‐‐‐‐‐‐‐‐‐‐ Marketplace contracts ‐‐‐‐‐‐‐‐‐‐‐‐‐‐*/
+/* primary write‑target (new ZeroSum)                             */
+export const MARKETPLACE_WRITE_ADDRESSES = {
   ghostnet: 'KT19yn9fWP6zTSLPntGyrPwc7JuMHnYxAn1z',
   mainnet : 'KT19kipdLiWyBZvP7KWCPdRbDXuEiu3gfjBR',
 };
+/* read‑only historic instances                                   */
+export const MARKETPLACE_READ_ADDRESSES = {
+  ghostnet: [
+    MARKETPLACE_WRITE_ADDRESSES.ghostnet,         // always first
+    'KT1R1PzLhBXEd98ei72mFuz4FrUYEcuV7t1p',       // legacy
+  ],
+  mainnet: [
+    MARKETPLACE_WRITE_ADDRESSES.mainnet,          // only one so far
+  ],
+};
 
-// Selected marketplace address based on the active TARGET.  Use this
-// constant when you need the marketplace contract for a given network.
-// If no entry exists for a network, the value will be undefined and
-// calling code should handle that case appropriately.
-export const MARKETPLACE_ADDRESS = MARKETPLACE_ADDRESSES[TARGET];
+/* backward‑compat single address exports                         */
+export const MARKETPLACE_ADDRESS   = MARKETPLACE_WRITE_ADDRESSES[TARGET];
+export const MARKETPLACE_ADDRESSES = MARKETPLACE_READ_ADDRESSES; // <‑‑ keep original name for legacy imports
 
 // ---------------------------------------------------------------------------
 // Tezos Domain registry addresses and fallback RPCs
@@ -213,11 +222,6 @@ export const FALLBACK_RPCS = {
 // compatibility and avoid build errors we export a constant that
 // always resolves to an empty string.  Additional URLs could be
 // mapped per network if remote forging is ever reintroduced.
-const FORGE_URLS = {
-  ghostnet: '',
-  mainnet:  '',
-};
-
 // Deprecated: always returns an empty string.  Remote forge services are
 // permanently disabled; client code should fall back to local forging via
 // Taquito’s LocalForger.  This export is retained solely to satisfy

@@ -6,36 +6,22 @@ describe('getLedgerBalanceV2a', () => {
     global.fetch?.mockReset?.();
   });
 
-  it('resolves balance and token id when initial lookup is empty', async () => {
-    const toolkit = { rpc: { getRpcUrl: () => 'https://ghostnet.example' } };
-    const contract = 'KT1TEST';
-    const pkh = 'tz1abc';
-
-    global.fetch = jest
-      .fn()
-      // bigmaps lookup
-      .mockResolvedValueOnce({
-        json: async () => [{ path: 'ledger', ptr: 123 }],
-      })
-      // first ledger query (token_id)
-      .mockResolvedValueOnce({
-        json: async () => [],
-      })
-      // second ledger query (token_id - 1)
-      .mockResolvedValueOnce({
-        json: async () => [],
-      })
-      // third ledger query (token_id + 1)
-      .mockResolvedValueOnce({
-        json: async () => [{ value: 7 }],
-      });
-
-    const res = await getLedgerBalanceV2a(toolkit, contract, pkh, 0);
-    expect(res.balance).toBe(7);
-    expect(res.tokenId).toBe(1);
-    expect(fetch).toHaveBeenCalledTimes(4);
-    expect(fetch.mock.calls[1][0]).toMatch('key.1=0');
-    expect(fetch.mock.calls[2][0]).toMatch('key.1=-1');
-    expect(fetch.mock.calls[3][0]).toMatch('key.1=1');
+  it('fetches balance via TzKT tokens API', async () => {
+    const tzktBase = 'https://api.ghostnet.tzkt.io';
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => [{ balance: '7' }],
+    });
+    const bal = await getLedgerBalanceV2a({
+      tzktBase,
+      contract: 'KT1TEST',
+      tokenId: 0,
+      owner: 'tz1abc',
+    });
+    expect(bal).toBe(7);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe(
+      `${tzktBase}/v1/tokens/balances?token.contract=KT1TEST&token.tokenId=0&account=tz1abc`,
+    );
   });
 });

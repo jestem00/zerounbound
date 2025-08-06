@@ -1,29 +1,28 @@
 /*─────────────────────────────────────────────────────────────
 Developed by @jams2blues – ZeroContract Studio
 File:    src/core/marketplace.js
-Rev :    r926    2025‑08‑05
-Summary: Fix marketplace contract resolution and preserve entrypoints.
-         getMarketContract() now resolves the marketplace address via
-         the static MARKETPLACE_ADDRESS from deployTarget.js and returns a
-         Contract instance via toolkit.contract.at().  This avoids
-         wallet.at() which can strip methodsObject and ensures the
-         list_token and other entrypoints are available on Taquito ≥22.
-         Off‑chain view helpers and entrypoint scanning remain unchanged.
+Rev :    r927    2025‑08‑06
+Summary: Add read/write marketplace address separation and offline
+         balance support. getMarketContract selects write or read
+         instance; fetchListings aggregates across all read
+         addresses; buildListParams accepts an offline_balance flag.
 */
 
 import { OpKind } from '@taquito/taquito';
-import { Tzip16Module, tzip16 } from '@taquito/tzip16';
-import { NETWORK_KEY, MARKETPLACE_ADDRESSES, MARKETPLACE_ADDRESS } from '../config/deployTarget.js';
+import { Tzip16Module } from '@taquito/tzip16';
+import {
+  TARGET,
+  MARKETPLACE_WRITE_ADDRESSES,
+  MARKETPLACE_READ_ADDRESSES,
+  TZKT_API,
+} from '../config/deployTarget.js';
+import { jFetch } from './net.js';
 
-// Resolve the marketplace address based on the network.  When a network
-// string is provided, match “mainnet” case-insensitively to select
-// the mainnet contract; otherwise default to ghostnet.  Fallbacks to
-// the global NETWORK_KEY when undefined.
-export const marketplaceAddr = (net = NETWORK_KEY) => {
+// Legacy helper – derive read address for a given network key.
+export const marketplaceAddr = (net = TARGET) => {
   const key = /mainnet/i.test(net) ? 'mainnet' : 'ghostnet';
-  return MARKETPLACE_ADDRESSES[key] || MARKETPLACE_ADDRESSES.ghostnet;
+  return MARKETPLACE_READ_ADDRESSES[key][0];
 };
-
 /**
  * Obtain a handle to the ZeroSum marketplace contract for the given toolkit.
  * Registers the TZIP‑16 module so that off‑chain views can be executed.
@@ -33,49 +32,40 @@ export const marketplaceAddr = (net = NETWORK_KEY) => {
  * @param {import('@taquito/taquito').TezosToolkit} toolkit an instantiated Taquito toolkit
  * @returns {Promise<import('@taquito/taquito').Contract>} contract instance
  */
-export async function getMarketContract(toolkit) {
-  // Determine the marketplace address from the active network.  When
-  // network type is undefined the NETWORK_KEY fallback is used.  To
-  // support off‑chain views the Tzip16Module is registered on the
-  // toolkit if not already present.  We return a WalletContract via
-  // wallet.at() so that calls support .send() directly.  Some
-  // versions of Taquito may omit methodsObject on the WalletContract
-  // when tzip16 is mixed in; callers should rely on the fallback
-  // logic in the param‑builder helpers to handle such cases.
-  // Determine the marketplace address.  Prefer the static address from
-  // deployTarget.js to avoid relying on toolkit._network which may
-  // be undefined.  Fallback to network-based lookup if the static
-  // address is unavailable.
-  const addr = MARKETPLACE_ADDRESS || marketplaceAddr(NETWORK_KEY);
-  // Register the TZIP‑16 module on the toolkit to support off‑chain views.
+export async function getMarketContract(toolkit, { write = true } = {}) {
+  const addr = write
+    ? MARKETPLACE_WRITE_ADDRESSES[TARGET]
+    : MARKETPLACE_READ_ADDRESSES[TARGET][0];
   try {
     toolkit.addExtension(new Tzip16Module());
-  } catch (e) {
-    /* ignore duplicate registration errors */
+  } catch {
+    /* ignore */
   }
-  // Return a Contract instance via contract.at() without the tzip16 mixin.  The
-  // registered extension enables off‑chain view support while preserving
-  // methodsObject and methods.  Avoid wallet.at() here as it may strip
-  // methodsObject on some Taquito versions.
   return toolkit.contract.at(addr);
+}
+
+function* _eachMarketAddr() {
+  for (const a of MARKETPLACE_READ_ADDRESSES[TARGET]) yield a;
 }
 
 /*─────────────────────────────────────────────────────────────
   Off‑chain view helpers
 ─────────────────────────────────────────────────────────────*/
 
-// Fetch all listings for a given token via the off‑chain view.
-export async function fetchListings({ toolkit, nftContract, tokenId }) {
-  // Prefer on‑chain view for listings.  Off‑chain views can trigger
-  // RPC run_code errors on certain nodes and clutter the console.  We
-  // therefore attempt the on‑chain view directly and return its
-  // results.  If the on‑chain view fails, fallback to an empty array.
-  try {
-    const results = await fetchOnchainListings({ toolkit, nftContract, tokenId });
-    return Array.isArray(results) ? results : [];
-  } catch {
-    return [];
+// Fetch all listings for a given token from every marketplace instance.
+export async function fetchListings({ toolkit: _tk, nftContract, tokenId }) {
+  const out = [];
+  for (const mkt of _eachMarketAddr()) {
+    try {
+      const res = await jFetch(
+        `${TZKT_API}/v1/contracts/${mkt}/bigmaps/listings/keys?token_contract=${nftContract}&token_id=${tokenId}`,
+      );
+      if (Array.isArray(res)) out.push(...res);
+    } catch {
+      /* ignore individual failures */
+    }
   }
+  return out;
 }
 
 // Return the cheapest active listing for the given token from off‑chain views.
@@ -384,6 +374,7 @@ export async function buildListParams(
     saleSplits = [],
     royaltySplits = [],
     startDelay = 0,
+    offline_balance = false,
   },
 ) {
   // Retrieve the marketplace contract.  This returns a WalletContract
@@ -443,6 +434,7 @@ export async function buildListParams(
       sale_splits: saleSplits,
       start_delay: delay,
       token_id: tokId,
+      offline_balance,
     }).toTransferParams();
   } else if (typeof posFn === 'function') {
     transferParams = posFn(
@@ -453,6 +445,7 @@ export async function buildListParams(
       saleSplits,
       delay,
       tokId,
+      offline_balance,
     ).toTransferParams();
   } else {
     throw new Error('list_token entrypoint unavailable on marketplace contract');

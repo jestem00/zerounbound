@@ -1,13 +1,11 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/ListTokenDialog.jsx
-  Rev :    r42    2025‑08‑05
-  Summary: v2 series balance‑detect patch.  Restores TzKT
-           balance fallback and adds direct ledger‑big‑map
-           look‑up for v2a contracts whose ledger key is
-           (address × nat) → nat.  Fixes “Insufficient balance”
-           FAILWITH and enables listing when off‑chain views
-           are absent.
+  Rev :    r43    2025‑08‑06
+  Summary: add v2a offline‑balance guard and dual‑marketplace
+           support. Detects v2a via hashMatrix, checks TzKT
+           balances, sets offline_balance flag and routes write
+           calls to the new marketplace instance.
 ────────────────────────────────────────────────────────────*/
 
 import React, { useState, useEffect } from 'react';
@@ -26,8 +24,9 @@ import {
   getMarketContract,
 } from '../core/marketplace.js';
 import getLedgerBalanceV2a from '../utils/getLedgerBalanceV2a.cjs';
+import hashMatrix from '../data/hashMatrix.json';
 
-import { URL_OBJKT_TOKENS_BASE } from '../config/deployTarget.js';
+import { URL_OBJKT_TOKENS_BASE, TZKT_API } from '../config/deployTarget.js';
 import { Tzip16Module } from '@taquito/tzip16';
 
 /* styled‑components handle */
@@ -192,14 +191,13 @@ export default function ListTokenDialog({
 
         /* direct ledger fallback – v2a */
         if (owned === 0) {
-          const { balance: bal, tokenId: idFound } = await getLedgerBalanceV2a(
-            toolkit,
+          const bal = await getLedgerBalanceV2a({
+            tzktBase: TZKT_API,
             contract,
-            pkh,
-            idNum,
-          );
+            tokenId: idNum,
+            owner: pkh,
+          });
           owned = bal;
-          if (idFound != null) resolvedId = idFound;
         }
 
         /* TzKT balances fallback */
@@ -252,6 +250,8 @@ export default function ListTokenDialog({
 
   /*───────── list click ───────────────────────────────────*/
   async function handleList() {
+    /* detect v2a */
+    const isV2a = hashMatrix[String(await toolkit.rpc.getNormalizedScriptHash(contract))] === 'v2a';
     if (isUnsupported) {
       snack('Unsupported contract – redirecting to Objkt…', 'warning');
       objktUrl && window.open(objktUrl, '_blank');
@@ -266,26 +266,44 @@ export default function ListTokenDialog({
       const listId = resolvedTokenId ?? Number(tokenId);
       const dec = await getDec(listId);
       const qtyUnits = dec > 0 ? q * 10 ** dec : q;
+
+      /* v2a guard — offline balance check */
+      let offline_balance = false;
+      if (isV2a) {
+        const bal = await getLedgerBalanceV2a({
+          tzktBase: TZKT_API,
+          contract,
+          tokenId: listId,
+          owner: await toolkit.wallet.pkh(),
+        });
+        if (bal < q) {
+          snack('Insufficient editions held (offline check)', 'error');
+          return;
+        }
+        offline_balance = true;
+      }
+
       await buildListParams(toolkit, {
         nftContract: contract,
         tokenId    : listId,
         amount     : qtyUnits,
         priceMutez : Math.floor(p * 1_000_000),
+        offline_balance,
       });
-      await submitTx(q, Math.floor(p * 1_000_000));
+      await submitTx(q, Math.floor(p * 1_000_000), offline_balance);
     } catch (e) {
       snack(e.message || 'Build error', 'error');
     }
   }
 
   /*───────── tx submit ────────────────────────────────────*/
-  async function submitTx(qEditions, priceMutez) {
+  async function submitTx(qEditions, priceMutez, offline_balance) {
     try {
       setOv({ open: true, label: 'Preparing listing …' });
 
       const seller = await toolkit.wallet.pkh();
       const nft    = await toolkit.wallet.at(contract);
-      const market = await getMarketContract(toolkit);
+      const market = await getMarketContract(toolkit, { write: true });
       const opAddr = market.address;
 
       const upd = (id, rev = false) =>
@@ -335,6 +353,7 @@ export default function ListTokenDialog({
           saleSplits,
           royaltySplits : [],
           startDelay    : 0,
+          offline_balance,
         });
         setOv({ open: true, label: 'Listing token …' });
         const op = await toolkit.wallet.batch(params).send();
@@ -466,11 +485,8 @@ ListTokenDialog.propTypes = {
 };
 
 /* What changed & why:
-   • r42 – Re‑enabled listing for v2‑series FA2 contracts.
-     – Restored TzKT /tokens/balances fallback.
-     – Added direct ledger big‑map balance
-       query for v2a (address×nat→nat ledger).
-     – Disabled quantity input when owned ≤ 0
-       to surface UX clarity.
-     – No other logic removed; lint‑clean. */
+   • r43 – Added dual‑marketplace support and v2a offline‑balance guard.
+     – Detect v2a via hashMatrix and verify TzKT balance.
+     – Pass offline_balance flag to buildListParams and route
+       writes through MARKETPLACE_WRITE_ADDRESS. */
 /* EOF */

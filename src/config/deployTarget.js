@@ -176,7 +176,7 @@ export const FACTORY_ADDRESS = FACTORY_ADDRESSES[TARGET];
 // deployTarget.js remaining the sole diverging file between Ghostnet and
 // Mainnet.  See src/core/marketplace.js for usage.
 export const MARKETPLACE_ADDRESSES = {
-  ghostnet: 'KT1R1PzLhBXEd98ei72mFuz4FrUYEcuV7t1p',
+  ghostnet: 'KT19yn9fWP6zTSLPntGyrPwc7JuMHnYxAn1z',
   mainnet : 'KT19kipdLiWyBZvP7KWCPdRbDXuEiu3gfjBR',
 };
 

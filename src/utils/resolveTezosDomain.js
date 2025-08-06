@@ -42,6 +42,7 @@ function normalizeAddress(addr) {
  * @param {string} network The network key ('mainnet' | 'ghostnet' | …).
  * @returns {Promise<string|null>} The resolved domain name or null.
  */
+// eslint-disable-next-line no-unused-vars
 async function resolveOnChain(address, network) {
   const rpcList = RPC_URLS || FALLBACK_RPCS;
   // Choose a single RPC endpoint per network for on‑chain calls.

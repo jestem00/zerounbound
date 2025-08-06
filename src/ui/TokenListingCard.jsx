@@ -72,7 +72,7 @@ const PLACEHOLDER = '/sprites/cover_default.svg';
  */
 export default function TokenListingCard({ contract, tokenId, priceMutez }) {
   const [meta, setMeta] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
   // Consent flags for NSFW, flashing and scripts
   const [allowNSFW, setAllowNSFW] = useConsent('nsfw', false);
   const [allowFlash, setAllowFlash] = useConsent('flash', false);

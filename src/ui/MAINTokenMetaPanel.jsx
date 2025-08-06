@@ -243,6 +243,7 @@ export default function MAINTokenMetaPanel({
   /* integrity + editions */
   const integrity = useMemo(() => checkOnChainIntegrity(token.metadata || {}), [token.metadata]);
   const { label } = useMemo(() => getIntegrityInfo(integrity.status), [integrity.status]);
+  void label;
   const editions = useMemo(() => countAmount(token), [token]);
   const verLabel = HASH2VER[collection.typeHash] || '?';
 

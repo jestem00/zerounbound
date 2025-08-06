@@ -396,10 +396,11 @@ export async function buildListParams(
   // entrypoint has the following Micheline signature:
   // (nat %amount)
   // (pair (address %nft_contract)
-  //       (pair (mutez %price)
-  //             (pair (list %royalty_splits (pair address nat))
-  //                   (pair (list %sale_splits (pair address nat))
-  //                         (pair (int %start_delay) (nat %token_id))))))
+  //       (pair (bool %offline_balance)
+  //             (pair (mutez %price)
+  //                   (pair (list %royalty_splits (pair address nat))
+  //                         (pair (list %sale_splits (pair address nat))
+  //                               (pair (int %start_delay) (nat %token_id)))))))
   let transferParams;
   // Use bracket lookup to handle potential name mangling by decorators.
   let objFn = c.methodsObject?.list_token || c.methodsObject?.['list_token'];
@@ -430,6 +431,7 @@ export async function buildListParams(
     transferParams = objFn({
       amount: amt,
       nft_contract: nftContract,
+      offline_balance,
       price: priceMutez,
       // The contract parameter order expects royalty_splits first
       // followed by sale_splits.  Passing both explicitly avoids
@@ -438,18 +440,17 @@ export async function buildListParams(
       sale_splits: saleSplits,
       start_delay: delay,
       token_id: tokId,
-      offline_balance,
     }).toTransferParams();
   } else if (typeof posFn === 'function') {
     transferParams = posFn(
       amt,
       nftContract,
+      offline_balance,
       priceMutez,
       royaltySplits,
       saleSplits,
       delay,
       tokId,
-      offline_balance,
     ).toTransferParams();
   } else {
     throw new Error('list_token entrypoint unavailable on marketplace contract');

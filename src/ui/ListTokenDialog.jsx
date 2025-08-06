@@ -25,6 +25,7 @@ import {
   fetchOnchainListings,
   getMarketContract,
 } from '../core/marketplace.js';
+import getLedgerBalanceV2a from '../utils/getLedgerBalanceV2a.cjs';
 
 import { URL_OBJKT_TOKENS_BASE } from '../config/deployTarget.js';
 import { Tzip16Module } from '@taquito/tzip16';
@@ -140,28 +141,6 @@ export default function ListTokenDialog({
     return d;
   }
 
-  /*───────── helper: direct ledger balance for v2a ────────*/
-  async function getLedgerBalance(pkh, id) {
-    try {
-      const tzkt =
-        /ghostnet|limanet/i.test(toolkit.rpc.getRpcUrl?.() ?? '')
-          ? 'https://api.ghostnet.tzkt.io'
-          : 'https://api.tzkt.io';
-      const maps   = await (await fetch(`${tzkt}/v1/contracts/${contract}/bigmaps`)).json();
-      const ledMap = maps.find((m) => m.path === 'ledger');
-      if (!ledMap) return 0;
-      const mapId  = ledMap.ptr ?? ledMap.id;
-      /* v2a key layout = pair(address,nat) => nat
-         query filter: key.0 = pkh & key.1 = tokenId                           */
-      const q      = `${tzkt}/v1/bigmaps/${mapId}/keys?key.0=${pkh}&key.1=${id}`;
-      const rows   = await (await fetch(q)).json();
-      if (Array.isArray(rows) && rows.length > 0) {
-        const bal = Number(rows[0]?.value ?? 0);
-        return bal;
-      }
-    } catch { /* ignore */ }
-    return 0;
-  }
 
   /*───────── version detection (FA2 test) ─────────────────*/
   useEffect(() => {
@@ -211,7 +190,7 @@ export default function ListTokenDialog({
 
         /* direct ledger fallback – v2a */
         if (owned === 0) {
-          owned = await getLedgerBalance(pkh, idNum);
+          owned = await getLedgerBalanceV2a(toolkit, contract, pkh, idNum);
         }
 
         /* TzKT balances fallback */
@@ -364,16 +343,13 @@ export default function ListTokenDialog({
       const dec      = await getDec(idNum);
       const qtyUnits = dec > 0 ? qEditions * 10 ** dec : qEditions;
 
-      try { await updateAndList(idNum, qtyUnits); }
-      catch {
-        if (idNum > 0) {
-          const alt     = idNum - 1;
-          const decAlt  = await getDec(alt);
-          const altQty  = decAlt > 0 ? qEditions * 10 ** decAlt : qEditions;
-          await updateAndList(alt, altQty);
-        } else {
-          throw new Error('Listing failed – operator update error');
-        }
+      try {
+        await updateAndList(idNum, qtyUnits);
+      } catch {
+        const alt = idNum + 1;
+        const decAlt = await getDec(alt);
+        const altQty = decAlt > 0 ? qEditions * 10 ** decAlt : qEditions;
+        await updateAndList(alt, altQty);
       }
 
       setOv({ open: false, label: '' });

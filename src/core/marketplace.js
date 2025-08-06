@@ -396,8 +396,8 @@ export async function buildListParams(
   // entrypoint has the following Micheline signature:
   // (nat %amount)
   // (pair (address %nft_contract)
-  //       (pair (bool %offline_balance)
-  //             (pair (mutez %price)
+  //       (pair (mutez %price)
+  //             (pair (bool %offline_balance)
   //                   (pair (list %royalty_splits (pair address nat))
   //                         (pair (list %sale_splits (pair address nat))
   //                               (pair (int %start_delay) (nat %token_id)))))))
@@ -445,8 +445,8 @@ export async function buildListParams(
     transferParams = posFn(
       amt,
       nftContract,
-      offline_balance,
       priceMutez,
+      offline_balance,
       royaltySplits,
       saleSplits,
       delay,
@@ -606,9 +606,6 @@ export async function buildOfferParams(toolkit, { nftContract, tokenId, priceMut
   ];
 }
 
-/* What changed & why: updated getMarketContract to return a Contract via
-   contract.at() instead of wallet.at(), preserving methodsObject and
-   contractViews on Taquito ≥22; added fallback logic to buildListParams
-   to handle both named and positional entrypoint APIs, reordered
-   royalty_splits and sale_splits to match the contract’s parameter order,
-   and updated revision and summary accordingly. */
+/* What changed & why: corrected positional list_token argument order so
+   price precedes offline_balance, preventing ParametersInvalidBeaconError
+   and ensuring v2a listings succeed with the offline balance flag. */

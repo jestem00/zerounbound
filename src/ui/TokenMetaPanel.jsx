@@ -181,13 +181,26 @@ export default function TokenMetaPanel({
    * current network. Cache results keyed by lowercased address. */
   useEffect(() => {
     const addrs = new Set();
-    // gather addresses from authors and creators lists
-    (metaObj.authors ?? metaObj.artists ?? []).forEach((item) => {
+    // gather addresses from authors/artists
+    const rawAuthors = metaObj.authors ?? metaObj.artists;
+    const authorsArr = Array.isArray(rawAuthors)
+      ? rawAuthors
+      : rawAuthors != null
+        ? [rawAuthors]
+        : [];
+    authorsArr.forEach((item) => {
       if (typeof item === 'string' && /^(tz|kt)/i.test(item.trim())) {
         addrs.add(item);
       }
     });
-    (metaObj.creators ?? []).forEach((item) => {
+    // gather addresses from creators
+    const rawCreators = metaObj.creators;
+    const creatorsArr = Array.isArray(rawCreators)
+      ? rawCreators
+      : rawCreators != null
+        ? [rawCreators]
+        : [];
+    creatorsArr.forEach((item) => {
       if (typeof item === 'string' && /^(tz|kt)/i.test(item.trim())) {
         addrs.add(item);
       }
@@ -446,7 +459,15 @@ export default function TokenMetaPanel({
         <IntegrityChip
           aria-label={label}
           title={label}
+          role="button"
+          tabIndex={0}
           onClick={() => openTool('integrity')}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              openTool('integrity');
+            }
+          }}
         >
           {/* Display the badge icon alongside the label to clarify status */}
           <IntegrityBadge status={integrity.status} />
@@ -456,7 +477,17 @@ export default function TokenMetaPanel({
 
       {/* Address row with copy button */}
       {ktShort && (
-        <AddrRow onClick={copyAddr}>
+        <AddrRow
+          role="button"
+          tabIndex={0}
+          onClick={copyAddr}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              copyAddr();
+            }
+          }}
+        >
           <span>{ktShort}</span>
           <span>{copied ? '✓' : '📋'}</span>
         </AddrRow>

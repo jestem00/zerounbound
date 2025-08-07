@@ -213,6 +213,7 @@ export async function fetchOnchainOffers({ toolkit, nftContract, tokenId }) {
 }
 
 // Fetch detailed information for a specific listing using the on‑chain view.
+// Note: this function must remain unique; duplicate declarations caused build failures.
 export async function fetchOnchainListingDetails({ toolkit, nftContract, tokenId, nonce }) {
   try { toolkit.addExtension?.(new Tzip16Module()); } catch {}
   for (const addr of _eachMarketAddr()) {

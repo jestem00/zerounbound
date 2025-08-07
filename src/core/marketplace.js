@@ -486,9 +486,10 @@ export async function buildListParams(
   if (typeof objFn === 'function') {
     transferParams = objFn({
       amount: amt,
-      nft_contract: nftContract,
+      nft_contract   : nftContract,
+      /* v2a ZeroSum expects the bool **before** the mutez  */
       offline_balance,
-      price: priceMutez,
+      price          : priceMutez,
       // The contract parameter order expects royalty_splits first
       // followed by sale_splits.  Passing both explicitly avoids
       // misalignment when Taquito generates positional arguments.
@@ -501,8 +502,9 @@ export async function buildListParams(
     transferParams = posFn(
       amt,
       nftContract,
-      offline_balance,
-      priceMutez,
+      /* positional order: amount • nft • bool • mutez • … */
+      offline_balance,                  // 3rd
+      priceMutez,                       // 4th
       royaltySplits,
       saleSplits,
       delay,

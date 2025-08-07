@@ -346,12 +346,13 @@ export default function ListTokenDialog({
         const params = await buildListParams(toolkit, {
           nftContract   : contract,
           tokenId       : id,
+          /* bool precedes price to match builder signature          */
+          offline_balance,
           priceMutez,
           amount        : qtyUnits,
           saleSplits,
           royaltySplits : [],
           startDelay    : 0,
-          offline_balance,
         });
         setOv({ open: true, label: 'Listing token …' });
         const op = await toolkit.wallet.batch(params).send();

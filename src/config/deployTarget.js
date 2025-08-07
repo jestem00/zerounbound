@@ -1,11 +1,9 @@
 /*─────────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/config/deployTarget.js
-  Rev :    r1162    2025‑08‑06
-  Summary: Split marketplace addresses into read/write arrays for
-           dual‑instance support. Exposes MARKETPLACE_WRITE_ADDRESSES
-           and MARKETPLACE_READ_ADDRESSES with legacy exports for
-           backward compatibility.
+  Rev :    r1163    2025‑08‑07
+  Summary: maintain dual marketplace address arrays and legacy
+           single‑value exports for backward compatibility.
 */
 
 // ---------------------------------------------------------------------------

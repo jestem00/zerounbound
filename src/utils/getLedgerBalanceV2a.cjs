@@ -1,9 +1,9 @@
 /*─────────────────────────────────────────────────────────────
 Developed by @jams2blues – ZeroContract Studio
 File:    src/utils/getLedgerBalanceV2a.cjs
-Rev :    r1    2025-08-06
+Rev :    r2    2025-08-07
 Summary: Simple TzKT balance fetch for v2a offline_balance guard.
-          Returns raw edition balance for a given owner and token.
+         Returns raw edition balance for a given owner and token.
 */
 module.exports = async function getLedgerBalanceV2a(
   { tzktBase, contract, tokenId, owner },

@@ -25,7 +25,7 @@ export const marketplaceAddrs = (net = TARGET) => {
   return MARKETPLACE_READ_ADDRESSES[key];
 };
 
-// Legacy helper – retain single‑address resolver for backward compat.
+// Write‑address helper for convenience.
 export const marketplaceAddr = (net = TARGET) => marketplaceAddrs(net)[0];
 /**
  * Obtain a handle to the ZeroSum marketplace contract for the given toolkit.
@@ -45,7 +45,7 @@ export async function getMarketContract(toolkit, { write = true } = {}) {
   } catch {
     /* ignore */
   }
-  return toolkit.contract.at(addr);
+  return toolkit.wallet.at(addr);
 }
 
 function* _eachMarketAddr() {

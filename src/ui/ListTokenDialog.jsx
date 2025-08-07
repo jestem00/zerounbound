@@ -267,9 +267,14 @@ export default function ListTokenDialog({
 
     /* marketplace checklist guard */
     try {
-      await jFetch(
-        `${TZKT_API}/v1/contracts/${MARKETPLACE_ADDRESS}/bigmaps/checklist/keys/${contract}`,
+      const store = await jFetch(
+        `${TZKT_API}/v1/contracts/${MARKETPLACE_ADDRESS}/storage`,
       );
+      const list = Array.isArray(store?.checklist) ? store.checklist : [];
+      if (!list.includes(contract)) {
+        snack('Collection not whitelisted on marketplace', 'error');
+        return;
+      }
     } catch {
       snack('Collection not whitelisted on marketplace', 'error');
       return;

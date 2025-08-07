@@ -25,6 +25,7 @@ import {
 } from '../core/marketplace.js';
 import getLedgerBalanceV2a from '../utils/getLedgerBalanceV2a.cjs';
 import hashMatrix from '../data/hashMatrix.json';
+import { jFetch } from '../core/net.js';
 
 import {
   URL_OBJKT_TOKENS_BASE,
@@ -266,13 +267,9 @@ export default function ListTokenDialog({
 
     /* marketplace checklist guard */
     try {
-      const wl = await fetch(
+      await jFetch(
         `${TZKT_API}/v1/contracts/${MARKETPLACE_ADDRESS}/bigmaps/checklist/keys/${contract}`,
       );
-      if (!wl.ok) {
-        snack('Collection not whitelisted on marketplace', 'error');
-        return;
-      }
     } catch {
       snack('Collection not whitelisted on marketplace', 'error');
       return;

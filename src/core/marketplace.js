@@ -150,14 +150,7 @@ async function getViewCaller(market, toolkit) {
 
 // Fetch all listings for a token using the on‑chain view.
 export async function fetchOnchainListings({ toolkit, nftContract, tokenId }) {
-  const market = await getMarketContract(toolkit);
-  const viewCaller = await getViewCaller(market, toolkit);
-  const raw = await market.contractViews
-    .onchain_listings_for_token({
-      nft_contract: nftContract,
-      token_id: Number(tokenId),
-    })
-    .executeView({ viewCaller });
+  try { toolkit.addExtension?.(new Tzip16Module()); } catch {}
   const out = [];
   const push = (n, o) =>
     out.push({
@@ -167,24 +160,29 @@ export async function fetchOnchainListings({ toolkit, nftContract, tokenId }) {
       seller: o.seller,
       active: o.active,
     });
-  if (raw?.entries) {
-    for (const [k, v] of raw.entries()) push(k, v);
-  } else if (typeof raw === 'object') {
-    Object.entries(raw).forEach(([k, v]) => push(k, v));
+  for (const addr of _eachMarketAddr()) {
+    try {
+      const market = await toolkit.contract.at(addr);
+      const viewCaller = await getViewCaller(market, toolkit);
+      const raw = await market.contractViews
+        .onchain_listings_for_token({
+          nft_contract: nftContract,
+          token_id: Number(tokenId),
+        })
+        .executeView({ viewCaller });
+      if (raw?.entries) {
+        for (const [k, v] of raw.entries()) push(k, v);
+      } else if (typeof raw === 'object') {
+        Object.entries(raw).forEach(([k, v]) => push(k, v));
+      }
+    } catch {}
   }
   return out;
 }
 
 // Fetch all offers for a token using the on‑chain view.
 export async function fetchOnchainOffers({ toolkit, nftContract, tokenId }) {
-  const market = await getMarketContract(toolkit);
-  const viewCaller = await getViewCaller(market, toolkit);
-  const raw = await market.contractViews
-    .onchain_offers_for_token({
-      nft_contract: nftContract,
-      token_id: Number(tokenId),
-    })
-    .executeView({ viewCaller });
+  try { toolkit.addExtension?.(new Tzip16Module()); } catch {}
   const offers = [];
   const push = (k, o) =>
     offers.push({
@@ -194,116 +192,174 @@ export async function fetchOnchainOffers({ toolkit, nftContract, tokenId }) {
       nonce: Number(o.nonce),
       accepted: o.accepted,
     });
-  if (raw?.entries) {
-    for (const [k, v] of raw.entries()) push(k, v);
-  } else if (typeof raw === 'object') {
-    Object.entries(raw).forEach(([k, v]) => push(k, v));
+  for (const addr of _eachMarketAddr()) {
+    try {
+      const market = await toolkit.contract.at(addr);
+      const viewCaller = await getViewCaller(market, toolkit);
+      const raw = await market.contractViews
+        .onchain_offers_for_token({
+          nft_contract: nftContract,
+          token_id: Number(tokenId),
+        })
+        .executeView({ viewCaller });
+      if (raw?.entries) {
+        for (const [k, v] of raw.entries()) push(k, v);
+      } else if (typeof raw === 'object') {
+        Object.entries(raw).forEach(([k, v]) => push(k, v));
+      }
+    } catch {}
   }
   return offers;
 }
 
 // Fetch detailed information for a specific listing using the on‑chain view.
 export async function fetchOnchainListingDetails({ toolkit, nftContract, tokenId, nonce }) {
-  const market = await getMarketContract(toolkit);
-  const viewCaller = await getViewCaller(market, toolkit);
-  const raw = await market.contractViews
-    .onchain_listing_details({
-      listing_nonce: Number(nonce),
-      nft_contract: nftContract,
-      token_id: Number(tokenId),
-    })
-    .executeView({ viewCaller });
-  return {
-    contract: raw.nft_contract,
-    tokenId: Number(raw.token_id),
-    seller: raw.seller,
-    priceMutez: Number(raw.price),
-    amount: Number(raw.amount),
-    active: raw.active,
-    startTime: raw.start_time,
-    saleSplits: raw.sale_splits,
-    royaltySplits: raw.royalty_splits,
-  };
+  try { toolkit.addExtension?.(new Tzip16Module()); } catch {}
+  for (const addr of _eachMarketAddr()) {
+    try {
+      const market = await toolkit.contract.at(addr);
+      const viewCaller = await getViewCaller(market, toolkit);
+      const raw = await market.contractViews
+        .onchain_listing_details({
+          listing_nonce: Number(nonce),
+          nft_contract: nftContract,
+          token_id: Number(tokenId),
+        })
+        .executeView({ viewCaller });
+      return {
+        contract: raw.nft_contract,
+        tokenId: Number(raw.token_id),
+        seller: raw.seller,
+        priceMutez: Number(raw.price),
+        amount: Number(raw.amount),
+        active: raw.active,
+        startTime: raw.start_time,
+        saleSplits: raw.sale_splits,
+        royaltySplits: raw.royalty_splits,
+      };
+    } catch {}
+  }
+  throw new Error('listing details unavailable');
 }
 
 // Fetch all listings made by a specific seller via the on‑chain view.
 export async function fetchOnchainListingsForSeller({ toolkit, seller }) {
-  const market = await getMarketContract(toolkit);
-  const viewCaller = await getViewCaller(market, toolkit);
-  const raw = await market.contractViews.onchain_listings_for_seller(seller).executeView({ viewCaller });
-  return Array.isArray(raw)
-    ? raw.map((r) => ({
-        contract: r.nft_contract,
-        tokenId: Number(r.token_id),
-        seller: r.seller,
-        priceMutez: Number(r.price),
-        amount: Number(r.amount),
-        active: r.active,
-        startTime: r.start_time,
-        saleSplits: r.sale_splits,
-        royaltySplits: r.royalty_splits,
-      }))
-    : [];
+  try { toolkit.addExtension?.(new Tzip16Module()); } catch {}
+  const out = [];
+  for (const addr of _eachMarketAddr()) {
+    try {
+      const market = await toolkit.contract.at(addr);
+      const viewCaller = await getViewCaller(market, toolkit);
+      const raw = await market.contractViews
+        .onchain_listings_for_seller(seller)
+        .executeView({ viewCaller });
+      if (Array.isArray(raw)) {
+        out.push(
+          ...raw.map((r) => ({
+            contract: r.nft_contract,
+            tokenId: Number(r.token_id),
+            seller: r.seller,
+            priceMutez: Number(r.price),
+            amount: Number(r.amount),
+            active: r.active,
+            startTime: r.start_time,
+            saleSplits: r.sale_splits,
+            royaltySplits: r.royalty_splits,
+          })),
+        );
+      }
+    } catch {}
+  }
+  return out;
 }
 
 // Fetch all offers made by a specific buyer using the on‑chain view.
 export async function fetchOnchainOffersForBuyer({ toolkit, buyer }) {
-  const market = await getMarketContract(toolkit);
-  const viewCaller = await getViewCaller(market, toolkit);
-  const raw = await market.contractViews.onchain_offers_for_buyer(buyer).executeView({ viewCaller });
-  return Array.isArray(raw)
-    ? raw.map((r) => ({
-        offeror: r.offeror,
-        priceMutez: Number(r.price),
-        amount: Number(r.amount),
-        nonce: Number(r.nonce),
-        accepted: r.accepted,
-      }))
-    : [];
+  try { toolkit.addExtension?.(new Tzip16Module()); } catch {}
+  const out = [];
+  for (const addr of _eachMarketAddr()) {
+    try {
+      const market = await toolkit.contract.at(addr);
+      const viewCaller = await getViewCaller(market, toolkit);
+      const raw = await market.contractViews
+        .onchain_offers_for_buyer(buyer)
+        .executeView({ viewCaller });
+      if (Array.isArray(raw)) {
+        out.push(
+          ...raw.map((r) => ({
+            offeror: r.offeror,
+            priceMutez: Number(r.price),
+            amount: Number(r.amount),
+            nonce: Number(r.nonce),
+            accepted: r.accepted,
+          })),
+        );
+      }
+    } catch {}
+  }
+  return out;
 }
 
 // Fetch all listings for an entire collection via the on‑chain view.
 export async function fetchOnchainListingsForCollection({ toolkit, nftContract }) {
-  const market = await getMarketContract(toolkit);
-  const viewCaller = await getViewCaller(market, toolkit);
-  const raw = await market.contractViews
-    .onchain_listings_for_collection({
-      nft_contract: nftContract,
-    })
-    .executeView({ viewCaller });
-  return Array.isArray(raw)
-    ? raw.map((r) => ({
-        contract: r.nft_contract,
-        tokenId: Number(r.token_id),
-        seller: r.seller,
-        priceMutez: Number(r.price),
-        amount: Number(r.amount),
-        active: r.active,
-        startTime: r.start_time,
-        saleSplits: r.sale_splits,
-        royaltySplits: r.royalty_splits,
-      }))
-    : [];
+  try { toolkit.addExtension?.(new Tzip16Module()); } catch {}
+  const out = [];
+  for (const addr of _eachMarketAddr()) {
+    try {
+      const market = await toolkit.contract.at(addr);
+      const viewCaller = await getViewCaller(market, toolkit);
+      const raw = await market.contractViews
+        .onchain_listings_for_collection({
+          nft_contract: nftContract,
+        })
+        .executeView({ viewCaller });
+      if (Array.isArray(raw)) {
+        out.push(
+          ...raw.map((r) => ({
+            contract: r.nft_contract,
+            tokenId: Number(r.token_id),
+            seller: r.seller,
+            priceMutez: Number(r.price),
+            amount: Number(r.amount),
+            active: r.active,
+            startTime: r.start_time,
+            saleSplits: r.sale_splits,
+            royaltySplits: r.royalty_splits,
+          })),
+        );
+      }
+    } catch {}
+  }
+  return out;
 }
 
 // Fetch all offers made on an entire collection via the on‑chain view.
 export async function fetchOnchainOffersForCollection({ toolkit, nftContract }) {
-  const market = await getMarketContract(toolkit);
-  const viewCaller = await getViewCaller(market, toolkit);
-  const raw = await market.contractViews
-    .onchain_offers_for_collection({
-      nft_contract: nftContract,
-    })
-    .executeView({ viewCaller });
-  return Array.isArray(raw)
-    ? raw.map((r) => ({
-        offeror: r.offeror,
-        priceMutez: Number(r.price),
-        amount: Number(r.amount),
-        nonce: Number(r.nonce),
-        accepted: r.accepted,
-      }))
-    : [];
+  try { toolkit.addExtension?.(new Tzip16Module()); } catch {}
+  const out = [];
+  for (const addr of _eachMarketAddr()) {
+    try {
+      const market = await toolkit.contract.at(addr);
+      const viewCaller = await getViewCaller(market, toolkit);
+      const raw = await market.contractViews
+        .onchain_offers_for_collection({
+          nft_contract: nftContract,
+        })
+        .executeView({ viewCaller });
+      if (Array.isArray(raw)) {
+        out.push(
+          ...raw.map((r) => ({
+            offeror: r.offeror,
+            priceMutez: Number(r.price),
+            amount: Number(r.amount),
+            nonce: Number(r.nonce),
+            accepted: r.accepted,
+          })),
+        );
+      }
+    } catch {}
+  }
+  return out;
 }
 
 /*─────────────────────────────────────────────────────────────

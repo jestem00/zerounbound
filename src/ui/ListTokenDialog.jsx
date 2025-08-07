@@ -271,8 +271,6 @@ export default function ListTokenDialog({
     }
     try {
       const listId = resolvedTokenId ?? Number(tokenId);
-      const dec = await getDec(listId);
-      const qtyUnits = dec > 0 ? q * 10 ** dec : q;
 
       /* v2a guard — offline balance check */
       let offline_balance = false;
@@ -290,13 +288,6 @@ export default function ListTokenDialog({
         offline_balance = true;
       }
 
-      await buildListParams(toolkit, {
-        nftContract: contract,
-        tokenId    : listId,
-        amount     : qtyUnits,
-        priceMutez : Math.floor(p * 1_000_000),
-        offline_balance,
-      });
       await submitTx(q, Math.floor(p * 1_000_000), offline_balance);
     } catch (e) {
       snack(e.message || 'Build error', 'error');

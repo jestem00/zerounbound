@@ -431,8 +431,8 @@ export async function buildListParams(
     transferParams = objFn({
       amount: amt,
       nft_contract: nftContract,
-      offline_balance,
       price: priceMutez,
+      offline_balance,
       // The contract parameter order expects royalty_splits first
       // followed by sale_splits.  Passing both explicitly avoids
       // misalignment when Taquito generates positional arguments.

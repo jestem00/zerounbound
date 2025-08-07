@@ -26,7 +26,7 @@ import {
 import getLedgerBalanceV2a from '../utils/getLedgerBalanceV2a.cjs';
 import hashMatrix from '../data/hashMatrix.json';
 
-import { URL_OBJKT_TOKENS_BASE, TZKT_API } from '../config/deployTarget.js';
+import { URL_OBJKT_TOKENS_BASE, TZKT_API, MARKETPLACE_ADDRESS } from '../config/deployTarget.js';
 import { Tzip16Module } from '@taquito/tzip16';
 
 /* styled‑components handle */
@@ -272,7 +272,7 @@ export default function ListTokenDialog({
     try {
       const listId = resolvedTokenId ?? Number(tokenId);
 
-      /* v2a guard — offline balance check */
+      /* v2a guard — offline balance check and checklist */
       let offline_balance = false;
       if (isV2a) {
         const bal = await getLedgerBalanceV2a({
@@ -283,6 +283,17 @@ export default function ListTokenDialog({
         });
         if (bal < q) {
           snack('Insufficient editions held (offline check)', 'error');
+          return;
+        }
+        try {
+          const store = await (await fetch(`${TZKT_API}/v1/contracts/${MARKETPLACE_ADDRESS}/storage`)).json();
+          const cl = Array.isArray(store?.checklist) ? store.checklist : [];
+          if (!cl.map((a) => a.toLowerCase()).includes(contract.toLowerCase())) {
+            snack('Collection not whitelisted on marketplace', 'error');
+            return;
+          }
+        } catch {
+          snack('Checklist verification failed', 'error');
           return;
         }
         offline_balance = true;

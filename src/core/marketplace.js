@@ -452,8 +452,8 @@ export async function buildListParams(
   // entrypoint has the following Micheline signature:
   // (nat %amount)
   // (pair (address %nft_contract)
-  //       (pair (mutez %price)
-  //             (pair (bool %offline_balance)
+  //       (pair (bool %offline_balance)
+  //             (pair (mutez %price)
   //                   (pair (list %royalty_splits (pair address nat))
   //                         (pair (list %sale_splits (pair address nat))
   //                               (pair (int %start_delay) (nat %token_id)))))))
@@ -487,8 +487,8 @@ export async function buildListParams(
     transferParams = objFn({
       amount: amt,
       nft_contract: nftContract,
-      price: priceMutez,
       offline_balance,
+      price: priceMutez,
       // The contract parameter order expects royalty_splits first
       // followed by sale_splits.  Passing both explicitly avoids
       // misalignment when Taquito generates positional arguments.
@@ -501,8 +501,8 @@ export async function buildListParams(
     transferParams = posFn(
       amt,
       nftContract,
-      priceMutez,
       offline_balance,
+      priceMutez,
       royaltySplits,
       saleSplits,
       delay,
@@ -662,6 +662,6 @@ export async function buildOfferParams(toolkit, { nftContract, tokenId, priceMut
   ];
 }
 
-/* What changed & why: corrected positional list_token argument order so
-   price precedes offline_balance, preventing ParametersInvalidBeaconError
-   and ensuring v2a listings succeed with the offline balance flag. */
+/* What changed & why: restored original list_token argument order so
+   offline_balance precedes price, matching the marketplace contract and
+   preventing ParametersInvalidBeaconError for v2a listings. */

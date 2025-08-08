@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
 Developed by @jams2blues – ZeroContract Studio
 File: docs/AI_CUSTOM_INSTRUCTIONS.md
-Rev : r7 2025‑07‑24 UTC
-Summary: unify origination flow; remove remote forge service; update environment guidance.
+Rev : r10 2025‑08‑06 UTC
+Summary: add Codex handoff guidance for dual marketplace rollout and v2a offline balance guard.
 */
 
 AI Custom Instructions — Zero Unbound
@@ -40,4 +40,22 @@ Unchanged. Apologise, provide corrected output, note the breach and log a new se
 
 Other sections remain unchanged from the previous revision.
 
-/* What changed & why: Updated to r7. Removed the remote forge service and Temple-specific forging path. All wallets now use TezosToolkit.wallet.originate() with a single‑stage origination. FAST_ORIGIN and USE_BACKEND remain removed. Updated summary and Tools & Environment guidance accordingly. */
+## ZeroUnbound — Codex Handoff (v2 2025‑08‑06)
+### Context
+* Ghostnet now runs **two** ZeroSum instances:
+  `KT1R1Pz…t1p` (legacy READ‑ONLY) and `KT19yn9…n1z` (new READ/WRITE).
+* Contract **v2a** must set the bool flag **offline_balance = True** and pass
+  the checklist guard inside the new marketplace.
+* The front‑end must:
+  1. Detect v2a via `hashMatrix.json`.
+  2. Verify balance via  
+     `GET {TZKT_API}/v1/tokens/balances?token.contract=<cid>&token.tokenId=<tid>&account=<pkh>`
+     and abort if `"balance": "0"`.
+  3. Call `buildListParams()` with `{ offline_balance:true }`.
+  4. Send all write operations to `MARKETPLACE_WRITE_ADDRESS`.
+  5. Aggregate listings/offers from **all** `MARKETPLACE_READ_ADDRESSES`.
+### Deliverables
+Update the five files listed in the PR description; keep **all** invariants.
+Provide fully‑linted, production‑ready code. No partial snippets.
+
+/* What changed & why: Added Codex handoff section outlining dual-marketplace usage and v2a offline balance guard. Bumped to r10 on 2025-08-06. */

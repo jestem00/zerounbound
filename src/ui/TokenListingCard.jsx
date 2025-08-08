@@ -1,20 +1,15 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/TokenListingCard.jsx
-  Rev :    r6    2025‑08‑01 UTC
-  Summary: Enhanced listing card for the marketplace.  Fetches
-           metadata from TzKT, resolves .tez domains for
-           authors/creators, renders creators as clickable
-           links to filter tokens by address, adds a “VIEW”
-           button linking to the token detail page and displays
-           hazard consent overlays (NSFW, flashing, scripts).
-           Shows image, price, token id, authors, creators,
-           MIME type and a buy button via MarketplaceBuyBar.  This
-           revision hides the price in the buy button, displays
-           the price with full precision (six decimals) in a
-           contrasting accent colour and passes showPrice={false}
-           to MarketplaceBuyBar.  It also formats prices
-           consistently without rounding.
+  Rev :    r7    2025‑08‑07 UTC
+  Summary: Support video preview & loop; add script toggle
+           Adds support for rendering on‑chain video data URIs
+           using a <video> element with controls and loop.  Also
+           imports and displays the EnableScriptsToggle to allow
+           users to enable or disable executable scripts on NFT
+           listings.  Removes the previous one‑way script overlay
+           in favour of a persistent toggle.  Leaves price
+           formatting and hazard consent logic unchanged.
 ────────────────────────────────────────────────────────────*/
 
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
@@ -34,6 +29,9 @@ import decodeHexFields from '../utils/decodeHexFields.js';
 // Consent and hazard helpers for NSFW, flashing and scripts
 import useConsent from '../hooks/useConsent.js';
 import detectHazards from '../utils/hazards.js';
+
+// Import the script toggle so users can enable/disable scripts
+import { EnableScriptsToggle } from './EnableScripts.jsx';
 
 /*
  * Select a suitable data URI from the token metadata.  This helper
@@ -60,10 +58,16 @@ const PLACEHOLDER = '/sprites/cover_default.svg';
 /**
  * Minimal listing card for the marketplace.  Fetches token
  * metadata from the TzKT API and displays the primary image
- * (data URI) along with the token name (or tokenId) and price.
- * Includes a buy button via MarketplaceBuyBar.  Does not
- * depend on the full TokenCard component to avoid missing
- * dependencies in the explore bundle.
+ * (data URI) or video thumbnail along with the token name
+ * (or tokenId) and price.  Includes a buy button via
+ * MarketplaceBuyBar.  Does not depend on the full TokenCard
+ * component to avoid missing dependencies in the explore bundle.
+ *
+ * In this revision the card now detects on‑chain video data URIs
+ * (e.g. data:video/mp4;base64,…) and renders them using the
+ * <video> element with controls and loop enabled.  It also adds
+ * an enable/disable scripts toggle to mirror the behaviour of
+ * TokenCard, replacing the prior one‑way enable overlay.
  *
  * @param {object} props component props
  * @param {string} props.contract KT1 address of the NFT contract
@@ -78,6 +82,8 @@ export default function TokenListingCard({ contract, tokenId, priceMutez }) {
   const [allowFlash, setAllowFlash] = useConsent('flash', false);
   const scriptKey = `scripts:${contract}:${tokenId}`;
   const [allowScr, setAllowScr] = useConsent(scriptKey, false);
+
+  // Fetch metadata on mount and whenever contract/tokenId changes
   useEffect(() => {
     let canceled = false;
     async function fetchMetadata() {
@@ -199,22 +205,28 @@ export default function TokenListingCard({ contract, tokenId, priceMutez }) {
   }, [domains, shortAddr]);
 
   // Hazard detection for NSFW, flashing and scripts
-  const hazards = useMemo(() => (meta ? detectHazards(meta) : { nsfw: false, flashing: false, scripts: false }), [meta]);
-  const needsNSFW  = hazards.nsfw     && !allowNSFW;
+  const hazards = useMemo(
+    () => (meta ? detectHazards(meta) : { nsfw: false, flashing: false, scripts: false }),
+    [meta],
+  );
+  const needsNSFW = hazards.nsfw && !allowNSFW;
   const needsFlash = hazards.flashing && !allowFlash;
-  const needsScr   = hazards.scripts && !allowScr;
-  const blocked    = needsNSFW || needsFlash;
+  const blocked = needsNSFW || needsFlash;
   // Convert price in mutez to tez for display; leave null when unknown
-  const priceXTZ = priceMutez != null
-    ? (priceMutez / 1_000_000).toLocaleString(undefined, {
-        minimumFractionDigits: 6,
-        maximumFractionDigits: 6,
-      })
-    : null;
+  const priceXTZ =
+    priceMutez != null
+      ? (priceMutez / 1_000_000).toLocaleString(undefined, {
+          minimumFractionDigits: 6,
+          maximumFractionDigits: 6,
+        })
+      : null;
   // Determine image URI; prefer on‑chain data URIs, fallback to placeholder
   const imageUri = useMemo(() => pickDataUri(meta) || PLACEHOLDER, [meta]);
   // Determine token name or fallback to id
   const title = meta?.name || `Token #${tokenId}`;
+  // Determine if the selected URI is a video data URI
+  const isVideo = useMemo(() => /^data:video\//i.test(imageUri), [imageUri]);
+
   return (
     <article
       style={{
@@ -229,7 +241,7 @@ export default function TokenListingCard({ contract, tokenId, priceMutez }) {
         minHeight: '330px',
       }}
     >
-      {/* Hazard overlays */}
+      {/* Hazard overlays for NSFW and flashing; scripts now handled via toggle */}
       {(needsNSFW || needsFlash) && (
         <div
           style={{
@@ -278,38 +290,7 @@ export default function TokenListingCard({ contract, tokenId, priceMutez }) {
           )}
         </div>
       )}
-      {(!blocked && needsScr) && (
-        <div
-          style={{
-            position: 'absolute',
-            inset: 0,
-            zIndex: 9,
-            background: 'rgba(0,0,0,0.6)',
-            color: '#fff',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'center',
-            alignItems: 'center',
-            gap: '0.5rem',
-            textAlign: 'center',
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => setAllowScr(true)}
-            style={{
-              background: 'var(--zu-accent,#00c8ff)',
-              border: '2px solid var(--zu-accent,#00c8ff)',
-              padding: '0.4rem 0.8rem',
-              fontFamily: 'Pixeloid Sans, monospace',
-              cursor: 'pointer',
-            }}
-          >
-            Enable Scripts
-          </button>
-        </div>
-      )}
-      {/* Thumbnail */}
+      {/* Thumbnail: render video with controls/loop when data URI is video */}
       <div
         style={{
           position: 'relative',
@@ -321,12 +302,22 @@ export default function TokenListingCard({ contract, tokenId, priceMutez }) {
           alignItems: 'center',
         }}
       >
-        {/* Use img tag for data URIs; if no image, show placeholder */}
-        <img
-          src={imageUri}
-          alt={title}
-          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-        />
+        {isVideo ? (
+          <video
+            src={imageUri}
+            controls
+            loop
+            preload="metadata"
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            title={title}
+          />
+        ) : (
+          <img
+            src={imageUri}
+            alt={title}
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+          />
+        )}
       </div>
       {/* Metadata section */}
       <div
@@ -372,6 +363,16 @@ export default function TokenListingCard({ contract, tokenId, priceMutez }) {
             {meta.mimeType}
           </p>
         )}
+        {/* Script toggle: show when the token contains scripts.  Enables users to
+            toggle scripts on or off.  Hidden when blocked for NSFW/flash. */}
+        {hazards.scripts && !blocked && (
+          <div style={{ margin: '2px 0 0 0' }}>
+            <EnableScriptsToggle
+              enabled={allowScr}
+              onToggle={() => setAllowScr((v) => !v)}
+            />
+          </div>
+        )}
         {/* View button: navigate to token detail page */}
         <div style={{ display: 'flex', justifyContent: 'center', marginTop: '4px' }}>
           <PixelButton
@@ -393,14 +394,14 @@ export default function TokenListingCard({ contract, tokenId, priceMutez }) {
 }
 
 TokenListingCard.propTypes = {
-  contract  : PropTypes.string.isRequired,
-  tokenId   : PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
+  contract: PropTypes.string.isRequired,
+  tokenId: PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
   priceMutez: PropTypes.number,
 };
 
-/* What changed & why: r6 – Adjusted TokenListingCard to display the price
-   with full precision and accent colour, and to hide the price inside
-   the Buy button by passing showPrice={false} to MarketplaceBuyBar.
-   Updated price formatting to avoid rounding and changed the Buy
-   button label behaviour accordingly.  Also bumped the revision and
-   summary to reflect these improvements. */
+/* What changed & why: r7 – Added support for rendering on‑chain video data
+   URIs via a <video> element with controls and loop enabled. Introduced
+   EnableScriptsToggle to allow users to enable or disable scripts for
+   script‑hazard tokens. Removed the previous one‑way script overlay and
+   kept hazard consent overlays for NSFW/flashing. Updated summary and
+   bumped revision. */

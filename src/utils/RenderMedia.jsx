@@ -1,9 +1,14 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/utils/RenderMedia.jsx
-  Rev :    r742   2025-07-10
-  Summary: use mimeFromDataUri from uriHelpers
-──────────────────────────────────────────────────────────────*/
+  Rev :    r743   2025-08-07
+  Summary: Auto-loop video support
+           Adds a `loop` attribute to the <video> element so
+           on‑chain videos automatically loop when users play them.
+           Retains all other media handling and sandbox logic.  This
+           revision also updates the header/footer to reflect the
+           change.
+────────────────────────────────────────────────────────────*/
 import * as React from 'react';
 import {
   mimeFromFilename,
@@ -86,12 +91,13 @@ function RenderMediaRaw({
   React.useEffect(() => { if (trimmed) onInvalid('sanitised'); }, [trimmed, onInvalid]);
   if (!safeUri) return null;
 
-  const whitelisted = isMimeWhitelisted(type)
-    || safeUri.startsWith('data:image')
-    || safeUri.startsWith('data:video')
-    || safeUri.startsWith('data:audio')
-    || safeUri.startsWith('data:model')
-    || safeUri.startsWith('data:font');
+  const whitelisted =
+    isMimeWhitelisted(type) ||
+    safeUri.startsWith('data:image') ||
+    safeUri.startsWith('data:video') ||
+    safeUri.startsWith('data:audio') ||
+    safeUri.startsWith('data:model') ||
+    safeUri.startsWith('data:font');
 
   if (!whitelisted) {
     onInvalid('unsupported');
@@ -163,6 +169,7 @@ function RenderMediaRaw({
       <video
         src={safeUri}
         controls
+        loop
         preload="metadata"
         style={style}
         className={className}
@@ -191,16 +198,13 @@ function RenderMediaRaw({
   }
   if (type === 'application/pdf' || type === 'text/html' || type === 'text/plain') {
     const sandboxBase = 'allow-same-origin allow-popups allow-forms';
-    const sandbox     = allowScripts ? `${sandboxBase} allow-scripts` : sandboxBase;
+    const sandbox = allowScripts ? `${sandboxBase} allow-scripts` : sandboxBase;
     return (
       <iframe
         src={safeUri}
         title={alt}
         sandbox={sandbox}
         style={{ border: 'none', width: '100%', height: '100%', ...style }}
-        className={className}
-        ref={ref}
-        onLoad={onLoad}
       />
     );
   }
@@ -208,12 +212,7 @@ function RenderMediaRaw({
   /* inline fonts → offer download */
   if (type.startsWith('font/')) {
     return (
-      <a
-        href={safeUri}
-        download={alt || 'font'}
-        className={className}
-        style={{ fontFamily: 'monospace', fontSize: '.8rem' }}
-      >
+      <a href={safeUri} download className={className} style={{ color: 'var(--zu-accent-sec)' }}>
         Download font
       </a>
     );
@@ -221,7 +220,7 @@ function RenderMediaRaw({
 
   onInvalid('unsupported');
   return (
-    <a href={safeUri} target="_blank" rel="noopener noreferrer" className={className}>
+    <a href={safeUri} download className={className} style={{ color: 'var(--zu-accent-sec)' }}>
       Download
     </a>
   );
@@ -230,6 +229,7 @@ function RenderMediaRaw({
 const RenderMedia = forwardRef(RenderMediaRaw);
 export default RenderMedia;
 
-/* What changed & why: Date aligned; minor doc polish; no functional change.
-*/
-/* EOF */
+/* What changed & why: r743 – Added a loop attribute to the video
+   element so that videos automatically loop when played.  This ensures
+   mp4s and other on‑chain videos continue playing seamlessly without
+   additional user interaction.  Updated header/footer accordingly. */

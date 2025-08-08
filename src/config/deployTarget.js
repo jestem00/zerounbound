@@ -126,7 +126,7 @@ export const FACTORY_ADDRESS = FACTORY_ADDRESSES[TARGET];
 // MARKETPLACE_ADDRESS singleton for back‑compatibility.
 export const MARKETPLACE_WRITE_ADDRESSES = {
   ghostnet: 'KT19yn9fWP6zTSLPntGyrPwc7JuMHnYxAn1z',
-  mainnet : 'KT19kipdLiWyBZvP7KWCPdRbDXuEiu3gfjBR',
+  mainnet : 'KT1Stfgf6H5N1idSBcAMAbo1BdPMi9K6E43M',
 };
 /**
  * Read‑only marketplace addresses per network.  Each array lists

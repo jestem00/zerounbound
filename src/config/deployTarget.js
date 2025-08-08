@@ -14,10 +14,13 @@
 ──────────────────────────────────────────────────────────────────*/
 
 // NOTE: TARGET is overwritten by scripts/setTarget.js during
-// development.  Do not edit manually.  Use yarn set:ghostnet or
-// yarn set:mainnet to switch networks.  Default network is
-// ghostnet when no environment override is present.
-export const TARGET = process.env.NEXT_PUBLIC_NETWORK ?? 'ghostnet';
+// development.  Do not edit this value directly.  Use yarn set:ghostnet
+// or yarn set:mainnet to toggle networks.  The default network is
+// ghostnet.  This constant must be a simple string literal so that
+// the regex in scripts/setTarget.js can locate and replace it during
+// builds.  Do not add environment variable lookups here or the
+// build script will fail.
+export const TARGET = 'mainnet';
 
 // ---------------------------------------------------------------------------
 // Network definitions

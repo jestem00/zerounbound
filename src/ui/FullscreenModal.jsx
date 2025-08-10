@@ -1,8 +1,12 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/FullscreenModal.jsx
-  Rev :    r14    2025‑09‑24
-  Summary: SVG‑aware natural‑size probe + width/height override
+  Rev :    r16    2025‑08‑10 UTC
+  Summary: Keep r15 (no ⛶ overlay + swallow dbl‑click FS). Add a
+           clean, conflict‑free keyboard toggle to hide/show the
+           control rail, plus a mobile‑friendly tap toggle and a
+           subtle on‑screen hint. Chosen shortcut: **H** (for
+           “Hide UI”), which avoids browser‑reserved combos.
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useCallback, useEffect, useLayoutEffect, useRef, useState,
@@ -36,8 +40,17 @@ const Rail = styled.div`
   top: .75rem; right: .75rem;
   display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
   z-index: 6501;
-  opacity: .85; transition: opacity .15s;
+  opacity: .88;
+  transition: opacity .15s ease, visibility .15s ease, transform .18s ease;
   &:hover { opacity: 1; }
+
+  /* hidden state (no pointer hitbox when hidden) */
+  ${(p) => p['data-hidden'] ? `
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translateY(-4px);
+  ` : ''}
 `;
 
 /* WC‑safe vertical range */
@@ -59,6 +72,26 @@ const VRange = styled.input.attrs({ type: 'range' })`
     background: var(--zu-track-bg,var(--zu-fg));
     width:2px;
   }
+`;
+
+/* small, low‑distraction hint chip (bottom‑left) */
+const Hint = styled.div`
+  position: fixed;
+  left: .75rem; bottom: .75rem;
+  z-index: 6502;
+  max-width: min(92vw, 560px);
+  padding: .4rem .6rem;
+  border-radius: 6px;
+  font: 600 .72rem/1.3 PixeloidSans, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  color: var(--zu-fg,#eee);
+  background: color-mix(in srgb, #000 70%, transparent);
+  border: 1px solid color-mix(in srgb, #fff 18%, transparent);
+  box-shadow: 0 8px 20px rgba(0,0,0,.35);
+  pointer-events: none;
+  opacity: ${(p) => (p.$show ? 1 : 0)};
+  transform: translateY(${(p) => (p.$show ? '0' : '3px')});
+  transition: opacity .18s ease, transform .18s ease;
+  user-select: none;
 `;
 
 /*──────── helpers ───────────────────────────────────────────*/
@@ -99,6 +132,15 @@ const fitScale = (natW, natH) => {
   return Math.min(vw / natW, vh / natH);
 };
 
+/* Detect coarse pointer (touch‑first, “mobile”) once per open */
+const hasCoarsePointer = () => {
+  try {
+    if (typeof window === 'undefined') return false;
+    if ('maxTouchPoints' in navigator && navigator.maxTouchPoints > 0) return true;
+    return window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+  } catch { return false; }
+};
+
 /*──────── component ───────────────────────────────────────*/
 export default function FullscreenModal({
   open         = false,
@@ -113,12 +155,26 @@ export default function FullscreenModal({
   const [base,  setBase]       = useState(1);
   const [mode,  setMode]       = useState('fit');
 
+  /* NEW: UI rail visibility + hint text */
+  const [uiHidden, setUiHidden] = useState(false);
+  const [hint, setHint]         = useState('');
+  const [coarse, setCoarse]     = useState(false);
+  const hintTimer = useRef(/** @type {ReturnType<typeof setTimeout>|null} */(null));
+
   const ref = useRef(null);
 
   /*──── reset on open ─────────────────────────────────────*/
   useEffect(() => {
     if (!open) return;
     setNat({ w: 0, h: 0 }); setScale(1); setBase(1); setMode('fit');
+    setUiHidden(false);
+    setCoarse(hasCoarsePointer());
+    // short onboarding hint (visible, low‑distraction)
+    const msg = `Press H to hide controls${hasCoarsePointer() ? ' • Tap artwork to toggle on mobile' : ''} • Esc to close`;
+    setHint(msg);
+    if (hintTimer.current) clearTimeout(hintTimer.current);
+    hintTimer.current = setTimeout(() => { setHint(''); }, 2600);
+    return () => { if (hintTimer.current) clearTimeout(hintTimer.current); };
   }, [open]);
 
   /*──── ESC quits ────────────────────────────────────────*/
@@ -128,6 +184,43 @@ export default function FullscreenModal({
     window.addEventListener('keydown', esc);
     return () => window.removeEventListener('keydown', esc);
   }, [open, onClose]);
+
+  /*──── Keyboard: H toggles rail (conflict‑free) ─────────*/
+  const toggleUi = useCallback(() => {
+    setUiHidden((prev) => {
+      const next = !prev;
+      // transient hint announcing the state change
+      const msg = next
+        ? `Controls hidden — press H${coarse ? ' or tap' : ''} to show`
+        : `Controls visible — press H${coarse ? ' or tap' : ''} to hide`;
+      setHint(msg);
+      if (hintTimer.current) clearTimeout(hintTimer.current);
+      hintTimer.current = setTimeout(() => { setHint(''); }, 1500);
+      return next;
+    });
+  }, [coarse]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => {
+      // ignore when typing in a field/contentEditable
+      const ae = document.activeElement;
+      const typing = ae && (
+        ae.tagName === 'INPUT' ||
+        ae.tagName === 'TEXTAREA' ||
+        ae.isContentEditable
+      );
+      if (typing) return;
+
+      // chosen shortcut: "h" / "H" only (no modifiers) – avoids browser conflicts
+      if (!e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (e.key === 'h' || e.key === 'H')) {
+        e.preventDefault();
+        toggleUi();
+      }
+    };
+    window.addEventListener('keydown', onKey, { passive: false });
+    return () => window.removeEventListener('keydown', onKey, { passive: false });
+  }, [open, toggleUi]);
 
   /*──── natural‑size detection ───────────────────────────*/
   const handleLoaded = useCallback(() => {
@@ -160,6 +253,16 @@ export default function FullscreenModal({
     setMode('custom');
   };
 
+  /*──── mobile/touch: tap artwork to toggle UI ───────────*/
+  const onPaneTap = useCallback((e) => {
+    // Always stop here so we never bubble to Back (which would close).
+    e.stopPropagation();
+    if (!coarse) return;
+    // Do not toggle if the user started interacting with a native control
+    // (no such controls inside Pane for now; kept for future safety).
+    toggleUi();
+  }, [coarse, toggleUi]);
+
   /*──── guard (hooks must run) ───────────────────────────*/
   if (!open || (scriptHazard && !allowScripts)) return null;
 
@@ -176,7 +279,7 @@ export default function FullscreenModal({
   /*──────── render ───────────────────────────────────────*/
   return (
     <Back onClick={onClose}>
-      <Pane onClick={(e) => e.stopPropagation()}>
+      <Pane onClick={onPaneTap}>
         <RenderMedia
           ref={ref}
           uri={uri}
@@ -185,10 +288,14 @@ export default function FullscreenModal({
           style={mediaStyle}
           onLoad={handleLoaded}
           onLoadedMetadata={handleLoaded}
+
+          /* r15: no ⛶ overlay and swallow dbl‑click fullscreen while in modal */
+          fsOverlay={false}
+          onRequestFullscreen={() => {}}
         />
       </Pane>
 
-      <Rail onClick={(e) => e.stopPropagation()}>
+      <Rail onClick={(e) => e.stopPropagation()} data-hidden={uiHidden}>
         <PixelButton size="xs" warning onClick={onClose}>CLOSE</PixelButton>
         <PixelButton size="xs" onClick={toOriginal}>ORIGINAL</PixelButton>
         <PixelButton size="xs" onClick={toFit}>FIT ON SCREEN</PixelButton>
@@ -198,6 +305,7 @@ export default function FullscreenModal({
           max={sliderMax}
           value={pct}
           onChange={onSlide}
+          aria-label="Zoom"
         />
         <span style={{
           font: '700 .7rem/1 PixeloidSans,monospace',
@@ -208,7 +316,26 @@ export default function FullscreenModal({
         >
           {pct}%
         </span>
+
+        {/* Explicit, visible toggle in the rail. If the rail is hidden, H/tap reveals it. */}
+        <PixelButton
+          size="xs"
+          onClick={toggleUi}
+          title="Hide/Show controls (H)"
+        >
+          {uiHidden ? 'SHOW UI (H)' : 'HIDE UI (H)'}
+        </PixelButton>
       </Rail>
+
+      {/* low‑key, timed helper hint for discoverability (SR‑friendly) */}
+      <Hint
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        $show={Boolean(hint)}
+      >
+        {hint}
+      </Hint>
     </Back>
   );
 }
@@ -222,11 +349,15 @@ FullscreenModal.propTypes = {
   scriptHazard : PropTypes.bool,
 };
 
-/* What changed & why:
-   • `measureNatural` now extracts SVG viewBox/width/height for true
-     intrinsic dimensions, preventing bogus 100 % reports.
-   • Inline `mediaStyle` overrides `width/height` with intrinsic px,
-     neutralising the earlier double‑scaling of SVGs.
-   • `pixelUpscaleStyle` now receives `mime` to drop pixelation on
-     vector or non‑image types.                                               */
+/* What changed & why (r16):
+   • Keyboard toggle: "H" hides/unhides the control rail. Chosen
+     to avoid browser‑reserved combos across Chrome/Safari/Firefox.
+   • Mobile: tap on artwork (coarse pointer devices only) toggles the
+     controls. This does not bubble to the backdrop (so no accidental
+     close) and doesn’t conflict with pinch‑zoom.
+   • Visible affordance: small hint chip (auto‑fades) and an explicit
+     "HIDE UI (H)" button on the rail. When hidden, H/tap brings it back.
+   • Kept r15 behavior (no fullscreen overlay + swallowing dbl‑click).
+   • Accessibility: role="status" hint, input focus guard, ARIA label
+     on zoom slider. */
 /* EOF */

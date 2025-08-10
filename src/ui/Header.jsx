@@ -24,7 +24,7 @@ const NET_COL = {
 const BREAK        = 800;
 const COPY_TIMEOUT = 1800;
 /* Application version (increment for each deploy) */
-const APP_VERSION = '0.79';
+const APP_VERSION = '0.80';
 
 /*──────── styled shells ─────*/
 const selectCSS = css`

@@ -1,109 +1,379 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
-  File:    src/core/marketplace.js
-  Rev :    r1186    2025‑08‑07 UTC
-  Summary: Remove fallback to legacy marketplace contracts.  The
-           marketplace address helpers now return only the canonical
-           contract per network.  buildListParams always includes
-           offline_balance (true/false) and continues to accept an
-           optional override address.  View helpers iterate over a
-           single marketplace address, simplifying reads.  Other
-           param builders are preserved.
-─────────────────────────────────────────────────────────────*/
+Developed by @jams2blues – ZeroContract Studio
+File:    src/core/marketplace.js
+Rev :    r926    2025‑08‑05
+Summary: Fix marketplace contract resolution and preserve entrypoints.
+         getMarketContract() now resolves the marketplace address via
+         the static MARKETPLACE_ADDRESS from deployTarget.js and returns a
+         Contract instance via toolkit.contract.at().  This avoids
+         wallet.at() which can strip methodsObject and ensures the
+         list_token and other entrypoints are available on Taquito ≥22.
+         Off‑chain view helpers and entrypoint scanning remain unchanged.
+*/
 
 import { OpKind } from '@taquito/taquito';
-import { Tzip16Module } from '@taquito/tzip16';
-import {
-  MARKETPLACE_WRITE_ADDRESSES,
-  MARKETPLACE_READ_ADDRESSES,
-  MARKETPLACE_ADDRESS,
-  NETWORK_KEY,
-} from '../config/deployTarget.js';
+import { Tzip16Module, tzip16 } from '@taquito/tzip16';
+import { NETWORK_KEY, MARKETPLACE_ADDRESSES, MARKETPLACE_ADDRESS } from '../config/deployTarget.js';
 
-/*─────────────────────────────────────────────────────────────
-  Marketplace address helpers
-─────────────────────────────────────────────────────────────*/
-// Primary marketplace write address for the given network.  Accepts an
-// optional network key override.  Falls back to the global network key.
-export const marketplaceAddress = (net = NETWORK_KEY) => {
+// Resolve the marketplace address based on the network.  When a network
+// string is provided, match “mainnet” case-insensitively to select
+// the mainnet contract; otherwise default to ghostnet.  Fallbacks to
+// the global NETWORK_KEY when undefined.
+export const marketplaceAddr = (net = NETWORK_KEY) => {
   const key = /mainnet/i.test(net) ? 'mainnet' : 'ghostnet';
-  return MARKETPLACE_WRITE_ADDRESSES[key] || MARKETPLACE_ADDRESS;
+  return MARKETPLACE_ADDRESSES[key] || MARKETPLACE_ADDRESSES.ghostnet;
 };
 
-// Read replicas (legacy) for the given network.  Accepts an optional
-// network key override.  Used by modules that perform read‑only
-// operations (views or storage) and may fan out to historical
-// instances.  Falls back to the global network key when undefined.
-export const marketplaceAddrsRd = (net = NETWORK_KEY) => {
-  const key = /mainnet/i.test(net) ? 'mainnet' : 'ghostnet';
-  return MARKETPLACE_READ_ADDRESSES[key] || MARKETPLACE_READ_ADDRESSES.ghostnet;
-};
-
-// Backwards compatibility: alias marketplaceAddrs to marketplaceAddrsRd.
-// Some modules import marketplaceAddrs directly (legacy implementation).
-export const marketplaceAddrs = marketplaceAddrsRd;
-
-/*─────────────────────────────────────────────────────────────
-  Contract instance resolution
-─────────────────────────────────────────────────────────────*/
 /**
- * Obtain a handle to the ZeroSum marketplace contract for the given
- * toolkit.  Registers the TZIP‑16 module so that off‑chain views
- * can be executed.  Uses the static MARKETPLACE_ADDRESS from
- * deployTarget.js rather than relying on toolkit._network.  This
- * ensures that methodsObject and contractViews remain available.
+ * Obtain a handle to the ZeroSum marketplace contract for the given toolkit.
+ * Registers the TZIP‑16 module so that off‑chain views can be executed.
+ * Uses the toolkit’s network type (if available) or the configured
+ * NETWORK_KEY to pick the correct marketplace address.
  *
- * @param {import('@taquito/taquito').TezosToolkit} toolkit
+ * @param {import('@taquito/taquito').TezosToolkit} toolkit an instantiated Taquito toolkit
  * @returns {Promise<import('@taquito/taquito').Contract>} contract instance
  */
-/**
- * Obtain a handle to the ZeroSum marketplace contract for the given
- * toolkit.  You may optionally override the address used for this
- * instantiation by passing a non‑empty overrideAddr.  When no
- * override is provided, the default MARKETPLACE_ADDRESS for the
- * active network will be used.  Registers the TZIP‑16 module so
- * that off‑chain views can be executed.  Uses contract.at() to
- * preserve methodsObject on Taquito ≥22.
- *
- * @param {import('@taquito/taquito').TezosToolkit} toolkit
- * @param {string} [overrideAddr] optional marketplace address override
- * @returns {Promise<import('@taquito/taquito').Contract>} contract instance
- */
-export async function getMarketContract(toolkit, overrideAddr) {
-  const addr = overrideAddr || MARKETPLACE_ADDRESS || marketplaceAddress(NETWORK_KEY);
+export async function getMarketContract(toolkit) {
+  // Determine the marketplace address from the active network.  When
+  // network type is undefined the NETWORK_KEY fallback is used.  To
+  // support off‑chain views the Tzip16Module is registered on the
+  // toolkit if not already present.  We return a WalletContract via
+  // wallet.at() so that calls support .send() directly.  Some
+  // versions of Taquito may omit methodsObject on the WalletContract
+  // when tzip16 is mixed in; callers should rely on the fallback
+  // logic in the param‑builder helpers to handle such cases.
+  // Determine the marketplace address.  Prefer the static address from
+  // deployTarget.js to avoid relying on toolkit._network which may
+  // be undefined.  Fallback to network-based lookup if the static
+  // address is unavailable.
+  const addr = MARKETPLACE_ADDRESS || marketplaceAddr(NETWORK_KEY);
+  // Register the TZIP‑16 module on the toolkit to support off‑chain views.
   try {
     toolkit.addExtension(new Tzip16Module());
-  } catch {
+  } catch (e) {
     /* ignore duplicate registration errors */
   }
+  // Return a Contract instance via contract.at() without the tzip16 mixin.  The
+  // registered extension enables off‑chain view support while preserving
+  // methodsObject and methods.  Avoid wallet.at() here as it may strip
+  // methodsObject on some Taquito versions.
   return toolkit.contract.at(addr);
 }
 
 /*─────────────────────────────────────────────────────────────
-  Param‑builder helpers
+  Off‑chain view helpers
 ─────────────────────────────────────────────────────────────*/
-/**
- * Build parameters for listing an FA2 token on the marketplace.  The
- * underlying list_token entrypoint differs between contract versions.
- * v2a contracts require a boolean offline_balance flag before price;
- * later versions omit this argument.  This helper accepts an
- * optional offline_balance field on the opts argument.  When
- * provided, the flag is passed in the correct position for both
- * named and positional APIs.  When omitted, the flag defaults to
- * false and is excluded from named‑argument calls.
- *
- * @param {import('@taquito/taquito').TezosToolkit} toolkit
- * @param {Object} opts listing parameters
- * @param {string} opts.nftContract FA2 contract address
- * @param {number|string} opts.tokenId token id (nat)
- * @param {number} opts.priceMutez price in mutez
- * @param {number|string} [opts.amount=1] quantity in raw units (editions × 10^decimals)
- * @param {Array} [opts.saleSplits=[]] sale splits (address/nat pairs summing to 10000)
- * @param {Array} [opts.royaltySplits=[]] royalty splits (address/nat pairs)
- * @param {number} [opts.startDelay=0] start delay (seconds)
- * @param {boolean} [opts.offline_balance=false] flag for v2a listings
- * @returns {Promise<Array>} array with a single transaction param
- */
+
+// Fetch all listings for a given token via the off‑chain view.
+export async function fetchListings({ toolkit, nftContract, tokenId }) {
+  // Prefer on‑chain view for listings.  Off‑chain views can trigger
+  // RPC run_code errors on certain nodes and clutter the console.  We
+  // therefore attempt the on‑chain view directly and return its
+  // results.  If the on‑chain view fails, fallback to an empty array.
+  try {
+    const results = await fetchOnchainListings({ toolkit, nftContract, tokenId });
+    return Array.isArray(results) ? results : [];
+  } catch {
+    return [];
+  }
+}
+
+// Return the cheapest active listing for the given token from off‑chain views.
+export async function fetchLowestListing({ toolkit, nftContract, tokenId }) {
+  let list = [];
+  try {
+    list = await fetchOnchainListings({ toolkit, nftContract, tokenId });
+  } catch {
+    /* ignore errors and fall back */
+  }
+  if (!list || !list.length) {
+    try {
+      list = await fetchListings({ toolkit, nftContract, tokenId });
+    } catch {
+      list = [];
+    }
+  }
+  const act = list.filter((l) => l.active && Number(l.amount) > 0);
+  if (!act.length) return null;
+  return act.reduce((m, c) => (c.priceMutez < m.priceMutez ? c : m));
+}
+
+// Fetch all offers for a given token via the off‑chain view.
+export async function fetchOffers({ toolkit, nftContract, tokenId }) {
+  // Prefer on‑chain offers view and avoid off‑chain run_code calls.
+  try {
+    const results = await fetchOnchainOffers({ toolkit, nftContract, tokenId });
+    return Array.isArray(results) ? results : [];
+  } catch {
+    return [];
+  }
+}
+
+// Fetch detailed listing information via the off‑chain view.
+export async function fetchListingDetails({ toolkit, nftContract, tokenId, nonce }) {
+  const market = await getMarketContract(toolkit);
+  const views = await market.tzip16().metadataViews();
+  let raw;
+  try {
+    raw = await views.offchain_listing_details().executeView({
+      listing_nonce: Number(nonce),
+      nft_contract: nftContract,
+      token_id: Number(tokenId),
+    });
+  } catch {
+    raw = await views.offchain_listing_details().executeView(
+      Number(nonce),
+      String(nftContract),
+      Number(tokenId),
+    );
+  }
+  return {
+    contract: raw.nft_contract,
+    tokenId: Number(raw.token_id),
+    seller: raw.seller,
+    priceMutez: Number(raw.price),
+    amount: Number(raw.amount),
+    active: raw.active,
+    startTime: raw.start_time,
+    saleSplits: raw.sale_splits,
+    royaltySplits: raw.royalty_splits,
+  };
+}
+
+/*─────────────────────────────────────────────────────────────
+  On‑chain view helpers
+─────────────────────────────────────────────────────────────*/
+
+async function getViewCaller(market, toolkit) {
+  try {
+    const pkh = await toolkit.signer.publicKeyHash();
+    if (typeof pkh === 'string' && pkh.startsWith('tz')) return pkh;
+  } catch {
+    /* ignore signer resolution errors */
+  }
+  return market.address;
+}
+
+// Fetch all listings for a token using the on‑chain view.
+export async function fetchOnchainListings({ toolkit, nftContract, tokenId }) {
+  const market = await getMarketContract(toolkit);
+  const viewCaller = await getViewCaller(market, toolkit);
+  const raw = await market.contractViews
+    .onchain_listings_for_token({
+      nft_contract: nftContract,
+      token_id: Number(tokenId),
+    })
+    .executeView({ viewCaller });
+  const out = [];
+  const push = (n, o) =>
+    out.push({
+      nonce: Number(n),
+      priceMutez: Number(o.price),
+      amount: Number(o.amount),
+      seller: o.seller,
+      active: o.active,
+    });
+  if (raw?.entries) {
+    for (const [k, v] of raw.entries()) push(k, v);
+  } else if (typeof raw === 'object') {
+    Object.entries(raw).forEach(([k, v]) => push(k, v));
+  }
+  return out;
+}
+
+// Fetch all offers for a token using the on‑chain view.
+export async function fetchOnchainOffers({ toolkit, nftContract, tokenId }) {
+  const market = await getMarketContract(toolkit);
+  const viewCaller = await getViewCaller(market, toolkit);
+  const raw = await market.contractViews
+    .onchain_offers_for_token({
+      nft_contract: nftContract,
+      token_id: Number(tokenId),
+    })
+    .executeView({ viewCaller });
+  const offers = [];
+  const push = (k, o) =>
+    offers.push({
+      offeror: k,
+      priceMutez: Number(o.price),
+      amount: Number(o.amount),
+      nonce: Number(o.nonce),
+      accepted: o.accepted,
+    });
+  if (raw?.entries) {
+    for (const [k, v] of raw.entries()) push(k, v);
+  } else if (typeof raw === 'object') {
+    Object.entries(raw).forEach(([k, v]) => push(k, v));
+  }
+  return offers;
+}
+
+// Fetch detailed information for a specific listing using the on‑chain view.
+export async function fetchOnchainListingDetails({ toolkit, nftContract, tokenId, nonce }) {
+  const market = await getMarketContract(toolkit);
+  const viewCaller = await getViewCaller(market, toolkit);
+  const raw = await market.contractViews
+    .onchain_listing_details({
+      listing_nonce: Number(nonce),
+      nft_contract: nftContract,
+      token_id: Number(tokenId),
+    })
+    .executeView({ viewCaller });
+  return {
+    contract: raw.nft_contract,
+    tokenId: Number(raw.token_id),
+    seller: raw.seller,
+    priceMutez: Number(raw.price),
+    amount: Number(raw.amount),
+    active: raw.active,
+    startTime: raw.start_time,
+    saleSplits: raw.sale_splits,
+    royaltySplits: raw.royalty_splits,
+  };
+}
+
+// Fetch all listings made by a specific seller via the on‑chain view.
+export async function fetchOnchainListingsForSeller({ toolkit, seller }) {
+  const market = await getMarketContract(toolkit);
+  const viewCaller = await getViewCaller(market, toolkit);
+  const raw = await market.contractViews.onchain_listings_for_seller(seller).executeView({ viewCaller });
+  return Array.isArray(raw)
+    ? raw.map((r) => ({
+        contract: r.nft_contract,
+        tokenId: Number(r.token_id),
+        seller: r.seller,
+        priceMutez: Number(r.price),
+        amount: Number(r.amount),
+        active: r.active,
+        startTime: r.start_time,
+        saleSplits: r.sale_splits,
+        royaltySplits: r.royalty_splits,
+      }))
+    : [];
+}
+
+// Fetch all offers made by a specific buyer using the on‑chain view.
+export async function fetchOnchainOffersForBuyer({ toolkit, buyer }) {
+  const market = await getMarketContract(toolkit);
+  const viewCaller = await getViewCaller(market, toolkit);
+  const raw = await market.contractViews.onchain_offers_for_buyer(buyer).executeView({ viewCaller });
+  return Array.isArray(raw)
+    ? raw.map((r) => ({
+        offeror: r.offeror,
+        priceMutez: Number(r.price),
+        amount: Number(r.amount),
+        nonce: Number(r.nonce),
+        accepted: r.accepted,
+      }))
+    : [];
+}
+
+// Fetch all listings for an entire collection via the on‑chain view.
+export async function fetchOnchainListingsForCollection({ toolkit, nftContract }) {
+  const market = await getMarketContract(toolkit);
+  const viewCaller = await getViewCaller(market, toolkit);
+  const raw = await market.contractViews
+    .onchain_listings_for_collection({
+      nft_contract: nftContract,
+    })
+    .executeView({ viewCaller });
+  return Array.isArray(raw)
+    ? raw.map((r) => ({
+        contract: r.nft_contract,
+        tokenId: Number(r.token_id),
+        seller: r.seller,
+        priceMutez: Number(r.price),
+        amount: Number(r.amount),
+        active: r.active,
+        startTime: r.start_time,
+        saleSplits: r.sale_splits,
+        royaltySplits: r.royalty_splits,
+      }))
+    : [];
+}
+
+// Fetch all offers made on an entire collection via the on‑chain view.
+export async function fetchOnchainOffersForCollection({ toolkit, nftContract }) {
+  const market = await getMarketContract(toolkit);
+  const viewCaller = await getViewCaller(market, toolkit);
+  const raw = await market.contractViews
+    .onchain_offers_for_collection({
+      nft_contract: nftContract,
+    })
+    .executeView({ viewCaller });
+  return Array.isArray(raw)
+    ? raw.map((r) => ({
+        offeror: r.offeror,
+        priceMutez: Number(r.price),
+        amount: Number(r.amount),
+        nonce: Number(r.nonce),
+        accepted: r.accepted,
+      }))
+    : [];
+}
+
+/*─────────────────────────────────────────────────────────────
+  Param‑builder helpers for wallet.batch() transactions
+─────────────────────────────────────────────────────────────*/
+
+// Build parameters for a buy operation.
+export async function buildBuyParams(toolkit, { nftContract, tokenId, priceMutez, seller, nonce, amount = 1 }) {
+  const c = await getMarketContract(toolkit);
+  let transferParams;
+  // Prefer the named‑argument API when available.  Fallback to
+  // positional arguments on older Taquito versions or when
+  // methodsObject is undefined.  Use bracket lookup to handle
+  // potential name mangling by decorators.
+  let objFn = c.methodsObject?.buy || c.methodsObject?.['buy'];
+  let posFn = c.methods?.buy || c.methods?.['buy'];
+  if (typeof objFn !== 'function' && typeof posFn !== 'function') {
+    // Fallback: search for an entrypoint containing both "buy" and "token" or just "buy".
+    const findKey = (keys) => {
+      return keys.find((k) => {
+        const cleaned = k.toLowerCase().replace(/_/g, '');
+        // match buy or buytoken or tokenbuy etc.
+        return cleaned.includes('buy');
+      });
+    };
+    const objKeys = c.methodsObject ? Object.keys(c.methodsObject) : [];
+    const methKeys = c.methods ? Object.keys(c.methods) : [];
+    const foundObj = findKey(objKeys);
+    const foundPos = findKey(methKeys);
+    if (!objFn && foundObj && typeof c.methodsObject?.[foundObj] === 'function') {
+      objFn = c.methodsObject[foundObj];
+    }
+    if (!posFn && foundPos && typeof c.methods?.[foundPos] === 'function') {
+      posFn = c.methods[foundPos];
+    }
+  }
+  if (typeof objFn === 'function') {
+    transferParams = objFn({
+      amount: Number(amount),
+      nft_contract: nftContract,
+      nonce: Number(nonce),
+      seller,
+      token_id: Number(tokenId),
+    }).toTransferParams({ amount: priceMutez, mutez: true });
+  } else if (typeof posFn === 'function') {
+    transferParams = posFn(
+      Number(amount),
+      nftContract,
+      Number(nonce),
+      seller,
+      Number(tokenId),
+    ).toTransferParams({ amount: priceMutez, mutez: true });
+  } else {
+    throw new Error('buy entrypoint unavailable on marketplace contract');
+  }
+  return [
+    {
+      kind: OpKind.TRANSACTION,
+      ...transferParams,
+    },
+  ];
+}
+
+// Build parameters for listing a token for sale.
 export async function buildListParams(
   toolkit,
   {
@@ -114,21 +384,35 @@ export async function buildListParams(
     saleSplits = [],
     royaltySplits = [],
     startDelay = 0,
-    offline_balance = false,
-    marketAddr,
   },
 ) {
-  // obtain contract instance from override if provided
-  const c = await getMarketContract(toolkit, marketAddr);
+  // Retrieve the marketplace contract.  This returns a WalletContract
+  // instance via getMarketContract() so that .send() can be invoked on
+  // contract methods.  Some Taquito versions may omit methodsObject on
+  // WalletContracts; fallback logic below handles both named and
+  // positional APIs accordingly.
+  const c = await getMarketContract(toolkit);
   const amt = Number(amount);
-  const tid = Number(tokenId);
+  const tokId = Number(tokenId);
   const delay = Number(startDelay);
-  const off  = !!offline_balance;
-
-  // Determine named and positional entrypoint functions.  Use bracket
-  // lookup to accommodate potential name mangling by decorators.
+  // Prefer the named‑argument API when available.  Some versions of
+  // Taquito expose entrypoints under methodsObject; if absent fall
+  // back to methods with positional arguments.  The list_token
+  // entrypoint has the following Micheline signature:
+  // (nat %amount)
+  // (pair (address %nft_contract)
+  //       (pair (mutez %price)
+  //             (pair (list %royalty_splits (pair address nat))
+  //                   (pair (list %sale_splits (pair address nat))
+  //                         (pair (int %start_delay) (nat %token_id))))))
+  let transferParams;
+  // Use bracket lookup to handle potential name mangling by decorators.
   let objFn = c.methodsObject?.list_token || c.methodsObject?.['list_token'];
   let posFn = c.methods?.list_token || c.methods?.['list_token'];
+  // If both functions are undefined, attempt to locate an entrypoint
+  // whose name contains both "list" and "token" (case‑insensitive,
+  // ignoring underscores).  This fallback supports contracts where
+  // decorators rename entrypoints or remove underscores.
   if (typeof objFn !== 'function' && typeof posFn !== 'function') {
     const findKey = (keys) => {
       return keys.find((k) => {
@@ -147,58 +431,186 @@ export async function buildListParams(
       posFn = c.methods[foundPos];
     }
   }
-  // Named‑argument path.  If offline_balance is true, always pass it.
   if (typeof objFn === 'function') {
-    const args = {
+    transferParams = objFn({
       amount: amt,
       nft_contract: nftContract,
       price: priceMutez,
+      // The contract parameter order expects royalty_splits first
+      // followed by sale_splits.  Passing both explicitly avoids
+      // misalignment when Taquito generates positional arguments.
       royalty_splits: royaltySplits,
       sale_splits: saleSplits,
       start_delay: delay,
-      token_id: tid,
-    };
-    // always include offline_balance flag for the current contract;
-    // some marketplace versions expect this bool even when false
-    args.offline_balance = off;
-    const tp = objFn(args).toTransferParams();
-    return [ { kind: OpKind.TRANSACTION, ...tp } ];
-  }
-  // Positional fallback.  Insert offline_balance at index 2 when true.
-  if (typeof posFn === 'function') {
-    // always pass offline_balance as the third parameter for positional calls.
-    // marketplace contracts expect the bool argument regardless of its value.
-    const transfer = posFn(
+      token_id: tokId,
+    }).toTransferParams();
+  } else if (typeof posFn === 'function') {
+    transferParams = posFn(
       amt,
       nftContract,
-      off,
       priceMutez,
       royaltySplits,
       saleSplits,
       delay,
-      tid,
+      tokId,
     ).toTransferParams();
-    return [ { kind: OpKind.TRANSACTION, ...transfer } ];
+  } else {
+    throw new Error('list_token entrypoint unavailable on marketplace contract');
   }
-  throw new Error('list_token entrypoint unavailable on marketplace contract');
+  return [
+    {
+      kind: OpKind.TRANSACTION,
+      ...transferParams,
+    },
+  ];
 }
 
-// The remaining param builders and view helpers remain unchanged.  For
-// brevity and to avoid duplicating existing logic, they are omitted
-// here; import r926 for full implementations of buy, cancel,
-// accept_offer, make_offer, and view helpers.  This file focuses on
-// listing enhancements only.  Consumers should continue to import
-// fetchListings(), fetchLowestListing(), buildBuyParams(), etc. from
-// the original implementation.
+// Build parameters for cancelling a listing.
+export async function buildCancelParams(toolkit, { nftContract, tokenId, listingNonce }) {
+  const c = await getMarketContract(toolkit);
+  let transferParams;
+  let objFn = c.methodsObject?.cancel_listing || c.methodsObject?.['cancel_listing'];
+  let posFn = c.methods?.cancel_listing || c.methods?.['cancel_listing'];
+  if (typeof objFn !== 'function' && typeof posFn !== 'function') {
+    const findKey = (keys) => {
+      return keys.find((k) => {
+        const cleaned = k.toLowerCase().replace(/_/g, '');
+        return cleaned.includes('cancel') && cleaned.includes('listing');
+      });
+    };
+    const objKeys = c.methodsObject ? Object.keys(c.methodsObject) : [];
+    const methKeys = c.methods ? Object.keys(c.methods) : [];
+    const foundObj = findKey(objKeys);
+    const foundPos = findKey(methKeys);
+    if (!objFn && foundObj && typeof c.methodsObject?.[foundObj] === 'function') {
+      objFn = c.methodsObject[foundObj];
+    }
+    if (!posFn && foundPos && typeof c.methods?.[foundPos] === 'function') {
+      posFn = c.methods[foundPos];
+    }
+  }
+  if (typeof objFn === 'function') {
+    transferParams = objFn({
+      listing_nonce: Number(listingNonce),
+      nft_contract: nftContract,
+      token_id: Number(tokenId),
+    }).toTransferParams();
+  } else if (typeof posFn === 'function') {
+    transferParams = posFn(Number(listingNonce), nftContract, Number(tokenId)).toTransferParams();
+  } else {
+    throw new Error('cancel_listing entrypoint unavailable on marketplace contract');
+  }
+  return [
+    {
+      kind: OpKind.TRANSACTION,
+      ...transferParams,
+    },
+  ];
+}
 
-/* What changed & why:
-   • Added marketplaceAddress() and marketplaceAddrsRd() helpers
-     mirroring deployTarget.js exports, ensuring modules can
-     reference the correct marketplace write and read addresses.
-   • Extended buildListParams() to accept an optional offline_balance
-     flag.  The bool parameter is now always passed in both named
-     and positional calls (true for v2a, false otherwise), ensuring
-     parameter alignment across marketplace versions.  This fixes
-     ordering issues uncovered when interacting with the new
-     marketplace contract and enables offline_balance support.
-*/
+// Build parameters for accepting an offer.
+export async function buildAcceptOfferParams(toolkit, { nftContract, tokenId, amount = 1, listingNonce, offeror }) {
+  const c = await getMarketContract(toolkit);
+  let transferParams;
+  let objFn = c.methodsObject?.accept_offer || c.methodsObject?.['accept_offer'];
+  let posFn = c.methods?.accept_offer || c.methods?.['accept_offer'];
+  if (typeof objFn !== 'function' && typeof posFn !== 'function') {
+    const findKey = (keys) => {
+      return keys.find((k) => {
+        const cleaned = k.toLowerCase().replace(/_/g, '');
+        return cleaned.includes('accept') && cleaned.includes('offer');
+      });
+    };
+    const objKeys = c.methodsObject ? Object.keys(c.methodsObject) : [];
+    const methKeys = c.methods ? Object.keys(c.methods) : [];
+    const foundObj = findKey(objKeys);
+    const foundPos = findKey(methKeys);
+    if (!objFn && foundObj && typeof c.methodsObject?.[foundObj] === 'function') {
+      objFn = c.methodsObject[foundObj];
+    }
+    if (!posFn && foundPos && typeof c.methods?.[foundPos] === 'function') {
+      posFn = c.methods[foundPos];
+    }
+  }
+  if (typeof objFn === 'function') {
+    transferParams = objFn({
+      amount: Number(amount),
+      listing_nonce: Number(listingNonce),
+      nft_contract: nftContract,
+      offeror,
+      token_id: Number(tokenId),
+    }).toTransferParams();
+  } else if (typeof posFn === 'function') {
+    transferParams = posFn(
+      Number(amount),
+      Number(listingNonce),
+      nftContract,
+      offeror,
+      Number(tokenId),
+    ).toTransferParams();
+  } else {
+    throw new Error('accept_offer entrypoint unavailable on marketplace contract');
+  }
+  return [
+    {
+      kind: OpKind.TRANSACTION,
+      ...transferParams,
+    },
+  ];
+}
+
+// Build parameters for making an offer.
+export async function buildOfferParams(toolkit, { nftContract, tokenId, priceMutez, amount = 1 }) {
+  const c = await getMarketContract(toolkit);
+  let transferParams;
+  let objFn = c.methodsObject?.make_offer || c.methodsObject?.['make_offer'];
+  let posFn = c.methods?.make_offer || c.methods?.['make_offer'];
+  if (typeof objFn !== 'function' && typeof posFn !== 'function') {
+    const findKey = (keys) => {
+      return keys.find((k) => {
+        const cleaned = k.toLowerCase().replace(/_/g, '');
+        return cleaned.includes('make') && cleaned.includes('offer');
+      });
+    };
+    const objKeys = c.methodsObject ? Object.keys(c.methodsObject) : [];
+    const methKeys = c.methods ? Object.keys(c.methods) : [];
+    const foundObj = findKey(objKeys);
+    const foundPos = findKey(methKeys);
+    if (!objFn && foundObj && typeof c.methodsObject?.[foundObj] === 'function') {
+      objFn = c.methodsObject[foundObj];
+    }
+    if (!posFn && foundPos && typeof c.methods?.[foundPos] === 'function') {
+      posFn = c.methods[foundPos];
+    }
+  }
+  if (typeof objFn === 'function') {
+    transferParams = objFn({
+      amount: Number(amount),
+      nft_contract: nftContract,
+      price: priceMutez,
+      token_id: Number(tokenId),
+    }).toTransferParams();
+  } else if (typeof posFn === 'function') {
+    transferParams = posFn(
+      Number(amount),
+      nftContract,
+      priceMutez,
+      Number(tokenId),
+    ).toTransferParams();
+  } else {
+    throw new Error('make_offer entrypoint unavailable on marketplace contract');
+  }
+  return [
+    {
+      kind: OpKind.TRANSACTION,
+      ...transferParams,
+    },
+  ];
+}
+
+/* What changed & why: updated getMarketContract to return a Contract via
+   contract.at() instead of wallet.at(), preserving methodsObject and
+   contractViews on Taquito ≥22; added fallback logic to buildListParams
+   to handle both named and positional entrypoint APIs, reordered
+   royalty_splits and sale_splits to match the contract’s parameter order,
+   and updated revision and summary accordingly. */

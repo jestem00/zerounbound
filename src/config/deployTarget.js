@@ -1,34 +1,53 @@
 /*─────────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/config/deployTarget.js
-  Rev :    r1181    2025‑08‑07 UTC
-  Summary: Consolidate marketplace configuration and expose both read
-           and write addresses for the new ZeroSum contract.  Adds
-           MARKETPLACE_WRITE_ADDRESSES, MARKETPLACE_READ_ADDRESSES and
-           MARKETPLACE_ADDRESS exports so that consumers can reliably
-           resolve the correct marketplace contract and avoid
-           undefined look‑ups.  Retains prior network configuration
-           (rpc, tzkt, factory addresses, domain constants) and
-           preserves existing exports.  See Master Manifest §1 and
-           invariant I131 for context.
-──────────────────────────────────────────────────────────────────*/
+  Rev :    r1158    2025‑08‑05
+  Summary: Corrected ghostnet marketplace address. Updated
+           MARKETPLACE_ADDRESSES to use KT1R1PzLhBXEd98ei72mFuz4FrUYEcuV7t1p for
+           ghostnet, fixing listing errors. Previous revision added
+           DOMAIN_CONTRACTS and FALLBACK_RPCS; other configuration
+           remains unchanged.
+*/
 
-// NOTE: TARGET is overwritten by scripts/setTarget.js during
-// development.  Do not edit this value directly.  Use yarn set:ghostnet
-// or yarn set:mainnet to toggle networks.  The default network is
-// ghostnet.  This constant must be a simple string literal so that
-// the regex in scripts/setTarget.js can locate and replace it during
-// builds.  Do not add environment variable lookups here or the
-// build script will fail.
+// ---------------------------------------------------------------------------
+// Network target selection
+//
+// The ZeroUnbound platform supports multiple Tezos networks.  During
+// development the target network is usually switched by running one of
+// the provided yarn scripts (e.g. yarn set:ghostnet or yarn set:mainnet).
+// Historically, these scripts rewrote a hard‑coded TARGET constant in this
+// file.  A recent revision replaced the constant with a dynamic lookup
+// against process.env.NEXT_PUBLIC_NETWORK, which broke the rewrite logic
+// and caused the dev server to always default to the ghostnet configuration.
+//
+// To maintain compatibility with both approaches we define a
+// TARGET_FALLBACK constant that represents the last network chosen by
+// scripts/setTarget.js.  If the NEXT_PUBLIC_NETWORK environment variable
+// is defined at runtime it takes precedence; otherwise the fallback is
+// used.  This hybrid approach lets developers switch networks via the
+// rewrite script or by exporting NEXT_PUBLIC_NETWORK for CI/production.
+
+// NOTE: The value of TARGET is overwritten by scripts/setTarget.js.  Do not
+// edit it manually.  If you wish to change the default network for your
+// environment, run yarn set:<network> (e.g. yarn set:mainnet or
+// yarn set:ghostnet).  This constant defines the active Tezos
+// network for the entire application.  Branches destined for Vercel
+// deployments should commit a version of this file with TARGET set to
+// 'mainnet' or 'ghostnet' as appropriate; deployTarget.js is the sole
+// diverging file between network branches.  During development, the
+// scripts/setTarget.js helper rewrites this line to toggle networks.
 export const TARGET = 'mainnet';
 
 // ---------------------------------------------------------------------------
-// Network definitions
+// Per‑network configuration
 //
-// Each network defines its RPC endpoints, TzKT API base and other UI
-// configuration.  Modify or extend these entries when adding support for
-// additional Tezos networks.  The devPort determines the default port
-// used by yarn dev:current for the given network.
+// Each supported network defines its own appearance, RPC endpoints, TzKT
+// API domains and other variables.  The fastest reachable RPC is selected
+// at runtime via selectFastestRpc().  Adjust these values as necessary
+// when adding or updating networks.  The devPort property determines
+// the port used by yarn dev:current; ghostnet defaults to 3000 and
+// mainnet defaults to 4000.
+
 const nets = {
   ghostnet: {
     label:        'GHOSTNET',
@@ -37,7 +56,7 @@ const nets = {
     manifestName: 'ZeroUnbound.art • Ghostnet',
     siteLogo:     '/sprites/ghostnet_logo.svg',
     ctaFirst:     '/deploy',
-    description:  'Test your fully‑on‑chain art collection risk‑free on Ghostnet.',
+    description:  'Test your fully-on-chain art collection risk‑free on Ghostnet.',
     siteUrl:      'https://ghostnet.zerounbound.art',
     ogImage:      'https://ghostnet.zerounbound.art/sprites/ghostnetBanner.png',
     startUrl:     '/?source=pwa-ghostnet',
@@ -81,10 +100,11 @@ const nets = {
   },
 };
 
-// Derive the selected network configuration.  Changing TARGET via
-// environment variable or setTarget.js rewrite automatically updates
-// these exports.
-export const NET           = nets[TARGET] ?? nets.ghostnet;
+// Extract the selected network configuration.  Changing TARGET (via
+// environment variable or setTarget.js rewrite) will automatically
+// update these exports.
+
+export const NET           = nets[TARGET];
 export const NETWORK_KEY   = TARGET;
 export const NETWORK_TYPE  = TARGET === 'mainnet' ? 'production' : 'test';
 export const NETWORK_LABEL = NET.label;
@@ -105,73 +125,114 @@ export const REDIRECTS     = NET.redirects;
 export const PACKAGE_NAME  = NET.pkgName;
 export const DEV_PORT      = NET.devPort;
 export const SITE_LOGO     = NET.siteLogo;
+
+// External site URL prefixes.  These base URLs change by network.
+export const URL_BCD_BASE = TARGET === 'ghostnet'
+  ? 'https://better-call.dev/ghostnet/'
+  : 'https://better-call.dev/mainnet/';
+export const URL_OBJKT_BASE = TARGET === 'ghostnet'
+  ? 'https://ghostnet.objkt.com/collection/'
+  : 'https://objkt.com/collection/';
+
+// Base URL for the Objkt tokens pages.  This constant points to
+// the network-specific site where individual tokens can be listed or
+// viewed.  It is derived from the collection base but exported
+// explicitly for convenience in UIs that need to construct token
+// links.  See ListTokenDialog.jsx for usage.
+export const URL_OBJKT_TOKENS_BASE = TARGET === 'ghostnet'
+  ? 'https://ghostnet.objkt.com/tokens/'
+  : 'https://objkt.com/tokens/';
+export const URL_TZKT_OP_BASE = TARGET === 'ghostnet'
+  ? 'https://ghostnet.tzkt.io/'
+  : 'https://tzkt.io/';
 export const ZT_BASE_URL    = NET.ztBase;
 export const ZT_MINT_URL    = `${ZT_BASE_URL}/?cmd=tokendata`;
-export const ztTokenUrl     = (cid, tid) => `${ZT_MINT_URL}&cid=${encodeURIComponent(cid)}&tid=${encodeURIComponent(tid)}`;
+export const ztTokenUrl     = (cid, tid) =>
+  `${ZT_MINT_URL}&cid=${encodeURIComponent(cid)}&tid=${encodeURIComponent(tid)}`;
 
-// Factory contract addresses per network (r1157).  Keep identical
-// entries across branches; deployTarget.js remains the sole diverging file.
+// Factory contract addresses per network.  These addresses correspond to
+// factories deployed on 2025‑07‑29.  Ghostnet: KT1H8myPr7EmVPFLmBcnSxgiYigdMKZu3ayw.
+// Mainnet: KT1VbzbUiswEqCsE9ugTFsG1nwh3XwwEq6D2.  Both entries must be kept
+// identical across branches; deployTarget.js is the sole diverging file.
 export const FACTORY_ADDRESSES = {
   ghostnet: 'KT1H8myPr7EmVPFLmBcnSxgiYigdMKZu3ayw',
   mainnet:  'KT1VbzbUiswEqCsE9ugTFsG1nwh3XwwEq6D2',
 };
+
+// Selected factory address based on TARGET.  Use this constant to call
+// the factory when originating new collections.  If no factory exists for
+// the current network, FACTORY_ADDRESS will be undefined and the UI can
+// fallback to direct origination.
 export const FACTORY_ADDRESS = FACTORY_ADDRESSES[TARGET];
 
-// Marketplace configuration
+// ---------------------------------------------------------------------------
+// Marketplace contract addresses
 //
-// The ZeroSum marketplace now deploys separate read and write
-// addresses.  Write operations (list, buy, offer) must target the
-// primary address, while read operations may fan out to legacy
-// replicas.  Expose explicit WRITE and READ maps along with a
-// MARKETPLACE_ADDRESS singleton for back‑compatibility.
-export const MARKETPLACE_WRITE_ADDRESSES = {
+// The ZeroSum marketplace lives at different addresses on Ghostnet and
+// Mainnet.  Rather than hard‑coding these values in multiple modules, we
+// centralise them here alongside other per‑network configuration.  Each
+// entry corresponds to the canonical marketplace contract for the given
+// network.  These values should be kept identical across branches, with
+// deployTarget.js remaining the sole diverging file between Ghostnet and
+// Mainnet.  See src/core/marketplace.js for usage.
+// Marketplace – canonical ZeroSum contracts
+export const MARKETPLACE_ADDRESSES = {
   ghostnet: 'KT19yn9fWP6zTSLPntGyrPwc7JuMHnYxAn1z',
   mainnet : 'KT1Stfgf6H5N1idSBcAMAbo1BdPMi9K6E43M',
 };
-/**
- * Read‑only marketplace addresses per network.  Each array lists
- * the contracts that may be queried for listings, offers and views.
- * The legacy ghostnet marketplace has been retired; only the
- * canonical contract remains in the read list.  When the mainnet
- * marketplace is upgraded, update the corresponding entry here.
- */
-export const MARKETPLACE_READ_ADDRESSES = {
-  ghostnet: [
-    MARKETPLACE_WRITE_ADDRESSES.ghostnet,
-  ],
-  mainnet : [
-    MARKETPLACE_WRITE_ADDRESSES.mainnet,
-  ],
-};
-// Primary marketplace address for the active network.
-export const MARKETPLACE_ADDRESS = MARKETPLACE_WRITE_ADDRESSES[TARGET];
-// Preserve array export for read replicas; used by some modules.
-export const MARKETPLACE_ADDRESSES = MARKETPLACE_READ_ADDRESSES;
 
-// Tezos Domain registry and fallback RPCs.  Imported by
-// resolveTezosDomain.js per invariant I131.  Do not remove these
-// constants; missing values will break domain resolution.
+// Selected marketplace address based on the active TARGET.  Use this
+// constant when you need the marketplace contract for a given network.
+// If no entry exists for a network, the value will be undefined and
+// calling code should handle that case appropriately.
+export const MARKETPLACE_ADDRESS = MARKETPLACE_ADDRESSES[TARGET];
+
+// ---------------------------------------------------------------------------
+// Tezos Domain registry addresses and fallback RPCs
+//
+// DOMAIN_CONTRACTS exposes the NameRegistry contract addresses used by the
+// Tezos Domains project to store reverse record mappings.  FALLBACK_RPCS
+// lists network-specific endpoints for on‑chain domain lookup when
+// RPC_URLS is unavailable.  Both exports are consumed by
+// resolveTezosDomain.js to perform optional on-chain resolution.
 export const DOMAIN_CONTRACTS = {
   ghostnet: 'KT1REqKBXwULnmU6RpZxnRBUgcBmESnXhCWs',
   mainnet:  'KT1GBZmSxmnKJXGMdMLbugPfLyUPmuLSMwKS',
 };
+
 export const FALLBACK_RPCS = {
   ghostnet: 'https://ghostnet.tezos.marigold.dev',
   mainnet:  'https://mainnet.api.tez.ie',
 };
 
-// Remote forge service disabled (r1015).  Retain export for
-// backwards compatibility; always resolves to an empty string.
+// ---------------------------------------------------------------------------
+// Remote forge service
+//
+// Remote forging and injection were removed from the ZeroUnbound
+// platform in r1015; however, some legacy modules still import
+// FORGE_SERVICE_URL from deployTarget.js.  To maintain backward
+// compatibility and avoid build errors we export a constant that
+// always resolves to an empty string.  Additional URLs could be
+// mapped per network if remote forging is ever reintroduced.
+const FORGE_URLS = {
+  ghostnet: '',
+  mainnet:  '',
+};
+
+// Deprecated: always returns an empty string.  Remote forge services are
+// permanently disabled; client code should fall back to local forging via
+// Taquito’s LocalForger.  This export is retained solely to satisfy
+// existing imports.
 export const FORGE_SERVICE_URL = '';
 
 /**
- * Select the fastest reachable RPC endpoint.  Pings each endpoint
- * concurrently and returns the first to respond within the timeout.
- * Throws if none respond.  Consumers (net.js, WalletContext) should
- * catch and retry on failure.
+ * Utility to select the fastest reachable RPC endpoint.  Given an array of
+ * endpoints (RPC_URLS), this function pings each endpoint concurrently and
+ * returns the first one that responds within the specified timeout.  If no
+ * endpoints respond, an error is thrown.  See core/net.js for usage.
  *
- * @param {number} timeout Timeout in milliseconds (default 2000 ms)
- * @returns {Promise<string>} URL of the fastest reachable RPC
+ * @param {number} timeout Timeout in milliseconds (default 2000 ms).
+ * @returns {Promise<string>} The URL of the fastest reachable RPC.
  */
 export async function selectFastestRpc(timeout = 2000) {
   const promises = RPC_URLS.map(async (url) => {
@@ -183,7 +244,7 @@ export async function selectFastestRpc(timeout = 2000) {
       clearTimeout(id);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return { url, time: performance.now() - start };
-    } catch {
+    } catch (err) {
       return { url, time: Infinity };
     }
   });
@@ -192,17 +253,16 @@ export async function selectFastestRpc(timeout = 2000) {
   return result.url;
 }
 
-// Provide DEFAULT_NETWORK alias for legacy imports.  Equal to TARGET.
+// Default network key.  Many modules import this constant to determine the
+// initial network.  By defining DEFAULT_NETWORK equal to TARGET we maintain
+// compatibility with components such as WalletContext that expect this export.
 export const DEFAULT_NETWORK = TARGET;
 
 /* What changed & why:
-   • Added MARKETPLACE_WRITE_ADDRESSES and MARKETPLACE_READ_ADDRESSES
-     exports, selecting the new ZeroSum contract (KT19yn9f… on
-     ghostnet) for write operations and including the legacy
-     ghostnet address for read replicas.  MARKETPLACE_ADDRESS now
-     references the write address for the active network.  This
-     prevents undefined look‑ups and 400 errors in downstream
-     modules (ListTokenDialog, marketplace.js).
-   • Retained existing network configuration, factory addresses,
-     domain constants and selectFastestRpc helper unchanged.
+   • Added DOMAIN_CONTRACTS and FALLBACK_RPCS exports.  These new constants
+     centralise the Tezos Domains registry contract addresses and fallback
+     RPC endpoints per network.  resolveTezosDomain.js imports them to
+     perform network-aware on-chain lookups and avoid hard‑coded values,
+     complying with invariant I10.
+   • Added a revision header noting the new revision r1157 on 2025‑08‑01.
 */

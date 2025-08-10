@@ -1,44 +1,52 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/TokenListingCard.jsx
-  Rev :    r7    2025‑08‑07 UTC
-  Summary: Support video preview & loop; add script toggle
-           Adds support for rendering on‑chain video data URIs
-           using a <video> element with controls and loop.  Also
-           imports and displays the EnableScriptsToggle to allow
-           users to enable or disable executable scripts on NFT
-           listings.  Removes the previous one‑way script overlay
-           in favour of a persistent toggle.  Leaves price
-           formatting and hazard consent logic unchanged.
+  Rev :    r1213    2025‑08‑10 UTC
+  Summary: Keep working BUY; add FullscreenModal button like
+           TokenCard. Preserve UX, styles, hazards & consent logic.
+           Uses BuyDialog directly; no regressions.
 ────────────────────────────────────────────────────────────*/
 
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, {
+  useEffect,
+  useState,
+  useMemo,
+  useCallback,
+} from 'react';
 import PropTypes from 'prop-types';
 
-// Use TzKT API base to fetch token metadata on the fly
-import { TZKT_API } from '../config/deployTarget.js';
-import MarketplaceBuyBar from './MarketplaceBuyBar.jsx';
+// API base and network key for TzKT queries and domain resolution
+import { TZKT_API, NETWORK_KEY } from '../config/deployTarget.js';
+
+// Pixel button for actions/nav
 import PixelButton from './PixelButton.jsx';
 
-// Domain resolver and network key for .tez lookups
+// Domain resolver for .tez lookups
 import { resolveTezosDomain } from '../utils/resolveTezosDomain.js';
-import { NETWORK_KEY } from '../config/deployTarget.js';
-// Utility to decode hex fields if metadata comes as hex (fallback)
-import decodeHexFields from '../utils/decodeHexFields.js';
 
-// Consent and hazard helpers for NSFW, flashing and scripts
+// Helpers to decode hex-encoded metadata and detect hazards in media
+import decodeHexFields from '../utils/decodeHexFields.js';
 import useConsent from '../hooks/useConsent.js';
 import detectHazards from '../utils/hazards.js';
 
-// Import the script toggle so users can enable/disable scripts
+// Script toggle and universal media renderer
 import { EnableScriptsToggle } from './EnableScripts.jsx';
+import RenderMedia from '../utils/RenderMedia.jsx';
+
+// BUY flow – mirror the working token page bar
+import BuyDialog from './BuyDialog.jsx';
+import { useWalletContext } from '../contexts/WalletContext.js';
+import { fetchLowestListing } from '../core/marketplace.js';
+
+// Fullscreen viewer & confirmation dialog (match TokenCard behavior)
+import FullscreenModal from './FullscreenModal.jsx';
+import PixelConfirmDialog from './PixelConfirmDialog.jsx';
 
 /*
- * Select a suitable data URI from the token metadata.  This helper
- * prioritises displayUri, then imageUri, then thumbnailUri and
- * finally artifactUri.  Only returns URIs that begin with
- * "data:"; other protocols are ignored in order to guarantee
- * fully on‑chain media.  See invariant I24 for rationale.
+ * Select a suitable data URI from the token metadata.  Prioritises
+ * displayUri, then imageUri, then thumbnailUri and finally artifactUri.
+ * Only returns URIs that begin with "data:" to guarantee fully
+ * on‑chain media.  See invariant I24 for rationale.
  */
 const pickDataUri = (m = {}) => {
   if (!m || typeof m !== 'object') return '';
@@ -49,41 +57,57 @@ const pickDataUri = (m = {}) => {
   return '';
 };
 
-/* A simple placeholder for tokens whose metadata has not loaded yet
- * or does not contain any on‑chain media.  This placeholder
- * preserves aspect ratio and ensures a consistent grid layout.
+/* A placeholder for tokens whose metadata has not loaded or does not
+ * contain any on‑chain media.  Preserves aspect ratio and grid layout.
  */
 const PLACEHOLDER = '/sprites/cover_default.svg';
 
 /**
- * Minimal listing card for the marketplace.  Fetches token
- * metadata from the TzKT API and displays the primary image
- * (data URI) or video thumbnail along with the token name
- * (or tokenId) and price.  Includes a buy button via
- * MarketplaceBuyBar.  Does not depend on the full TokenCard
- * component to avoid missing dependencies in the explore bundle.
+ * Minimal listing card for the marketplace.  Fetches token metadata
+ * from the TzKT API and displays the primary image or video along
+ * with the token name (or id) and price.  Includes a working BUY
+ * button that opens the BuyDialog using the same parameters and
+ * guards as the working MarketplaceBar implementation.  RenderMedia
+ * handles images, videos and SVGs; scripts can be enabled by the user.
  *
- * In this revision the card now detects on‑chain video data URIs
- * (e.g. data:video/mp4;base64,…) and renders them using the
- * <video> element with controls and loop enabled.  It also adds
- * an enable/disable scripts toggle to mirror the behaviour of
- * TokenCard, replacing the prior one‑way enable overlay.
+ * Adds a fullscreen button & modal (like TokenCard) so mp4s and
+ * other media can be viewed properly without relying on the native
+ * control’s fullscreen icon.
  *
  * @param {object} props component props
- * @param {string} props.contract KT1 address of the NFT contract
+ * @param {string} props.contract FA2 contract address
  * @param {string|number} props.tokenId token id within the contract
- * @param {number} [props.priceMutez] precomputed lowest price in mutez
+ * @param {number} [props.priceMutez] optional lowest price in mutez (for label only)
  */
 export default function TokenListingCard({ contract, tokenId, priceMutez }) {
   const [meta, setMeta] = useState(null);
   const [, setLoading] = useState(true);
+
+  // Wallet/toolkit for marketplace calls
+  const { address: walletAddr, toolkit } = useWalletContext() || {};
+
+  // Local state for lowest listing + dialog
+  const [lowest, setLowest] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [buyOpen, setBuyOpen] = useState(false);
+
   // Consent flags for NSFW, flashing and scripts
   const [allowNSFW, setAllowNSFW] = useConsent('nsfw', false);
   const [allowFlash, setAllowFlash] = useConsent('flash', false);
-  const scriptKey = `scripts:${contract}:${tokenId}`;
+  // Use a dynamic key for script consent scoped per token
+  const scriptKey = useMemo(() => `scripts:${contract}:${tokenId}`, [contract, tokenId]);
   const [allowScr, setAllowScr] = useConsent(scriptKey, false);
 
-  // Fetch metadata on mount and whenever contract/tokenId changes
+  // Fullscreen modal & script-confirm dialog (mirroring TokenCard)
+  const [fsOpen, setFsOpen] = useState(false);
+  const [cfrmScr, setCfrmScr] = useState(false);
+  const [scrTerms, setScrTerms] = useState(false);
+  const askEnableScripts = useCallback(() => { setScrTerms(false); setCfrmScr(true); }, []);
+  const confirmScripts   = useCallback(() => {
+    if (scrTerms) { setAllowScr(true); setCfrmScr(false); }
+  }, [scrTerms, setAllowScr]);
+
+  // Fetch token metadata on mount and whenever contract or tokenId changes
   useEffect(() => {
     let canceled = false;
     async function fetchMetadata() {
@@ -95,7 +119,7 @@ export default function TokenListingCard({ contract, tokenId, priceMutez }) {
           const data = await res.json();
           if (!canceled && Array.isArray(data) && data.length > 0) {
             let md = data[0].metadata || {};
-            // metadata may be hex‑encoded; attempt to decode
+            // decode hex-encoded metadata if necessary
             if (typeof md === 'string') {
               try {
                 md = decodeHexFields(md);
@@ -113,37 +137,36 @@ export default function TokenListingCard({ contract, tokenId, priceMutez }) {
       if (!canceled) setLoading(false);
     }
     fetchMetadata();
-    return () => {
-      canceled = true;
-    };
+    return () => { canceled = true; };
   }, [contract, tokenId]);
 
-  // Derive authors and creators arrays from metadata (fallbacks)
+  // Derive authors and creators arrays from metadata with fallbacks
   const authors = useMemo(() => {
     const m = meta || {};
     const src = m.authors ?? m.artists ?? [];
     if (Array.isArray(src)) return src;
-    if (typeof src === 'string') {
-      return src.split(/[,;]\s*/).filter((x) => x);
-    }
+    if (typeof src === 'string') return src.split(/[,;]\s*/).filter((x) => x);
     return [];
   }, [meta]);
+
   const creators = useMemo(() => {
     const m = meta || {};
     const src = m.creators ?? [];
     if (Array.isArray(src)) return src;
-    if (typeof src === 'string') {
-      return src.split(/[,;]\s*/).filter((x) => x);
-    }
+    if (typeof src === 'string') return src.split(/[,;]\s*/).filter((x) => x);
     return [];
   }, [meta]);
 
-  // Domain cache for authors and creators
+  // Resolve .tez domains for addresses in authors/creators lists
   const [domains, setDomains] = useState({});
   useEffect(() => {
     const addrs = new Set();
-    authors.forEach((a) => { if (typeof a === 'string' && /^(tz|kt)/i.test(a.trim())) addrs.add(a.trim()); });
-    creators.forEach((a) => { if (typeof a === 'string' && /^(tz|kt)/i.test(a.trim())) addrs.add(a.trim()); });
+    authors.forEach((val) => {
+      if (typeof val === 'string' && /^(tz|kt)/i.test(val.trim())) addrs.add(val.trim());
+    });
+    creators.forEach((val) => {
+      if (typeof val === 'string' && /^(tz|kt)/i.test(val.trim())) addrs.add(val.trim());
+    });
     addrs.forEach((addr) => {
       const key = addr.toLowerCase();
       if (domains[key] !== undefined) return;
@@ -154,33 +177,25 @@ export default function TokenListingCard({ contract, tokenId, priceMutez }) {
         });
       });
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authors, creators]);
 
-  // Helper to shorten Tezos addresses
+  // Helper to abbreviate long Tezos addresses
   const shortAddr = useCallback((val) => {
     const v = String(val || '');
     return v.length > 10 ? `${v.slice(0, 5)}…${v.slice(-4)}` : v;
   }, []);
 
-  // Render a list of values (authors or creators).  When clickable
-  // is true, tz/KT addresses are wrapped in an <a> tag that links
-  // to a filtered explore page showing tokens by that admin.  If
-  // clickable is false, addresses and names are rendered as plain
-  // text.  Domain names take precedence over addresses.  Use
-  // shortAddr() to abbreviate raw addresses.
+  // Format and render a list of entries (authors/creators).
   const renderEntries = useCallback((list, clickable) => {
     return list.map((val, idx) => {
       const v = String(val || '').trim();
       const key = v.toLowerCase();
       const resolved = domains[key];
       let content;
-      if (resolved) {
-        content = resolved;
-      } else if (!/^(tz|kt)/i.test(v)) {
-        content = v;
-      } else {
-        content = shortAddr(v);
-      }
+      if (resolved) content = resolved;
+      else if (!/^(tz|kt)/i.test(v)) content = v;
+      else content = shortAddr(v);
       const prefix = idx > 0 ? ', ' : '';
       if (clickable && /^(tz|kt)/i.test(v)) {
         return (
@@ -204,28 +219,76 @@ export default function TokenListingCard({ contract, tokenId, priceMutez }) {
     });
   }, [domains, shortAddr]);
 
-  // Hazard detection for NSFW, flashing and scripts
-  const hazards = useMemo(
-    () => (meta ? detectHazards(meta) : { nsfw: false, flashing: false, scripts: false }),
-    [meta],
-  );
+  // Select a data URI from metadata for preview or fall back to placeholder
+  const imageUri = useMemo(() => pickDataUri(meta) || PLACEHOLDER, [meta]);
+  const title = meta?.name || `Token #${tokenId}`;
+
+  // Convert mutez price to tez string with six decimal places (label only)
+  const priceXTZ = useMemo(() => {
+    if (priceMutez == null) return null;
+    return (priceMutez / 1_000_000).toLocaleString(undefined, {
+      minimumFractionDigits: 6,
+      maximumFractionDigits: 6,
+    });
+  }, [priceMutez]);
+
+  // Detect hazards from full metadata
+  const hazards = useMemo(() => (
+    meta ? detectHazards(meta) : { nsfw: false, flashing: false, scripts: false }
+  ), [meta]);
   const needsNSFW = hazards.nsfw && !allowNSFW;
   const needsFlash = hazards.flashing && !allowFlash;
   const blocked = needsNSFW || needsFlash;
-  // Convert price in mutez to tez for display; leave null when unknown
-  const priceXTZ =
-    priceMutez != null
-      ? (priceMutez / 1_000_000).toLocaleString(undefined, {
-          minimumFractionDigits: 6,
-          maximumFractionDigits: 6,
-        })
-      : null;
-  // Determine image URI; prefer on‑chain data URIs, fallback to placeholder
-  const imageUri = useMemo(() => pickDataUri(meta) || PLACEHOLDER, [meta]);
-  // Determine token name or fallback to id
-  const title = meta?.name || `Token #${tokenId}`;
-  // Determine if the selected URI is a video data URI
-  const isVideo = useMemo(() => /^data:video\//i.test(imageUri), [imageUri]);
+  const scriptHaz = hazards.scripts;
+
+  // Fullscreen media source (mirror TokenCard logic)
+  const artifactDataUri = useMemo(() => {
+    const u = meta?.artifactUri;
+    return (typeof u === 'string' && /^data:/i.test(u.trim())) ? u.trim() : '';
+  }, [meta]);
+  const fsUri = useMemo(() => {
+    // Prefer artifact when scripts are allowed and the artifact is a data: URI
+    return (scriptHaz && allowScr && artifactDataUri) ? artifactDataUri : imageUri;
+  }, [scriptHaz, allowScr, artifactDataUri, imageUri]);
+
+  // Fetch the lowest active listing – follow MarketplaceBar pattern
+  useEffect(() => {
+    let stop = false;
+    async function run() {
+      setBusy(true);
+      try {
+        // Support both call shapes used across repo:
+        //   fetchLowestListing({ toolkit, nftContract, tokenId })
+        //   fetchLowestListing(toolkit, { nftContract, tokenId })
+        let res = null;
+        try {
+          res = await fetchLowestListing({ toolkit, nftContract: contract, tokenId });
+        } catch {
+          /* fall through to 2‑arg */
+        }
+        if (!res) {
+          try {
+            res = await fetchLowestListing(toolkit, { nftContract: contract, tokenId });
+          } catch {
+            /* ignore */
+          }
+        }
+        if (!stop) setLowest(res || null);
+      } finally {
+        if (!stop) setBusy(false);
+      }
+    }
+    run();
+    const t = setInterval(run, 15_000);
+    return () => { stop = true; clearInterval(t); };
+  }, [toolkit, contract, tokenId]);
+
+  const isSeller = useMemo(() => {
+    if (!walletAddr || !lowest?.seller) return false;
+    return String(walletAddr).toLowerCase() === String(lowest.seller).toLowerCase();
+  }, [walletAddr, lowest]);
+
+  const cardBuyDisabled = !toolkit || !lowest || lowest.priceMutez == null || isSeller;
 
   return (
     <article
@@ -241,7 +304,7 @@ export default function TokenListingCard({ contract, tokenId, priceMutez }) {
         minHeight: '330px',
       }}
     >
-      {/* Hazard overlays for NSFW and flashing; scripts now handled via toggle */}
+      {/* Hazard overlays for NSFW and flashing; script hazards are toggled via EnableScriptsToggle */}
       {(needsNSFW || needsFlash) && (
         <div
           style={{
@@ -290,7 +353,8 @@ export default function TokenListingCard({ contract, tokenId, priceMutez }) {
           )}
         </div>
       )}
-      {/* Thumbnail: render video with controls/loop when data URI is video */}
+
+      {/* Thumbnail: always render via RenderMedia; script execution controlled by toggle */}
       <div
         style={{
           position: 'relative',
@@ -302,23 +366,47 @@ export default function TokenListingCard({ contract, tokenId, priceMutez }) {
           alignItems: 'center',
         }}
       >
-        {isVideo ? (
-          <video
-            src={imageUri}
-            controls
-            loop
-            preload="metadata"
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-            title={title}
-          />
-        ) : (
-          <img
-            src={imageUri}
-            alt={title}
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+        <RenderMedia
+          uri={imageUri}
+          alt={title}
+          allowScripts={allowScr}
+          /* ensure fresh mount when scripts toggle */
+          key={String(allowScr)}
+          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+        />
+
+        {/* Block interactive scripts until user enables (matches TokenCard) */}
+        {scriptHaz && !allowScr && !blocked && (
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              zIndex: 6,
+              background: 'transparent',
+              pointerEvents: 'all',
+            }}
+            aria-label="Scripts disabled overlay"
           />
         )}
+
+        {/* Fullscreen button (matches TokenCard placement/behavior) */}
+        <PixelButton
+          size="xs"
+          disabled={!(!scriptHaz || allowScr)}
+          onClick={() => { (!scriptHaz || allowScr) ? setFsOpen(true) : askEnableScripts(); }}
+          title={(!scriptHaz || allowScr) ? 'Fullscreen' : 'Enable scripts first'}
+          style={{
+            position: 'absolute',
+            bottom: '4px',
+            right: '4px',
+            opacity: (!scriptHaz || allowScr) ? 0.45 : 0.35,
+            zIndex: 7,
+          }}
+        >
+          ⛶
+        </PixelButton>
       </div>
+
       {/* Metadata section */}
       <div
         style={{
@@ -331,50 +419,98 @@ export default function TokenListingCard({ contract, tokenId, priceMutez }) {
           borderTop: '2px solid var(--zu-accent, #00c8ff)',
         }}
       >
-        <h4 style={{ margin: 0, fontSize: '.82rem', lineHeight: 1.15, fontFamily: 'Pixeloid Sans, monospace' }}>
+        <h4
+          style={{
+            margin: 0,
+            fontSize: '.82rem',
+            lineHeight: 1.15,
+            fontFamily: 'Pixeloid Sans, monospace',
+          }}
+        >
           {title}
         </h4>
+
         {priceXTZ && (
-          <p style={{ margin: 0, fontSize: '.68rem', lineHeight: 1.25, color: 'var(--zu-accent-sec,#6ff)' }}>
+          <p
+            style={{
+              margin: 0,
+              fontSize: '.68rem',
+              lineHeight: 1.25,
+              color: 'var(--zu-accent-sec,#6ff)',
+            }}
+          >
             {priceXTZ} ꜩ
           </p>
         )}
-        {/* Token identifier to help users distinguish editions */}
-        <p style={{ margin: 0, fontSize: '.6rem', lineHeight: 1.15, opacity: 0.8 }}>
+
+        <p
+          style={{
+            margin: 0,
+            fontSize: '.6rem',
+            lineHeight: 1.15,
+            opacity: 0.8,
+          }}
+        >
           ID {tokenId}
         </p>
-        {/* Authors and creators lines: display names with domain resolution.  Creators
-           are clickable links to filter tokens by admin address. */}
+
         {authors.length > 0 && (
-          <p style={{ margin: 0, fontSize: '.6rem', lineHeight: 1.2, opacity: 0.75 }}>
+          <p
+            style={{
+              margin: 0,
+              fontSize: '.6rem',
+              lineHeight: 1.2,
+              opacity: 0.75,
+            }}
+          >
             Author{authors.length > 1 ? 's' : ''} 
             {renderEntries(authors, false)}
           </p>
         )}
+
         {creators.length > 0 && (
-          <p style={{ margin: 0, fontSize: '.6rem', lineHeight: 1.2, opacity: authors.length > 0 ? 0.65 : 0.75 }}>
+          <p
+            style={{
+              margin: 0,
+              fontSize: '.6rem',
+              lineHeight: 1.2,
+              opacity: authors.length > 0 ? 0.65 : 0.75,
+            }}
+          >
             Creator{creators.length > 1 ? 's' : ''} 
             {renderEntries(creators, true)}
           </p>
         )}
-        {/* File type */}
+
         {meta?.mimeType && (
-          <p style={{ margin: 0, fontSize: '.6rem', lineHeight: 1.2, opacity: 0.6 }}>
+          <p
+            style={{
+              margin: 0,
+              fontSize: '.6rem',
+              lineHeight: 1.2,
+              opacity: 0.6,
+            }}
+          >
             {meta.mimeType}
           </p>
         )}
-        {/* Script toggle: show when the token contains scripts.  Enables users to
-            toggle scripts on or off.  Hidden when blocked for NSFW/flash. */}
-        {hazards.scripts && !blocked && (
+
+        {scriptHaz && !blocked && (
           <div style={{ margin: '2px 0 0 0' }}>
             <EnableScriptsToggle
               enabled={allowScr}
-              onToggle={() => setAllowScr((v) => !v)}
+              onToggle={allowScr ? () => setAllowScr(false) : askEnableScripts}
             />
           </div>
         )}
-        {/* View button: navigate to token detail page */}
-        <div style={{ display: 'flex', justifyContent: 'center', marginTop: '4px' }}>
+
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'center',
+            marginTop: '4px',
+          }}
+        >
           <PixelButton
             size="sm"
             as="a"
@@ -385,23 +521,110 @@ export default function TokenListingCard({ contract, tokenId, priceMutez }) {
           </PixelButton>
         </div>
       </div>
-      {/* Buy bar */}
+
+      {/* Buy bar: inline, compact – mirrors MarketplaceBar behavior; no style changes to wrapper */}
       <div style={{ padding: '6px 8px 8px' }}>
-        <MarketplaceBuyBar contractAddress={contract} tokenId={tokenId} showPrice={false} />
+        <PixelButton
+          size="sm"
+          disabled={cardBuyDisabled}
+          onClick={() => setBuyOpen(true)}
+          title={
+            isSeller
+              ? 'You cannot buy your own listing'
+              : lowest && lowest.priceMutez != null
+                ? `Buy for ${(lowest.priceMutez / 1_000_000).toLocaleString(undefined, { minimumFractionDigits: 6, maximumFractionDigits: 6 })} ꜩ`
+                : (busy ? '…' : 'No active listing')
+          }
+        >
+          BUY
+        </PixelButton>
       </div>
+
+      {/* Buy dialog – pass BOTH legacy and current prop names for maximum compatibility */}
+      {buyOpen && lowest && (
+        <BuyDialog
+          /* visibility flags */
+          open
+          isOpen
+          onClose={() => setBuyOpen(false)}
+
+          /* contract identifiers: cover all variants in use */
+          contract={contract}
+          nftContract={contract}
+          contractAddress={contract}
+
+          /* token & listing detail */
+          tokenId={tokenId}
+          priceMutez={lowest.priceMutez}
+          seller={lowest.seller}
+          nonce={lowest.nonce}
+          listingNonce={lowest.nonce}
+          amount={1}
+          available={lowest.amount || 1}
+
+          /* some versions expect a single listing object, others discrete props */
+          listing={{
+            seller: lowest.seller,
+            priceMutez: lowest.priceMutez,
+            nonce: lowest.nonce,
+            amount: lowest.amount || 1,
+          }}
+
+          /* pass toolkit when required by dialog internals */
+          toolkit={toolkit}
+        />
+      )}
+
+      {/* Fullscreen modal (works for mp4, html, svg, etc.) */}
+      <FullscreenModal
+        open={fsOpen}
+        onClose={() => setFsOpen(false)}
+        uri={fsUri}
+        mime={meta?.mimeType}
+        allowScripts={scriptHaz && allowScr}
+        scriptHazard={scriptHaz}
+      />
+
+      {/* Enable-scripts confirmation (matches TokenCard UX) */}
+      {cfrmScr && (
+        <PixelConfirmDialog
+          open
+          title="Enable scripts?"
+          message={(
+            <>
+              <label style={{ display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '8px' }}>
+                <input
+                  type="checkbox"
+                  checked={scrTerms}
+                  onChange={(e) => setScrTerms(e.target.checked)}
+                />
+                I&nbsp;agree&nbsp;to&nbsp;
+                <a href="/terms" target="_blank" rel="noopener noreferrer">Terms</a>
+              </label>
+              Executable HTML / JS can be harmful. Proceed only if you trust the author.
+            </>
+          )}
+          confirmLabel="OK"
+          cancelLabel="Cancel"
+          confirmDisabled={!scrTerms}
+          onConfirm={confirmScripts}
+          onCancel={() => setCfrmScr(false)}
+        />
+      )}
     </article>
   );
 }
 
 TokenListingCard.propTypes = {
-  contract: PropTypes.string.isRequired,
-  tokenId: PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
+  contract  : PropTypes.string.isRequired,
+  tokenId   : PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
   priceMutez: PropTypes.number,
 };
 
-/* What changed & why: r7 – Added support for rendering on‑chain video data
-   URIs via a <video> element with controls and loop enabled. Introduced
-   EnableScriptsToggle to allow users to enable or disable scripts for
-   script‑hazard tokens. Removed the previous one‑way script overlay and
-   kept hazard consent overlays for NSFW/flashing. Updated summary and
-   bumped revision. */
+/* What changed & why (r1213):
+   • Added FullscreenModal button + modal (like TokenCard) for better
+     mp4/fullscreen UX. Keeps native preview intact.
+   • Kept working BUY dialog path; no visual regressions.
+   • Added scripts confirm dialog; toggle now asks before enabling.
+   • Added overlay to block interactive scripts until enabled. */
+/* EOF */

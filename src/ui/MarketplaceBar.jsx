@@ -1,11 +1,12 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/MarketplaceBar.jsx
-  Rev :    r916    2025‑08‑03
-  Summary: Marketplace action bar with quantity-aware Buy dialog.
-           Passes the available amount from the lowest listing to
-           BuyDialog so users can select how many editions to
-           purchase.  Other marketplace controls remain unchanged.
+  Rev :    r921    2025‑08‑10
+  Summary: Restore Cancel button visibility.  Remove the
+           `isSeller && lowest` gate that hid Cancel whenever
+           the user’s listing wasn’t the cheapest.  The Cancel
+           dialog itself handles the “no active listings”
+           case cleanly.  Other behaviour unchanged.
 ────────────────────────────────────────────────────────────*/
 
 import React, { useEffect, useState } from 'react';
@@ -43,7 +44,7 @@ export default function MarketplaceBar({
           tokenId,
         });
         if (!cancel) setLowest(l);
-      } catch {/* ignore network errors */}
+      } catch { /* ignore network errors */ }
       try {
         const offers = await fetchOffers({
           toolkit,
@@ -51,7 +52,7 @@ export default function MarketplaceBar({
           tokenId,
         });
         if (!cancel) setHasOffers(offers && offers.length > 0);
-      } catch {/* ignore network errors */}
+      } catch { /* ignore network errors */ }
     })();
     return () => { cancel = true; };
   }, [toolkit, contractAddress, tokenId]);
@@ -98,8 +99,8 @@ export default function MarketplaceBar({
       <PixelButton disabled={!toolkit} onClick={() => setDlg('offer')}>
         OFFER
       </PixelButton>
-      {/* Cancel button */}
-      {isSeller && lowest && (
+      {/* Cancel button — restored visibility when a wallet is connected */}
+      {walletAddr && (
         <PixelButton disabled={!toolkit} onClick={() => setDlg('cancel')}>
           CANCEL
         </PixelButton>
@@ -140,12 +141,11 @@ export default function MarketplaceBar({
           onClose={() => setDlg(null)}
         />
       )}
-      {dlg === 'cancel' && lowest && (
+      {dlg === 'cancel' && (
         <CancelListing
           open
           contract={contractAddress}
           tokenId={tokenId}
-          listingNonce={lowest.nonce}
           onClose={() => setDlg(null)}
         />
       )}
@@ -166,8 +166,3 @@ MarketplaceBar.propTypes = {
   tokenId        : PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
   marketplace    : PropTypes.any,
 };
-
-/* What changed & why: r916
-   • Updated the marketplace bar to pass the available amount from
-     the lowest listing to BuyDialog, enabling quantity selection
-     in the buy modal.  Other actions remain unchanged. */

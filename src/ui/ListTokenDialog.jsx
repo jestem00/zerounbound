@@ -1,45 +1,43 @@
-/*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+/*─────────────────────────────────────────────────────────────────
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/ListTokenDialog.jsx
-  Rev :    r1188    2025‑08‑07
-  Summary: Always use the primary marketplace contract for listing.
-           For v2a contracts, verify the collection is in the
-           marketplace checklist via TZKT before listing; set
-           offline_balance accordingly; remove dynamic marketplace
-           selection logic and ensure consistent parameter order.
-────────────────────────────────────────────────────────────*/
+  Rev :    r1195    2025‑08‑10
+  Summary: Guaranteed operator update + single-signature batch.
+           • ALWAYS verifies marketplace has operator permission
+             for the specific token; if not, prepends an
+             update_operators call and batches it with list_token.
+           • Robust TzKT operator probe via key-filter (no 256-key
+             ceiling); network comes from TZKT_API.
+           • Preserves v2a flow: checklist whitelist + offline
+             balance probe and passes offline_balance=true to
+             list_token; non‑v2a unchanged.
+           • Retains decimals handling and all prior UX/overlays.
+──────────────────────────────────────────────────────────────────*/
 
-import React, { useState, useEffect } from 'react';
-import PropTypes                      from 'prop-types';
-import styledPkg                      from 'styled-components';
+import React, { useEffect, useState } from 'react';
+import PropTypes from 'prop-types';
+import styledPkg from 'styled-components';
 
-import PixelHeading    from './PixelHeading.jsx';
-import PixelInput      from './PixelInput.jsx';
-import PixelButton     from './PixelButton.jsx';
+import { OpKind } from '@taquito/taquito';
+import { Tzip16Module } from '@taquito/tzip16';
+
+import PixelHeading from './PixelHeading.jsx';
+import PixelInput from './PixelInput.jsx';
+import PixelButton from './PixelButton.jsx';
 import OperationOverlay from './OperationOverlay.jsx';
+
 import { useWalletContext } from '../contexts/WalletContext.js';
-import {
-  buildListParams,
-  fetchListings,
-  fetchOnchainListings,
-  getMarketContract,
-} from '../core/marketplace.js';
+import { buildListParams, fetchListings, fetchOnchainListings, getMarketContract } from '../core/marketplace.js';
 import getLedgerBalanceV2a from '../utils/getLedgerBalanceV2a.cjs';
 import hashMatrix from '../data/hashMatrix.json';
 import { jFetch } from '../core/net.js';
 
-import {
-  URL_OBJKT_TOKENS_BASE,
-  TZKT_API,
-  MARKETPLACE_ADDRESS,
-} from '../config/deployTarget.js';
-
-import { Tzip16Module } from '@taquito/tzip16';
+import { URL_OBJKT_TOKENS_BASE, TZKT_API, MARKETPLACE_ADDRESS } from '../config/deployTarget.js';
 
 /* styled‑components handle */
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
-/*───────── styled shells ───────────────────────────────────*/
+/*───────── shells ───────────────────────────────────────────*/
 const ModalOverlay = styled.div`
   position: fixed;
   inset: 0;
@@ -56,9 +54,11 @@ const ModalBox = styled.section`
   padding: 1rem;
   width: min(90%, 480px);
 `;
-const Wrap = styled.section`margin-top:1.4rem;`;
+const Wrap = styled.section`
+  margin-top: 1.4rem;
+`;
 
-/*───────── helpers ─────────────────────────────────────────*/
+/*───────── helpers ──────────────────────────────────────────*/
 function hexToString(hex = '') {
   let out = '';
   for (let i = 0; i < hex.length; i += 2) {
@@ -68,92 +68,79 @@ function hexToString(hex = '') {
   return out;
 }
 
-/*──────────────────────────────────────────────────────────*/
+/* Resolve token decimals (TzKT bigmap walk) */
+const decCache = {};
+async function getDec(_toolkit, contract, id) {
+  const k = `${contract}:${id}`;
+  if (decCache[k] != null) return decCache[k];
+  let d = 0;
+  try {
+    if (!contract) return 0;
+    const maps = await (await fetch(`${TZKT_API}/v1/contracts/${contract}/bigmaps`)).json();
+    const meta = Array.isArray(maps) ? maps.find((m) => m.path === 'token_metadata') : null;
+    if (meta) {
+      const mapId = meta.ptr ?? meta.id;
+      const dat = await (await fetch(`${TZKT_API}/v1/bigmaps/${mapId}/keys/${id}`)).json();
+      const ds = hexToString(dat?.value?.token_info?.decimals ?? '');
+      const n = parseInt(ds, 10);
+      if (Number.isFinite(n) && n >= 0) d = n;
+    }
+  } catch {
+    /* ignore */
+  }
+  decCache[k] = d;
+  return d;
+}
+
+/* Marketplace checklist (array or big‑map) */
+async function isInMarketplaceChecklist(contract) {
+  try {
+    const store = await jFetch(`${TZKT_API}/v1/contracts/${MARKETPLACE_ADDRESS}/storage`);
+    // Array storage
+    if (Array.isArray(store?.checklist)) return store.checklist.includes(contract);
+    // Big‑map pointer
+    const bm = store?.checklist;
+    const bigmapId = (bm && (bm.ptr ?? bm.id ?? bm.bigmapId ?? bm.bigMapId ?? bm)) || null;
+    if (bigmapId) {
+      const resp = await fetch(`${TZKT_API}/v1/bigmaps/${bigmapId}/keys/${contract}`);
+      return resp.ok;
+    }
+  } catch {
+    // Non‑blocking if unverifiable; contract will gate on‑chain.
+    return true;
+  }
+  return false;
+}
+
 export default function ListTokenDialog({ open, contract, tokenId, onClose = () => {} }) {
   const { toolkit } = useWalletContext() || {};
 
-  const [price, setPrice]                 = useState('');
-  const [amount, setAmount]               = useState('1');
-  const [maxAmount, setMaxAmount]         = useState(1);
-  const [listedCount, setListedCount]     = useState(0);
+  const [price, setPrice] = useState('');
+  const [amount, setAmount] = useState('1');
+  const [maxAmount, setMaxAmount] = useState(1);
+  const [listedCount, setListedCount] = useState(0);
   const [listedEntries, setListedEntries] = useState(0);
-  const [ov, setOv]                       = useState({ open: false, label: '' });
+  const [ov, setOv] = useState({ open: false, label: '' });
   const [resolvedTokenId, setResolvedTokenId] = useState(null);
 
-  /* sale‑split state */
-  const [splits, setSplits]               = useState([]);
-  const [newSplitAddr, setNewSplitAddr]   = useState('');
-  const [newSplitPct, setNewSplitPct]     = useState('');
+  const [splits, setSplits] = useState([]);
+  const [newSplitAddr, setNewSplitAddr] = useState('');
+  const [newSplitPct, setNewSplitPct] = useState('');
 
-  /* unsupported → non‑FA2 only */
   const [isUnsupported, setIsUnsupported] = useState(false);
 
   const objktUrl =
-    contract && tokenId != null
-      ? `${URL_OBJKT_TOKENS_BASE}${contract}/${tokenId}`
-      : '';
+    contract && tokenId != null ? `${URL_OBJKT_TOKENS_BASE}${contract}/${tokenId}` : '';
 
   const snack = (msg, sev = 'info') =>
-    window.dispatchEvent(
-      new CustomEvent('zu:snackbar', { detail: { message: msg, severity: sev } }),
-    );
+    window.dispatchEvent(new CustomEvent('zu:snackbar', { detail: { message: msg, severity: sev } }));
 
-  /*───────── sale‑splits add/remove ───────────────────────*/
-  function addSplit() {
-    const addr = newSplitAddr.trim();
-    const pct  = parseFloat(newSplitPct);
-    if (!addr || !Number.isFinite(pct) || pct <= 0) {
-      snack('Enter valid address & percent', 'error');
-      return;
-    }
-    const basis = Math.floor(pct * 100);
-    const total = splits.reduce((t, s) => t + s.percent, 0) + basis;
-    if (total >= 10000) {
-      snack('Total splits must be < 100 %', 'error');
-      return;
-    }
-    setSplits([...splits, { address: addr, percent: basis }]);
-    setNewSplitAddr('');
-    setNewSplitPct('');
-  }
-  const removeSplit = (i) => setSplits(splits.filter((_, idx) => idx !== i));
-
-  /*───────── decimals cache ───────────────────────────────*/
-  const decCache = {};
-  async function getDec(id) {
-    const k = String(id);
-    if (decCache[k] != null) return decCache[k];
-    let d = 0;
-    try {
-      if (!toolkit || !contract) return 0;
-      const tzkt =
-        /ghostnet|limanet/i.test(toolkit.rpc.getRpcUrl?.() ?? '')
-          ? 'https://api.ghostnet.tzkt.io'
-          : 'https://api.tzkt.io';
-      const maps = await (await fetch(`${tzkt}/v1/contracts/${contract}/bigmaps`)).json();
-      const meta = maps.find((m) => m.path === 'token_metadata');
-      if (meta) {
-        const mapId = meta.ptr ?? meta.id;
-        const dat   = await (await fetch(`${tzkt}/v1/bigmaps/${mapId}/keys/${id}`)).json();
-        const ds    = hexToString(dat?.value?.token_info?.decimals ?? '');
-        const n     = parseInt(ds, 10);
-        if (Number.isFinite(n) && n >= 0) d = n;
-      }
-    } catch {
-      /* ignore */
-    }
-    decCache[k] = d;
-    return d;
-  }
-
-  /*───────── version detection (FA2 test) ─────────────────*/
+  /* FA2 probe — require update_operators */
   useEffect(() => {
     (async () => {
       if (!open || !toolkit || !contract) return;
       try {
-        const eps = Object.keys(
-          (await toolkit.contract.at(contract)).entrypoints.entrypoints || {},
-        );
+        const eps = Object.keys((await toolkit.contract.at(contract)).entrypoints.entrypoints || {});
         setIsUnsupported(!eps.includes('update_operators'));
       } catch {
         setIsUnsupported(false);
@@ -161,7 +148,7 @@ export default function ListTokenDialog({ open, contract, tokenId, onClose = () 
     })();
   }, [open, toolkit, contract]);
 
-  /*───────── balance + listing counts ─────────────────────*/
+  /* Balances & listings snapshot */
   useEffect(() => {
     let cancel = false;
     (async () => {
@@ -174,7 +161,7 @@ export default function ListTokenDialog({ open, contract, tokenId, onClose = () 
       setResolvedTokenId(Number(tokenId));
 
       const idNum = Number(tokenId);
-      let owned   = 0;
+      let owned = 0;
       let resolvedId = idNum;
 
       try {
@@ -182,7 +169,7 @@ export default function ListTokenDialog({ open, contract, tokenId, onClose = () 
         toolkit.addExtension?.(new Tzip16Module());
         const nft = await toolkit.contract.at(contract);
 
-        /* preferred off‑chain views */
+        // Prefer off‑chain views (balance_of/get_balance)
         try {
           const res = await nft.views?.balance_of?.([{ owner: pkh, token_id: idNum }]).read();
           owned = Number(res?.[0]?.balance ?? 0);
@@ -190,225 +177,240 @@ export default function ListTokenDialog({ open, contract, tokenId, onClose = () 
           try {
             const res2 = await nft.views?.get_balance?.({ owner: pkh, token_id: idNum }).read();
             owned = typeof res2 === 'object' ? Number(Object.values(res2)[0]) : Number(res2);
-          } catch {
-            /* ignore */
-          }
+          } catch { /* ignore */ }
         }
 
-        /* direct ledger fallback – v2a */
+        // v2a fallback — query via TzKT tokens/balances
         if (owned === 0) {
-          const bal = await getLedgerBalanceV2a({ tzktBase: TZKT_API, contract, tokenId: idNum, owner: pkh });
+          const bal = await getLedgerBalanceV2a({
+            tzktBase: TZKT_API,
+            contract,
+            tokenId: idNum,
+            owner: pkh,
+          });
           owned = bal;
         }
 
-        /* TzKT balances fallback */
+        // Last resort — direct TzKT balances
         if (owned === 0) {
-          const tzkt =
-            /ghostnet|limanet/i.test(toolkit.rpc.getRpcUrl?.() ?? '')
-              ? 'https://api.ghostnet.tzkt.io'
-              : 'https://api.tzkt.io';
-          const u = `${tzkt}/v1/tokens/balances?account=${pkh}&token.contract=${contract}&token.tokenId=${idNum}`;
+          const u = `${TZKT_API}/v1/tokens/balances?account=${pkh}&token.contract=${contract}&token.tokenId=${idNum}`;
           const resp = await fetch(u);
           if (resp.ok) {
             const arr = await resp.json();
             if (Array.isArray(arr) && arr.length) owned = Number(arr[0].balance);
           }
         }
-      } catch {
-        /* ignore */
-      }
+      } catch { /* ignore */ }
 
       if (!cancel) {
         setMaxAmount(owned);
         setResolvedTokenId(resolvedId);
       }
 
-      /* listing counts */
+      // Listings snapshot (count + entries)
       try {
         const listingId = resolvedId;
         let arr = await fetchOnchainListings({ toolkit, nftContract: contract, tokenId: listingId }).catch(() => []);
         if (!arr.length) arr = await fetchListings({ toolkit, nftContract: contract, tokenId: listingId }).catch(() => []);
-        const dec   = await getDec(listingId);
-        const total = arr.reduce(
-          (t, l) => t + (dec > 0 ? Math.floor(l.amount / 10 ** dec) : Number(l.amount)),
-          0,
-        );
+        const dec = await getDec(toolkit, contract, listingId);
+        const total = arr.reduce((t, l) => t + (dec > 0 ? Math.floor(l.amount / 10 ** dec) : Number(l.amount)), 0);
         if (!cancel) {
           setListedCount(total);
           setListedEntries(arr.length);
         }
-      } catch {
-        /* ignore */
-      }
+      } catch { /* ignore */ }
     })();
-    return () => {
-      cancel = true;
-    };
+    return () => { cancel = true; };
   }, [open, toolkit, contract, tokenId]);
 
-  /* reset on close */
+  // Reset UI when dialog closes
   useEffect(() => {
     if (!open) {
       setPrice('');
       setAmount('1');
       setOv({ open: false, label: '' });
+      setSplits([]);
+      setNewSplitAddr('');
+      setNewSplitPct('');
     }
   }, [open]);
 
-  const amtNum   = Number(amount);
-  const priceNum = parseFloat(price);
-  const disabled = !toolkit || priceNum <= 0 || amtNum <= 0 || amtNum > maxAmount || !Number.isFinite(priceNum);
+  /* Splits management */
+  function addSplit() {
+    const addr = newSplitAddr.trim();
+    const pct = parseFloat(newSplitPct);
+    if (!addr || !Number.isFinite(pct) || pct <= 0) {
+      snack('Enter valid address & percent', 'error');
+      return;
+    }
+    const basis = Math.floor(pct * 100);
+    const total = splits.reduce((t, s) => t + s.percent, 0) + basis;
+    if (total >= 10000) {
+      snack('Total splits must be < 100 %', 'error');
+      return;
+    }
+    setSplits([...splits, { address: addr, percent: basis }]);
+    setNewSplitAddr('');
+    setNewSplitPct('');
+  }
+  const removeSplit = (i) => setSplits(splits.filter((_, idx) => idx !== i));
 
-  /*───────── list click ───────────────────────────────────*/
+  const amtNum = Number(amount);
+  const priceNum = parseFloat(price);
+  const disabled =
+    !toolkit || priceNum <= 0 || amtNum <= 0 || amtNum > maxAmount || !Number.isFinite(priceNum);
+
+  /* Robust operator probe via TzKT key filters */
+  async function hasOperatorForId({ owner, operator, id }) {
+    try {
+      const maps = await (await fetch(`${TZKT_API}/v1/contracts/${contract}/bigmaps`)).json();
+      const opMap = Array.isArray(maps) ? maps.find((m) => m.path === 'operators') : null;
+      if (!opMap) return false;
+      const mapId = opMap.ptr ?? opMap.id;
+      const url = `${TZKT_API}/v1/bigmaps/${mapId}/keys` +
+        `?key.owner=${encodeURIComponent(owner)}` +
+        `&key.operator=${encodeURIComponent(operator)}` +
+        `&key.token_id=${encodeURIComponent(Number(id))}` +
+        `&select=active&limit=1`;
+      const resp = await fetch(url);
+      if (!resp.ok) return false;
+      const arr = await resp.json();
+      return Array.isArray(arr) && arr.length > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  /* Build update_operators transfer params (with reversed‑fields fallback) */
+  async function buildUpdateOperatorParams(nft, { owner, operator, id }) {
+    // Default ordering
+    try {
+      const call = nft.methods.update_operators([
+        { add_operator: { owner, operator, token_id: Number(id) } },
+      ]);
+      return call.toTransferParams();
+    } catch { /* fall through */ }
+    // Reversed fields (rare FA2 quirk)
+    const call2 = nft.methods.update_operators([
+      { add_operator: { operator, owner, token_id: Number(id) } },
+    ]);
+    return call2.toTransferParams();
+  }
+
   async function handleList() {
-    /* detect v2a via TzKT typeHash */
+    // Detect v2a by typeHash
     let isV2a = false;
     try {
       const info = await (await fetch(`${TZKT_API}/v1/contracts/${contract}`)).json();
       const tHash = info?.typeHash ?? info?.type_hash;
       if (tHash !== undefined) isV2a = hashMatrix[String(tHash)] === 'v2a';
-    } catch {
-      /* ignore fetch errors */
-    }
+    } catch { /* ignore */ }
 
-    /* For v2a contracts, verify that the collection address is present
-       in the marketplace’s checklist.  The checklist is a failsafe
-       that allows v2a tokens to bypass the on‑chain balance_of check
-       when offline_balance is true.  If the contract is absent, the
-       marketplace will throw "Insufficient balance to list". */
-    if (isV2a) {
-      try {
-        const store = await jFetch(`${TZKT_API}/v1/contracts/${MARKETPLACE_ADDRESS}/storage`);
-        const list  = Array.isArray(store?.checklist) ? store.checklist : [];
-        if (!list.includes(contract)) {
-          snack('Collection not whitelisted on marketplace', 'error');
-          return;
-        }
-      } catch {
-        // If the checklist cannot be verified (network issues), do not block;
-        // let the contract enforce the whitelist on chain.
-      }
-    }
+    // Hard‑block non‑FA2
     if (isUnsupported) {
       snack('Unsupported contract – redirecting to Objkt…', 'warning');
-      objktUrl && window.open(objktUrl, '_blank');
+      if (objktUrl) window.open(objktUrl, '_blank');
       return;
     }
+
     const p = parseFloat(price);
     const q = parseInt(amount, 10);
     if (p <= 0 || q <= 0 || q > maxAmount) {
       snack('Check price & quantity', 'error');
       return;
     }
-    try {
-      const listId = resolvedTokenId ?? Number(tokenId);
 
-      /* v2a guard — offline balance check */
-      let offline_balance = false;
-      if (isV2a) {
-        const bal = await getLedgerBalanceV2a({ tzktBase: TZKT_API, contract, tokenId: listId, owner: await toolkit.wallet.pkh() });
+    // v2a guards: whitelist + offline balance
+    let offline_balance = false;
+    if (isV2a) {
+      const ok = await isInMarketplaceChecklist(contract);
+      if (!ok) {
+        snack('Collection not whitelisted on marketplace', 'error');
+        return;
+      }
+      try {
+        const bal = await getLedgerBalanceV2a({
+          tzktBase: TZKT_API,
+          contract,
+          tokenId: Number(resolvedTokenId ?? tokenId),
+          owner: await toolkit.wallet.pkh(),
+        });
         if (bal < q) {
           snack('Insufficient editions held (offline check)', 'error');
           return;
         }
         offline_balance = true;
+      } catch {
+        snack('Offline balance check failed; try again', 'error');
+        return;
       }
-      await submitTx(q, Math.floor(p * 1_000_000), offline_balance);
-    } catch (e) {
-      snack(e.message || 'Build error', 'error');
     }
+
+    await submitTx(q, Math.floor(p * 1_000_000), offline_balance);
   }
 
-  /*───────── tx submit ────────────────────────────────────*/
   async function submitTx(qEditions, priceMutez, offline_balance) {
     try {
       setOv({ open: true, label: 'Preparing listing …' });
 
       const seller = await toolkit.wallet.pkh();
-      const nft    = await toolkit.wallet.at(contract);
+      toolkit.addExtension?.(new Tzip16Module());
+
+      const nft = await toolkit.wallet.at(contract);
       const market = await getMarketContract(toolkit);
-      const opAddr = market.address;
+      const operatorAddr = market.address;
 
-      const upd = (id, rev = false) =>
-        nft.methods.update_operators([
-          {
-            add_operator: rev
-              ? { operator: opAddr, owner: seller, token_id: id }
-              : { owner: seller, operator: opAddr, token_id: id },
-          },
-        ]);
+      const idNum = resolvedTokenId ?? Number(tokenId);
+      const dec = await getDec(toolkit, contract, idNum);
+      const qtyUnits = dec > 0 ? qEditions * 10 ** dec : qEditions;
 
-      const hasOperator = async (id) => {
-        try {
-          const tzkt =
-            /ghostnet|limanet/i.test(toolkit.rpc.getRpcUrl?.() ?? '')
-              ? 'https://api.ghostnet.tzkt.io'
-              : 'https://api.tzkt.io';
-          const maps = await (await fetch(`${tzkt}/v1/contracts/${contract}/bigmaps`)).json();
-          const opMap = maps.find((m) => m.path === 'operators');
-          if (!opMap) return false;
-          const keys = await (await fetch(`${tzkt}/v1/bigmaps/${opMap.ptr ?? opMap.id}/keys?limit=256`)).json();
-          return keys.some(
-            (k) =>
-              k.key?.owner === seller && k.key?.operator === opAddr && Number(k.key.token_id) === id,
-          );
-        } catch {
-          return false;
-        }
-      };
-
+      // Compose sale splits (ensure seller receives the remainder)
       const saleSplits = (() => {
         if (!splits.length) return [{ address: seller, percent: 10000 }];
         const used = splits.reduce((t, s) => t + s.percent, 0);
-        return used < 10000
-          ? [...splits, { address: seller, percent: 10000 - used }]
-          : splits;
+        return used < 10000 ? [...splits, { address: seller, percent: 10000 - used }] : splits;
       })();
 
-      const listOnly = async (id, qtyUnits) => {
-        const params = await buildListParams(toolkit, {
-          nftContract   : contract,
-          tokenId       : id,
-          offline_balance,
-          priceMutez,
-          amount        : qtyUnits,
-          saleSplits,
-          royaltySplits : [],
-          startDelay    : 0,
+      // Build list_token params up front (may throw if EP mismatch)
+      const listParams = await buildListParams(toolkit, {
+        nftContract: contract,
+        tokenId: idNum,
+        offline_balance, // critical for v2a
+        priceMutez,
+        amount: qtyUnits,
+        saleSplits,
+        royaltySplits: [],
+        startDelay: 0,
+      });
+
+      // Ensure operator; batch update_operators + list_token for single signature
+      const alreadyOp = await hasOperatorForId({ owner: seller, operator: operatorAddr, id: idNum });
+
+      const batchOps = [];
+      if (!alreadyOp) {
+        const updParams = await buildUpdateOperatorParams(nft, {
+          owner: seller,
+          operator: operatorAddr,
+          id: idNum,
         });
-        setOv({ open: true, label: 'Listing token …' });
-        const op = await toolkit.wallet.batch(params).send();
-        await op.confirmation();
-      };
+        batchOps.push({ kind: OpKind.TRANSACTION, ...updParams });
+      }
+      batchOps.push(...listParams);
 
-      const updateAndList = async (id, qtyUnits) => {
-        if (!(await hasOperator(id))) {
-          setOv({ open: true, label: 'Granting operator …' });
-          try {
-            await (await upd(id).send()).confirmation(2);
-          } catch {
-            await (await upd(id, true).send()).confirmation(2);
-          }
-        }
-        await listOnly(id, qtyUnits);
-      };
-
-      const idNum    = resolvedTokenId ?? Number(tokenId);
-      const dec      = await getDec(idNum);
-      const qtyUnits = dec > 0 ? qEditions * 10 ** dec : qEditions;
-
-      await updateAndList(idNum, qtyUnits);
+      setOv({ open: true, label: !alreadyOp ? 'Authorizing & listing …' : 'Listing token …' });
+      const op = await toolkit.wallet.batch(batchOps).send();
+      await op.confirmation();
 
       setOv({ open: false, label: '' });
       snack('Listing created ✔', 'info');
       onClose();
     } catch (e) {
       setOv({ open: false, label: '' });
-      snack(e.message || 'Transaction failed', 'error');
+      snack(e?.message || 'Transaction failed', 'error');
     }
   }
 
-  /*───────── render ───────────────────────────────────────*/
+  /*───────── render ─────────────────────────────────────────*/
   if (!open) return null;
 
   const amtLbl =
@@ -416,8 +418,8 @@ export default function ListTokenDialog({ open, contract, tokenId, onClose = () 
       ? ` | For Sale: ${listedCount} (${listedEntries} listing${listedEntries !== 1 ? 's' : ''})`
       : ` | For Sale: ${listedCount}`;
 
-  const handleOverlayKey = (e) => {
-    if (e.key === 'Enter' || e.key === ' ') onClose();
+  const handleOverlayKey = (ev) => {
+    if (ev.key === 'Enter' || ev.key === ' ') onClose();
   };
 
   return (
@@ -426,9 +428,7 @@ export default function ListTokenDialog({ open, contract, tokenId, onClose = () 
         <Wrap>
           <PixelHeading level={3}>List Token</PixelHeading>
 
-          <p style={{ fontSize: '.75rem', marginBottom: '.2rem', opacity: 0.9 }}>
-            Price (ꜩ)
-          </p>
+          <p style={{ fontSize: '.75rem', marginBottom: '.2rem', opacity: 0.9 }}>Price (ꜩ)</p>
           <PixelInput placeholder="0.0" value={price} onChange={(e) => setPrice(e.target.value)} />
 
           <p style={{ fontSize: '.75rem', margin: '0.6rem 0 .2rem', opacity: 0.9 }}>
@@ -444,9 +444,7 @@ export default function ListTokenDialog({ open, contract, tokenId, onClose = () 
             onChange={(e) => setAmount(e.target.value)}
           />
 
-          <p style={{ fontSize: '.75rem', margin: '0.6rem 0 .2rem', opacity: 0.9 }}>
-            Sale Splits (optional)
-          </p>
+          <p style={{ fontSize: '.75rem', margin: '0.6rem 0 .2rem', opacity: 0.9 }}>Sale Splits (optional)</p>
           <PixelInput
             placeholder="Recipient tz‑address"
             value={newSplitAddr}
@@ -467,12 +465,11 @@ export default function ListTokenDialog({ open, contract, tokenId, onClose = () 
 
           {splits.map((s, i) => (
             <p
+              // eslint-disable-next-line react/no-array-index-key
               key={i}
               style={{ fontSize: '.7rem', marginTop: '.1rem', opacity: 0.9, display: 'flex', alignItems: 'center' }}
             >
-              <span style={{ flexGrow: 1 }}>
-                {s.address}: {(s.percent / 100).toFixed(2)}%
-              </span>
+              <span style={{ flexGrow: 1 }}>{s.address}: {(s.percent / 100).toFixed(2)}%</span>
               <PixelButton style={{ flexShrink: 0 }} onClick={() => removeSplit(i)}>
                 ✕
               </PixelButton>
@@ -520,29 +517,3 @@ ListTokenDialog.propTypes = {
   tokenId: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
   onClose: PropTypes.func,
 };
-
-/* What changed & why:
-   • r1182 – Initial port from production bundle with a whitelist
-     guard that queried storage.checklist and removed bigmap lookups.
-   • r1183 – Refined the whitelist logic: iterate across all
-     marketplace read addresses, treat missing checklist as
-     unrestricted (legacy contracts), and removed unused imports
-     (MARKETPLACE_ADDRESS, marketplaceAddress).  Header and
-     summary updated accordingly.
-   • r1184 – Skipped whitelist check for v2a contracts entirely;
-     resolved addresses via both marketplaceAddrs and
-     marketplaceAddrsRd; updated header and summary.
-   • r1185 – Added dynamic marketplace address resolution.
-     Iterates through all read addresses to find one whose
-     checklist includes the collection; passes this override to
-     buildListParams and getMarketContract; retains whitelist
-     guard for non‑v2a tokens; ensures operator assignment uses
-     the correct marketplace; updated header and summary accordingly.
-   • r1188 – Switched to always use the primary marketplace
-     contract.  Added a failsafe whitelist check for v2a
-     collections via MARKETPLACE_ADDRESS.storage.checklist using
-     TZKT API; removed dynamic marketplace selection and
-     address overrides; offline_balance now always included in
-     list_token calls via buildListParams; updated header and
-     summary accordingly.
-*/

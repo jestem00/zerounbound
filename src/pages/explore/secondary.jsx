@@ -34,7 +34,7 @@ import { NETWORK_KEY } from '../../config/deployTarget.js';
 // Marketplace helpers for discovering collections
 import { listActiveCollections, listListingsForCollectionViaBigmap } from '../../utils/marketplaceListings.js';
 // Marketplace helpers for querying on‑chain views
-import { fetchOnchainListingsForCollection, fetchListings, marketplaceAddrs } from '../../core/marketplace.js';
+import { fetchOnchainListingsForCollection, fetchListings, marketplaceAddr } from '../../core/marketplace.js';
 
 // Helper to decode hex-encoded metadata strings
 import decodeHexFields from '../../utils/decodeHexFields.js';
@@ -151,7 +151,7 @@ export default function SecondaryPage() {
             // parse listings directly from the marketplace’s listings big‑map.
             if (!listings || listings.length === 0) {
               try {
-                const markets = marketplaceAddrs(net);
+                const markets = marketplaceAddr(net);
                 const aggregated = [];
                 for (const market of markets) {
                   try {

@@ -2,11 +2,17 @@
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/FullscreenModal.jsx
   Rev :    r16    2025‑08‑10 UTC
-  Summary: Keep r15 (no ⛶ overlay + swallow dbl‑click FS). Add a
-           clean, conflict‑free keyboard toggle to hide/show the
-           control rail, plus a mobile‑friendly tap toggle and a
-           subtle on‑screen hint. Chosen shortcut: **H** (for
-           “Hide UI”), which avoids browser‑reserved combos.
+  Summary: Adds UI‑hide toggles + safer layout
+           • Keyboard: press H to hide/show controls (no modifiers).
+           • Mobile: two‑finger tap OR 600 ms long‑press toggles.
+           • Close moved to top‑left (avoid hamburger overlap).
+           • Extremely high z‑index to beat any global header.
+           • Ephemeral key/gesture hint (auto‑fades).
+           • Keeps r15 changes (no ⛶ overlay, swallow dbl‑click).
+           • Optional props:
+               - hideControlsDefault (bool) — start hidden
+               - lockControlsHidden  (bool) — force hidden (interactive NFTs)
+               - showHint            (bool) — show “Press H” helper (default true)
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useCallback, useEffect, useLayoutEffect, useRef, useState,
@@ -21,36 +27,66 @@ import { pixelUpscaleStyle }   from '../utils/pixelUpscale.js';
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
 /*──────── styled shells ─────────────────────────────────────*/
+/* Make sure our modal is always the topmost layer on the page.
+ * 2147483000 < 2^31‑1 so it remains a valid CSS integer. */
+const TOPMOST_Z = 2147483000;
+
 const Back = styled.div`
-  position: fixed; inset: 0;
+  position: fixed;
+  inset: 0;
   background: rgba(0,0,0,.92);
-  z-index: 6500;
+  z-index: ${TOPMOST_Z};
 `;
 
 const Pane = styled.div`
-  position: absolute; inset: 0;
+  position: absolute;
+  inset: 0;
   overflow: auto;
-  display: flex; align-items: center; justify-content: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 1rem;
 `;
 
 /* control rail – vertical stack, top‑right */
 const Rail = styled.div`
   position: fixed;
-  top: .75rem; right: .75rem;
-  display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
-  z-index: 6501;
+  top: calc(env(safe-area-inset-top, 0px) + .75rem);
+  right: calc(env(safe-area-inset-right, 0px) + .75rem);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  z-index: ${TOPMOST_Z + 1};
   opacity: .88;
-  transition: opacity .15s ease, visibility .15s ease, transform .18s ease;
+  transition: opacity .15s;
   &:hover { opacity: 1; }
+`;
 
-  /* hidden state (no pointer hitbox when hidden) */
-  ${(p) => p['data-hidden'] ? `
-    opacity: 0;
-    visibility: hidden;
-    pointer-events: none;
-    transform: translateY(-4px);
-  ` : ''}
+/* dedicated close button – top‑left to avoid hamburger overlap */
+const CloseWrap = styled.div`
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + .75rem);
+  left: calc(env(safe-area-inset-left, 0px) + .75rem);
+  z-index: ${TOPMOST_Z + 2};
+`;
+
+/* ephemeral helper badge */
+const Hint = styled.div`
+  position: fixed;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + .5rem);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: ${TOPMOST_Z + 1};
+  background: rgba(0,0,0,.6);
+  color: var(--zu-fg,#eee);
+  font: 600 .78rem/1.25 PixeloidSans, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  padding: .45rem .6rem;
+  border: 1px solid rgba(255,255,255,.15);
+  border-radius: 6px;
+  user-select: none;
+  pointer-events: none;
+  white-space: nowrap;
 `;
 
 /* WC‑safe vertical range */
@@ -72,26 +108,6 @@ const VRange = styled.input.attrs({ type: 'range' })`
     background: var(--zu-track-bg,var(--zu-fg));
     width:2px;
   }
-`;
-
-/* small, low‑distraction hint chip (bottom‑left) */
-const Hint = styled.div`
-  position: fixed;
-  left: .75rem; bottom: .75rem;
-  z-index: 6502;
-  max-width: min(92vw, 560px);
-  padding: .4rem .6rem;
-  border-radius: 6px;
-  font: 600 .72rem/1.3 PixeloidSans, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  color: var(--zu-fg,#eee);
-  background: color-mix(in srgb, #000 70%, transparent);
-  border: 1px solid color-mix(in srgb, #fff 18%, transparent);
-  box-shadow: 0 8px 20px rgba(0,0,0,.35);
-  pointer-events: none;
-  opacity: ${(p) => (p.$show ? 1 : 0)};
-  transform: translateY(${(p) => (p.$show ? '0' : '3px')});
-  transition: opacity .18s ease, transform .18s ease;
-  user-select: none;
 `;
 
 /*──────── helpers ───────────────────────────────────────────*/
@@ -132,15 +148,6 @@ const fitScale = (natW, natH) => {
   return Math.min(vw / natW, vh / natH);
 };
 
-/* Detect coarse pointer (touch‑first, “mobile”) once per open */
-const hasCoarsePointer = () => {
-  try {
-    if (typeof window === 'undefined') return false;
-    if ('maxTouchPoints' in navigator && navigator.maxTouchPoints > 0) return true;
-    return window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
-  } catch { return false; }
-};
-
 /*──────── component ───────────────────────────────────────*/
 export default function FullscreenModal({
   open         = false,
@@ -149,78 +156,72 @@ export default function FullscreenModal({
   mime         = '',
   allowScripts = false,
   scriptHazard = false,
+  /* NEW options */
+  hideControlsDefault = false,
+  lockControlsHidden  = false,
+  showHint            = true,
 }) {
   const [nat, setNat]          = useState({ w: 0, h: 0 });
   const [scale, setScale]      = useState(1);
   const [base,  setBase]       = useState(1);
   const [mode,  setMode]       = useState('fit');
-
-  /* NEW: UI rail visibility + hint text */
-  const [uiHidden, setUiHidden] = useState(false);
-  const [hint, setHint]         = useState('');
-  const [coarse, setCoarse]     = useState(false);
-  const hintTimer = useRef(/** @type {ReturnType<typeof setTimeout>|null} */(null));
+  const [uiVisible, setUiVisible] = useState(!hideControlsDefault && !lockControlsHidden);
+  const [hintVisible, setHintVisible] = useState(false);
 
   const ref = useRef(null);
+  const longPressTimer = useRef(0);
+  const touchStartXY   = useRef(null);
 
   /*──── reset on open ─────────────────────────────────────*/
   useEffect(() => {
     if (!open) return;
-    setNat({ w: 0, h: 0 }); setScale(1); setBase(1); setMode('fit');
-    setUiHidden(false);
-    setCoarse(hasCoarsePointer());
-    // short onboarding hint (visible, low‑distraction)
-    const msg = `Press H to hide controls${hasCoarsePointer() ? ' • Tap artwork to toggle on mobile' : ''} • Esc to close`;
-    setHint(msg);
-    if (hintTimer.current) clearTimeout(hintTimer.current);
-    hintTimer.current = setTimeout(() => { setHint(''); }, 2600);
-    return () => { if (hintTimer.current) clearTimeout(hintTimer.current); };
-  }, [open]);
+    setNat({ w: 0, h: 0 });
+    setScale(1);
+    setBase(1);
+    setMode('fit');
 
-  /*──── ESC quits ────────────────────────────────────────*/
+    /* controls visibility */
+    const startHidden = !!(hideControlsDefault || lockControlsHidden);
+    setUiVisible(!startHidden);
+    if (!startHidden && showHint) {
+      setHintVisible(true);
+      const id = setTimeout(() => setHintVisible(false), 10000);
+      return () => clearTimeout(id);
+    }
+    return undefined;
+  }, [open, hideControlsDefault, lockControlsHidden, showHint]);
+
+  /*──── global hotkeys ────────────────────────────────────*/
   useEffect(() => {
-    if (!open) return;
-    const esc = (e) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', esc);
-    return () => window.removeEventListener('keydown', esc);
-  }, [open, onClose]);
+    if (!open) return undefined;
 
-  /*──── Keyboard: H toggles rail (conflict‑free) ─────────*/
-  const toggleUi = useCallback(() => {
-    setUiHidden((prev) => {
-      const next = !prev;
-      // transient hint announcing the state change
-      const msg = next
-        ? `Controls hidden — press H${coarse ? ' or tap' : ''} to show`
-        : `Controls visible — press H${coarse ? ' or tap' : ''} to hide`;
-      setHint(msg);
-      if (hintTimer.current) clearTimeout(hintTimer.current);
-      hintTimer.current = setTimeout(() => { setHint(''); }, 1500);
-      return next;
-    });
-  }, [coarse]);
-
-  useEffect(() => {
-    if (!open) return;
     const onKey = (e) => {
-      // ignore when typing in a field/contentEditable
-      const ae = document.activeElement;
-      const typing = ae && (
-        ae.tagName === 'INPUT' ||
-        ae.tagName === 'TEXTAREA' ||
-        ae.isContentEditable
-      );
-      if (typing) return;
-
-      // chosen shortcut: "h" / "H" only (no modifiers) – avoids browser conflicts
-      if (!e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (e.key === 'h' || e.key === 'H')) {
+      if (e.key === 'Escape') {
         e.preventDefault();
-        toggleUi();
+        onClose();
+        return;
+      }
+      // ‘H’ toggles UI – only when no modifier keys to avoid conflicts
+      if (!lockControlsHidden && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const k = String(e.key || '').toLowerCase();
+        if (k === 'h') {
+          e.preventDefault();
+          setUiVisible((v) => !v);
+          setHintVisible(false);
+        } else if (k === 'f') {
+          e.preventDefault();
+          setScale(base);
+          setMode('fit');
+        } else if (k === 'o') {
+          e.preventDefault();
+          setScale(1);
+          setMode('original');
+        }
       }
     };
-    window.addEventListener('keydown', onKey, { passive: false });
-    return () => window.removeEventListener('keydown', onKey, { passive: false });
-  }, [open, toggleUi]);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose, base, lockControlsHidden]);
 
   /*──── natural‑size detection ───────────────────────────*/
   const handleLoaded = useCallback(() => {
@@ -231,7 +232,7 @@ export default function FullscreenModal({
 
   /*──── compute baseline “fit” scale ─────────────────────*/
   useLayoutEffect(() => {
-    if (!nat.w) return;
+    if (!nat.w) return undefined;
     const compute = () => {
       const fit = fitScale(nat.w, nat.h);
       setBase(fit);
@@ -253,15 +254,45 @@ export default function FullscreenModal({
     setMode('custom');
   };
 
-  /*──── mobile/touch: tap artwork to toggle UI ───────────*/
-  const onPaneTap = useCallback((e) => {
-    // Always stop here so we never bubble to Back (which would close).
-    e.stopPropagation();
-    if (!coarse) return;
-    // Do not toggle if the user started interacting with a native control
-    // (no such controls inside Pane for now; kept for future safety).
-    toggleUi();
-  }, [coarse, toggleUi]);
+  /*──── touch gestures (mobile) ──────────────────────────*/
+  const cancelLongPress = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = 0;
+    }
+  };
+  const onTouchStart = (e) => {
+    if (!open) return;
+    // Two‑finger tap toggles immediately
+    if (!lockControlsHidden && e.touches && e.touches.length >= 2) {
+      setUiVisible((v) => !v);
+      setHintVisible(false);
+      cancelLongPress();
+      return;
+    }
+    // Long‑press anywhere toggles (600 ms)
+    if (!lockControlsHidden) {
+      const t = e.touches && e.touches[0];
+      touchStartXY.current = t ? { x: t.clientX, y: t.clientY } : null;
+      cancelLongPress();
+      longPressTimer.current = window.setTimeout(() => {
+        setUiVisible((v) => !v);
+        setHintVisible(false);
+        longPressTimer.current = 0;
+      }, 600);
+    }
+  };
+  const onTouchMove = (e) => {
+    // Cancel long‑press if user drags significantly (prevents accidental toggles)
+    if (!longPressTimer.current || !touchStartXY.current) return;
+    const t = e.touches && e.touches[0];
+    if (!t) return;
+    const dx = Math.abs(t.clientX - touchStartXY.current.x);
+    const dy = Math.abs(t.clientY - touchStartXY.current.y);
+    if (dx > 12 || dy > 12) cancelLongPress();
+  };
+  const onTouchEnd = () => cancelLongPress();
+  const onTouchCancel = () => cancelLongPress();
 
   /*──── guard (hooks must run) ───────────────────────────*/
   if (!open || (scriptHazard && !allowScripts)) return null;
@@ -278,8 +309,16 @@ export default function FullscreenModal({
 
   /*──────── render ───────────────────────────────────────*/
   return (
-    <Back onClick={onClose}>
-      <Pane onClick={onPaneTap}>
+    <Back
+      onClick={onClose}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+      onTouchCancel={onTouchCancel}
+      role="dialog"
+      aria-modal="true"
+    >
+      <Pane onClick={(e) => e.stopPropagation()}>
         <RenderMedia
           ref={ref}
           uri={uri}
@@ -295,69 +334,78 @@ export default function FullscreenModal({
         />
       </Pane>
 
-      <Rail onClick={(e) => e.stopPropagation()} data-hidden={uiHidden}>
-        <PixelButton size="xs" warning onClick={onClose}>CLOSE</PixelButton>
-        <PixelButton size="xs" onClick={toOriginal}>ORIGINAL</PixelButton>
-        <PixelButton size="xs" onClick={toFit}>FIT ON SCREEN</PixelButton>
+      {uiVisible && (
+        <>
+          <CloseWrap onClick={(e) => e.stopPropagation()}>
+            <PixelButton
+              size="xs"
+              warning
+              onClick={onClose}
+              aria-label="Close (Esc)"
+              title="Close (Esc)"
+            >
+              CLOSE
+            </PixelButton>
+          </CloseWrap>
 
-        <VRange
-          min="1"
-          max={sliderMax}
-          value={pct}
-          onChange={onSlide}
-          aria-label="Zoom"
-        />
-        <span style={{
-          font: '700 .7rem/1 PixeloidSans,monospace',
-          color: 'var(--zu-fg)',
-          marginRight: '2px',
-          userSelect: 'none',
-        }}
-        >
-          {pct}%
-        </span>
+          <Rail onClick={(e) => e.stopPropagation()}>
+            <PixelButton size="xs" onClick={toOriginal} aria-label="Original size (O)" title="Original size (O)">
+              ORIGINAL
+            </PixelButton>
+            <PixelButton size="xs" onClick={toFit} aria-label="Fit on screen (F)" title="Fit on screen (F)">
+              FIT ON SCREEN
+            </PixelButton>
 
-        {/* Explicit, visible toggle in the rail. If the rail is hidden, H/tap reveals it. */}
-        <PixelButton
-          size="xs"
-          onClick={toggleUi}
-          title="Hide/Show controls (H)"
-        >
-          {uiHidden ? 'SHOW UI (H)' : 'HIDE UI (H)'}
-        </PixelButton>
-      </Rail>
+            <VRange
+              aria-label="Zoom"
+              min="1"
+              max={sliderMax}
+              value={pct}
+              onChange={onSlide}
+            />
+            <span style={{
+              font: '700 .7rem/1 PixeloidSans,monospace',
+              color: 'var(--zu-fg)',
+              marginRight: '2px',
+              userSelect: 'none',
+            }}
+            >
+              {pct}%
+            </span>
+          </Rail>
+        </>
+      )}
 
-      {/* low‑key, timed helper hint for discoverability (SR‑friendly) */}
-      <Hint
-        role="status"
-        aria-live="polite"
-        aria-atomic="true"
-        $show={Boolean(hint)}
-      >
-        {hint}
-      </Hint>
+      {hintVisible && !lockControlsHidden && (
+        <Hint>H — hide controls · two‑finger tap/long‑press on mobile</Hint>
+      )}
     </Back>
   );
 }
 
 FullscreenModal.propTypes = {
-  open         : PropTypes.bool,
-  onClose      : PropTypes.func,
-  uri          : PropTypes.string,
-  mime         : PropTypes.string,
-  allowScripts : PropTypes.bool,
-  scriptHazard : PropTypes.bool,
+  open                : PropTypes.bool,
+  onClose             : PropTypes.func,
+  uri                 : PropTypes.string,
+  mime                : PropTypes.string,
+  allowScripts        : PropTypes.bool,
+  scriptHazard        : PropTypes.bool,
+  hideControlsDefault : PropTypes.bool,
+  lockControlsHidden  : PropTypes.bool,
+  showHint            : PropTypes.bool,
 };
 
 /* What changed & why (r16):
-   • Keyboard toggle: "H" hides/unhides the control rail. Chosen
-     to avoid browser‑reserved combos across Chrome/Safari/Firefox.
-   • Mobile: tap on artwork (coarse pointer devices only) toggles the
-     controls. This does not bubble to the backdrop (so no accidental
-     close) and doesn’t conflict with pinch‑zoom.
-   • Visible affordance: small hint chip (auto‑fades) and an explicit
-     "HIDE UI (H)" button on the rail. When hidden, H/tap brings it back.
-   • Kept r15 behavior (no fullscreen overlay + swallowing dbl‑click).
-   • Accessibility: role="status" hint, input focus guard, ARIA label
-     on zoom slider. */
+   • Moved CLOSE button to top‑left and raised modal z‑index to out‑rank
+     any site‑wide hamburger/menu overlays that previously overlapped
+     the close target.  This fixes mis‑clicks on small screens.
+   • Added UI visibility toggles:
+       – Desktop: press H (no Ctrl/Alt/Meta) to hide/show controls.
+       – Mobile: two‑finger tap OR 600 ms long‑press toggles controls.
+     These gestures avoid browser‑reserved shortcuts (Ctrl/⌘‑H opens
+     history/Hide App) and work across browsers.
+   • Kept r15 behavior (no ⛶ overlay, swallow dbl‑click fullscreen).
+   • Added optional props: hideControlsDefault, lockControlsHidden,
+     showHint, and an ephemeral hint banner.
+*/
 /* EOF */

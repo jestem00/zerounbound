@@ -1,402 +1,399 @@
-/*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
-  File:    src/pages/my/tokens.jsx
-  Rev :    r45    2025‑08‑XX UTC
-  Summary: Added a second tab to display NFTs owned (purchased or
-           gifted) by the connected wallet.  The page now fetches
-           both creations (minted or authored by the wallet) and
-           owned tokens.  For owned tokens, it queries the
-           /v1/tokens/balances endpoint, filters out tokens where
-           the wallet is the creator or firstMinter, decodes
-           metadata, parses JSON‑encoded creators arrays, validates
-           on‑chain media previews (JPEG/PNG/GIF/BMP/WebP) and
-           excludes unsupported contracts or zero‑supply tokens.
-           A tab selector allows switching between “My Creations”
-           and “My Owned”, with live counts and infinite scroll.
-─────────────────────────────────────────────────────────────*/
+/* Developed by @jams2blues
+   File:    src/pages/my/tokens.jsx
+   Rev:     r80
+   Summary: Definitive fix for My Tokens. Uses admin‑based discovery
+            (v1–v4e) via `discoverCreated`, includes factory‑originated
+            contracts (initiator workaround), and cleanly separates
+            “My Creations” (admin‑owned collections) from “My Owned”
+            (balances where admin ≠ user). Network‑aware TzKT, robust
+            preview validation, dedupe, and pagination. */
 
-import React, {
-  useState, useEffect, useMemo,
-} from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import styledPkg from 'styled-components';
+
 import { useWalletContext } from '../../contexts/WalletContext.js';
-import { TZKT_API } from '../../config/deployTarget.js';
+import { TZKT_API, NETWORK_KEY } from '../../config/deployTarget.js';
 import ExploreNav from '../../ui/ExploreNav.jsx';
 import PixelHeading from '../../ui/PixelHeading.jsx';
 import PixelButton from '../../ui/PixelButton.jsx';
 import TokenCard from '../../ui/TokenCard.jsx';
+
 import { jFetch } from '../../core/net.js';
 import decodeHexFields from '../../utils/decodeHexFields.js';
 import hashMatrix from '../../data/hashMatrix.json';
+import { discoverCreated } from '../../utils/contractDiscovery.js';
 
-/* styled-components factory import (Invariant I23) */
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
-/*─ Responsive grid layout matching explore pages (Invariant I105) ─*/
-const Grid = styled.div
-  `display: grid;
-    grid-template-columns: repeat(
-      auto-fill,
-      minmax(clamp(160px, 18vw, 220px), 1fr)
-    );
-    gap: 1rem;
-    width: 100%;
-    margin-top: 1rem;`;
+/*───────────────────────────────────────────────────────────*
+ * Layout
+ *───────────────────────────────────────────────────────────*/
+const Wrap = styled.main`
+  width: 100%;
+  padding: 0 1rem 1.5rem;
+  max-width: 1440px;
+  margin: 0 auto;
+`;
+const Tabs = styled.div`
+  display:flex; gap:.6rem; margin-top: 1rem; flex-wrap:wrap;
+`;
+const Grid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(
+    auto-fill,
+    minmax(clamp(160px, 18vw, 220px), 1fr)
+  );
+  gap: 1rem;
+  width: 100%;
+  margin-top: 1rem;
+`;
+const Center = styled.div`
+  text-align:center;
+  margin:1.4rem 0 2rem;
+`;
+const Subtle = styled.p`
+  margin: 0.6rem 0 0;
+  opacity: 0.8;
+`;
 
-// Burn address used to filter out destroyed tokens in balance checks
-const BURN = 'tz1burnburnburnburnburnburnburjAYjjX';
+/*───────────────────────────────────────────────────────────*
+ * Helpers
+ *───────────────────────────────────────────────────────────*/
+function useTzktV1Base(toolkit) {
+  const net = useMemo(() => {
+    const walletNetwork = (toolkit?._network?.type || '').toLowerCase();
+    if (walletNetwork.includes('mainnet')) return 'mainnet';
+    if (walletNetwork.includes('ghostnet')) return 'ghostnet';
+    return (NETWORK_KEY || 'mainnet').toLowerCase();
+  }, [toolkit]);
 
-export default function MyTokensPage() {
-  const { address } = useWalletContext() || {};
-  // Tab state: 'creations' or 'owned'
-  const [tab, setTab] = useState('creations');
-  // Lists for creations and owned tokens
+  if (typeof TZKT_API === 'string' && TZKT_API) {
+    const base = TZKT_API.replace(/\/+$/, '');
+    return base.endsWith('/v1') ? base : `${base}/v1`;
+  }
+  return net === 'mainnet'
+    ? 'https://api.tzkt.io/v1'
+    : 'https://api.ghostnet.tzkt.io/v1';
+}
+
+/** Robust preview validation for on‑chain data URIs (JPEG/PNG/APNG/GIF/BMP/WebP) */
+function isValidPreview(m = {}) {
+  const keys = [
+    'artifactUri', 'artifact_uri',
+    'displayUri', 'display_uri',
+    'imageUri',   'image',
+    'thumbnailUri','thumbnail_uri',
+    'mediaUri',   'media_uri',
+  ];
+  const mediaRe = /^data:(image\/|video\/|audio\/)/i;
+  // Pick the first preview data URI
+  let uri = null;
+  for (const k of keys) {
+    const v = m && typeof m === 'object' ? m[k] : undefined;
+    if (typeof v === 'string') {
+      const val = v.trim();
+      if (mediaRe.test(val)) { uri = val; break; }
+    }
+  }
+  if (!uri && Array.isArray(m.formats)) {
+    for (const fmt of m.formats) {
+      if (fmt && typeof fmt === 'object') {
+        const candidates = [];
+        if (fmt.uri) candidates.push(String(fmt.uri));
+        if (fmt.url) candidates.push(String(fmt.url));
+        for (const cand of candidates) {
+          const val = cand.trim();
+          if (mediaRe.test(val)) { uri = val; break; }
+        }
+      }
+      if (uri) break;
+    }
+  }
+  if (!uri) return false;
+  try {
+    const comma = uri.indexOf(',');
+    if (comma < 0) return false;
+    const header = uri.slice(5, comma);
+    const semi = header.indexOf(';');
+    const mime = (semi >= 0 ? header.slice(0, semi) : header).toLowerCase();
+    const b64  = uri.slice(comma + 1);
+    let binary;
+    if (typeof atob === 'function') binary = atob(b64);
+    else {
+      // SSR safety: Buffer may exist in Node
+      // eslint-disable-next-line no-undef
+      const buf = Buffer.from(b64, 'base64');
+      binary = String.fromCharCode.apply(null, buf);
+    }
+    const bytes = [];
+    for (let i = 0; i < binary.length; i++) bytes.push(binary.charCodeAt(i) & 0xff);
+
+    if (mime === 'image/jpeg') {
+      return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff &&
+             bytes[bytes.length - 2] === 0xff && bytes[bytes.length - 1] === 0xd9;
+    }
+    if (mime === 'image/png' || mime === 'image/apng') {
+      const headerOk = bytes[0] === 0x89 && bytes[1] === 0x50 &&
+                       bytes[2] === 0x4e && bytes[3] === 0x47;
+      let hasIEND = false;
+      for (let i = bytes.length - 8; i >= 0; i--) {
+        if (bytes[i] === 0x49 && bytes[i + 1] === 0x45 &&
+            bytes[i + 2] === 0x4e && bytes[i + 3] === 0x44) {
+          hasIEND = true;
+          break;
+        }
+      }
+      return headerOk && hasIEND;
+    }
+    if (mime === 'image/gif') {
+      const hdr = binary.slice(0, 6);
+      return hdr === 'GIF87a' || hdr === 'GIF89a';
+    }
+    if (mime === 'image/bmp') {
+      return bytes[0] === 0x42 && bytes[1] === 0x4d;
+    }
+    if (mime === 'image/webp') {
+      return binary.slice(0, 4) === 'RIFF' && binary.slice(8, 12) === 'WEBP';
+    }
+    return true; // accept other media types (audio/video/svg…)
+  } catch {
+    return false;
+  }
+}
+
+/** Numeric typeHash set (ZeroContract v1–v4e) from hashMatrix */
+const VALID_TYPE_HASHES = new Set(
+  Object.keys(hashMatrix).filter((k) => /^-?\d+$/.test(k))
+);
+
+/*───────────────────────────────────────────────────────────*
+ * Component
+ *───────────────────────────────────────────────────────────*/
+export default function MyTokens() {
+  const { address, toolkit } = useWalletContext() || {};
+  const tzktV1 = useTzktV1Base(toolkit);
+  const network = useMemo(
+    () => (tzktV1.includes('ghostnet') ? 'ghostnet' : 'mainnet'),
+    [tzktV1]
+  );
+
+  const [tab, setTab] = useState('creations'); // 'creations' | 'owned'
   const [creations, setCreations] = useState([]);
   const [owned, setOwned] = useState([]);
-  // Counts for tabs
   const [countCreations, setCountCreations] = useState(0);
   const [countOwned, setCountOwned] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [visible, setVisible] = useState(10);
-  // Cache valid type hashes from hashMatrix (performance guard)
-  const validTypeHashes = useMemo(() => new Set(Object.keys(hashMatrix)), []);
+  const [phase, setPhase] = useState('idle'); // idle | loading | ready | error
+  const [error, setError] = useState(null);
+  const [visible, setVisible] = useState(24);
+
+  const resetAll = useCallback(() => {
+    setCreations([]); setOwned([]);
+    setCountCreations(0); setCountOwned(0);
+    setPhase('idle'); setError(null); setVisible(24);
+  }, []);
+
+  /** Fetch contracts’ typeHash in chunks and build a map */
+  const fetchTypeHashes = useCallback(async (addrs) => {
+    const map = new Map();
+    const CHUNK = 50;
+    for (let i = 0; i < addrs.length; i += CHUNK) {
+      const slice = addrs.slice(i, i + CHUNK);
+      const q = new URLSearchParams({
+        'address.in': slice.join(','),
+        select: 'address,typeHash',
+        limit: String(slice.length),
+      });
+      const res = await jFetch(`${tzktV1}/contracts?${q}`).catch(() => []);
+      const arr = Array.isArray(res) ? res : [];
+      for (const row of arr) map.set(row.address, String(row.typeHash ?? ''));
+    }
+    return map;
+  }, [tzktV1]);
+
+  /** Decode + normalise token metadata; validate preview */
+  const prepareToken = useCallback((row) => {
+    let meta = row?.metadata || {};
+    try {
+      meta = decodeHexFields(meta || {});
+    } catch { /* keep original */ }
+    if (meta && typeof meta.creators === 'string') {
+      try {
+        const parsed = JSON.parse(meta.creators);
+        if (Array.isArray(parsed)) meta.creators = parsed;
+      } catch { /* ignore */ }
+    }
+    if (!isValidPreview(meta)) return null;
+    const contract = row?.contract?.address || row?.contract;
+    return {
+      contract,
+      tokenId: String(row?.tokenId ?? row?.id ?? ''),
+      metadata: meta,
+      holdersCount: Number(row?.holdersCount ?? 0),
+      totalSupply: Number(row?.totalSupply ?? 0),
+    };
+  }, []);
+
+  /** Load both tabs’ data with admin‑based logic */
+  const loadAll = useCallback(async (signal) => {
+    if (!address) { resetAll(); return; }
+    setPhase('loading'); setError(null); setVisible(24);
+    try {
+      // 1) Discover all ZeroContract collections created/administered by the user.
+      //    This utility embodies the initiator‑vs‑sender workaround required
+      //    for factory‑originated contracts (v4e), ensuring parity with
+      //    My Collections / Explore admin filter.  (see refs)  ➜
+      //    • explore/[[...filter]].jsx (uses discoverCreated)
+      //    • OBJKT.comFixeditforus.txt (initiator/sender)
+      const created = await discoverCreated(address, network);
+      if (signal.aborted) return;
+      const adminSet = new Set((created || []).map((c) => c.address));
+
+      // 2) Fetch typeHash for all admin collections; only keep ZeroContracts.
+      const createdAddrs = [...adminSet];
+      const typeMapCreated = await fetchTypeHashes(createdAddrs);
+      const createdZeroAddrs = createdAddrs.filter((a) =>
+        VALID_TYPE_HASHES.has(String(typeMapCreated.get(a) || ''))
+      );
+
+      // 3) Enumerate tokens for *My Creations* across user‑admin’d collections.
+      const tempCreations = [];
+      for (const kt of createdZeroAddrs) {
+        if (signal.aborted) return;
+        const rows = await jFetch(
+          `${tzktV1}/tokens?contract=${kt}&limit=10000`
+        ).catch(() => []);
+        const arr = Array.isArray(rows) ? rows : [];
+        for (const row of arr) {
+          const t = prepareToken(row);
+          if (!t) continue;
+          // Skip fully burned tokens (supply 0)
+          if (Number(t.totalSupply) === 0) continue;
+          tempCreations.push(t);
+        }
+      }
+      // Deduplicate (defensive) and newest‑first
+      const seenC = new Set();
+      const finalCreations = [];
+      for (const t of tempCreations) {
+        const key = `${t.contract}:${t.tokenId}`;
+        if (seenC.has(key)) continue; seenC.add(key);
+        finalCreations.push(t);
+      }
+      finalCreations.sort((a, b) =>
+        Number(b.tokenId) - Number(a.tokenId)
+      );
+
+      // 4) Fetch balances for *My Owned* and filter out collections the user administers.
+      const balRows = await jFetch(
+        `${tzktV1}/tokens/balances?account=${address}&balance.ne=0&limit=1000`
+      ).catch(() => []);
+      const balances = Array.isArray(balRows) ? balRows : [];
+      // Collect unique contract addresses from balances
+      const ownedAddrSet = new Set();
+      const ownedPairs = [];
+      for (const r of balances) {
+        const contract = r?.token?.contract?.address;
+        const tokenId = r?.token?.tokenId;
+        if (!contract || tokenId == null) continue;
+        ownedAddrSet.add(contract);
+        ownedPairs.push([contract, tokenId, r?.token]);
+      }
+      // Fetch typeHash for owned contracts once
+      const typeMapOwned = await fetchTypeHashes([...ownedAddrSet]);
+      const finalOwned = [];
+      const seenO = new Set();
+      for (const [cAddr, tId, tokenObj] of ownedPairs) {
+        // Only ZeroContract collections
+        const th = String(typeMapOwned.get(cAddr) || '');
+        if (!VALID_TYPE_HASHES.has(th)) continue;
+        // Exclude tokens from collections the user currently administers
+        if (adminSet.has(cAddr)) continue;
+
+        // Metadata: prefer already present, else lookup
+        let meta = tokenObj?.metadata;
+        if (!meta) {
+          const [row] = await jFetch(
+            `${tzktV1}/tokens?contract=${cAddr}&tokenId=${tId}&limit=1`
+          ).catch(() => []);
+          meta = row?.metadata;
+        }
+        const prepared = prepareToken({ contract: { address: cAddr }, tokenId: tId, metadata: meta, holdersCount: tokenObj?.holdersCount, totalSupply: tokenObj?.totalSupply });
+        if (!prepared) continue;
+        const key = `${cAddr}:${String(tId)}`;
+        if (seenO.has(key)) continue; seenO.add(key);
+        finalOwned.push(prepared);
+      }
+      finalOwned.sort((a, b) => Number(b.tokenId) - Number(a.tokenId));
+
+      if (!signal.aborted) {
+        setCreations(finalCreations);
+        setOwned(finalOwned);
+        setCountCreations(finalCreations.length);
+        setCountOwned(finalOwned.length);
+        setPhase('ready');
+      }
+    } catch (err) {
+      if (!signal.aborted) {
+        setPhase('error');
+        setError((err && (err.message || String(err))) || 'Network error');
+      }
+    }
+  }, [address, network, tzktV1, fetchTypeHashes, prepareToken, resetAll]);
 
   useEffect(() => {
-    if (!address) {
-      setCreations([]);
-      setOwned([]);
-      setCountCreations(0);
-      setCountOwned(0);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      setCreations([]);
-      setOwned([]);
-      setVisible(10);
-      setCountCreations(0);
-      setCountOwned(0);
-      // Helper: validate data URI previews (JPEG/PNG/GIF/BMP/WebP)
-      const isValidPreview = (m = {}) => {
-        const keys = [
-          'artifactUri', 'artifact_uri',
-          'displayUri', 'display_uri',
-          'imageUri',   'image',
-          'thumbnailUri','thumbnail_uri',
-          'mediaUri',   'media_uri',
-        ];
-        const mediaRe = /^data:(image\/|video\/|audio\/)/i;
-        let uri = null;
-        for (const k of keys) {
-          const v = m && typeof m === 'object' ? m[k] : undefined;
-          if (typeof v === 'string') {
-            const val = v.trim();
-            if (mediaRe.test(val)) { uri = val; break; }
-          }
-        }
-        if (!uri && Array.isArray(m.formats)) {
-          for (const fmt of m.formats) {
-            if (fmt && typeof fmt === 'object') {
-              const candidates = [];
-              if (fmt.uri) candidates.push(String(fmt.uri));
-              if (fmt.url) candidates.push(String(fmt.url));
-              for (const cand of candidates) {
-                const val = cand.trim();
-                if (mediaRe.test(val)) { uri = val; break; }
-              }
-            }
-            if (uri) break;
-          }
-        }
-        if (!uri) return false;
-        try {
-          const comma = uri.indexOf(',');
-          if (comma < 0) return false;
-          const header = uri.slice(5, comma);
-          const semi = header.indexOf(';');
-          const mime = (semi >= 0 ? header.slice(0, semi) : header).toLowerCase();
-          const b64 = uri.slice(comma + 1);
-          let binary;
-          if (typeof atob === 'function') {
-            binary = atob(b64);
-          } else {
-            const buf = Buffer.from(b64, 'base64');
-            binary = String.fromCharCode.apply(null, buf);
-          }
-          const bytes = [];
-          for (let i = 0; i < binary.length; i++) bytes.push(binary.charCodeAt(i) & 0xff);
-          if (mime === 'image/jpeg') {
-            return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff &&
-                   bytes[bytes.length - 2] === 0xff && bytes[bytes.length - 1] === 0xd9;
-          }
-          if (mime === 'image/png' || mime === 'image/apng') {
-            const headerOk = bytes[0] === 0x89 && bytes[1] === 0x50 &&
-                             bytes[2] === 0x4e && bytes[3] === 0x47;
-            let hasIEND = false;
-            for (let i = bytes.length - 8; i >= 0; i--) {
-              if (bytes[i] === 0x49 && bytes[i + 1] === 0x45 &&
-                  bytes[i + 2] === 0x4e && bytes[i + 3] === 0x44) {
-                hasIEND = true;
-                break;
-              }
-            }
-            return headerOk && hasIEND;
-          }
-          if (mime === 'image/gif') {
-            const hdr = binary.slice(0, 6);
-            return hdr === 'GIF87a' || hdr === 'GIF89a';
-          }
-          if (mime === 'image/bmp') {
-            return bytes[0] === 0x42 && bytes[1] === 0x4d;
-          }
-          if (mime === 'image/webp') {
-            return binary.slice(0, 4) === 'RIFF' && binary.slice(8, 12) === 'WEBP';
-          }
-          return true;
-        } catch {
-          return false;
-        }
-      };
-      // === Fetch creations ===
-      const mintedCreatorRaw = await jFetch(
-        `${TZKT_API}/v1/tokens?creator=${address}&limit=1000`,
-      ).catch(() => []);
-      const mintedFirstRaw = await jFetch(
-        `${TZKT_API}/v1/tokens?firstMinter=${address}&limit=1000`,
-      ).catch(() => []);
-      const creatorsRaw = await jFetch(
-        `${TZKT_API}/v1/tokens?metadata.creators.[*]=${address}&limit=1000`,
-      ).catch(() => []);
-      const authorsRaw = await jFetch(
-        `${TZKT_API}/v1/tokens?metadata.authors.[*]=${address}&limit=1000`,
-      ).catch(() => []);
-      const mCreat = Array.isArray(mintedCreatorRaw) ? mintedCreatorRaw : [];
-      const mFirst = Array.isArray(mintedFirstRaw)  ? mintedFirstRaw  : [];
-      const cList  = Array.isArray(creatorsRaw)     ? creatorsRaw     : [];
-      const aList  = Array.isArray(authorsRaw)      ? authorsRaw      : [];
-      // Dedup minted
-      const mintedMap = new Map();
-      for (const row of [...mCreat, ...mFirst]) {
-        const cAddr = row.contract?.address;
-        const tId   = row.tokenId;
-        if (!cAddr || tId === undefined || tId === null) continue;
-        const key = `${cAddr}:${tId}`;
-        if (!mintedMap.has(key)) mintedMap.set(key, row);
-      }
-      const mintedList = Array.from(mintedMap.values());
-      // Build contract set for creations
-      const contractSet = new Set([
-        ...mintedList.map((r) => r.contract?.address),
-        ...cList.map((r) => r.contract?.address),
-        ...aList.map((r) => r.contract?.address),
-      ].filter(Boolean));
-      const contractInfo = new Map();
-      const CHUNK = 50;
-      const cArr = [...contractSet];
-      for (let i = 0; i < cArr.length; i += CHUNK) {
-        if (cancelled) return;
-        const slice = cArr.slice(i, i + CHUNK);
-        const q = slice.join(',');
-        const res = await jFetch(
-          `${TZKT_API}/v1/contracts?address.in=${q}&select=address,typeHash&limit=${slice.length}`,
-        ).catch(() => []);
-        const arr = Array.isArray(res) ? res : [];
-        for (const row of arr) contractInfo.set(row.address, row);
-      }
-      const seenMint = new Set();
-      const tempCreations = [];
-      const addMinted = (row) => {
-        const cAddr = row.contract?.address;
-        const tIdStr = String(row.tokenId);
-        const key = `${cAddr}:${tIdStr}`;
-        if (seenMint.has(key)) return;
-        seenMint.add(key);
-        const supply = row.totalSupply;
-        if (String(supply) === '0') return;
-        const info = contractInfo.get(cAddr);
-        const typeHash = String(info?.typeHash ?? '');
-        if (!validTypeHashes.has(typeHash)) return;
-        let meta;
-        try {
-          meta = decodeHexFields(row.metadata || {});
-        } catch {
-          meta = row.metadata || {};
-        }
-        if (meta && typeof meta.creators === 'string') {
-          try {
-            const parsed = JSON.parse(meta.creators);
-            if (Array.isArray(parsed)) meta.creators = parsed;
-          } catch {/* ignore */}
-        }
-        // Validate preview
-        if (!isValidPreview(meta)) return;
-        tempCreations.push({
-          contract: cAddr,
-          tokenId: tIdStr,
-          metadata: meta,
-          holdersCount: row.holdersCount,
-        });
-      };
-      const processList = (list) => {
-        for (const row of list) {
-          if (cancelled) return;
-          addMinted(row);
-        }
-      };
-      processList(mintedList);
-      processList(cList);
-      processList(aList);
-      // Live-balance filtering for creations
-      const filteredCreations = [];
-      await Promise.all(tempCreations.map(async (tok) => {
-        if (cancelled) return;
-        try {
-          const balRaw = await jFetch(
-            `${TZKT_API}/v1/tokens/balances?token.contract=${tok.contract}` +
-            `&token.tokenId=${tok.tokenId}` +
-            `&balance.ne=0` +
-            `&select=account.address,balance` +
-            `&limit=10`,
-          ).catch(() => []);
-          const balances = Array.isArray(balRaw) ? balRaw : [];
-          let hasLive = false;
-          for (const b of balances) {
-            const addr = b?.account?.address ?? b['account.address'] ?? '';
-            if (addr && addr.toLowerCase() !== BURN.toLowerCase()) {
-              hasLive = true;
-              break;
-            }
-          }
-          if (hasLive) filteredCreations.push(tok);
-        } catch {
-          filteredCreations.push(tok);
-        }
-      }));
-      setCreations(filteredCreations);
-      setCountCreations(filteredCreations.length);
-      // === Fetch owned tokens ===
-      const balRaw = await jFetch(
-        `${TZKT_API}/v1/tokens/balances?account=${address}&balance.ne=0&limit=1000`,
-      ).catch(() => []);
-      const balList = Array.isArray(balRaw) ? balRaw : [];
-      const seenOwned = new Set();
-      const tempOwned = [];
-      const ownedContractSet = new Set();
-      for (const row of balList) {
-        const t = row.token || {};
-        const cAddr = t.contract?.address;
-        const tId = t.tokenId;
-        if (!cAddr || tId === undefined || tId === null) continue;
-        const key = `${cAddr}:${tId}`;
-        if (seenOwned.has(key)) continue;
-        seenOwned.add(key);
-        tempOwned.push({ raw: row, cAddr, tId });
-        ownedContractSet.add(cAddr);
-      }
-      // Fetch typeHash for owned contracts
-      const ownedInfo = new Map();
-      const oArr = [...ownedContractSet];
-      for (let i = 0; i < oArr.length; i += CHUNK) {
-        if (cancelled) return;
-        const slice = oArr.slice(i, i + CHUNK);
-        const q = slice.join(',');
-        const res = await jFetch(
-          `${TZKT_API}/v1/contracts?address.in=${q}&select=address,typeHash&limit=${slice.length}`,
-        ).catch(() => []);
-        const arr = Array.isArray(res) ? res : [];
-        for (const row of arr) ownedInfo.set(row.address, row);
-      }
-      const finalOwned = [];
-      await Promise.all(tempOwned.map(async ({ raw, cAddr, tId }) => {
-        if (cancelled) return;
-        const info = ownedInfo.get(cAddr);
-        const typeHash = String(info?.typeHash ?? '');
-        if (!validTypeHashes.has(typeHash)) return;
-        const tokenObj = raw.token || {};
-        const creator = tokenObj.creator?.address ?? tokenObj.creator;
-        const firstMinter = tokenObj.firstMinter;
-        // Skip if wallet minted this token via creator or firstMinter
-        if (creator && typeof creator === 'string' && creator.toLowerCase() === address.toLowerCase()) return;
-        if (firstMinter && typeof firstMinter === 'string' && firstMinter.toLowerCase() === address.toLowerCase()) return;
-        // Supply check (zero supply tokens are burned)
-        const supply = tokenObj.totalSupply;
-        if (String(supply) === '0') return;
-        // Metadata
-        let meta = tokenObj.metadata;
-        if (!meta || typeof meta === 'string') {
-          try {
-            const [tokDetail] = await jFetch(
-              `${TZKT_API}/v1/tokens?contract=${cAddr}&tokenId=${tId}&limit=1`,
-            ).catch(() => []);
-            if (tokDetail) meta = tokDetail.metadata;
-          } catch {/* ignore */}
-        }
-        try {
-          meta = decodeHexFields(meta || {});
-        } catch {
-          meta = meta || {};
-        }
-        if (meta && typeof meta.creators === 'string') {
-          try {
-            const parsed = JSON.parse(meta.creators);
-            if (Array.isArray(parsed)) meta.creators = parsed;
-          } catch {/* ignore */}
-        }
-        // Skip tokens where the user appears in metadata.creators or metadata.authors
-        {
-          const cr = meta?.creators;
-          const au = meta?.authors ?? meta?.artists;
-          const arr = [];
-          if (Array.isArray(cr)) arr.push(...cr);
-          else if (typeof cr === 'string') arr.push(cr);
-          else if (cr && typeof cr === 'object') arr.push(...Object.values(cr));
-          if (Array.isArray(au)) arr.push(...au);
-          else if (typeof au === 'string') arr.push(au);
-          else if (au && typeof au === 'object') arr.push(...Object.values(au));
-          for (const a of arr) {
-            const s = String(a).toLowerCase();
-            if (s === address.toLowerCase()) return;
-          }
-        }
-        // Validate preview
-        if (!isValidPreview(meta)) return;
-        finalOwned.push({
-          contract: cAddr,
-          tokenId: String(tId),
-          metadata: meta,
-          holdersCount: tokenObj.holdersCount ?? 0,
-        });
-      }));
-      setOwned(finalOwned);
-      setCountOwned(finalOwned.length);
-      setLoading(false);
-    })();
-    return () => { cancelled = true; };
-  }, [address, validTypeHashes]);
-  // Visible list based on tab
-  const currentList = tab === 'creations' ? creations : owned;
-  const visibleTokens = currentList.slice(0, visible);
-  const loadMore = () => setVisible((v) => v + 10);
+    const controller = new AbortController();
+    loadAll(controller.signal);
+    return () => controller.abort();
+  }, [loadAll]);
+
+  const list = tab === 'creations' ? creations : owned;
+  const visibleList = list.slice(0, visible);
+  const hasMore = visible < list.length;
+
   return (
-    <div>
+    <Wrap>
       <ExploreNav hideSearch={false} />
-      {/* Tab buttons */}
-      <div style={{ display:'flex', gap:'0.6rem', marginTop:'1rem' }}>
-        <PixelButton warning={tab==='creations'} onClick={() => { setTab('creations'); setVisible(10); }}>
-          My Creations ({countCreations})
+      <PixelHeading level={3} style={{ marginTop: '1rem' }}>
+        My&nbsp;Tokens
+      </PixelHeading>
+
+      <Tabs>
+        <PixelButton
+          warning={tab === 'creations'}
+          onClick={() => { setTab('creations'); setVisible(24); }}
+          size="sm"
+        >
+          My&nbsp;Creations&nbsp;({countCreations})
         </PixelButton>
-        <PixelButton warning={tab==='owned'} onClick={() => { setTab('owned'); setVisible(10); }}>
-          My Owned ({countOwned})
+        <PixelButton
+          warning={tab === 'owned'}
+          onClick={() => { setTab('owned'); setVisible(24); }}
+          size="sm"
+        >
+          My&nbsp;Owned&nbsp;({countOwned})
         </PixelButton>
-      </div>
-      {loading && (
-        <p style={{ marginTop: '0.8rem' }}>Fetching your tokens…</p>
+      </Tabs>
+
+      {!address && (
+        <Subtle>Connect your wallet to see your tokens.</Subtle>
       )}
-      {!loading && visibleTokens.length > 0 && (
+
+      {phase === 'loading' && (
+        <Subtle>Fetching your tokens…</Subtle>
+      )}
+
+      {phase === 'error' && (
+        <Subtle role="alert">Could not load tokens. Please try again shortly.</Subtle>
+      )}
+
+      {phase === 'ready' && visibleList.length === 0 && (
+        <Subtle>No tokens found for this tab.</Subtle>
+      )}
+
+      {phase === 'ready' && visibleList.length > 0 && (
         <>
           <Grid>
-            {visibleTokens.map((t) => (
+            {visibleList.map((t) => (
               <TokenCard
                 key={`${t.contract}:${t.tokenId}`}
                 contractAddress={t.contract}
@@ -408,26 +405,30 @@ export default function MyTokensPage() {
               />
             ))}
           </Grid>
-          {visible < currentList.length && (
-            <div style={{ marginTop: '1rem', textAlign: 'center' }}>
-              <PixelButton onClick={loadMore}>Load More 🔻</PixelButton>
-            </div>
+
+          {hasMore && (
+            <Center>
+              <PixelButton
+                onClick={() => setVisible((v) => v + 24)}
+                size="sm"
+              >
+                Load More 🔻
+              </PixelButton>
+            </Center>
           )}
         </>
       )}
-      {!loading && visibleTokens.length === 0 && (
-        <p style={{ marginTop: '0.8rem' }}>No tokens match your criteria.</p>
-      )}
-    </div>
+    </Wrap>
   );
 }
 
-/* What changed & why: r45 – Added “My Owned” tab that lists
-   NFTs held by the wallet but not minted by it.  The component now
-   queries the /v1/tokens/balances endpoint, filters out tokens
-   where the wallet is the creator or firstMinter, decodes
-   metadata, parses JSON‑encoded creators arrays, validates on‑chain
-   media previews and excludes unsupported contracts and burnt tokens.
-   Live‑balance filtering still applies to creations; owned tokens
-   rely on the balance query itself.  A tab selector with live
-   counts enables switching between creations and owned tokens. */
+/* What changed & why (r80):
+   • Rewrote discovery: “Creations” now enumerates tokens from all
+     collections the wallet administers using discoverCreated (parity
+     with My Collections / Explore admin filter) to include v4e and
+     factory‑originated contracts (initiator workaround). 
+   • “Owned” now strictly lists balances where the collection admin
+     ≠ wallet (no metadata‑based exclusions), matching product spec.
+   • Added network‑aware TzKT base, robust data‑URI preview validation,
+     numeric typeHash filtering, dedupe, pagination, and clear states. */
+/* EOF */

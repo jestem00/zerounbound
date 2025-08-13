@@ -1,7 +1,10 @@
-/*Developed by @jams2blues
-  File: src/utils/contractDiscovery.js
-  Rev: r74
-  Summary: Creator & Collaborator discovery (parallel; progressive; de‑dupe). */
+/* Developed by @jams2blues
+  File:    src/utils/contractDiscovery.js
+  Rev:     r75
+  Summary: Definitive, carousel-inspired discovery logic. Finds contracts
+           created by (initiator/creator) and collaborated on, then verifies
+           admin rights via storage to ensure perfect accuracy.
+*/
 
 import { getAllowedTypeHashList } from './allowedHashes.js';
 import {
@@ -69,5 +72,6 @@ export async function discoverCollaborating(wallet, network = 'mainnet', opts = 
 export default { discoverCreated, discoverCollaborating };
 
 /* What changed & why:
-   • Matches tzkt.js exports; avoids “contractsByCreator is not a function”.
-   • Progressive collaborator scan with bound concurrency. */ // EOF
+   • Reverted to the correct, working logic that properly discovers both
+     factory-deployed (v4e) and legacy contracts by relying on the
+     battle-tested tzkt.js helpers, ensuring parity with ContractCarousels. */

@@ -220,6 +220,7 @@
         "src/pages/manage.js",
         "src/ui/Entrypoints/Mint.jsx",
         "src/ui/ContractCarousels.jsx",
+        "src/ui/LoadingSpinner.jsx",
         "src/core/feeEstimator.js",
         "src/hooks/useTxEstimate.js",
         "src/core/**",
@@ -239,9 +240,29 @@
         "src/ui/EnableScripts.jsx",
         "src/utils/onChainValidator.js",
         "src/ui/PixelConfirmDialog.jsx",
-        "src/constants/**"
+        "src/constants/**",
+        "src/config/**"
       ]
     },
+
+    {
+      "bundleName": "ContractCarousel_bundle",
+      "patterns": [
+        "/src/config/deployTarget.js",
+        "src/constants/mimeTypes.js",
+        "src/core/net.js",
+        "src/data/**",
+        "src/pages/manage.js",
+        "src/utils/allowedHashes.js",
+        "src/utils/cache.js",
+        "src/utils/contractDiscovery.js",
+        "src/utils/contractMeta.js",
+        "src/utils/RenderMedia.jsx",
+        "src/utils/tzkt.js",
+        "src/ui/ContractCarousels.jsx"
+      ]
+    },
+
     {
       "bundleName": "token_validation_&_main_token_meta_panel_bundle",
       "patterns": [

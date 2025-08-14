@@ -1,10 +1,8 @@
-/* Developed by @jams2blues
-  File:    src/pages/explore/[[...filter]].jsx
-  Rev:     r12
-  Summary: Definitive fix for Explore grid admin filter. Implements the
-           robust, multi-stage discovery and admin-verification logic from
-           the centralized contractDiscovery utility to find all v1-v4e contracts.
-*/
+/*Developed by @jams2blues
+File: src/pages/explore/[[...filter]].jsx
+Rev: r13
+Summary: Fix tokens view initial load + pagination; validate previews,
+exclude burns/zero‑supply; keep v1–v4e scope; admin filter intact. */
 
 import React, {
   useCallback,
@@ -57,36 +55,101 @@ const Center = styled.div`
   text-align:center;
   margin:1.4rem 0 2rem;
 `;
-/*──────── helpers ───────────────────────────────────────────*/
-const isZeroToken = (t) => {
-  if (!t || !t.metadata) return true;
-  if (Number(t.totalSupply) === 0) return true;
-  if (t.account?.address === BURN) return true;
-  const meta = decodeHexFields(t.metadata);
-  const pickPreview = (m = {}) => {
-    const keys = [
-      'displayUri','display_uri', 'imageUri','image_uri','image',
-      'thumbnailUri','thumbnail_uri', 'artifactUri','artifact_uri', 'mediaUri','media_uri',
-    ];
-    for (const k of keys) {
-      const v = m && typeof m === 'object' ? m[k] : undefined;
-      if (typeof v === 'string' && v.startsWith('data:')) return v;
-    }
-    if (Array.isArray(m.formats)) {
-      for (const f of m.formats) {
-        const cand = f?.uri || f?.url;
-        if (typeof cand === 'string' && cand.startsWith('data:')) return cand;
-      }
-    }
-    return '';
-  };
-  const preview = pickPreview(meta);
-  if (!preview) return true;
-  if (detectHazards(meta).broken) return true;
-  t.metadata = meta;
-  return false;
-};
 
+/*──────── preview helpers ───────────────────────────────────*/
+/** Return first media/data preview URI from metadata or empty string. */
+function pickPreview(m = {}) {
+  const keys = [
+    'displayUri','display_uri',
+    'imageUri','image_uri','image',
+    'thumbnailUri','thumbnail_uri',
+    'artifactUri','artifact_uri',
+    'mediaUri','media_uri',
+  ];
+  for (const k of keys) {
+    const v = m && typeof m === 'object' ? m[k] : undefined;
+    if (typeof v === 'string' && /^data:(image|audio|video)\//i.test(v)) return v;
+  }
+  if (Array.isArray(m.formats)) {
+    for (const f of m.formats) {
+      const cand = f?.uri || f?.url;
+      if (typeof cand === 'string' && /^data:(image|audio|video)\//i.test(cand)) return cand;
+    }
+  }
+  return '';
+}
+
+/** Robust data‑URI validator (mirrors contract/token pages logic). */
+function isValidDataPreview(uri) {
+  try {
+    if (typeof uri !== 'string' || !uri.startsWith('data:')) return false;
+    const comma = uri.indexOf(',');
+    if (comma < 0) return false;
+    const header = uri.slice(5, comma);
+    const semi = header.indexOf(';');
+    const mime = (semi >= 0 ? header.slice(0, semi) : header).toLowerCase();
+    const b64  = uri.slice(comma + 1);
+
+    let binary;
+    if (typeof atob === 'function') binary = atob(b64);
+    else {
+      // SSR: Node side
+      // eslint-disable-next-line no-undef
+      const buf = Buffer.from(b64, 'base64');
+      binary = String.fromCharCode.apply(null, buf);
+    }
+    const bytes = new Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i) & 0xff;
+
+    if (mime === 'image/jpeg') {
+      return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff &&
+             bytes[bytes.length - 2] === 0xff && bytes[bytes.length - 1] === 0xd9;
+    }
+    if (mime === 'image/png' || mime === 'image/apng') {
+      const headerOk = bytes[0] === 0x89 && bytes[1] === 0x50 &&
+                       bytes[2] === 0x4e && bytes[3] === 0x47;
+      // quick IEND scan
+      let hasIEND = false;
+      for (let i = bytes.length - 8; i >= 0; i--) {
+        if (bytes[i] === 0x49 && bytes[i + 1] === 0x45 && bytes[i + 2] === 0x4e && bytes[i + 3] === 0x44) {
+          hasIEND = true; break;
+        }
+      }
+      return headerOk && hasIEND;
+    }
+    if (mime === 'image/gif') {
+      const hdr = binary.slice(0, 6);
+      return hdr === 'GIF87a' || hdr === 'GIF89a';
+    }
+    if (mime === 'image/bmp') {
+      return bytes[0] === 0x42 && bytes[1] === 0x4d;
+    }
+    if (mime === 'image/webp') {
+      return binary.slice(0, 4) === 'RIFF' && binary.slice(8, 12) === 'WEBP';
+    }
+    return true; // accept audio/video/svg and other types
+  } catch {
+    return false;
+  }
+}
+
+/** Decode metadata, enforce on‑chain preview presence, exclude burns/zero‑supply. */
+function normalizeAndAcceptToken(t) {
+  if (!t) return null;
+  if (Number(t.totalSupply) === 0) return null;
+  if (t.account?.address === BURN) return null;
+
+  let meta = t.metadata || {};
+  try { meta = decodeHexFields(meta || {}); } catch { /* keep raw */ }
+  const preview = pickPreview(meta);
+  if (!preview) return null;
+  if (!isValidDataPreview(preview)) return null;
+  if (detectHazards(meta).broken) return null;
+
+  return { ...t, metadata: meta };
+}
+
+/*──────── tzkt base selector ───────────────────────────────*/
 function useTzktV1Base(toolkit) {
   const net = useMemo(() => {
     if (toolkit?._network?.type) {
@@ -107,27 +170,33 @@ function useTzktV1Base(toolkit) {
 export default function ExploreGrid() {
   const router = useRouter();
   const { toolkit } = useWalletContext() || {};
-  const { admin: adminFilter = '' } = router.query;
-  const isTokensMode = (router.query?.filter?.[0] === 'tokens') || (router.query?.cmd === 'tokens');
-  
+  const seg0 = Array.isArray(router.query.filter)
+    ? (router.query.filter[0] || '').toString().toLowerCase()
+    : '';
+  const isTokensMode = seg0 === 'tokens' || String(router.query?.cmd || '').toLowerCase() === 'tokens';
+  const adminFilter = String(router.query?.admin || '').trim();
+
   const TZKT = useTzktV1Base(toolkit);
   const networkName = useMemo(() => TZKT.includes('ghostnet') ? 'ghostnet' : 'mainnet', [TZKT]);
 
   const [collections, setCollections] = useState([]);
   const [tokens, setTokens]           = useState([]);
-  const [loading, setLoading]         = useState(true);
+  const [loading, setLoading]         = useState(false);
   const [offset, setOffset]           = useState(0);
   const [end, setEnd]                 = useState(false);
+  const [fetching, setFetching]       = useState(false); // inner guard
   const seenColl = useRef(new Set());
   const seenTok = useRef(new Set());
 
+  /*──── admin collections (creator/initiator aware) ────────*/
   const fetchAdminCollections = useCallback(async () => {
-      if (!adminFilter || !/tz[1-3][1-9A-HJ-NP-Za-km-z]{33}/.test(adminFilter)) return [];
-      const created = await discoverCreated(adminFilter, networkName);
-      // Per user request, filter out empty collections on this page
-      return created.filter(c => Number(c.tokensCount) > 0);
+    if (!adminFilter || !/^tz[1-3][1-9A-HJ-NP-Za-km-z]{33}$/i.test(adminFilter)) return [];
+    const created = await discoverCreated(adminFilter, networkName);
+    // Per product needs on Explore: hide empty collections
+    return (created || []).filter((c) => Number(c.tokensCount || c.tokens_count || 0) > 0);
   }, [networkName, adminFilter]);
 
+  /*──── pagination fetchers ─────────────────────────────────*/
   const fetchBatchCollections = useCallback(async (currentOffset) => {
     const qs = new URLSearchParams({
       limit: String(FETCH_STEP),
@@ -140,69 +209,104 @@ export default function ExploreGrid() {
   }, [TZKT]);
 
   const fetchBatchTokens = useCallback(async (currentOffset) => {
-      const qs = new URLSearchParams({
-        limit: String(FETCH_STEP),
-        offset: String(currentOffset),
-        'sort.desc': 'firstTime',
-        'contract.metadata.version.in': 'ZeroContractV1,ZeroContractV2,ZeroContractV2a,ZeroContractV2b,ZeroContractV2c,ZeroContractV2d,ZeroContractV2e,ZeroContractV3,ZeroContractV4,ZeroContractV4a,ZeroContractV4b,ZeroContractV4c,ZeroContractV4d,ZeroContractV4e',
-      });
-      return jFetch(`${TZKT}/tokens?${qs}`).catch(() => []);
+    const qs = new URLSearchParams({
+      limit: String(FETCH_STEP),
+      offset: String(currentOffset),
+      'sort.desc': 'firstTime',
+      'contract.metadata.version.in':
+        [
+          'ZeroContractV1',
+          'ZeroContractV2','ZeroContractV2a','ZeroContractV2b','ZeroContractV2c','ZeroContractV2d','ZeroContractV2e',
+          'ZeroContractV3',
+          'ZeroContractV4','ZeroContractV4a','ZeroContractV4b','ZeroContractV4c','ZeroContractV4d','ZeroContractV4e',
+        ].join(','),
+    });
+    return jFetch(`${TZKT}/tokens?${qs}`).catch(() => []);
   }, [TZKT]);
 
-  const loadMore = useCallback(async () => {
-    if (loading || end) return;
-    setLoading(true);
-    
-    let newItems;
-    if (isTokensMode) {
-        newItems = await fetchBatchTokens(offset);
-    } else {
-        newItems = await fetchBatchCollections(offset);
-    }
+  /** Core loader (works for initial + "Load more"). */
+  const loadPage = useCallback(async (initial = false) => {
+    if (fetching || end) return;
+    setFetching(true);
+    if (!initial) setLoading(true);
 
-    if (!newItems || newItems.length === 0) {
+    const currentOffset = initial ? 0 : offset;
+    const rows = isTokensMode
+      ? await fetchBatchTokens(currentOffset)
+      : (adminFilter ? await fetchAdminCollections() : await fetchBatchCollections(currentOffset));
+
+    if (!rows || rows.length === 0) {
       setEnd(true);
-    } else {
-      const uniqueNewItems = newItems.filter(item => {
-        const key = isTokensMode ? `${item.contract?.address}_${item.tokenId}` : item.address;
-        const seenSet = isTokensMode ? seenTok.current : seenColl.current;
-        if (seenSet.has(key)) return false;
-        seenSet.add(key);
-        return isTokensMode ? !isZeroToken(item) : true;
-      });
-
-      if (isTokensMode) {
-          setTokens(prev => [...prev, ...uniqueNewItems]);
-      } else {
-          setCollections(prev => [...prev, ...uniqueNewItems]);
+      setFetching(false);
+      setLoading(false);
+      if (initial) {
+        // ensure we reset state when initial returns empty
+        setCollections([]); setTokens([]);
+        setOffset(0);
       }
-      setOffset(prev => prev + newItems.length);
-      if (newItems.length < FETCH_STEP) setEnd(true);
+      return;
     }
-    setLoading(false);
-  }, [loading, end, offset, isTokensMode, fetchBatchTokens, fetchBatchCollections]);
 
-  useEffect(() => {
-    setCollections([]);
-    setTokens([]);
-    setOffset(0);
-    setEnd(false);
-    seenColl.current.clear();
-    seenTok.current.clear();
-    setLoading(true);
-
-    if (adminFilter && !isTokensMode) {
-      fetchAdminCollections().then(data => {
-        setCollections(data);
-        setEnd(true);
-        setLoading(false);
-      });
+    if (isTokensMode) {
+      const fresh = [];
+      for (const t of rows) {
+        const key = `${t.contract?.address}_${t.tokenId}`;
+        if (seenTok.current.has(key)) continue;
+        const norm = normalizeAndAcceptToken(t);
+        if (!norm) continue;
+        seenTok.current.add(key);
+        fresh.push(norm);
+      }
+      setTokens((prev) => [...prev, ...fresh]);
+      // only advance offset when using paginated /tokens (admin token mode not used here)
+      setOffset((prev) => prev + rows.length);
+      if (rows.length < FETCH_STEP) setEnd(true);
     } else {
-        loadMore();
+      // collections
+      let fresh = rows;
+      if (!adminFilter) {
+        // unique + allowed hashes already enforced by query; just dedupe
+        fresh = rows.filter((c) => {
+          if (!c?.address) return false;
+          if (seenColl.current.has(c.address)) return false;
+          seenColl.current.add(c.address);
+          return true;
+        });
+      }
+      setCollections((prev) => [...prev, ...fresh]);
+      if (!adminFilter) {
+        setOffset((prev) => prev + rows.length);
+        if (rows.length < FETCH_STEP) setEnd(true);
+      } else {
+        // admin filter lists all at once
+        setEnd(true);
+      }
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adminFilter, isTokensMode, TZKT]);
-  
+
+    setFetching(false);
+    setLoading(false);
+  }, [fetching, end, offset, isTokensMode, adminFilter, fetchBatchTokens, fetchBatchCollections, fetchAdminCollections]);
+
+  /*──── reset & first paint ─────────────────────────────────*/
+  useEffect(() => {
+    // reset state whenever mode/admin/network flips
+    setCollections([]); setTokens([]);
+    setOffset(0); setEnd(false);
+    setLoading(false); setFetching(false);
+    seenColl.current.clear(); seenTok.current.clear();
+
+    // initial batch (do NOT set loading=true before calling; that would block)
+    loadPage(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isTokensMode, adminFilter, TZKT]);
+
+  /*──── auto prefetch when tokens mode starves quickly ─────*/
+  useEffect(() => {
+    if (isTokensMode && !end && !loading && tokens.length < FIRST_FAST && offset > 0) {
+      loadPage(false);
+    }
+  }, [isTokensMode, end, loading, tokens.length, offset, loadPage]);
+
   const cardList = useMemo(
     () => (
       isTokensMode
@@ -223,11 +327,33 @@ export default function ExploreGrid() {
   return (
     <Wrap>
       <ExploreNav />
-      {adminFilter && (
-        <p style={{ textAlign: 'center', fontSize: '.8rem', margin: '6px 0 0', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '6px' }}>
+      {!!adminFilter && !isTokensMode && (
+        <p
+          style={{
+            textAlign: 'center',
+            fontSize: '.8rem',
+            margin: '6px 0 0',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            gap: '6px',
+          }}
+        >
           Showing collections created by&nbsp;
           <code style={{ fontSize: '.8rem' }}>{adminFilter}</code>
-          <button type="button" aria-label="Clear filter" onClick={() => router.push('/explore')} style={{ background: 'none', border: 'none', fontSize: '1rem', cursor: 'pointer', lineHeight: 1, marginTop: '-2px' }}>
+          <button
+            type="button"
+            aria-label="Clear filter"
+            onClick={() => (isTokensMode ? null : router.push('/explore'))}
+            style={{
+              background: 'none',
+              border: 'none',
+              fontSize: '1rem',
+              cursor: 'pointer',
+              lineHeight: 1,
+              marginTop: '-2px',
+            }}
+          >
             ❌
           </button>
         </p>
@@ -235,8 +361,13 @@ export default function ExploreGrid() {
       <GridWrap>{cardList}</GridWrap>
       {!end && !adminFilter && (
         <Center>
-          <PixelButton type="button" onClick={loadMore} disabled={loading} size="sm">
-            {loading ? 'Loading…' : 'Load More 🔻'}
+          <PixelButton
+            type="button"
+            onClick={() => loadPage(false)}
+            disabled={loading || fetching}
+            size="sm"
+          >
+            {loading || fetching ? 'Loading…' : 'Load More 🔻'}
           </PixelButton>
         </Center>
       )}
@@ -244,9 +375,12 @@ export default function ExploreGrid() {
   );
 }
 
-/* What changed & why (r12):
-   • Replaced flawed admin filter with the definitive discovery logic from the
-     centralized contractDiscovery utility, ensuring parity with My Collections.
-   • Fixed ReferenceError by importing `useRef` from React.
-   • Hardened TzKT base URL construction to be wallet-aware and always use /v1.
-   • Streamlined data fetching logic and removed redundant fallbacks. */
+/* What changed & why (r13):
+   • Fixed initial load: the previous version set loading=true before triggering
+     the fetch, causing the early‑exit guard in the loader to bail out. Now the
+     first page uses loadPage(true) which bypasses that guard and fetches tokens.
+   • Strengthened preview filter: decode metadata, require a valid on‑chain
+     data‑URI preview and exclude burns/zero‑supply/broken assets, mirroring the
+     robust checks used on token/contract pages (consistency with r5/r872). 
+   • Kept v1–v4e scope and pagination; preserved admin collections filter logic.
+*/

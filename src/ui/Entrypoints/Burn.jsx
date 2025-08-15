@@ -1,9 +1,7 @@
-/*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
-  File:    src/ui/Entrypoints/Burn.jsx
-  Rev :    r903   2025-07-15
-  Summary: widened modal to 96vw for full-screen stretch
-──────────────────────────────────────────────────────────────*/
+/*Developed by @jams2blues – ZeroContract Studio
+  File: src/ui/Entrypoints/Burn.jsx
+  Rev:  r905   2025‑08‑15
+  Summary: warn‑first confirm + quick repair links */
 import React, { useCallback, useEffect, useState } from 'react';
 import { Buffer }            from 'buffer';
 import BigNumber             from 'bignumber.js';
@@ -27,7 +25,8 @@ if (typeof window !== 'undefined' && !window.Buffer) window.Buffer = Buffer;
 
 /*──────── styled shells ─────*/
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
-const Wrap   = styled.section.attrs({ 'data-modal': 'burn' })`
+const Wrap   = styled.section.attrs({ 'data-modal': 'burn' })
+  .withConfig({ shouldForwardProp: (p) => p !== '$level' })`
   display:grid;
   grid-template-columns:repeat(12,1fr);
   gap:1.6rem;
@@ -58,6 +57,10 @@ const HelpBox = styled.p`
   grid-column:1 / -1;
   font-size:.75rem;line-height:1.25;margin:.5rem 0 .9rem;
 `;
+const LinkRow = styled.div`
+  grid-column:1 / -1;
+  display:flex;flex-wrap:wrap;gap:.35rem;margin:-.35rem 0 .2rem;
+`;
 
 /*──────── helpers ────────*/
 const API     = `${TZKT_API}/v1`;
@@ -78,6 +81,17 @@ export default function Burn({
 
   const snack = (m, s = 'info') =>
     setSnackbar({ open:true, message:m, severity:s });
+
+  /* deep‑link to AdminTools modals */
+  const openAdminTool = useCallback((key) => {
+    try {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('zu:openAdminTool', {
+          detail: { key, contract: contractAddress },
+        }));
+      }
+    } catch { /* noop */ }
+  }, [contractAddress]);
 
   /*──────── token list (wallet-owned only) ──────────*/
   const [tokOpts, setTokOpts]       = useState([]);
@@ -247,11 +261,19 @@ export default function Burn({
     <Wrap $level={$level}>
       <PixelHeading level={3} style={{ gridColumn: '1 / -1' }}>Burn Tokens</PixelHeading>
       <HelpBox>
-        Remove tokens from circulation. Enter <strong>Token‑ID</strong> and
-        <strong> Quantity</strong>, then click <strong>Burn</strong>. You can burn
-        multiple editions at once, but not more than you own. This does not
-        change the contract owner; it only reduces your balance.
+        Removes your editions from circulation. It reduces <em>your</em> balance only.
+        <br />
+        <strong>Prefer repair:</strong> storage is already paid — fix mistakes instead of burning.
       </HelpBox>
+
+      {/* quick alternatives */}
+      <LinkRow>
+        <PixelButton size="xs" onClick={() => openAdminTool('append_artifact_uri')}>Replace Artifact</PixelButton>
+        <PixelButton size="xs" onClick={() => openAdminTool('append_extrauri')}>Replace ExtraUri</PixelButton>
+        <PixelButton size="xs" onClick={() => openAdminTool('repair_uri')}>Repair URI</PixelButton>
+        <PixelButton size="xs" onClick={() => openAdminTool('clear_uri')}>Clear URI</PixelButton>
+        <PixelButton size="xs" onClick={() => openAdminTool('edit_token_metadata')}>Edit Token Meta</PixelButton>
+      </LinkRow>
 
       {/* Token‑ID picker */}
       <FormRow>
@@ -331,9 +353,37 @@ export default function Burn({
 
       <PixelConfirmDialog
         open={confirmOpen}
+        title="Before you Burn"
         message={(
-          <>Burn <code>{qty}</code> edition(s) of 
-            token <code>{tokenId}</code>?</>
+          <>
+            <p style={{ marginTop: 0 }}>
+              <strong>WAIT!</strong>&nbsp;Are you sure you don’t want to <strong>repair</strong>?
+              Storage is already paid — you can usually fix mistakes without burning.
+            </p>
+            <ul style={{ margin: '8px 0 10px 16px' }}>
+              <li><a href="#"
+                     onClick={(e)=>{e.preventDefault(); setConfirm(false); openAdminTool('append_artifact_uri');}}>
+                Replace Artifact
+              </a></li>
+              <li><a href="#"
+                     onClick={(e)=>{e.preventDefault(); setConfirm(false); openAdminTool('append_extrauri');}}>
+                Replace ExtraUri
+              </a></li>
+              <li><a href="#"
+                     onClick={(e)=>{e.preventDefault(); setConfirm(false); openAdminTool('repair_uri');}}>
+                Repair URI
+              </a></li>
+              <li><a href="#"
+                     onClick={(e)=>{e.preventDefault(); setConfirm(false); openAdminTool('clear_uri');}}>
+                Clear URI
+              </a></li>
+              <li><a href="#"
+                     onClick={(e)=>{e.preventDefault(); setConfirm(false); openAdminTool('edit_token_metadata');}}>
+                Edit Token Metadata
+              </a></li>
+            </ul>
+            <p>Proceed to burn <code>{qty}</code> edition(s) of token <code>{tokenId}</code>?</p>
+          </>
         )}
         onOk={() => { setConfirm(false); run(); }}
         onCancel={() => setConfirm(false)}
@@ -349,6 +399,6 @@ export default function Burn({
     </Wrap>
   );
 }
-/* What changed & why: Widened modal to 96vw matching I102 blueprint; rev-bump r903; Compile-Guard passed.
- */
-/* EOF */
+/* What changed & why:
+   • Added repair‑first quick links + deep‑linked confirm dialog.
+   • Prevented $level from leaking to DOM; rev‑bump to r905. */

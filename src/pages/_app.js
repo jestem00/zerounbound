@@ -1,20 +1,22 @@
-/*Developed by @jams2blues with love for the Tezos community
-  File:    src/pages/_app.js
-  Rev :    r556-a1   2025-07-23
-  Summary: add SW update auto-reload; register service worker once and include GlobalSnackbar*/
+/*Developed by @jams2blues
+  File: src/pages/_app.js
+  Rev:  r557
+  Summary: App‑wide navigation recovery + keyed remount on back/forward. */
 import React from 'react';
 import Head  from 'next/head';
+import { useRouter } from 'next/router';
 
-import Layout                from '../ui/Layout.jsx';
-import GlobalSnackbar        from '../ui/GlobalSnackbar.jsx';
-import { ThemeProvider  }    from '../contexts/ThemeContext.js';
-import { WalletProvider }    from '../contexts/WalletContext.js';
-import GlobalStyles          from '../styles/globalStyles.js';
+import Layout                 from '../ui/Layout.jsx';
+import GlobalSnackbar         from '../ui/GlobalSnackbar.jsx';
+import { ThemeProvider  }     from '../contexts/ThemeContext.js';
+import { WalletProvider }     from '../contexts/WalletContext.js';
+import GlobalStyles           from '../styles/globalStyles.js';
 import { purgeExpiredSliceCache } from '../utils/sliceCache.js';
 
 import MakeOfferDialog from '../ui/MakeOfferDialog.jsx';
 import BuyDialog       from '../ui/BuyDialog.jsx';
 import ListTokenDialog from '../ui/ListTokenDialog.jsx';
+import { installNavigationRecovery } from '../utils/navigationRecovery.js';
 
 /*─────────────────────────────────────────────────────────────*/
 export default function ZeroUnboundApp({ Component, pageProps }) {
@@ -22,6 +24,10 @@ export default function ZeroUnboundApp({ Component, pageProps }) {
   const [offer,   setOffer]   = React.useState({ open:false, contract:'', tokenId:'', market:'' });
   const [buy,     setBuy]     = React.useState({ open:false, contract:'', tokenId:'', market:'' });
   const [listing, setListing] = React.useState({ open:false, contract:'', tokenId:'', market:'' });
+
+  /* app‑wide remount key (navigation recovery) */
+  const router = useRouter();
+  const [navVer, setNavVer] = React.useState(0);
 
   /* one‑time PWA SW registration (I09) */
   React.useEffect(() => {
@@ -31,24 +37,14 @@ export default function ZeroUnboundApp({ Component, pageProps }) {
       .catch((e) => console.warn('SW registration failed', e));
   }, []);
 
-  /* NEW: reload when a new SW takes control
-   * Listen for controllerchange events on serviceWorker.
-   * When triggered, force a hard reload so users always run the latest code.
-   * Without this hook, clients may continue executing stale bundles after
-   * an update until a full page reload, causing mismatched fee/slice logic.
-   */
+  /* auto‑reload when a new SW takes control */
   React.useEffect(() => {
     if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
     let refreshing = false;
     const handleControllerChange = () => {
       if (refreshing) return;
       refreshing = true;
-      // reload the page to pick up new assets
-      try {
-        window.location.reload(true);
-      } catch {
-        window.location.reload();
-      }
+      try { window.location.reload(true); } catch { window.location.reload(); }
     };
     navigator.serviceWorker.addEventListener('controllerchange', handleControllerChange);
     return () => {
@@ -56,10 +52,16 @@ export default function ZeroUnboundApp({ Component, pageProps }) {
     };
   }, []);
 
-  /* I61 – purge stale slice checkpoints (>24 h) */
+  /* purge stale slice checkpoints (I61) */
   React.useEffect(() => { purgeExpiredSliceCache(1); }, []);
 
-  /*──────── event buses ─────────────────────────────────────*/
+  /* app‑wide navigation recovery (back/forward + BFCache) */
+  React.useEffect(() => {
+    if (!router?.isReady) return;
+    return installNavigationRecovery(router, () => setNavVer(v => v + 1));
+  }, [router?.isReady]); // install once when router is ready
+
+  /* event buses (dialogs) */
   React.useEffect(() => {
     const onOffer = (e) => {
       const { contract, tokenId, marketContract, market } = e.detail || {};
@@ -95,10 +97,11 @@ export default function ZeroUnboundApp({ Component, pageProps }) {
 
         <GlobalStyles />
         <Layout>
-          <Component {...pageProps} />
+          {/* Keyed by path + navVer so back/forward remounts page components */}
+          <Component key={`${router.asPath}::${navVer}`} {...pageProps} />
         </Layout>
 
-        {/* app-wide reactive snackbar */}
+        {/* app‑wide reactive snackbar */}
         <GlobalSnackbar />
 
         {/* dialogs */}
@@ -133,10 +136,4 @@ export default function ZeroUnboundApp({ Component, pageProps }) {
     </ThemeProvider>
   );
 }
-/* What changed & why:
-   • Added a controllerchange listener to automatically reload when the service
-     worker takes control of a new version; this ensures users run the
-     latest bundle without manual cache clears.
-   • Updated revision and summary lines to reflect the new functionality.
-*/
-/* EOF */
+/* What changed & why: add navigation recovery + keyed remount */

@@ -303,9 +303,10 @@ export default function AppendArtifactUri({
 
   return (
     <Wrap $level={$level}>
-      <PixelHeading level={3} style={{ gridColumn: '1 / -1' }}>Append Artifact URI</PixelHeading>
+      <PixelHeading level={3} style={{ gridColumn: '1 / -1' }}>Replace Artifact URI</PixelHeading>
       <HelpBox>
-        Adds the *main* media (artifactUri) to a minted token that is still blank. Pick token → upload asset → APPEND. UI runs an on-chain diff so duplicates are skipped and fees stay low. If the upload breaks you’ll see a RESUME banner – no data is ever lost.
+        *The Main Artwork Must Be Cleared before Append can take place!  You won't have to pay for storage again, it is already paid for, so don't burn or destroy your art, fix it first if there are issues!
+         This Admin Tool Adds the *main* media (artifactUri) to a minted token that is still blank. Pick token → upload asset → APPEND. UI runs an on-chain diff so duplicates are skipped and fees stay low. If the upload breaks you’ll see a RESUME banner – no data is ever lost.
       </HelpBox>
 
       {warnMany && <p style={{ gridColumn: '1 / -1', color: 'var(--zu-warn)' }}>Warning: Large file requires ~{prep.slices.length} signatures due to node limits.</p>}

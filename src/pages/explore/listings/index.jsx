@@ -1,194 +1,276 @@
-/*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
-  File:    src/pages/explore/listings/index.jsx
-  Rev :    r2    2025‑07‑30 UTC
-  Summary: Responsive marketplace listings page.  Presents
-           listing cards in a grid that adapts to screen size
-           (≈5 cards per row on 1080p+).  Loads active
-           listings via marketplace big‑maps, falls back to
-           on‑chain views or token enumeration and paginates
-           results (10 per page).  Delegates to
-           TokenListingCard for rich details (hazards, authors,
-           price, ID).  Works without a connected wallet and
-           respects the current network selection.
-─────────────────────────────────────────────────────────────*/
+/*Developed by @jams2blues
+  File: src/pages/explore/listings/index.jsx
+  Rev: r7
+  Summary: Fix TzKT /v1 duplication, stable discovery & batching for
+           ZeroContract (v1–v4e) listings. Prefetch metadata and pass
+           into TokenListingCard. Deterministic pagination. */
 
-import React, { useEffect, useState } from 'react';
-import styledPkg                        from 'styled-components';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import styledPkg from 'styled-components';
 
-// Use wallet context to detect the active network and provide
-// toolkit for on‑chain view fallbacks
-import { useWalletContext }             from '../../../contexts/WalletContext.js';
+import ExploreNav from '../../../ui/ExploreNav.jsx';
+import LoadingSpinner from '../../../ui/LoadingSpinner.jsx';
+import TokenListingCard from '../../../ui/TokenListingCard.jsx';
 
-// Import UI components
-import TokenListingCard                 from '../../../ui/TokenListingCard.jsx';
-import ExploreNav                       from '../../../ui/ExploreNav.jsx';
-import LoadingSpinner                   from '../../../ui/LoadingSpinner.jsx';
+import { useWalletContext } from '../../../contexts/WalletContext.js';
+import { NETWORK_KEY } from '../../../config/deployTarget.js';
 
-// Network configuration
-import { NETWORK_KEY }                  from '../../../config/deployTarget.js';
+import { jFetch } from '../../../core/net.js';
+import decodeHexFields from '../../../utils/decodeHexFields.js';
+import detectHazards from '../../../utils/hazards.js';
 
-// Marketplace helpers for discovery and fallback
 import {
   listActiveCollections,
   listListingsForCollectionViaBigmap,
 } from '../../../utils/marketplaceListings.js';
-import listLiveTokenIds                 from '../../../utils/listLiveTokenIds.js';
-import { fetchOnchainListingsForCollection } from '../../../core/marketplace.js';
-
-// Static fallback list of known ZeroContract collections
-import hashMatrix                       from '../../../data/hashMatrix.json';
+import { getAllowedTypeHashList } from '../../../utils/allowedHashes.js';
+import { tzktBase } from '../../../utils/tzkt.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
-/* A responsive grid container mirroring the main explore grid.  It
- * automatically adjusts the number of columns based on viewport
- * width using CSS variable --col (see invariant I105).  Each
- * token card occupies one grid cell. */
+/*──────── Layout ────────*/
 const Grid = styled.div`
   width: 100%;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(var(--col), 1fr));
   gap: 1.2rem;
   justify-content: stretch;
-  /* Define a responsive column width similar to the explore grid
-   * (see invariant I105).  This ensures 4–5 cards appear per row
-   * on large screens and gracefully scales down on mobile. */
   --col: clamp(160px, 18vw, 220px);
 `;
+const Center = styled.div`
+  text-align: center;
+  margin: 1.25rem 0 1.75rem;
+`;
 
+/*──────── Helpers ────────*/
+
+/** tolerant data‑URI test; supports base64 & utf8 (e.g. SVG) */
+function hasRenderablePreview(m = {}) {
+  const keys = [
+    'displayUri', 'display_uri',
+    'imageUri', 'image_uri', 'image',
+    'thumbnailUri', 'thumbnail_uri',
+    'artifactUri', 'artifact_uri',
+    'mediaUri', 'media_uri',
+  ];
+  let uri = null;
+  for (const k of keys) {
+    const v = m && typeof m === 'object' ? m[k] : undefined;
+    if (typeof v === 'string' && v.startsWith('data:')) { uri = v; break; }
+  }
+  if (!uri && Array.isArray(m.formats)) {
+    for (const f of m.formats) {
+      const cand = (f && (f.uri || f.url)) || '';
+      if (typeof cand === 'string' && cand.startsWith('data:')) { uri = cand; break; }
+    }
+  }
+  if (!uri) return false;
+  return /^data:(image|audio|video|application\/svg\+xml|text\/html)/i.test(uri);
+}
+
+/** chunk helper */
+const chunk = (arr, n) => {
+  const out = [];
+  for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
+  return out;
+};
+
+/** dedupe by contract+tokenId */
+function uniqByPair(items) {
+  const seen = new Set();
+  const out  = [];
+  for (const it of items) {
+    const key = `${it.contract}|${it.tokenId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(it);
+  }
+  return out;
+}
+
+/*──────── Component ────────*/
 export default function ListingsPage() {
   const { toolkit } = useWalletContext() || {};
-  const [items, setItems]   = useState([]);
-  const [loading, setLoading] = useState(true);
-  // Control the number of items shown before requiring a Load More click.
-  // Start with 10 items and increment by 10 on each click.
-  const [showCount, setShowCount] = useState(10);
+  const net = useMemo(() => {
+    if (toolkit?._network?.type && /mainnet/i.test(toolkit._network.type)) return 'mainnet';
+    return (NETWORK_KEY || 'ghostnet').toLowerCase().includes('mainnet') ? 'mainnet' : 'ghostnet';
+  }, [toolkit]);
 
-  useEffect(() => {
-    let cancel = false;
+  // IMPORTANT: tzktBase() already includes `/v1` → do NOT append it again.
+  const TZKT = useMemo(() => tzktBase(net), [net]);
+
+  const [loading, setLoading]   = useState(true);
+  const [error, setError]       = useState(null);
+  const [showCount, setCount]   = useState(24);
+  const [items, setItems]       = useState([]); // [{contract, tokenId, priceMutez, metadata, contractName}]
+
+  const allowedHashes = useMemo(() => new Set(getAllowedTypeHashList()), []);
+
+  /** batch query: filter to ZeroContract family via typeHash */
+  const filterAllowedContracts = useCallback(async (addrs) => {
+    if (!addrs.length) return [];
+    const out = [];
+    for (const slice of chunk(addrs, 50)) {
+      const qs = new URLSearchParams({
+        'address.in': slice.join(','),
+        select: 'address,typeHash,metadata',
+        limit: String(slice.length),
+      });
+      // tzktBase(net) returns '.../v1' so no extra '/v1' here.
+      const rows = await jFetch(`${TZKT}/contracts?${qs}`, 2).catch(() => []);
+      for (const r of rows || []) {
+        const th = Number(r?.typeHash ?? r?.type_hash);
+        if (allowedHashes.has(th)) {
+          out.push({ address: r.address, name: r?.metadata?.name || '' });
+        }
+      }
+    }
+    return out;
+  }, [TZKT, allowedHashes]);
+
+  /** batch fetch token metadata for a contract */
+  const fetchTokenMetaBatch = useCallback(async (contract, ids) => {
+    const result = new Map(); // id -> { metadata, holdersCount, totalSupply }
+    for (const slice of chunk(ids, 40)) {
+      const qs = new URLSearchParams({
+        contract,
+        'tokenId.in': slice.join(','),
+        select: 'tokenId,metadata,holdersCount,totalSupply',
+        limit: String(slice.length),
+      });
+      const rows = await jFetch(`${TZKT}/tokens?${qs}`, 2).catch(() => []);
+      for (const t of rows || []) {
+        let md = t.metadata || {};
+        try { md = decodeHexFields(md || {}); } catch {}
+        if (md && typeof md.creators === 'string') {
+          try { const j = JSON.parse(md.creators); if (Array.isArray(j)) md.creators = j; } catch {}
+        }
+        result.set(String(t.tokenId), {
+          metadata: md,
+          holdersCount: Number(t.holdersCount || t.holders_count || 0),
+          totalSupply : Number(t.totalSupply  || t.total_supply  || 0),
+        });
+      }
+    }
+    return result;
+  }, [TZKT]);
+
+  useEffect(() => { let abort = false;
     async function load() {
-      // Determine the active network.  When a wallet is connected
-      // the toolkit exposes its network type; otherwise fall back
-      // to the configured NETWORK_KEY from deployTarget.js.
-      const net = toolkit && toolkit._network?.type && /mainnet/i.test(toolkit._network.type)
-        ? 'mainnet'
-        : (NETWORK_KEY || 'ghostnet');
-      setLoading(true);
-      const result = [];
-      // 1 · Discover collection addresses with active listings.  Do not
-      // filter by ZeroContract here; the metadata endpoint is unreliable.
-      let addrs = [];
+      setLoading(true); setError(null);
       try {
-        addrs = await listActiveCollections(net, false);
-      } catch {
-        addrs = [];
-      }
-      // Fallback to static hashMatrix addresses if the API fails
-      if (!addrs || addrs.length === 0) {
-        addrs = Object.keys(hashMatrix || {}).filter((a) => /^KT1[0-9A-Za-z]{33}$/.test(a));
-      }
-      // 2 · For each collection, fetch the lowest listing per token
-      for (const contract of addrs) {
-        let listings = [];
-        // 2a · Try the big‑map first.  This returns the lowest listing per
-        // token without requiring a wallet.
-        try {
-          const viaBigmap = await listListingsForCollectionViaBigmap(contract, net);
-          if (Array.isArray(viaBigmap) && viaBigmap.length) {
-            listings = viaBigmap;
+        /* 1) discover collections with listings (unfiltered) */
+        let candidates = await listActiveCollections(net, false).catch(() => []);
+        if (!Array.isArray(candidates) || candidates.length === 0) candidates = [];
+
+        /* 2) keep only ZeroContract family (typeHash filter) */
+        const allowed = await filterAllowedContracts(candidates);
+
+        /* 3) for each allowed contract, fetch lowest listing per token */
+        const byContract = new Map(); // KT1 -> Set(tokenId)
+        const prices     = new Map(); // KT1|id -> priceMutez
+        const names      = new Map(); // KT1 -> name
+        for (const { address: kt, name } of allowed) {
+          names.set(kt, name || '');
+          const ls = await listListingsForCollectionViaBigmap(kt, net).catch(() => []);
+          if (!Array.isArray(ls) || ls.length === 0) continue;
+          const set = byContract.get(kt) || new Set();
+          for (const l of ls) {
+            const id = Number(l.tokenId ?? l.token_id);
+            if (!Number.isFinite(id)) continue;
+            const key = `${kt}|${id}`;
+            const price = Number(l.priceMutez ?? l.price);
+            /* keep the lowest ask per token */
+            const prev = prices.get(key);
+            if (prev == null || price < prev) prices.set(key, price);
+            set.add(id);
           }
-        } catch {
-          listings = [];
+          byContract.set(kt, set);
         }
-        // 2b · If big‑map returns nothing and a wallet is available, try
-        // on‑chain views as a secondary source.  Group by token and
-        // select the lowest price per token.
-        if ((!listings || listings.length === 0) && toolkit) {
-          try {
-            const raw = await fetchOnchainListingsForCollection({ toolkit, nftContract: contract });
-            if (Array.isArray(raw) && raw.length) {
-              const byToken = new Map();
-              for (const l of raw) {
-                if (!l.active || Number(l.amount) <= 0) continue;
-                const id    = Number(l.tokenId ?? l.token_id);
-                const price = Number(l.priceMutez ?? l.price);
-                const prev  = byToken.get(id);
-                if (!prev || price < prev.priceMutez) {
-                  byToken.set(id, { contract, tokenId: id, priceMutez: price });
-                }
-              }
-              listings = [...byToken.values()];
-            }
-          } catch {
-            /* ignore view errors */
+
+        /* 4) metadata batch per contract, validate previews, build cards */
+        const assembled = [];
+        for (const [kt, idSet] of byContract.entries()) {
+          const ids = [...idSet];
+          const metaMap = await fetchTokenMetaBatch(kt, ids);
+          for (const id of ids) {
+            const key = `${kt}|${id}`;
+            const priceMutez = prices.get(key);
+            const metaEntry = metaMap.get(String(id)) || {};
+            const md        = metaEntry.metadata || {};
+            const supply    = metaEntry.totalSupply ?? 0;
+            if (!hasRenderablePreview(md)) continue;
+            if (detectHazards(md).broken) continue;    // keep broken out of grid
+            if (Number(supply) === 0) continue;        // guard for burned/empty
+            assembled.push({
+              contract: kt,
+              tokenId : id,
+              priceMutez,
+              metadata: md,
+              contractName: names.get(kt) || undefined,
+            });
           }
         }
-        // 2c · Final fallback: if still no listings and wallet exists, just
-        // push token IDs so the Buy bar can recheck the price later.
-        if ((!listings || listings.length === 0) && toolkit) {
-          try {
-            const ids = await listLiveTokenIds(contract, net);
-            for (const id of ids) {
-              result.push({ contract, tokenId: id, priceMutez: undefined });
-            }
-          } catch {
-            /* ignore network errors */
-          }
-        } else {
-          result.push(...(listings || []));
+
+        /* 5) order: newest visible first by tokenId as an approximation */
+        const unique = uniqByPair(assembled);
+        unique.sort((a, b) => b.tokenId - a.tokenId);
+
+        if (!abort) {
+          setItems(unique);
+          setLoading(false);
         }
-      }
-      if (!cancel) {
-        setItems(result);
-        setLoading(false);
+      } catch (err) {
+        if (!abort) {
+          setError((err && (err.message || String(err))) || 'Network error');
+          setItems([]);
+          setLoading(false);
+        }
       }
     }
     load();
-    return () => {
-      cancel = true;
-    };
-  }, [toolkit]);
+    return () => { abort = true; };
+  }, [net, filterAllowedContracts, fetchTokenMetaBatch]);
 
-  // Handler to load additional items when the user clicks the Load More button.
-  const loadMore = () => {
-    setShowCount((c) => c + 10);
-  };
-
-  // When the effect is loading, show a spinner
-  if (loading) {
-    return (
-      <>
-        <ExploreNav hideSearch />
-        <div style={{ marginTop: '2rem', textAlign: 'center' }}>
-          <LoadingSpinner />
-        </div>
-      </>
-    );
-  }
+  const visible = useMemo(() => items.slice(0, showCount), [items, showCount]);
 
   return (
     <>
       <ExploreNav hideSearch />
-      {items.length === 0 ? (
-        <p style={{ marginTop: '2rem' }}>No active listings found.</p>
-      ) : (
+      {loading && (
+        <div style={{ marginTop: '2rem', textAlign: 'center' }}>
+          <LoadingSpinner />
+        </div>
+      )}
+      {!loading && error && (
+        <p role="alert" style={{ marginTop: '1.25rem', textAlign: 'center' }}>
+          Could not load listings. Please try again.
+        </p>
+      )}
+      {!loading && !error && items.length === 0 && (
+        <p style={{ marginTop: '1.25rem', textAlign: 'center' }}>
+          No active listings found.
+        </p>
+      )}
+      {!loading && !error && items.length > 0 && (
         <>
           <Grid>
-            {items.slice(0, showCount).map(({ contract, tokenId, priceMutez }) => (
+            {visible.map(({ contract, tokenId, priceMutez, metadata, contractName }) => (
               <TokenListingCard
                 key={`${contract}-${tokenId}`}
                 contract={contract}
                 tokenId={tokenId}
                 priceMutez={priceMutez}
+                metadata={metadata}
+                contractName={contractName}
               />
             ))}
           </Grid>
           {showCount < items.length && (
-            <div style={{ textAlign: 'center', marginTop: '1rem' }}>
+            <Center>
               <button
                 type="button"
-                onClick={loadMore}
+                onClick={() => setCount((n) => n + 24)}
                 style={{
                   background: 'none',
                   border: '2px solid var(--zu-accent,#00c8ff)',
@@ -198,9 +280,9 @@ export default function ListingsPage() {
                   cursor: 'pointer',
                 }}
               >
-                Load More 🔻
+                Load&nbsp;More&nbsp;🔻
               </button>
-            </div>
+            </Center>
           )}
         </>
       )}
@@ -208,8 +290,6 @@ export default function ListingsPage() {
   );
 }
 
-/* What changed & why: Relocated the marketplace listings page into a
-   nested index route (explore/listings/index.jsx) to resolve route
-   conflicts with the optional catch-all route.  The component
-   retains dynamic discovery logic and works with or without a
-   wallet. */
+/* What changed & why: r7 – Fixed TzKT base double '/v1' causing 404s and
+   empty results; preserved ZeroContract filtering and added robust
+   metadata prefetch + validation, passing it to TokenListingCard. */

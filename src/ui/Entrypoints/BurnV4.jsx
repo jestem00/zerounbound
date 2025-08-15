@@ -1,15 +1,14 @@
-/*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
-  File:    src/ui/Entrypoints/BurnV4.jsx
-  Rev :    r908   2025‑08‑13
-  Summary: robust token‑list fetch + name merge parity
-──────────────────────────────────────────────────────────────*/
+/*Developed by @jams2blues – ZeroContract Studio
+  File: src/ui/Entrypoints/BurnV4.jsx
+  Rev:  r909   2025‑08‑15
+  Summary: added warn‑first PixelConfirmDialog + deep‑links */
 import React, { useCallback, useEffect, useState } from 'react';
 import styledPkg             from 'styled-components';
 
 import PixelHeading          from '../PixelHeading.jsx';
 import PixelInput            from '../PixelInput.jsx';
 import PixelButton           from '../PixelButton.jsx';
+import PixelConfirmDialog    from '../PixelConfirmDialog.jsx';
 import LoadingSpinner        from '../LoadingSpinner.jsx';
 import TokenMetaPanel        from '../TokenMetaPanel.jsx';
 
@@ -32,6 +31,7 @@ const Spin      = styled(LoadingSpinner).attrs({ size:16 })`
   position:absolute;top:8px;right:8px;
 `;
 const HelpBox   = styled.p`font-size:.75rem;line-height:1.25;margin:.5rem 0 .9rem;`;
+const LinkRow   = styled.div`display:flex;flex-wrap:wrap;gap:.35rem;margin:-.25rem 0 .2rem;`;
 
 /*──────── component ────────────────────────────*/
 export default function BurnV4({
@@ -45,8 +45,19 @@ export default function BurnV4({
     toolkit,
     network = 'ghostnet',
   } = useWalletContext() || {};
-  const kit   = toolkit || window.tezosToolkit;
+  const kit   = toolkit || (typeof window !== 'undefined' ? window.tezosToolkit : null);
   const snack = (m, s='warning') => setSnackbar({ open:true, message:m, severity:s });
+
+  /* deep‑link to AdminTools modals */
+  const openAdminTool = useCallback((key) => {
+    try {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('zu:openAdminTool', {
+          detail: { key, contract: contractAddress },
+        }));
+      }
+    } catch { /* noop */ }
+  }, [contractAddress]);
 
   /* token list (wallet‑owned only) */
   const [tokOpts, setTokOpts]       = useState([]);
@@ -136,6 +147,7 @@ export default function BurnV4({
   const [amount,  setAmount ] = useState('1');
   const [meta,    setMeta  ] = useState(null);
   const [busy,    setBusy  ] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   /* preview */
   const API = `${TZKT_API}/v1`;
@@ -181,9 +193,19 @@ export default function BurnV4({
       <HelpBox>
         ZeroContract&nbsp;v4 has <em>no native burn entry‑point</em>. This tool
         simply transfers your editions to the standard Tezos burn address
-        (<code>{BURN_ADDR.slice(0,12)}…</code>).&nbsp;Once sent, they are
+        (<code>{BURN_ADDR.slice(0,12)}…</code>). Once sent, they are
         permanently irretrievable and the collection supply is reduced.
+        <br />
+        <strong>Prefer repair:</strong> storage is already paid — fix mistakes first.
       </HelpBox>
+
+      {/* quick alternatives */}
+      <LinkRow>
+        <PixelButton size="xs" onClick={() => openAdminTool('append_artifact_uri')}>Replace Artifact</PixelButton>
+        <PixelButton size="xs" onClick={() => openAdminTool('append_extrauri')}>Replace ExtraUri</PixelButton>
+        <PixelButton size="xs" onClick={() => openAdminTool('repair_uri')}>Repair URI</PixelButton>
+        <PixelButton size="xs" onClick={() => openAdminTool('clear_uri')}>Clear URI</PixelButton>
+      </LinkRow>
 
       {/* token picker */}
       <Picker>
@@ -248,21 +270,48 @@ export default function BurnV4({
         warning
         disabled={!tokenId || !amount || busy}
         style={{ marginTop:'1rem' }}
-        onClick={send}
+        onClick={() => setConfirmOpen(true)}
       >
         {busy ? 'Burning…' : 'Burn'}
       </PixelButton>
+
+      <PixelConfirmDialog
+        open={confirmOpen}
+        title="Before you Burn"
+        message={(
+          <>
+            <p style={{ marginTop: 0 }}>
+              <strong>WAIT!</strong> Are you sure you don’t want to <strong>repair</strong>?
+              You already paid for storage — avoid wasting funds.
+            </p>
+            <ul style={{ margin: '8px 0 10px 16px' }}>
+              <li><a href="#"
+                     onClick={(e)=>{e.preventDefault(); setConfirmOpen(false); openAdminTool('append_artifact_uri');}}>
+                Replace Artifact
+              </a></li>
+              <li><a href="#"
+                     onClick={(e)=>{e.preventDefault(); setConfirmOpen(false); openAdminTool('append_extrauri');}}>
+                Replace ExtraUri
+              </a></li>
+              <li><a href="#"
+                     onClick={(e)=>{e.preventDefault(); setConfirmOpen(false); openAdminTool('repair_uri');}}>
+                Repair URI
+              </a></li>
+              <li><a href="#"
+                     onClick={(e)=>{e.preventDefault(); setConfirmOpen(false); openAdminTool('clear_uri');}}>
+                Clear URI
+              </a></li>
+            </ul>
+            <p>Burn <code>{amount}</code> edition(s) of token <code>{tokenId}</code> to <code>{BURN_ADDR}</code>?</p>
+          </>
+        )}
+        onOk={() => { setConfirmOpen(false); void send(); }}
+        onCancel={() => setConfirmOpen(false)}
+      />
     </Wrap>
   );
 }
 /* What changed & why:
-   • fetchTokens now fully mirrors Transfer.jsx logic:
-     – handles numeric rows from ?select=token.tokenId API.
-     – legacy fallback when ?select unsupported.
-     – merges names from live list + second /tokens query so
-       dropdown shows “id — name” consistently.
-   • Owned‑id parser fixed (previous NaN bug caused empty list).
-   • Capped name look‑up to first 100 ids to keep URL ≤ 8 KB.
-   • Rev bumped to r908.
-*/
-/* EOF */
+   • Added repair‑first quick links + deep‑linked confirm dialog.
+   • Preserved existing fetch/name‑merge logic; no behavior regressions.
+   • Rev‑bump to r909; lint‑clean. */

@@ -1,9 +1,7 @@
-/*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
-  File:    src/ui/Entrypoints/Destroy.jsx
-  Rev :    r864   2025‑09‑04
-  Summary: success overlay + auto‑dismiss, lint‑clean
-──────────────────────────────────────────────────────────────*/
+/*Developed by @jams2blues – ZeroContract Studio
+  File: src/ui/Entrypoints/Destroy.jsx
+  Rev:  r865   2025‑08‑15
+  Summary: warn‑first dialog with repair links; success overlay kept */
 import React, {
   useCallback, useEffect, useRef, useState,
 } from 'react';
@@ -38,6 +36,9 @@ const Spin = styled(LoadingSpinner).attrs({ size:16 })`
 const HelpBox = styled.p`
   font-size:.75rem;line-height:1.25;margin:.5rem 0 .9rem;
 `;
+const LinkRow = styled.div`
+  display:flex;flex-wrap:wrap;gap:.35rem;margin:.35rem 0 .1rem;
+`;
 const API = `${TZKT_API}/v1`;
 const hex2str = (h) => Buffer.from(h.replace(/^0x/, ''), 'hex').toString('utf8');
 
@@ -58,6 +59,17 @@ export default function Destroy({
 }) {
   const { toolkit, network = 'ghostnet' } = useWalletContext() || {};
   const snack = (m, s = 'info') => setSnackbar({ open: true, message: m, severity: s });
+
+  /* deep‑link to AdminTools modals */
+  const openAdminTool = useCallback((key) => {
+    try {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('zu:openAdminTool', {
+          detail: { key, contract: contractAddress },
+        }));
+      }
+    } catch { /* noop */ }
+  }, [contractAddress]);
 
   /* token list */
   const [tokOpts, setTokOpts]       = useState([]);
@@ -140,7 +152,18 @@ export default function Destroy({
         V4 contracts replace burn with an admin‑only “hard” destroy:
         sets <strong>total_supply = 0</strong> and marks token as destroyed.
         Metadata remains for provenance. You must own <em>all</em> editions.
+        <br />
+        <strong>Prefer repair:</strong> storage is already paid. Use the tools below to fix mistakes instead of wasting funds.
       </HelpBox>
+
+      {/* quick alternatives */}
+      <LinkRow aria-label="Quick alternatives">
+        <PixelButton size="xs" onClick={() => openAdminTool('append_artifact_uri')}>Replace Artifact</PixelButton>
+        <PixelButton size="xs" onClick={() => openAdminTool('append_extrauri')}>Replace ExtraUri</PixelButton>
+        <PixelButton size="xs" onClick={() => openAdminTool('repair_uri')}>Repair URI</PixelButton>
+        <PixelButton size="xs" onClick={() => openAdminTool('clear_uri')}>Clear URI</PixelButton>
+        <PixelButton size="xs" onClick={() => openAdminTool('edit_token_metadata')}>Edit Token Meta</PixelButton>
+      </LinkRow>
 
       <div style={{ display: 'flex', gap: '.5rem' }}>
         <PixelInput
@@ -194,12 +217,49 @@ export default function Destroy({
 
       <PixelConfirmDialog
         open={confirmOpen}
+        title="Before you Destroy"
         message={(
           <>
-            This will <strong>permanently reduce</strong> supply of&nbsp;
-            token&nbsp;<code>{tokenId}</code> to&nbsp;0.<br />
-            Metadata remains on‑chain for provenance.<br /><br />
-            Continue?
+            <p style={{ marginTop: 0 }}>
+              <strong>WAIT!</strong>&nbsp;Are you sure you don’t want to <strong>repair</strong>?
+              Storage is already paid — don’t waste gas/value.
+            </p>
+            <ul style={{ margin: '8px 0 10px 16px' }}>
+              <li>
+                <a href="#"
+                   onClick={(e) => { e.preventDefault(); setConfirm(false); openAdminTool('append_artifact_uri'); }}>
+                  Replace Artifact
+                </a>
+              </li>
+              <li>
+                <a href="#"
+                   onClick={(e) => { e.preventDefault(); setConfirm(false); openAdminTool('append_extrauri'); }}>
+                  Replace ExtraUri
+                </a>
+              </li>
+              <li>
+                <a href="#"
+                   onClick={(e) => { e.preventDefault(); setConfirm(false); openAdminTool('repair_uri'); }}>
+                  Repair URI
+                </a>
+              </li>
+              <li>
+                <a href="#"
+                   onClick={(e) => { e.preventDefault(); setConfirm(false); openAdminTool('clear_uri'); }}>
+                  Clear URI
+                </a>
+              </li>
+              <li>
+                <a href="#"
+                   onClick={(e) => { e.preventDefault(); setConfirm(false); openAdminTool('edit_token_metadata'); }}>
+                  Edit Token Metadata
+                </a>
+              </li>
+            </ul>
+            <p>
+              This will <strong>permanently reduce</strong> supply of token&nbsp;<code>{tokenId}</code> to 0.
+              Metadata remains on‑chain for provenance. Continue?
+            </p>
           </>
         )}
         onOk={() => { setConfirm(false); run(); }}
@@ -217,7 +277,6 @@ export default function Destroy({
   );
 }
 /* What changed & why:
-   • Added success overlay state with auto‑dismiss after 1.6 s.
-   • Guarded timeout clean‑up via ref.
-   • Rev‑bump r864. */
-/* EOF */
+   • Added repair‑first quick links + deep‑linked confirm.
+   • Kept success overlay with auto‑dismiss.
+   • Rev‑bump to r865; lint‑clean. */

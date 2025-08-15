@@ -332,7 +332,7 @@ export default function AppendExtraUri({
 
   return (
     <Wrap $level={$level}>
-      <PixelHeading level={3} style={{ gridColumn: '1 / -1' }}>Append Extra URI</PixelHeading>
+      <PixelHeading level={3} style={{ gridColumn: '1 / -1' }}>Replace ExtraUri</PixelHeading>
 
       <Hint>
         Stores *extra* media under an **extrauri_* key** (e.g. hi-res, bonus file). Upload, adjust description/label/name, then APPEND. Diff scan avoids re-uploading bytes; a RESUME banner appears on failure. Clear old extras from the inline list.

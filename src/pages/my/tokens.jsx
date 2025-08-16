@@ -1,9 +1,12 @@
 /*Developed by @jams2blues
   File: src/pages/my/tokens.jsx
-  Rev:  r82
-  Summary: Fix wallet hook + Owned logic (include tokens from admin’d
-           collections if not minted by me); keep ZeroContract gating,
-           creators/authors cleanup, /v1 guard, and UX/pagination. */
+  Rev:  r86
+  Summary: Fix reverse DNS resolution by preserving tz-address case in
+           creators/authors normalization (was lowercasing, which breaks
+           Tezos Domains lookups). Tighten minted-by-me exclusion, keep
+           ZeroContract typeHash gating, robust preview guard, /v1 base
+           guard, and UX/pagination. No change to TokenCard.jsx.
+*/
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import styledPkg from 'styled-components';
@@ -40,8 +43,7 @@ const Grid = styled.div`
     minmax(clamp(160px, 18vw, 220px), 1fr)
   );
   gap: 1rem;
-  width: 100%
-  ;
+  width: 100%;
   margin-top: 1rem;
 `;
 const Center = styled.div`
@@ -73,36 +75,56 @@ function useTzktV1Base(toolkit) {
     : 'https://api.ghostnet.tzkt.io/v1';
 }
 
-/** Tight tz‑address check (tz1|tz2|tz3) */
-const isTz = (s) => typeof s === 'string' && /^tz[1-3][1-9A-HJ-NP-Za-km-z]{33}$/.test(s);
+/** Tight tz‑address check (tz1|tz2|tz3, 36‑char Base58) */
+const isTz = (s) => typeof s === 'string' && /^tz[1-3][1-9A-HJ-NP-Za-km-z]{33}$/.test(s?.trim());
 
-/** Normalize a possibly messy creators/authors field into a clean array of tz‑addresses (lowercased). */
+/**
+ * Normalize a possibly messy creators/authors field into a clean array
+ * of tz‑addresses while **preserving original case**. Case preservation
+ * is required so downstream Tezos Domains reverse lookups succeed.
+ * Deduplication is performed case‑insensitively.
+ */
 function normalizeCreatorsField(src) {
   const out = [];
-  const push = (v) => {
-    if (typeof v !== 'string') return;
-    const parts = v.split(/[,\s;]+/).map((x) => x.trim()).filter(Boolean);
+  const seen = new Set(); // lowercased key for dedupe
+
+  const pushIfAddr = (val) => {
+    if (typeof val !== 'string') return;
+    const parts = val
+      .split(/[,\s;]+/)
+      .map((x) => x.trim())
+      .filter(Boolean);
     for (const p of parts) {
-      if (isTz(p)) out.push(p.toLowerCase());
+      if (isTz(p)) {
+        const key = p.toLowerCase();
+        if (!seen.has(key)) {
+          seen.add(key);
+          out.push(p); // preserve original case as seen in metadata
+        }
+      }
     }
   };
 
   if (Array.isArray(src)) {
     for (const v of src) {
-      if (typeof v === 'string') push(v);
-      else if (v && typeof v.address === 'string') push(v.address);
-      else if (v && typeof v === 'object') {
-        Object.values(v).forEach((x) => push(String(x || '')));
+      if (typeof v === 'string') {
+        pushIfAddr(v);
+      } else if (v && typeof v.address === 'string') {
+        pushIfAddr(v.address);
+      } else if (v && typeof v === 'object') {
+        // scan any nested stringy fields for tz* substrings
+        Object.values(v).forEach((x) => pushIfAddr(String(x || '')));
       }
     }
   } else if (typeof src === 'string') {
+    // attempt JSON, else parse as delimited string
     try {
       const parsed = JSON.parse(src);
       if (Array.isArray(parsed)) return normalizeCreatorsField(parsed);
     } catch { /* noop */ }
-    push(src);
+    pushIfAddr(src);
   } else if (src && typeof src === 'object') {
-    Object.values(src).forEach((x) => push(String(x || '')));
+    Object.values(src).forEach((x) => pushIfAddr(String(x || '')));
   }
   return out;
 }
@@ -148,8 +170,9 @@ function isValidPreview(m = {}) {
     const mime = (semi >= 0 ? header.slice(0, semi) : header).toLowerCase();
     const b64  = uri.slice(comma + 1);
     let binary;
-    if (typeof atob === 'function') binary = atob(b64);
-    else {
+    if (typeof atob === 'function') {
+      binary = atob(b64);
+    } else {
       // eslint-disable-next-line no-undef
       const buf = Buffer.from(b64, 'base64');
       binary = String.fromCharCode.apply(null, buf);
@@ -238,14 +261,14 @@ export default function MyTokens() {
     return map;
   }, [tzktV1]);
 
-  /** Decode + normalise token metadata; validate preview; sanitize creators for domain resolver */
+  /** Decode + normalise token metadata; validate preview; sanitize creators/authors for domain resolver */
   const prepareToken = useCallback((row) => {
     let meta = row?.metadata || {};
     try {
       meta = decodeHexFields(meta || {});
     } catch { /* keep original */ }
 
-    // sanitize creators/authors for downstream components
+    // sanitize creators/authors for downstream components (preserve case!)
     const creatorsNorm = normalizeCreatorsField(meta?.creators);
     const authorsNorm  = normalizeCreatorsField(meta?.authors ?? meta?.artists);
 
@@ -273,16 +296,24 @@ export default function MyTokens() {
   const mintedByUser = useCallback((t, me) => {
     if (!t || !me) return false;
     const meLc = me.toLowerCase();
+
+    // direct or first-mint fields
     if (t._creator && t._creator === meLc) return true;
     if (t._firstMinter && t._firstMinter === meLc) return true;
 
+    // metadata hints (creators/authors/artists)
     const meta = t.metadata || {};
     const arrays = [];
     if (Array.isArray(meta.creators)) arrays.push(...meta.creators);
     if (Array.isArray(meta.authors))  arrays.push(...meta.authors);
     if (Array.isArray(meta.artists))  arrays.push(...meta.artists);
+
     for (const a of arrays) {
-      const s = typeof a === 'string' ? a : (a && a.address) ? a.address : '';
+      const s = typeof a === 'string'
+        ? a
+        : (a && typeof a.address === 'string')
+          ? a.address
+          : '';
       if (s && s.toLowerCase() === meLc) return true;
     }
     return false;
@@ -334,7 +365,7 @@ export default function MyTokens() {
       const minted = await fetchMintedBy(address);
       if (signal.aborted) return;
 
-      // OWNED: balances where (a) ZeroContract, (b) NOT minted by me (even if I'm admin of the collection)
+      // OWNED: balances where (a) ZeroContract, (b) NOT minted by me
       const balRows = await jFetch(
         `${tzktV1}/tokens/balances?account=${encodeURIComponent(address)}&balance.ne=0&limit=1000`
       ).catch(() => []);
@@ -380,7 +411,9 @@ export default function MyTokens() {
           firstMinter,
         });
         if (!prepared) continue;
-        if (mintedByUser(prepared, address)) continue; // exclude anything I minted anywhere
+
+        // Strict exclusion: anything I minted anywhere (creator OR firstMinter OR meta hints)
+        if (mintedByUser(prepared, address)) continue;
 
         const key = `${cAddr}:${String(tId)}`;
         if (seenO.has(key)) continue;
@@ -486,11 +519,11 @@ export default function MyTokens() {
   );
 }
 
-/* What changed & why (r82):
-   • Switched to useWallet() hook and unified address selection, fixing the
-     “Connect your wallet…” false-negative.
-   • OWNED tab now includes tokens from collections the wallet admins if
-     they were minted by others (removes admin‑set exclusion).
-   • Kept strict minted‑by‑me detection, ZeroContract typeHash gating,
-     creators/authors normalization, and /v1 base guard.
-   • Minor UX: only show “Fetching…” when a wallet is connected. */ /* EOF */
+/* What changed & why (r86):
+   • Preserve case in creators/authors normalization so TokenCard’s
+     reverse Tezos Domains lookups succeed on /my/tokens (names now
+     resolve the same as on the token detail page).
+   • Keep strict minted-by-me exclusion (creator | firstMinter | meta),
+     ZeroContract typeHash gating, robust data-URI preview guard, and
+     /v1 base enforcement. UX unchanged.
+*/

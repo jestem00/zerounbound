@@ -76,10 +76,9 @@ array is encoded and stored at origination; no placeholder pointer is used.
 2.3 Additional minting minutiae (unchanged).
 
 ──────────────────────────────────────────────────────────────────────────────
-3 · ZERO‑CONTRACT V4 — STORAGE PAIRS (REFERENCE)
+3 · ZERO‑CONTRACT — STORAGE PAIRS (REFERENCE)
 ──────────────────────────────────────────────────────────────────────────────
-Unchanged. See previous revision for the full list of storage pairs (active_tokens,
-admin, burn_address, etc.).
+see zerounbound\contracts\StorageReference in the repo or contracts bundle
 
 ──────────────────────────────────────────────────────────────────────────────
 4 · ORIGINATION GUIDANCE

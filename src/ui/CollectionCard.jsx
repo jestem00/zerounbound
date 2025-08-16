@@ -1,8 +1,11 @@
-/*Developed by @jams2blues
+/*Developed by @jams2blues
   File: src/ui/CollectionCard.jsx
-  Rev : r27   2025‑08‑16
-  Summary: Accept initialTokensCount + hideIfEmpty; seed counts from
-           props; optionally return null when live count is 0 (Explore). */
+  Rev : r28   2025‑08‑16
+  Summary: Restrict Tezos Domains reverse lookups to tz‑addresses only
+           (skip KT1 and human names) to cut unnecessary resolver hits
+           and avoid GraphQL 400s. Preserve existing behavior, counts,
+           hazard gates, and UX.
+*/
 
 import {
   useEffect,
@@ -96,6 +99,9 @@ function decodeHexMetadata(val='') {
   }catch{return null;}
 }
 
+/** Tight tz‑address check for resolver */
+const isTz = (s) => typeof s === 'string' && /^tz[1-3][1-9A-HJ-NP-Za-km-z]{33}$/i.test(s?.trim());
+
 /*──────── component ─────────────────────────────────────────*/
 export default function CollectionCard({ contract, initialTokensCount, hideIfEmpty = false }) {
   const [meta, setMeta]     = useState({});
@@ -165,15 +171,16 @@ export default function CollectionCard({ contract, initialTokensCount, hideIfEmp
       ? meta.authors.split(/[,;]\s*/)
       : [];
 
-  // Domain resolution
+  // Domain resolution – tz‑only (skip KT/names)
   const [domains, setDomains] = useState({});
   const [showAllAuthors, setShowAllAuthors] = useState(false);
 
   useEffect(() => {
     const addrs = new Set();
     authors.forEach((a) => {
-      if (a && typeof a === 'string' && /^(tz|kt)/i.test(a.trim())) {
-        addrs.add(a);
+      if (a && typeof a === 'string') {
+        const v = a.trim();
+        if (isTz(v)) addrs.add(v);
       }
     });
     addrs.forEach((addr) => {
@@ -187,7 +194,8 @@ export default function CollectionCard({ contract, initialTokensCount, hideIfEmp
         });
       })();
     });
-  }, [authors]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authors.join('|')]);
 
   const formatEntry = useCallback(
     (val) => {
@@ -212,7 +220,7 @@ export default function CollectionCard({ contract, initialTokensCount, hideIfEmp
       elems.push(
         isAddr ? (
           <a
-            key={item}
+            key={`${item}_${idx}`}
             href={`/explore?cmd=tokens&admin=${item}`}
             style={{ color: 'var(--zu-accent-sec,#6ff)', textDecoration: 'none' }}
           >
@@ -220,7 +228,7 @@ export default function CollectionCard({ contract, initialTokensCount, hideIfEmp
             {formatted}
           </a>
         ) : (
-          <span key={item}>{prefix}{formatted}</span>
+          <span key={`${String(item)}_${idx}`}>{prefix}{formatted}</span>
         ),
       );
     });
@@ -306,7 +314,7 @@ export default function CollectionCard({ contract, initialTokensCount, hideIfEmp
           <h3 title={nameSafe}>{nameSafe}</h3>
           {authors.length > 0 && (
             <p style={{ wordBreak: 'break-all' }}>
-              Author(s) 
+              Author(s)&nbsp;
               {renderAuthors()}
             </p>
           )}
@@ -337,7 +345,8 @@ CollectionCard.propTypes = {
   hideIfEmpty: PropTypes.bool,            // when true, hide card if live === 0
 };
 
-/* What changed & why (r27):
-   • New props `initialTokensCount` and `hideIfEmpty` let Explore
-     seed counts and suppress empty collections, eliminating “0 Tokens”
-     cards on the grid.  Counts are still refreshed asynchronously. */
+/* What changed & why (r28):
+   • Only attempt reverse Tezos Domains lookups for tz‑addresses
+     (skip KT1/names) to reduce failed requests and network noise.
+   • Behavior otherwise unchanged; hazards/UX intact.
+*/

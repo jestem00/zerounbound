@@ -1,9 +1,8 @@
 /*Developed by @jams2blues
   File: src/pages/explore/listings/index.jsx
-  Rev: r7
-  Summary: Fix TzKT /v1 duplication, stable discovery & batching for
-           ZeroContract (v1–v4e) listings. Prefetch metadata and pass
-           into TokenListingCard. Deterministic pagination. */
+  Rev:  r9
+  Summary: Integrate TzKT‑backed stale‑listing filter into discovery;
+           preserve /v1 handling; restore stable grid & pagination. */
 
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import styledPkg from 'styled-components';
@@ -25,6 +24,7 @@ import {
 } from '../../../utils/marketplaceListings.js';
 import { getAllowedTypeHashList } from '../../../utils/allowedHashes.js';
 import { tzktBase } from '../../../utils/tzkt.js';
+import { filterStaleListings } from '../../../core/marketplace.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -155,7 +155,8 @@ export default function ListingsPage() {
     return result;
   }, [TZKT]);
 
-  useEffect(() => { let abort = false;
+  useEffect(() => {
+    let abort = false;
     async function load() {
       setLoading(true); setError(null);
       try {
@@ -166,21 +167,37 @@ export default function ListingsPage() {
         /* 2) keep only ZeroContract family (typeHash filter) */
         const allowed = await filterAllowedContracts(candidates);
 
-        /* 3) for each allowed contract, fetch lowest listing per token */
+        /* 3) for each allowed contract, fetch lowest listing per token
+              — and drop stale sellers using batch TzKT checks */
         const byContract = new Map(); // KT1 -> Set(tokenId)
         const prices     = new Map(); // KT1|id -> priceMutez
         const names      = new Map(); // KT1 -> name
+
         for (const { address: kt, name } of allowed) {
           names.set(kt, name || '');
           const ls = await listListingsForCollectionViaBigmap(kt, net).catch(() => []);
           if (!Array.isArray(ls) || ls.length === 0) continue;
+
+          // keep "active, amount>0" first
+          let active = ls.filter((l) => Number(l.amount ?? l.available ?? 0) > 0 && (l.active ?? true));
+
+          // stale‑listing filter (single batched call per token group done inside)
+          active = await filterStaleListings(toolkit, active.map((l) => ({
+            nftContract: kt,
+            tokenId: Number(l.tokenId ?? l.token_id),
+            seller: String(l.seller || ''),
+            amount: Number(l.amount ?? 1),
+            __src: l,
+          }))).catch(() => active).then((arr) => (arr[0]?.__src ? arr.map((x) => x.__src) : arr));
+
+          if (!active.length) continue;
+
           const set = byContract.get(kt) || new Set();
-          for (const l of ls) {
+          for (const l of active) {
             const id = Number(l.tokenId ?? l.token_id);
             if (!Number.isFinite(id)) continue;
             const key = `${kt}|${id}`;
             const price = Number(l.priceMutez ?? l.price);
-            /* keep the lowest ask per token */
             const prev = prices.get(key);
             if (prev == null || price < prev) prices.set(key, price);
             set.add(id);
@@ -200,8 +217,8 @@ export default function ListingsPage() {
             const md        = metaEntry.metadata || {};
             const supply    = metaEntry.totalSupply ?? 0;
             if (!hasRenderablePreview(md)) continue;
-            if (detectHazards(md).broken) continue;    // keep broken out of grid
-            if (Number(supply) === 0) continue;        // guard for burned/empty
+            if (detectHazards(md).broken) continue;
+            if (Number(supply) === 0) continue;
             assembled.push({
               contract: kt,
               tokenId : id,
@@ -230,7 +247,7 @@ export default function ListingsPage() {
     }
     load();
     return () => { abort = true; };
-  }, [net, filterAllowedContracts, fetchTokenMetaBatch]);
+  }, [net, filterAllowedContracts, fetchTokenMetaBatch, toolkit]);
 
   const visible = useMemo(() => items.slice(0, showCount), [items, showCount]);
 
@@ -290,6 +307,6 @@ export default function ListingsPage() {
   );
 }
 
-/* What changed & why: r7 – Fixed TzKT base double '/v1' causing 404s and
-   empty results; preserved ZeroContract filtering and added robust
-   metadata prefetch + validation, passing it to TokenListingCard. */
+/* What changed & why: r9 — Applied batch stale‑listing filter using
+   TzKT balances to drop sellers with insufficient FA2 holdings.
+   Restored reliable grid without breaking the /v1 handling. */

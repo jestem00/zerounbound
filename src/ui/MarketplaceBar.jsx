@@ -1,13 +1,7 @@
-/*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
-  File:    src/ui/MarketplaceBar.jsx
-  Rev :    r921    2025‑08‑10
-  Summary: Restore Cancel button visibility.  Remove the
-           `isSeller && lowest` gate that hid Cancel whenever
-           the user’s listing wasn’t the cheapest.  The Cancel
-           dialog itself handles the “no active listings”
-           case cleanly.  Other behaviour unchanged.
-────────────────────────────────────────────────────────────*/
+/* Developed by @jams2blues
+   File: src/ui/MarketplaceBar.jsx
+   Rev:  r922   2025‑09‑21
+   Summary: Disable press jiggle on BUY/OFFER/ACCEPT/LIST/CANCEL CTAs. */
 
 import React, { useEffect, useState } from 'react';
 import PropTypes                      from 'prop-types';
@@ -64,11 +58,12 @@ export default function MarketplaceBar({
       })
     : null;
 
-  const isSeller = lowest && walletAddr && lowest.seller && walletAddr.toLowerCase() === lowest.seller.toLowerCase();
+  const isSeller = lowest && walletAddr && lowest.seller
+    && walletAddr.toLowerCase() === lowest.seller.toLowerCase();
 
   return (
     <>
-      {/* Price indicator – shown before buttons when a listing exists */}
+      {/* Price indicator */}
       {priceXTZ && (
         <span
           style={{
@@ -83,34 +78,41 @@ export default function MarketplaceBar({
           {priceXTZ} ꜩ
         </span>
       )}
-      {/* Buy button */}
+
+      {/* Buy */}
       <PixelButton
+        noActiveFx
         disabled={!toolkit || !lowest || lowest.priceMutez == null || isSeller}
         warning={!lowest || lowest.priceMutez == null}
         onClick={() => setDlg('buy')}
       >
         BUY
       </PixelButton>
-      {/* List button */}
-      <PixelButton disabled={!toolkit} onClick={() => setDlg('list')}>
+
+      {/* List */}
+      <PixelButton noActiveFx disabled={!toolkit} onClick={() => setDlg('list')}>
         LIST
       </PixelButton>
-      {/* Offer button */}
-      <PixelButton disabled={!toolkit} onClick={() => setDlg('offer')}>
+
+      {/* Offer */}
+      <PixelButton noActiveFx disabled={!toolkit} onClick={() => setDlg('offer')}>
         OFFER
       </PixelButton>
-      {/* Cancel button — restored visibility when a wallet is connected */}
+
+      {/* Cancel */}
       {walletAddr && (
-        <PixelButton disabled={!toolkit} onClick={() => setDlg('cancel')}>
+        <PixelButton noActiveFx disabled={!toolkit} onClick={() => setDlg('cancel')}>
           CANCEL
         </PixelButton>
       )}
-      {/* Accept button */}
+
+      {/* Accept */}
       {isSeller && hasOffers && (
-        <PixelButton disabled={!toolkit} onClick={() => setDlg('accept')}>
+        <PixelButton noActiveFx disabled={!toolkit} onClick={() => setDlg('accept')}>
           ACCEPT
         </PixelButton>
       )}
+
       {/* dialogs */}
       {dlg === 'buy' && lowest && (
         <BuyDialog
@@ -125,37 +127,16 @@ export default function MarketplaceBar({
         />
       )}
       {dlg === 'list' && (
-        <ListTokenDialog
-          open
-          contract={contractAddress}
-          tokenId={tokenId}
-          onClose={() => setDlg(null)}
-        />
+        <ListTokenDialog open contract={contractAddress} tokenId={tokenId} onClose={() => setDlg(null)} />
       )}
       {dlg === 'offer' && (
-        <MakeOfferDialog
-          open
-          contract={contractAddress}
-          tokenId={tokenId}
-          marketContract={marketplace}
-          onClose={() => setDlg(null)}
-        />
+        <MakeOfferDialog open contract={contractAddress} tokenId={tokenId} marketContract={marketplace} onClose={() => setDlg(null)} />
       )}
       {dlg === 'cancel' && (
-        <CancelListing
-          open
-          contract={contractAddress}
-          tokenId={tokenId}
-          onClose={() => setDlg(null)}
-        />
+        <CancelListing open contract={contractAddress} tokenId={tokenId} onClose={() => setDlg(null)} />
       )}
       {dlg === 'accept' && (
-        <AcceptOffer
-          open
-          contract={contractAddress}
-          tokenId={tokenId}
-          onClose={() => setDlg(null)}
-        />
+        <AcceptOffer open contract={contractAddress} tokenId={tokenId} onClose={() => setDlg(null)} />
       )}
     </>
   );
@@ -166,3 +147,4 @@ MarketplaceBar.propTypes = {
   tokenId        : PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
   marketplace    : PropTypes.any,
 };
+/* What changed & why: apply `noActiveFx` to CTAs to eliminate jiggle. */

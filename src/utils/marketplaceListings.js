@@ -1,219 +1,274 @@
-/*─────────────────────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
-  File:    src/utils/marketplaceListings.js
-  Rev :    r4     2025‑08‑03 UTC
-  Summary: Removed unused TZKT_API import; revision bump; helper logic
-           unchanged.  Maintains the per‑network TzKT resolver and
-           listing enumeration functions.
-
-   NOTE: These functions should never throw; they always return
-   sensible defaults when the network or API is unreachable.
-─────────────────────────────────────────────────────────────────────────────*/
+/*Developed by @jams2blues
+  File: src/utils/marketplaceListings.js
+  Rev:  r62
+  Summary: Restore marketplace discovery: probe both `collection_listings`
+           and `listings` big‑maps; resilient pointer & shape handling;
+           no network hard‑assumptions; preserves r7 page behaviour. */
 
 import { NETWORK_KEY } from '../config/deployTarget.js';
-import { marketplaceAddr }       from '../core/marketplace.js';
+import { marketplaceAddr } from '../core/marketplace.js';
+import { jFetch } from '../core/net.js';
 
-/*──────── dynamic TzKT base resolver ───────────────────────*/
-// Determine the appropriate TzKT API domain for a given network.  The
-// default TZKT_API constant reflects only the build‑time network.
-// When functions such as listActiveCollections() are invoked with
-// net='mainnet' while the app is configured for ghostnet (or vice
-// versa) the static constant points at the wrong chain and yields
-// empty results.  To avoid this, derive the API root per network.
-const tzktBaseForNet = (net = NETWORK_KEY) => {
-  if (!net) net = NETWORK_KEY;
-  return /mainnet/i.test(net) ? 'https://api.tzkt.io' : 'https://api.ghostnet.tzkt.io';
-};
+/*──────── dynamic TzKT base resolver (no `/v1`) ─────────────*/
+const tzktBaseForNet = (net = NETWORK_KEY) =>
+  /mainnet/i.test(net) ? 'https://api.tzkt.io' : 'https://api.ghostnet.tzkt.io';
 
-/**
- * Inspect contract metadata via TzKT to determine if a contract is
- * a ZeroContract instance.  This heuristic checks the contract's
- * `version` field (added by the deploy UI) and interfaces array.
- * It returns true when the version contains “ZeroContract” (case
- * insensitive) or when the contract lists both TZIP‑012 and
- * TZIP‑016 interfaces.  When metadata cannot be fetched the
- * function returns false.
- *
- * @param {string} addr KT1 contract address
- * @param {string} net  network key (ghostnet|mainnet)
- * @returns {Promise<boolean>}
- */
-async function isZeroContract(addr, net = NETWORK_KEY) {
-  if (!/^KT1[0-9A-Za-z]{33}$/.test(addr)) return false;
-  try {
-    const base = tzktBaseForNet(net);
-    const res  = await fetch(`${base}/v1/contracts/${addr}/metadata`);
-    if (!res.ok) return false;
-    const md   = await res.json();
-    if (!md || typeof md !== 'object') return false;
-    // The deploy UI injects a version string on the contract
-    const ver = md.version || md.ver || '';
-    if (typeof ver === 'string' && /ZeroContract/i.test(ver)) return true;
-    // Otherwise, check that both FA2 (TZIP‑12) and metadata (TZIP‑16)
-    // interfaces are present.  Some contracts may include more but
-    // these two are mandatory for ZeroContract.
-    const interfaces = md.interfaces || md.interface || [];
-    if (Array.isArray(interfaces)) {
-      const has12 = interfaces.some((x) => /TZIP-?12/i.test(x));
-      const has16 = interfaces.some((x) => /TZIP-?16/i.test(x));
-      if (has12 && has16) return true;
+/*──────── helpers ───────────*/
+const isKt = (s) => typeof s === 'string' && /^KT1[0-9A-Za-z]{33}$/.test(s);
+
+/** Extract a KT1 address from heterogeneous TzKT key shapes. */
+function addrFromKey(key) {
+  if (isKt(key)) return key;
+  if (key && typeof key === 'object') {
+    if (isKt(key.address)) return key.address;
+    if (isKt(key.value)) return key.value;
+    // Some shapes encode Michelson pairs as arrays/objects; try common fields
+    if (Array.isArray(key)) {
+      for (const item of key) {
+        if (isKt(item)) return item;
+        if (item && typeof item === 'object') {
+          const v = item.address || item.value || item.string;
+          if (isKt(v)) return v;
+        }
+      }
+    } else {
+      const v = key.string || key.bytes || key.prim;
+      if (isKt(v)) return v;
     }
-  } catch {
-    /* ignore network/parse errors */
   }
-  return false;
+  return '';
 }
 
+/** Probe a marketplace for relevant big‑maps; return pointers if found. */
+async function probeMarketIndexes(base, market) {
+  try {
+    const rows = await jFetch(
+      `${base}/v1/contracts/${market}/bigmaps?select=path,ptr,id,active&limit=200`,
+      1,
+    );
+    const out = {};
+    for (const r of rows || []) {
+      const path = r?.path || r?.name || '';
+      const ptr  = Number(r?.ptr ?? r?.id);
+      if (!Number.isFinite(ptr)) continue;
+      if (path === 'collection_listings') out.collection_listings = ptr;
+      if (path === 'listings') out.listings = ptr;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** Select a set of viable market indices for a given network. */
+async function resolveMarketIndices(net) {
+  const base = tzktBaseForNet(net);
+  const primary = marketplaceAddr(net);
+  const markets = [primary]; // Keep it minimal & deterministic
+  const results = [];
+  for (const m of markets) {
+    if (!isKt(m)) continue;
+    const idx = await probeMarketIndexes(base, m);
+    if (idx.collection_listings || idx.listings) {
+      results.push({ market: m, base, idx });
+    }
+  }
+  return results;
+}
+
+/** Walk an arbitrary nested map/array and yield listing objects. */
+function* walkListings(value, depth = 0) {
+  if (!value || depth > 3) return;
+  const v = value;
+  const looksListing =
+    typeof v === 'object' &&
+    ('price' in v || 'priceMutez' in v) &&
+    ('token_id' in v || 'tokenId' in v || 'token' in v);
+
+  if (looksListing) {
+    yield v;
+    return;
+  }
+  if (Array.isArray(v)) {
+    for (const it of v) yield* walkListings(it, depth + 1);
+    return;
+  }
+  if (typeof v === 'object') {
+    for (const it of Object.values(v)) yield* walkListings(it, depth + 1);
+  }
+}
+
+/*──────── Public API ─────────*/
+
 /**
- * Enumerate NFT contract addresses that currently have active
- * listings on the ZeroSum marketplace.  The TzKT API exposes a
- * `collection_listings` big‑map keyed by the collection address.
- * This helper queries the big‑map pointer, retrieves all active
- * keys and returns unique KT1 addresses.  Optionally, the
- * addresses can be filtered to only include ZeroContract
- * instances by inspecting their metadata via {@link isZeroContract}.
- * When the TzKT API fails or no addresses are found, the
- * function returns an empty array; callers are expected to fall
- * back to static lists such as hashMatrix.
- *
- * @param {string} [net=NETWORK_KEY] network identifier ('ghostnet' | 'mainnet')
- * @param {boolean} [filterZeroContract=true] filter results to ZeroContract collections
- * @returns {Promise<string[]>} list of KT1 addresses with active listings
+ * Enumerate NFT contract addresses that currently have active listings.
+ * Aggregates results from either `collection_listings` or `listings` big‑maps.
  */
 export async function listActiveCollections(net = NETWORK_KEY, filterZeroContract = true) {
-  // Determine the correct marketplace contract for the given network.  If
-  // marketplaceAddr() returns an undefined or legacy value, fall back to
-  // the known ghostnet marketplace.  This guard ensures that calls to
-  // TzKT fetch from the intended marketplace contract when the
-  // configuration has not yet been updated.
-  const rawMarket = marketplaceAddr(net);
-  const fallbackMarket =
-    (net && typeof net === 'string' && net.toLowerCase() === 'ghostnet')
-      ? 'KT1R1PzLhBXEd98ei72mFuz4FrUYEcuV7t1p'
-      : undefined;
-  const market = rawMarket || fallbackMarket;
-  const out = [];
-  try {
-    // Determine the API base for the given network.  Do not
-    // reference the static TZKT_API here, as it may point to a
-    // different chain when the wallet selects a network other than
-    // the build‑time default.
-    const base = tzktBaseForNet(net);
-    // Discover the big‑map pointer for collection_listings.  When
-    // requesting TzKT bigmaps by path, the API may return multiple
-    // entries; find the one whose `path` property exactly matches
-    // collection_listings to avoid accidentally picking another
-    // big‑map such as total_listed.  See issue with pointer
-    // selection in r8.
-    const maps = await fetch(`${base}/v1/contracts/${market}/bigmaps?path=collection_listings`).then((r) => r.json());
-    let ptr;
-    if (Array.isArray(maps) && maps.length > 0) {
-      const match = maps.find((m) => (m.path || m.name) === 'collection_listings');
-      ptr = match ? (match.ptr ?? match.id) : undefined;
+  const resolved = await resolveMarketIndices(net);
+  const addrs = new Set();
+
+  for (const { idx, base } of resolved) {
+    // Preferred path: keys of collection_listings are collection KT1s
+    if (idx.collection_listings) {
+      try {
+        const keys = await jFetch(
+          `${base}/v1/bigmaps/${idx.collection_listings}/keys?active=true&select=key&limit=10000`,
+          2,
+        );
+        for (const k of keys || []) {
+          const addr = addrFromKey(k);
+          if (isKt(addr)) addrs.add(addr);
+        }
+      } catch { /* ignore */ }
     }
-    if (ptr == null) throw new Error('collection_listings bigmap not found');
-    // Retrieve active keys (collection addresses)
-    const keys = await fetch(`${base}/v1/bigmaps/${ptr}/keys?active=true`).then((r) => r.json());
-    for (const entry of keys) {
-      const key = entry.key;
-      // Keys may be strings or objects; normalise to string
-      let addr;
-      if (typeof key === 'string') {
-        addr = key;
-      } else if (key && typeof key.address === 'string') {
-        addr = key.address;
-      } else if (key && typeof key.value === 'string') {
-        addr = key.value;
-      }
-      if (addr && /^KT1[0-9A-Za-z]{33}$/.test(addr)) {
-        out.push(addr);
-      }
+
+    // Fallback path: keys of listings often encode collection in the key
+    if (idx.listings) {
+      try {
+        const keys = await jFetch(
+          `${base}/v1/bigmaps/${idx.listings}/keys?active=true&select=key&limit=10000`,
+          2,
+        );
+        for (const k of keys || []) {
+          const addr = addrFromKey(k);
+          if (isKt(addr)) addrs.add(addr);
+        }
+      } catch { /* ignore */ }
     }
-  } catch {
-    /* ignore network errors; return empty list */
   }
-  // Remove duplicates
-  const unique = Array.from(new Set(out));
+
+  const unique = Array.from(addrs);
   if (!filterZeroContract) return unique;
+
+  // Optional metadata filter; tolerant to failures
   const filtered = [];
-  for (const addr of unique) {
+  for (const kt of unique) {
     try {
-      if (await isZeroContract(addr, net)) filtered.push(addr);
-    } catch {
-      /* ignore metadata errors */
-    }
+      const meta = await jFetch(`${tzktBaseForNet(net)}/v1/contracts/${kt}/metadata`, 1);
+      const ver = (meta?.version || meta?.ver || '') + '';
+      const ifaces = meta?.interfaces || meta?.interface || [];
+      const ok =
+        /ZeroContract/i.test(ver) ||
+        (Array.isArray(ifaces) &&
+          ifaces.some((x) => /TZIP-?12/i.test(x)) &&
+          ifaces.some((x) => /TZIP-?16/i.test(x)));
+      if (ok) filtered.push(kt);
+    } catch { /* ignore */ }
   }
   return filtered;
 }
 
 /**
- * Retrieve all active listings for a given collection via the
- * marketplace’s `listings` big‑map.  Each entry contains
- * complete listing details (nonce, price, amount, seller and
- * other fields) keyed by a composite of NFT contract, token id
- * and listing nonce.  This helper scans all active entries,
- * filters them by the provided collection address and returns
- * one listing per token id corresponding to the lowest price.
- *
- * @param {string} nftContract KT1 address of the collection
- * @param {string} [net=NETWORK_KEY] network identifier
- * @returns {Promise<Array<{contract:string, tokenId:number, priceMutez:number}>>}
+ * Retrieve all active listings for a given collection via TzKT big‑maps.
+ * Supports both `collection_listings` (keyed by collection KT1) and
+ * `listings` (various key shapes). Returns lowest‑price per token id.
  */
 export async function listListingsForCollectionViaBigmap(nftContract, net = NETWORK_KEY) {
-  const market = marketplaceAddr(net);
+  const resolved = await resolveMarketIndices(net);
   const byToken = new Map();
-  try {
-    // Determine the appropriate TzKT API root for this network.
-    const base = tzktBaseForNet(net);
-    // Locate the listings big‑map pointer.  As with
-    // collection_listings, multiple entries may be returned; find
-    // the entry whose `path` equals 'listings'.
-    const maps = await fetch(`${base}/v1/contracts/${market}/bigmaps?path=listings`).then((r) => r.json());
-    let ptr;
-    if (Array.isArray(maps) && maps.length > 0) {
-      const match = maps.find((m) => (m.path || m.name) === 'listings');
-      ptr = match ? (match.ptr ?? match.id) : undefined;
+
+  const push = (tokenId, listing) => {
+    const id = Number(tokenId);
+    if (!Number.isFinite(id)) return;
+    const active = !!(listing?.active ?? listing?.is_active ?? true);
+    let price = Number(listing?.price ?? listing?.priceMutez);
+    let amount = Number(listing?.amount ?? listing?.quantity ?? listing?.amountTokens ?? 0);
+    if (!Number.isFinite(price) || !Number.isFinite(amount)) return;
+    if (!active || amount <= 0) return;
+    const prev = byToken.get(id);
+    if (!prev || price < prev.priceMutez) {
+      byToken.set(id, {
+        contract: nftContract,
+        tokenId: id,
+        priceMutez: price,
+        seller: listing?.seller,
+        nonce: Number(listing?.nonce ?? listing?.listing_nonce ?? listing?.id ?? 0),
+        amount,
+        active: true,
+      });
     }
-    if (ptr == null) throw new Error('listings bigmap not found');
-    // Fetch all active keys; note that TzKT returns full keys with values
-    const entries = await fetch(`${base}/v1/bigmaps/${ptr}/keys?active=true`).then((r) => r.json());
-    for (const entry of entries) {
-      // Skip keys that do not match the requested collection.  The key
-      // identifies (nft_contract, token_id); the address is a string.
-      const keyAddr = entry.key?.address || entry.key?.value || entry.key;
-      if (
-        !keyAddr ||
-        typeof keyAddr !== 'string' ||
-        keyAddr.toLowerCase() !== nftContract.toLowerCase()
-      ) {
-        continue;
+  };
+
+  for (const { idx, base } of resolved) {
+    // Preferred: collection_listings → direct lookup by KT1 key
+    if (idx.collection_listings) {
+      // Attempt direct /keys/{key} first; fallback to query param
+      let holder = null;
+      try {
+        holder = await jFetch(
+          `${base}/v1/bigmaps/${idx.collection_listings}/keys/${encodeURIComponent(nftContract)}?select=value`,
+          1,
+        );
+      } catch {
+        // Fallback forms to accommodate different key serializers
+        const variants = [
+          `${base}/v1/bigmaps/${idx.collection_listings}/keys?key=${encodeURIComponent(
+            nftContract,
+          )}&select=value&limit=1`,
+          `${base}/v1/bigmaps/${idx.collection_listings}/keys?key.address=${encodeURIComponent(
+            nftContract,
+          )}&select=value&limit=1`,
+          `${base}/v1/bigmaps/${idx.collection_listings}/keys?key.value=${encodeURIComponent(
+            nftContract,
+          )}&select=value&limit=1`,
+        ];
+        for (const url of variants) {
+          const rows = await jFetch(url, 1).catch(() => null);
+          if (Array.isArray(rows) && rows[0]?.value) {
+            holder = rows[0].value;
+            break;
+          }
+        }
       }
-      const values = entry.value || {};
-      // Each entry.value is a map keyed by listing nonce.  Iterate
-      // through all listing details to process each active listing.
-      for (const listing of Object.values(values)) {
-        if (!listing || typeof listing !== 'object') continue;
-        const tokenId = Number(listing.token_id ?? listing.tokenId);
-        let price = listing.price ?? listing.priceMutez;
-        let amount = listing.amount ?? listing.quantity ?? listing.amountTokens;
-        // Convert numeric strings to numbers
-        price = typeof price === 'string' ? Number(price) : price;
-        amount = typeof amount === 'string' ? Number(amount) : amount;
-        const active = listing.active !== false;
-        if (!active || !Number.isFinite(tokenId) || !Number.isFinite(price) || amount <= 0) continue;
-        const prev = byToken.get(tokenId);
-        if (!prev || price < prev.priceMutez) {
-          byToken.set(tokenId, { contract: nftContract, tokenId, priceMutez: price });
+      if (holder && typeof holder === 'object') {
+        // holder: { [tokenId]: { [nonce]: listing } }
+        for (const [tid, nonceMap] of Object.entries(holder)) {
+          if (nonceMap && typeof nonceMap === 'object') {
+            for (const listing of Object.values(nonceMap)) push(tid, listing);
+          }
         }
       }
     }
-  } catch {
-    /* ignore network errors; return empty list */
+
+    // Fallback: listings → scan active keys and filter to collection
+    if (idx.listings) {
+      let entries = [];
+      // Try server‑side filter first
+      const tryUrls = [
+        `${base}/v1/bigmaps/${idx.listings}/keys?active=true&select=key,value&value.nft_contract=${encodeURIComponent(
+          nftContract,
+        )}&limit=10000`,
+        `${base}/v1/bigmaps/${idx.listings}/keys?active=true&select=key,value&limit=10000`,
+      ];
+      for (const url of tryUrls) {
+        entries = await jFetch(url, 1).catch(() => []);
+        if (Array.isArray(entries) && entries.length) break;
+      }
+      for (const entry of entries) {
+        const keyAddr = addrFromKey(entry?.key);
+        if (!isKt(keyAddr) || keyAddr.toLowerCase() !== nftContract.toLowerCase()) continue;
+        const v = entry?.value;
+        // Shape A: value is the listing object
+        const looksListing =
+          v && typeof v === 'object' && ('price' in v || 'priceMutez' in v) && ('token_id' in v || 'tokenId' in v);
+        if (looksListing) {
+          const tokenId = Number(v.token_id ?? v.tokenId);
+          push(tokenId, v);
+          continue;
+        }
+        // Shape B: nested map(s) → walk them
+        for (const listing of walkListings(v)) {
+          const tokenId = Number(listing.token_id ?? listing.tokenId);
+          push(tokenId, listing);
+        }
+      }
+    }
   }
+
   return Array.from(byToken.values());
 }
 
-/* What changed & why: r4 – Removed an unused TZKT_API import to clean
-   up the module and bumped the revision.  The helper continues to
-   derive the TzKT base per network and the existing enumeration
-   logic remains unchanged. */
+/* What changed & why: r62 — Fixed “no active listings” by tolerating both
+   index names (`collection_listings` and `listings`), normalising TzKT key
+   shapes, and walking nested values. Keeps r7 explore page contract. */

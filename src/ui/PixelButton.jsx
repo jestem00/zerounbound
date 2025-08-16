@@ -1,9 +1,9 @@
-/*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues with love for the Tezos community
-  File:    src/ui/PixelButton.jsx
-  Rev :    r638   2025‑09‑20
-  Summary: adds size variants (sm/xs) for compact controls
-──────────────────────────────────────────────────────────────*/
+/*Developed by @jams2blues
+  File: src/ui/PixelButton.jsx
+  Rev:  r640
+  Summary: Absorb `noActiveFx` via transient prop to prevent
+           React unknown‑prop warnings; refine active effect. */
+
 import React from 'react';
 import styled, { css } from 'styled-components';
 
@@ -28,18 +28,15 @@ const base = css`
   font: 700 clamp(0.75rem, 2.8vw, 1rem)/1 'PixeloidSans', monospace;
   text-transform: uppercase;
   cursor: pointer; user-select: none;
-  transition: transform 80ms, filter 80ms, background 120ms;
+  transition: transform 80ms, filter 80ms, background 120ms, box-shadow 80ms;
   max-width: 100%;
 
   background: var(--zu-accent);
   color: var(--zu-btn-fg);
   &:hover  { background: var(--zu-accent-hover); }
-  &:active { transform: translateY(2px);
-             box-shadow: 0 0 0 2px var(--zu-bg); }
-  &:focus  { outline: none;
-             box-shadow: 0 0 0 2px #fff, 0 0 0 4px #ff2d2d; }
-  &[disabled] { filter: grayscale(1);
-                cursor: not-allowed; box-shadow: none; }
+  &:active { transform: translateY(2px); box-shadow: 0 0 0 2px var(--zu-bg); }
+  &:focus  { outline: none; box-shadow: 0 0 0 2px #fff, 0 0 0 4px #ff2d2d; }
+  &[disabled] { filter: grayscale(1); cursor: not-allowed; box-shadow: none; }
 
   ${({ $size }) => $size === 'sm' && VAR_SM}
   ${({ $size }) => $size === 'xs' && VAR_XS}
@@ -56,10 +53,15 @@ const warn = css`
   &:hover { background: #ff4c4c; }
 `;
 
+const activeOff = css`
+  &:active { transform: none; box-shadow: 0 0 0 2px var(--zu-bg); }
+`;
+
 const StyledButton = styled.button`
   ${base}
   ${({ $sec  }) => $sec  && sec}
   ${({ $warn }) => $warn && warn}
+  ${({ $noActiveFx }) => $noActiveFx && activeOff}
 `;
 
 export default function PixelButton({
@@ -70,6 +72,7 @@ export default function PixelButton({
   'data-sec': dataSec,
   warning = false,
   size = '',          /* '', 'sm', 'xs' */
+  noActiveFx = false, /* absorb custom prop; not forwarded to DOM */
   as,
   href,
   ...rest
@@ -86,13 +89,14 @@ export default function PixelButton({
       $sec={!!dataSec}
       $warn={!!warning}
       $size={size}
+      $noActiveFx={!!noActiveFx}
       {...rest}
     >
       {children}
     </StyledButton>
   );
 }
+
 /* What changed & why:
-   • Introduced `$size` prop with `sm` and new `xs` variant.
-   • Smallest variant used by FullscreenModal controls. */
-/* EOF */
+   • New transient prop `$noActiveFx` prevents React DOM warnings.
+   • Keeps existing styling; active effect can be disabled per‑button. */

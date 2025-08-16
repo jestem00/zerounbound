@@ -1,7 +1,7 @@
 /*Developed by @jams2blues
   File: src/ui/TokenCard.jsx
-  Rev : r42
-  Summary: Attach .preview-1x1; keep down‑scale fit; video-controls hit‑test. */
+  Rev:  r43
+  Summary: Use .preview-1x1 CSS (no inline sizing); MP4s fit/no crop; controls clickable. */
 
 import {
   useState, useMemo, useEffect, useCallback,
@@ -145,8 +145,7 @@ export default function TokenCard({
   /* UI states */
   const preview      = pickDataUri(meta);
   const artifactSvg  = (typeof meta.artifactUri === 'string' && VALID_DATA.test(meta.artifactUri.trim()))
-    ? meta.artifactUri.trim()
-    : '';
+    ? meta.artifactUri.trim() : '';
   const fsUri        = (scriptHaz && allowScr && artifactSvg) ? artifactSvg : preview;
 
   const [thumbOk, setThumbOk]   = useState(true);
@@ -157,8 +156,8 @@ export default function TokenCard({
   const [termsOk,    setTermsOk]    = useState(false);
 
   /* author / creator merge + “more…” toggle */
-  const authors  = authorArray(meta);
-  const creators = creatorArray(meta);
+  const authors  = toArray(meta.authors);
+  const creators = toArray(meta.creators);
   const showCreatorsLine = creators.length > 0 && authors.join() !== creators.join();
   const [showAllAuthors, setShowAllAuthors] = useState(false);
   const [showAllCreators, setShowAllCreators] = useState(false);
@@ -268,8 +267,7 @@ export default function TokenCard({
               mime={meta.mimeType}
               allowScripts={scriptHaz && allowScr}
               onInvalid={() => setThumbOk(false)}
-              /* Down‑scale only; avoid cropping; center media. */
-              style={{ display:'block', width:'auto', height:'auto', maxWidth:'100%', maxHeight:'100%', objectFit:'contain', objectPosition:'center' }}
+              /* No inline sizing — CSS .preview-1x1 enforces contain fit for IMG/VIDEO */
             />
           )}
 
@@ -301,7 +299,7 @@ export default function TokenCard({
           >⛶</FSBtn>
         </ThumbWrap>
 
-        {/* meta info (no VIEW button; tile is the link) */}
+        {/* meta info */}
         <Meta>
           <Row>
             <span title={getIntegrityInfo(integrity.status).label} style={{ cursor:'pointer', fontSize:'1.1rem' }}>
@@ -334,8 +332,8 @@ export default function TokenCard({
           {meta.mimeType && (
             <p>
               FileType:&nbsp;
-              {downloadAllowed && artifact
-                ? <a href={artifact} download style={{ color:'inherit' }}>{meta.mimeType}</a>
+              {downloadAllowed && meta.artifactUri
+                ? <a href={meta.artifactUri} download style={{ color:'inherit' }}>{meta.mimeType}</a>
                 : meta.mimeType}
             </p>
           )}
@@ -352,7 +350,7 @@ export default function TokenCard({
           <p style={{ marginTop:'4px', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
             Collection:&nbsp;
             <a href={`/contracts/${contractAddress}`} style={{ color:'var(--zu-accent-sec,#6ff)', textDecoration:'none' }}>
-              {contractName || formatEntry(contractAddress)}
+              {contractName}
             </a>
           </p>
         </Meta>
@@ -428,7 +426,7 @@ TokenCard.propTypes = {
   contractName   : PropTypes.string,
   contractAdmin  : PropTypes.string,
 };
-/* What changed & why (r42):
-   • Use .preview-1x1 for square, no-crop fit.
-   • Click-through respects native media controls band.
-   • Kept prior feature parity; no layout regressions. */ /* EOF */
+
+/* What changed & why (r43):
+   • Removed inline width/height; let .preview-1x1 CSS size IMG/VIDEO (no crop).
+   • Preserved controls band hit-test + fullscreen affordance. */

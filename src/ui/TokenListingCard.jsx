@@ -1,7 +1,8 @@
 /*Developed by @jams2blues
   File: src/ui/TokenListingCard.jsx
-  Rev:  r1232
-  Summary: Attach .preview-1x1; no-crop fit; precise video-controls hit-test; remove stray prop. */
+  Rev:  r1233
+  Summary: Fix BUY press behavior: remove card :active shift, disable
+           button press‑shrink, and guard bubbling for reliable clicks. */
 
 import React, {
   useEffect,
@@ -41,9 +42,9 @@ const Card = styled.article`
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  transition: box-shadow .15s, transform .05s;
+  transition: box-shadow .15s;
   &:hover { box-shadow: 0 0 6px var(--zu-accent-sec,#ff0); }
-  &:active { transform: translateY(1px); }
+  /* NOTE: removed &:active translate that made inner CTAs “jump” */
 `;
 
 const Thumb = styled.div`
@@ -59,7 +60,7 @@ const Thumb = styled.div`
   &:focus-visible { box-shadow: inset 0 0 0 3px rgba(0,200,255,.45); }
 `;
 
-const FSBtn = styled(PixelButton)`
+const FSBtn = styled(PixelButton).attrs({ noActiveFx: true })`
   position: absolute;
   bottom: 4px;
   right: 4px;
@@ -342,12 +343,12 @@ export default function TokenListingCard({
             justifyContent:'center', gap:'6px', padding:'0 8px', flexDirection:'column',
           }}>
             {needsNSFW && (
-              <PixelButton size="sm" warning onClick={(e) => { e.preventDefault(); e.stopPropagation(); setAllowNSFW(true); }}>
+              <PixelButton size="xs" warning noActiveFx onClick={(e) => { e.preventDefault(); e.stopPropagation(); setAllowNSFW(true); }}>
                 NSFW&nbsp;🔞
               </PixelButton>
             )}
             {needsFlash && (
-              <PixelButton size="sm" warning onClick={(e) => { e.preventDefault(); e.stopPropagation(); setAllowFlash(true); }}>
+              <PixelButton size="xs" warning noActiveFx onClick={(e) => { e.preventDefault(); e.stopPropagation(); setAllowFlash(true); }}>
                 Flashing&nbsp;🚨
               </PixelButton>
             )}
@@ -356,8 +357,11 @@ export default function TokenListingCard({
 
         <FSBtn
           size="xs"
-          disabled={!(!hazards.scripts || allowScr)}
-          onClick={(e) => { e.preventDefault(); e.stopPropagation(); (!hazards.scripts || allowScr) ? setFsOpen(true) : askEnableScripts(); }}
+          onMouseDown={(e) => { e.stopPropagation(); }}
+          onClick={(e) => {
+            e.preventDefault(); e.stopPropagation();
+            (!hazards.scripts || allowScr) ? setFsOpen(true) : askEnableScripts();
+          }}
           title={(!hazards.scripts || allowScr) ? 'Fullscreen' : 'Enable scripts first'}
         >
           ⛶
@@ -390,8 +394,10 @@ export default function TokenListingCard({
         <BuyRow>
           <PixelButton
             size="xs"
+            noActiveFx                 /* ← do not “shrink” on press */
             disabled={cardBuyDisabled}
-            onClick={() => setBuyOpen(true)}
+            onMouseDown={(e) => { e.stopPropagation(); }}  /* prevent tile click */
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setBuyOpen(true); }}
             title={
               isSeller
                 ? 'You cannot buy your own listing'
@@ -473,7 +479,8 @@ TokenListingCard.propTypes = {
   metadata    : PropTypes.object,
   contractName: PropTypes.string,
 };
-/* What changed & why (r1232):
-   • Use .preview-1x1 to enforce square, no-crop fitting.
-   • Respect native media controls while keeping tile clickable.
-   • Removed stray isOpen prop to avoid leaking unknown props. */ /* EOF */
+
+/* What changed & why (r1233):
+   • Removed Card &:active translate that caused “jump”.
+   • BUY now uses noActiveFx and stops propagation for reliable clicks.
+   • FS overlay button also disables press‑shrink. */ /* EOF */

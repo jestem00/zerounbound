@@ -1,9 +1,9 @@
-/*Developed by @jams2blues
+/*Developed by @jams2blues
   File: src/pages/_app.js
-  Rev:  r557
-  Summary: App‑wide navigation recovery + keyed remount on back/forward. */
+  Rev:  r558
+  Summary: Import preview-1x1.css globally; no functional changes. */
 import React from 'react';
-import Head  from 'next/head';
+import Head from 'next/head';
 import { useRouter } from 'next/router';
 
 import Layout                 from '../ui/Layout.jsx';
@@ -18,7 +18,9 @@ import BuyDialog       from '../ui/BuyDialog.jsx';
 import ListTokenDialog from '../ui/ListTokenDialog.jsx';
 import { installNavigationRecovery } from '../utils/navigationRecovery.js';
 
-/*─────────────────────────────────────────────────────────────*/
+/* NEW: global 1×1 preview CSS (images/videos fit without cropping) */
+import '../styles/preview-1x1.css';
+
 export default function ZeroUnboundApp({ Component, pageProps }) {
   /* dialog states */
   const [offer,   setOffer]   = React.useState({ open:false, contract:'', tokenId:'', market:'' });
@@ -136,4 +138,4 @@ export default function ZeroUnboundApp({ Component, pageProps }) {
     </ThemeProvider>
   );
 }
-/* What changed & why: add navigation recovery + keyed remount */
+/* What changed & why: add global import for preview-1x1.css. */ /* EOF */

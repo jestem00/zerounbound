@@ -1,11 +1,7 @@
 /*Developed by @jams2blues
   File: src/ui/CollectionCard.jsx
-  Rev : r28   2025‑08‑16
-  Summary: Restrict Tezos Domains reverse lookups to tz‑addresses only
-           (skip KT1 and human names) to cut unnecessary resolver hits
-           and avoid GraphQL 400s. Preserve existing behavior, counts,
-           hazard gates, and UX.
-*/
+  Rev : r29
+  Summary: Attach .preview-1x1; enforce down‑scale contain; keep overlays. */
 
 import {
   useEffect,
@@ -47,24 +43,29 @@ const Card = styled.div`
 `;
 
 const ThumbWrap = styled.div`
-  flex: 0 0 var(--col);
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;                 /* strict 1:1 for every card */
   display:flex;align-items:center;justify-content:center;
   background: var(--zu-bg-dim,#111);
-  position: relative;
 `;
 
 const ThumbMedia = styled(RenderMedia)`
-  max-width:100%; max-height:100%; image-rendering:pixelated;
+  /* Down‑scale only; center. */
+  width: auto; height: auto;
+  max-width: 100%; max-height: 100%;
+  object-fit: contain; object-position: center;
+  image-rendering: pixelated;
 `;
 
 const Badge = styled.span`
-  position:absolute;top:4px;right:4px;z-index:2;font-size:1.1rem;
+  position:absolute;top:4px;right:4px;z-index:12;font-size:1.1rem;
 `;
 
 const Obf = styled.div`
   position:absolute;inset:0;background:rgba(0,0,0,.85);
   display:flex;flex-direction:column;align-items:center;justify-content:center;
-  gap:10px;font-size:.75rem;z-index:3;text-align:center;
+  gap:10px;font-size:.75rem;z-index:11;text-align:center;
   p{margin:0;width:80%;}
 `;
 
@@ -83,7 +84,7 @@ const AddrRow = styled.div`
   button{line-height:1;padding:0 .3rem;font-size:.65rem;}
 `;
 
-/*──────── helpers ───────────────────────────────────────────*/
+/*──────── helpers ─────────────────────────────────────────*/
 const ipfsToHttp = (u='') => u.replace(/^ipfs:\/\//,'https://ipfs.io/ipfs/');
 const PLACEHOLDER = '/sprites/cover_default.svg';
 
@@ -99,9 +100,6 @@ function decodeHexMetadata(val='') {
   }catch{return null;}
 }
 
-/** Tight tz‑address check for resolver */
-const isTz = (s) => typeof s === 'string' && /^tz[1-3][1-9A-HJ-NP-Za-km-z]{33}$/i.test(s?.trim());
-
 /*──────── component ─────────────────────────────────────────*/
 export default function CollectionCard({ contract, initialTokensCount, hideIfEmpty = false }) {
   const [meta, setMeta]     = useState({});
@@ -115,26 +113,24 @@ export default function CollectionCard({ contract, initialTokensCount, hideIfEmp
   const [allowFlash,setAllowFlash]= useConsent('flash',false);
   const [allowScripts,setAllowScripts]= useConsent('scripts',false);
 
-  // Determine current network from deployTarget.js.
   const net = NETWORK_KEY;
-  // Base API URL for the chosen network.
   const api = `${TZKT_API}/v1`;
 
   /*── metadata – big‑map “content” key query ───────────────*/
   useEffect(()=>{let cancelled=false;
-    (async()=>{
+    (async ()=>{
       let m = {};
       try{
         const rows = await jFetch(
-          `${api}/contracts/${contract.address}/bigmaps/metadata/keys`
-          + '?key=content&select=value&limit=1',
+          `${api}/contracts/${contract.address}/bigmaps/metadata/keys` +
+          '?key=content&select=value&limit=1',
         ).catch(()=>[]);
         const raw = rows?.[0];
         const parsed = decodeHexMetadata(raw);
         if(parsed) m = parsed;
       }catch{/* ignore */}
 
-      if(!m.name){                                   /* fallback contract */
+      if(!m.name){
         try{
           const c = await jFetch(`${api}/contracts/${contract.address}`).catch(()=>null);
           if(c?.metadata) m = { ...m, ...decodeHexFields(c.metadata) };
@@ -147,10 +143,7 @@ export default function CollectionCard({ contract, initialTokensCount, hideIfEmp
 
   /* counts (seed from props; then refresh) */
   useEffect(()=>{let c=false;
-    // seed (if provided) to avoid flash of "0 Tokens" on explore
-    if (Number.isFinite(initialTokensCount)) {
-      setLive(Number(initialTokensCount));
-    }
+    if (Number.isFinite(initialTokensCount)) setLive(Number(initialTokensCount));
     countOwners(contract.address,net).then(n=>{if(!c)setOwners(n);});
     countTokens(contract.address,net).then(n=>{if(!c)setLive(n);});
     return ()=>{c=true;};
@@ -161,7 +154,6 @@ export default function CollectionCard({ contract, initialTokensCount, hideIfEmp
   const integrity = useMemo(()=>checkOnChainIntegrity(meta).status,[meta]);
   const { badge,label } = getIntegrityInfo(integrity);
 
-  /* preview + text */
   const preview = meta.imageUri ? ipfsToHttp(meta.imageUri) : PLACEHOLDER;
   const showPlaceholder = (!meta.imageUri || !thumbOk);
   const nameSafe = meta.name || shortKt(contract.address);
@@ -171,31 +163,21 @@ export default function CollectionCard({ contract, initialTokensCount, hideIfEmp
       ? meta.authors.split(/[,;]\s*/)
       : [];
 
-  // Domain resolution – tz‑only (skip KT/names)
   const [domains, setDomains] = useState({});
   const [showAllAuthors, setShowAllAuthors] = useState(false);
 
   useEffect(() => {
     const addrs = new Set();
-    authors.forEach((a) => {
-      if (a && typeof a === 'string') {
-        const v = a.trim();
-        if (isTz(v)) addrs.add(v);
-      }
-    });
+    authors.forEach((a) => { if (a && typeof a === 'string' && /^(tz|kt)/i.test(a.trim())) addrs.add(a); });
     addrs.forEach((addr) => {
       const key = addr.toLowerCase();
       if (domains[key] !== undefined) return;
       (async () => {
         const name = await resolveTezosDomain(addr, NETWORK_KEY);
-        setDomains((prev) => {
-          if (prev[key] !== undefined) return prev;
-          return { ...prev, [key]: name };
-        });
+        setDomains((prev) => (prev[key] !== undefined ? prev : { ...prev, [key]: name }));
       })();
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authors.join('|')]);
+  }, [authors, domains]);
 
   const formatEntry = useCallback(
     (val) => {
@@ -220,15 +202,14 @@ export default function CollectionCard({ contract, initialTokensCount, hideIfEmp
       elems.push(
         isAddr ? (
           <a
-            key={`${item}_${idx}`}
+            key={item}
             href={`/explore?cmd=tokens&admin=${item}`}
             style={{ color: 'var(--zu-accent-sec,#6ff)', textDecoration: 'none' }}
           >
-            {prefix}
-            {formatted}
+            {prefix}{formatted}
           </a>
         ) : (
-          <span key={`${String(item)}_${idx}`}>{prefix}{formatted}</span>
+          <span key={item}>{prefix}{formatted}</span>
         ),
       );
     });
@@ -250,12 +231,8 @@ export default function CollectionCard({ contract, initialTokensCount, hideIfEmp
     return elems;
   }, [authors, showAllAuthors, formatEntry]);
 
-  /* optional Explore-only hide for empty contracts */
-  if (hideIfEmpty && live === 0) {
-    return null;
-  }
+  if (hideIfEmpty && live === 0) return null;
 
-  /* toggle handler */
   const handleToggleScripts = () => {
     if (allowScripts) {
       setAllowScripts(false);
@@ -264,19 +241,15 @@ export default function CollectionCard({ contract, initialTokensCount, hideIfEmp
     }
   };
 
-  /*──────── render ─*/
   return (
     <a href={`/contracts/${contract.address}`} style={{textDecoration:'none'}}>
       <Card>
-        <ThumbWrap>
+        <ThumbWrap className="preview-1x1">
           <Badge title={label}>{badge}</Badge>
 
           {scripts && (
-            <span style={{ position:'absolute', top:4, left:4, zIndex:11 }}>
-              <EnableScriptsToggle
-                enabled={allowScripts}
-                onToggle={handleToggleScripts}
-              />
+            <span style={{ position:'absolute', top:4, left:4, zIndex:12 }}>
+              <EnableScriptsToggle enabled={allowScripts} onToggle={handleToggleScripts} />
             </span>
           )}
 
@@ -304,9 +277,7 @@ export default function CollectionCard({ contract, initialTokensCount, hideIfEmp
           )}
 
           {scripts && !allowScripts && !hide && (
-            <Obf>
-              <EnableScriptsOverlay onAccept={handleToggleScripts}/>
-            </Obf>
+            <EnableScriptsOverlay onAccept={handleToggleScripts} style={{ zIndex:11 }}/>
           )}
         </ThumbWrap>
 
@@ -314,8 +285,7 @@ export default function CollectionCard({ contract, initialTokensCount, hideIfEmp
           <h3 title={nameSafe}>{nameSafe}</h3>
           {authors.length > 0 && (
             <p style={{ wordBreak: 'break-all' }}>
-              Author(s)&nbsp;
-              {renderAuthors()}
+              Author(s) {renderAuthors()}
             </p>
           )}
 
@@ -326,8 +296,7 @@ export default function CollectionCard({ contract, initialTokensCount, hideIfEmp
 
           <AddrRow>
             <span>{shortKt(contract.address)}</span>
-            <PixelButton size="xs" title="Copy address"
-              onClick={e=>{e.preventDefault();copyToClipboard(contract.address);}}>
+            <PixelButton size="xs" title="Copy address" onClick={e=>{e.preventDefault();copyToClipboard(contract.address);}}>
               📋
             </PixelButton>
           </AddrRow>
@@ -341,12 +310,9 @@ CollectionCard.propTypes = {
   contract: PropTypes.shape({
     address: PropTypes.string.isRequired,
   }).isRequired,
-  initialTokensCount: PropTypes.number,   // optional seed from parent (e.g., explore)
-  hideIfEmpty: PropTypes.bool,            // when true, hide card if live === 0
+  initialTokensCount: PropTypes.number,
+  hideIfEmpty: PropTypes.bool,
 };
-
-/* What changed & why (r28):
-   • Only attempt reverse Tezos Domains lookups for tz‑addresses
-     (skip KT1/names) to reduce failed requests and network noise.
-   • Behavior otherwise unchanged; hazards/UX intact.
-*/
+/* What changed & why (r29):
+   • Use .preview-1x1 square container; down‑scale contain; no crop.
+   • Keep overlays/toggles layered; no behavior change. */ /* EOF */

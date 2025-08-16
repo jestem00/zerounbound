@@ -1,0 +1,79 @@
+/*Developed by @jams2blues
+  File: src/styles/preview-1x1.css
+  Rev:  r806
+  Summary: Square previews; IMG/VIDEO fit contain; wrappers fill parent */
+
+/* 1) Square container (keeps every preview box 1:1) */
+.preview-1x1 {
+  aspect-ratio: 1 / 1;
+  position: relative;
+  display: grid;                  /* centers children */
+  place-items: center;
+  overflow: hidden;
+  background-color: var(--preview-bg, #0a0a0a);
+  border-radius: var(--preview-radius, 8px);
+}
+
+/* Fallback for browsers without aspect-ratio support */
+@supports not (aspect-ratio: 1 / 1) {
+  .preview-1x1 { display: block; }
+  .preview-1x1::before {
+    content: "";
+    display: block;
+    padding-top: 100%;
+  }
+  .preview-1x1 > * { position: absolute; inset: 0; }
+}
+
+/* 2) IMAGES — keep full artwork visible (no crop) */
+.preview-1x1 > img,
+.preview-1x1 > picture > img,
+.preview-1x1 > span > img {       /* Next.js <Image> wrapper */
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain !important;
+  object-position: center center;
+  display: block;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Ensure Next.js <Image> wrapper stretches to the frame */
+.preview-1x1 > span { position: absolute !important; inset: 0 !important; }
+
+/* 3) VIDEO — wrapper fills parent; video scales inside with contain */
+.preview-1x1 > video,
+.preview-1x1 > div[data-zu-media="video"] {
+  position: absolute;
+  inset: 0;
+}
+.preview-1x1 > div[data-zu-media="video"] {
+  display: grid;
+  place-items: center;
+}
+.preview-1x1 > video,
+.preview-1x1 > div[data-zu-media="video"] > video {
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain !important;    /* critical for mp4 previews */
+  object-position: center center;
+  background: transparent;
+  outline: none;
+}
+
+/* 4) Optional helper when using background-image thumbnails */
+.preview-1x1.is-bg,
+.preview-1x1[data-bg] {
+  background-repeat: no-repeat;
+  background-position: center center;
+  background-size: contain !important;  /* DO NOT crop */
+}
+
+/* What changed & why: Add explicit VIDEO rules and wrapper fill to fix mp4 clipping. */

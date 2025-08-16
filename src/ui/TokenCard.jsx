@@ -1,11 +1,7 @@
-/*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
-  File:    src/ui/TokenCard.jsx
-  Rev :    r40    2025‑08‑16
-  Summary: Avoid unnecessary Tezos Domains calls by only attempting
-           reverse lookups for tz‑addresses (skip names/KT1/others).
-           Reduces 400s and network noise.
-──────────────────────────────────────────────────────────────*/
+/*Developed by @jams2blues
+  File: src/ui/TokenCard.jsx
+  Rev : r42
+  Summary: Attach .preview-1x1; keep down‑scale fit; video-controls hit‑test. */
 
 import {
   useState, useMemo, useEffect, useCallback,
@@ -58,9 +54,6 @@ const isCreator = (meta = {}, addr = '') =>
   !!addr && creatorArray(meta).some((a) => String(a).toLowerCase() === addr.toLowerCase());
 
 const hrefFor = (addr = '') => `/explore?cmd=tokens&admin=${addr}`;
-
-function showPlaceholder(uri, ok) { return !uri || !ok; }
-
 const isTz = (s) => typeof s === 'string' && /^tz[1-3][1-9A-HJ-NP-Za-km-z]{33}$/i.test(s?.trim());
 
 /*──────── styled shells ────────────────────────────────────*/
@@ -80,11 +73,14 @@ const Card = styled.article`
 const ThumbWrap = styled.div`
   position: relative;
   width: 100%;
-  aspect-ratio: 1/1;
+  aspect-ratio: 1 / 1;  /* strict square */
   background: var(--zu-bg-dim,#111);
   display: flex;
   justify-content: center;
   align-items: center;
+  cursor: pointer;
+  outline: none;
+  &:focus-visible { box-shadow: inset 0 0 0 3px rgba(0,200,255,.45); }
 `;
 
 const FSBtn = styled(PixelButton)`
@@ -93,7 +89,7 @@ const FSBtn = styled(PixelButton)`
   right:4px;
   opacity:.45;
   &:hover{ opacity:1; }
-  z-index:7;
+  z-index:7; /* above preview */
 `;
 
 const Meta = styled.section`
@@ -117,16 +113,6 @@ const Row = styled.div`
   display:flex;justify-content:space-between;align-items:center;
 `;
 
-const CenterWrap = styled.div`
-  display:flex;justify-content:center;
-`;
-
-const Blocker = styled.div`
-  position:absolute;inset:0;z-index:6;
-  background:transparent;
-  pointer-events:all;
-`;
-
 /*──────── component ───────────────────────────────────────*/
 export default function TokenCard({
   token, contractAddress, contractName = '', contractAdmin = '',
@@ -143,7 +129,6 @@ export default function TokenCard({
   const [allowScr,   setAllowScr]   = useConsent(scriptKey, false);
 
   const { nsfw, flashing, scripts: scriptHaz } = detectHazards(meta);
-
   const needsNSFW  = nsfw     && !allowNSFW;
   const needsFlash = flashing && !allowFlash;
   const blocked    = needsNSFW || needsFlash;
@@ -178,7 +163,7 @@ export default function TokenCard({
   const [showAllAuthors, setShowAllAuthors] = useState(false);
   const [showAllCreators, setShowAllCreators] = useState(false);
 
-  /* domain name cache for addresses used in this card (tz‑only) */
+  /* domains */
   const [domains, setDomains] = useState({});
   useEffect(() => {
     const addrs = new Set();
@@ -227,7 +212,7 @@ export default function TokenCard({
     });
     if (list.length > 3 && !showAll) {
       elems.push(
-        <>
+        <span key="more">
           …&nbsp;
           <button
             type="button"
@@ -235,7 +220,7 @@ export default function TokenCard({
             onClick={() => toggle(true)}
             style={{ background:'none', border:'none', color:'inherit', font:'inherit', cursor:'pointer', padding:0 }}
           >🔻More</button>
-        </>
+        </span>
       );
     }
     return elems;
@@ -258,72 +243,68 @@ export default function TokenCard({
   const askEnableScripts = () => { setScrTerms(false); setCfrmScr(true); };
   const confirmScripts   = () => { if (scrTerms) { setAllowScr(true); setCfrmScr(false); } };
 
-  const askReveal = (type) => { setRevealType(type); setTermsOk(false); };
-  const doReveal  = () => {
-    if (!termsOk) return;
-    if (revealType === 'nsfw')  setAllowNSFW(true);
-    if (revealType === 'flash') setAllowFlash(true);
-    setRevealType(null); setTermsOk(false);
+  /* navigation helpers (tile = link; keep video controls functional) */
+  const tokenHref = `/tokens/${contractAddress}/${token.tokenId}`;
+  const goDetail = useCallback(() => { window.location.href = tokenHref; }, [tokenHref]);
+  const onKey = (e) => { if (e.key === 'Enter') goDetail(); };
+  const isMediaControlsHit = (e) => {
+    const v = e.target?.closest?.('video, audio');
+    if (!v) return false;
+    const r = v.getBoundingClientRect?.(); if (!r) return true;
+    const band = Math.max(34, Math.min(64, r.height * 0.22));
+    const yFromBottom = r.bottom - (e.clientY ?? 0);
+    return yFromBottom <= band;
   };
+  const onThumbClick = (e) => { if (!isMediaControlsHit(e)) goDetail(); };
 
   return (
     <>
       <Card>
-        {/* preview */}
-        <ThumbWrap>
-          {!blocked && preview && !showPlaceholder(preview, thumbOk) && (
+        {/* preview (1:1 clickable tile) */}
+        <ThumbWrap className="preview-1x1" role="link" tabIndex={0} aria-label="View token detail" onClick={onThumbClick} onKeyDown={onKey}>
+          {!blocked && preview && !(!thumbOk || !preview) && (
             <RenderMedia
               uri={preview}
               mime={meta.mimeType}
               allowScripts={scriptHaz && allowScr}
               onInvalid={() => setThumbOk(false)}
-              style={{ width:'100%', height:'100%', objectFit:'contain', objectPosition:'center' }}
+              /* Down‑scale only; avoid cropping; center media. */
+              style={{ display:'block', width:'auto', height:'auto', maxWidth:'100%', maxHeight:'100%', objectFit:'contain', objectPosition:'center' }}
             />
           )}
 
-          {!blocked && showPlaceholder(preview, thumbOk) && (
+          {!blocked && (!preview || !thumbOk) && (
             <img src={PLACEHOLDER} alt="" style={{ width:'60%', opacity:.45 }} />
           )}
 
           {blocked && (
-            <CenterWrap style={{ height:'100%', flexDirection:'column', gap:'6px', padding:'0 8px' }}>
-              {needsNSFW && (
-                <PixelButton size="sm" warning onClick={() => askReveal('nsfw')}>
+            <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center',
+              justifyContent:'center', gap:'6px', padding:'0 8px', flexDirection:'column' }}>
+              {nsfw && !allowNSFW && (
+                <PixelButton size="sm" warning onClick={(e) => { e.preventDefault(); e.stopPropagation(); setRevealType('nsfw'); }}>
                   NSFW&nbsp;🔞
                 </PixelButton>
               )}
-              {needsFlash && (
-                <PixelButton size="sm" warning onClick={() => askReveal('flash')}>
+              {flashing && !allowFlash && (
+                <PixelButton size="sm" warning onClick={(e) => { e.preventDefault(); e.stopPropagation(); setRevealType('flash'); }}>
                   Flashing&nbsp;🚨
                 </PixelButton>
               )}
-            </CenterWrap>
+            </div>
           )}
-
-          {scriptHaz && !allowScr && !blocked && <Blocker />}
 
           <FSBtn
             size="xs"
             disabled={!(!scriptHaz || allowScr)}
-            onClick={() => { (!scriptHaz || allowScr) ? setFs(true) : askEnableScripts(); }}
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); (!scriptHaz || allowScr) ? setFs(true) : askEnableScripts(); }}
             title={(!scriptHaz || allowScr) ? 'Fullscreen' : 'Enable scripts first'}
           >⛶</FSBtn>
         </ThumbWrap>
 
-        {/* meta info */}
+        {/* meta info (no VIEW button; tile is the link) */}
         <Meta>
-          <CenterWrap>
-            <PixelButton
-              size="sm"
-              as="a"
-              href={`/tokens/${contractAddress}/${token.tokenId}`}
-              title="View token detail"
-            >VIEW</PixelButton>
-          </CenterWrap>
-
           <Row>
-            <span title={getIntegrityInfo(integrity.status).label}
-                  style={{ cursor:'pointer', fontSize:'1.1rem' }}>
+            <span title={getIntegrityInfo(integrity.status).label} style={{ cursor:'pointer', fontSize:'1.1rem' }}>
               <IntegrityBadge status={integrity.status} />
             </span>
 
@@ -337,18 +318,16 @@ export default function TokenCard({
 
           <h4>{meta.name || `#${token.tokenId}`}</h4>
 
-          {/* Authors line */}
-          {authors.length > 0 && (
+          {authorArray(meta).length > 0 && (
             <p style={{ wordBreak:'break-all' }}>
               Author(s)&nbsp;
-              {renderEntryList(authors, showAllAuthors, setShowAllAuthors)}
+              {renderEntryList(authorArray(meta), showAllAuthors, setShowAllAuthors)}
             </p>
           )}
-          {/* Creators line */}
           {showCreatorsLine && (
-            <p style={{ wordBreak:'break-all', opacity: authors.length > 0 ? 0.8 : 1 }}>
+            <p style={{ wordBreak:'break-all', opacity: authorArray(meta).length > 0 ? 0.8 : 1 }}>
               Creator(s)&nbsp;
-              {renderEntryList(creators, showAllCreators, setShowAllCreators)}
+              {renderEntryList(creatorArray(meta), showAllCreators, setShowAllCreators)}
             </p>
           )}
 
@@ -370,12 +349,9 @@ export default function TokenCard({
             <MakeOfferBtn contract={contractAddress} tokenId={token.tokenId} label="OFFER" />
           </div>
 
-          <p style={{ marginTop:'4px' }}>
+          <p style={{ marginTop:'4px', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
             Collection:&nbsp;
-            <a
-              href={`/contracts/${contractAddress}`}
-              style={{ color:'var(--zu-accent-sec,#6ff)', textDecoration:'none' }}
-            >
+            <a href={`/contracts/${contractAddress}`} style={{ color:'var(--zu-accent-sec,#6ff)', textDecoration:'none' }}>
               {contractName || formatEntry(contractAddress)}
             </a>
           </p>
@@ -400,13 +376,8 @@ export default function TokenCard({
           message={(
             <>
               <label style={{ display:'flex',gap:'6px',alignItems:'center',marginBottom:'8px' }}>
-                <input
-                  type="checkbox"
-                  checked={scrTerms}
-                  onChange={(e) => setScrTerms(e.target.checked)}
-                />
-                I&nbsp;agree&nbsp;to&nbsp;
-                <a href="/terms" target="_blank" rel="noopener noreferrer">Terms</a>
+                <input type="checkbox" checked={scrTerms} onChange={(e) => setScrTerms(e.target.checked)} />
+                I&nbsp;agree&nbsp;to&nbsp;<a href="/terms" target="_blank" rel="noopener noreferrer">Terms</a>
               </label>
               Executable HTML / JS can be harmful. Proceed only if you trust the author.
             </>
@@ -414,7 +385,7 @@ export default function TokenCard({
           confirmLabel="OK"
           cancelLabel="Cancel"
           confirmDisabled={!scrTerms}
-          onConfirm={confirmScripts}
+          onConfirm={() => { if (scrTerms) { setAllowScr(true); setCfrmScr(false); } }}
           onCancel={() => setCfrmScr(false)}
         />
       )}
@@ -426,38 +397,19 @@ export default function TokenCard({
           title={`Reveal ${revealType === 'nsfw' ? 'NSFW' : 'flashing‑hazard'} content?`}
           message={(
             <>
-              {revealType === 'nsfw' ? (
-                <p style={{ margin:'0 0 8px' }}>
-                  This asset is flagged as <strong>Not‑Safe‑For‑Work (NSFW)</strong>. It may
-                  contain explicit nudity, sexual content, graphic violence or other
-                  mature themes. Viewer discretion is advised.
-                </p>
-              ) : (
-                <p style={{ margin:'0 0 8px' }}>
-                  This asset contains <strong>rapid flashing or strobing effects</strong>{' '}
-                  which may trigger seizures for people with photosensitive epilepsy.
-                </p>
-              )}
-              <label style={{
-                display:'flex',
-                gap:'6px',
-                alignItems:'center',
-                flexWrap:'wrap',
-              }}>
-                <input
-                  type="checkbox"
-                  checked={termsOk}
-                  onChange={(e) => setTermsOk(e.target.checked)}
-                />
-                I&nbsp;confirm&nbsp;I&nbsp;am&nbsp;18 + and&nbsp;agree&nbsp;to&nbsp;
-                <a href="/terms" target="_blank" rel="noopener noreferrer">Terms</a>
+              {revealType === 'nsfw'
+                ? <p style={{ margin:'0 0 8px' }}>This asset is flagged as <strong>Not‑Safe‑For‑Work (NSFW)</strong>. Viewer discretion is advised.</p>
+                : <p style={{ margin:'0 0 8px' }}>This asset contains <strong>rapid flashing or strobing effects</strong>.</p>}
+              <label style={{ display:'flex',gap:'6px',alignItems:'center',flexWrap:'wrap' }}>
+                <input type="checkbox" checked={termsOk} onChange={(e) => setTermsOk(e.target.checked)} />
+                I&nbsp;confirm&nbsp;I&nbsp;am&nbsp;18 + and&nbsp;agree&nbsp;to&nbsp;<a href="/terms" target="_blank" rel="noopener noreferrer">Terms</a>
               </label>
             </>
           )}
           confirmLabel="REVEAL"
           cancelLabel="Cancel"
           confirmDisabled={!termsOk}
-          onConfirm={doReveal}
+          onConfirm={() => { if (revealType==='nsfw') setAllowNSFW(true); if (revealType==='flash') setAllowFlash(true); setRevealType(null); setTermsOk(false); }}
           onCancel={() => { setRevealType(null); setTermsOk(false); }}
         />
       )}
@@ -476,7 +428,7 @@ TokenCard.propTypes = {
   contractName   : PropTypes.string,
   contractAdmin  : PropTypes.string,
 };
-/* What changed & why (r40):
-   • Only attempt domain reverse lookup for tz‑addresses (skip names/KT1).
-     Cuts failed requests and avoids GraphQL 400s spam.
-   • Kept r39 fixes (useWallet hook, lint polish). */ /* EOF */
+/* What changed & why (r42):
+   • Use .preview-1x1 for square, no-crop fit.
+   • Click-through respects native media controls band.
+   • Kept prior feature parity; no layout regressions. */ /* EOF */

@@ -1,9 +1,9 @@
-/*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
-  File:    src/ui/CollectionCard.jsx
-  Rev :    r26   2025‑07‑22
-  Summary: use deployTarget for network detection and TzKT API
-─────────────────────────────────────────────────────────────*/
+/*Developed by @jams2blues
+  File: src/ui/CollectionCard.jsx
+  Rev : r27   2025‑08‑16
+  Summary: Accept initialTokensCount + hideIfEmpty; seed counts from
+           props; optionally return null when live count is 0 (Explore). */
+
 import {
   useEffect,
   useState,
@@ -19,8 +19,7 @@ import { checkOnChainIntegrity }  from '../utils/onChainValidator.js';
 import { getIntegrityInfo }       from '../constants/integrityBadges.js';
 import countOwners                from '../utils/countOwners.js';
 import countTokens                from '../utils/countTokens.js';
-import { shortKt, copyToClipboard } from '../utils/formatAddress.js';
-import { shortAddr } from '../utils/formatAddress.js';
+import { shortKt, copyToClipboard, shortAddr } from '../utils/formatAddress.js';
 import RenderMedia                from '../utils/RenderMedia.jsx';
 import PixelButton                from './PixelButton.jsx';
 import { jFetch }                 from '../core/net.js';
@@ -29,17 +28,8 @@ import {
   EnableScriptsToggle,
   EnableScriptsOverlay,
 } from './EnableScripts.jsx';
-// Import network constants from deployTarget.  This avoids reliance on
-// process.env.NEXT_PUBLIC_NETWORK, which is only substituted at build
-// time and may default to ghostnet in development.  NETWORK_KEY
-// resolves to 'mainnet' or 'ghostnet'; TZKT_API provides the base
-// TzKT domain for the selected network.  See src/config/deployTarget.js.
-import { NETWORK_KEY, TZKT_API } from '../config/deployTarget.js';
-
-// Domain resolver for reverse lookups.  This helper queries Tezos
-// Domains via GraphQL and falls back to cached results.  Domains are
-// resolved per-network (mainnet vs ghostnet) using NETWORK_KEY.
-import { resolveTezosDomain } from '../utils/resolveTezosDomain.js';
+import { NETWORK_KEY, TZKT_API }  from '../config/deployTarget.js';
+import { resolveTezosDomain }     from '../utils/resolveTezosDomain.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -107,22 +97,21 @@ function decodeHexMetadata(val='') {
 }
 
 /*──────── component ─────────────────────────────────────────*/
-export default function CollectionCard({ contract }) {
-  const [meta, setMeta]   = useState({});
-  const [owners,setOwners]= useState(null);
-  const [live,  setLive]  = useState(null);
-  const [thumbOk,setThumbOk]=useState(true);
+export default function CollectionCard({ contract, initialTokensCount, hideIfEmpty = false }) {
+  const [meta, setMeta]     = useState({});
+  const [owners,setOwners]  = useState(null);
+  const [live,  setLive]    = useState(
+    Number.isFinite(initialTokensCount) ? Number(initialTokensCount) : null,
+  );
+  const [thumbOk,setThumbOk]= useState(true);
 
   const [allowNSFW,setAllowNSFW]= useConsent('nsfw',false);
   const [allowFlash,setAllowFlash]= useConsent('flash',false);
   const [allowScripts,setAllowScripts]= useConsent('scripts',false);
 
-  // Determine current network from deployTarget.js.  Falling back to
-  // process.env will cause mismatches in local dev when NEXT_PUBLIC_NETWORK
-  // is undefined.  NETWORK_KEY returns 'mainnet' or 'ghostnet'.
+  // Determine current network from deployTarget.js.
   const net = NETWORK_KEY;
-  // Base API URL for the chosen network.  Append /v1 to use the v1
-  // endpoints for tokens, contracts and bigmaps.
+  // Base API URL for the chosen network.
   const api = `${TZKT_API}/v1`;
 
   /*── metadata – big‑map “content” key query ───────────────*/
@@ -150,12 +139,16 @@ export default function CollectionCard({ contract }) {
     return ()=>{cancelled=true;};
   },[contract.address,api]);
 
-  /* counts */
+  /* counts (seed from props; then refresh) */
   useEffect(()=>{let c=false;
+    // seed (if provided) to avoid flash of "0 Tokens" on explore
+    if (Number.isFinite(initialTokensCount)) {
+      setLive(Number(initialTokensCount));
+    }
     countOwners(contract.address,net).then(n=>{if(!c)setOwners(n);});
     countTokens(contract.address,net).then(n=>{if(!c)setLive(n);});
     return ()=>{c=true;};
-  },[contract.address,net]);
+  },[contract.address,net,initialTokensCount]);
 
   const { nsfw,flashing,scripts } = detectHazards(meta);
   const hide  = (nsfw&&!allowNSFW)||(flashing&&!allowFlash);
@@ -172,14 +165,10 @@ export default function CollectionCard({ contract }) {
       ? meta.authors.split(/[,;]\s*/)
       : [];
 
-  // --------------------------------------------------------------
-  // Domain resolution state.  We cache resolved .tez domains for
-  // author addresses using a lowercase key.  Lookups are performed
-  // only once per address per component instance.
+  // Domain resolution
   const [domains, setDomains] = useState({});
   const [showAllAuthors, setShowAllAuthors] = useState(false);
 
-  // Resolve domain names for all addresses in the authors list.
   useEffect(() => {
     const addrs = new Set();
     authors.forEach((a) => {
@@ -200,9 +189,6 @@ export default function CollectionCard({ contract }) {
     });
   }, [authors]);
 
-  // Format a single entry: if a domain is resolved, use it; if the
-  // string contains a dot (likely a custom name or domain) leave it
-  // unmodified; otherwise abbreviate tz/KT addresses via shortAddr().
   const formatEntry = useCallback(
     (val) => {
       if (!val || typeof val !== 'string') return String(val || '');
@@ -216,9 +202,6 @@ export default function CollectionCard({ contract }) {
     [domains],
   );
 
-  // Render authors with optional expansion.  When not showing all,
-  // only the first three entries are displayed; a toggle is appended
-  // when more items exist.
   const renderAuthors = useCallback(() => {
     const list = showAllAuthors ? authors : authors.slice(0, 3);
     const elems = [];
@@ -243,7 +226,7 @@ export default function CollectionCard({ contract }) {
     });
     if (authors.length > 3 && !showAllAuthors) {
       elems.push(
-        <>
+        <span key="authors-more">
           …&nbsp;
           <button
             type="button"
@@ -253,17 +236,22 @@ export default function CollectionCard({ contract }) {
           >
             🔻More
           </button>
-        </>,
+        </span>,
       );
     }
     return elems;
   }, [authors, showAllAuthors, formatEntry]);
 
+  /* optional Explore-only hide for empty contracts */
+  if (hideIfEmpty && live === 0) {
+    return null;
+  }
+
   /* toggle handler */
   const handleToggleScripts = () => {
     if (allowScripts) {
       setAllowScripts(false);
-    } else if (window.confirm('Enable executable scripts for this media?')) {
+    } else if (typeof window !== 'undefined' && window.confirm('Enable executable scripts for this media?')) {
       setAllowScripts(true);
     }
   };
@@ -345,13 +333,11 @@ CollectionCard.propTypes = {
   contract: PropTypes.shape({
     address: PropTypes.string.isRequired,
   }).isRequired,
+  initialTokensCount: PropTypes.number,   // optional seed from parent (e.g., explore)
+  hideIfEmpty: PropTypes.bool,            // when true, hide card if live === 0
 };
-/* What changed & why:
-   • Replaced environment‑based network detection with imports from
-     deployTarget.js to ensure correct network selection in both
-     development and production.  process.env.NEXT_PUBLIC_NETWORK is
-     only replaced at build time and may default to ghostnet, causing
-     mainnet pages to fetch testnet data.  We now derive net and API
-     base directly from deployTarget.
-*/
-/* EOF */
+
+/* What changed & why (r27):
+   • New props `initialTokensCount` and `hideIfEmpty` let Explore
+     seed counts and suppress empty collections, eliminating “0 Tokens”
+     cards on the grid.  Counts are still refreshed asynchronously. */

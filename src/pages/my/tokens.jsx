@@ -1,15 +1,14 @@
 /*Developed by @jams2blues
   File: src/pages/my/tokens.jsx
-  Rev:  r81
-  Summary: Solid "My Tokens" fix. Creations = tokens actually minted by me
-           (creator|firstMinter|creators/authors match). Owned excludes any
-           minted-by-me and any admin’d collections. Adds creators cleanup
-           to prevent Tezos Domains 400s; robust ZeroContract gating. */
+  Rev:  r82
+  Summary: Fix wallet hook + Owned logic (include tokens from admin’d
+           collections if not minted by me); keep ZeroContract gating,
+           creators/authors cleanup, /v1 guard, and UX/pagination. */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import styledPkg from 'styled-components';
 
-import { useWalletContext } from '../../contexts/WalletContext.js';
+import { useWallet } from '../../contexts/WalletContext.js';
 import { TZKT_API, NETWORK_KEY } from '../../config/deployTarget.js';
 import ExploreNav from '../../ui/ExploreNav.jsx';
 import PixelHeading from '../../ui/PixelHeading.jsx';
@@ -19,7 +18,6 @@ import TokenCard from '../../ui/TokenCard.jsx';
 import { jFetch } from '../../core/net.js';
 import decodeHexFields from '../../utils/decodeHexFields.js';
 import hashMatrix from '../../data/hashMatrix.json';
-import { discoverCreated } from '../../utils/contractDiscovery.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -42,7 +40,8 @@ const Grid = styled.div`
     minmax(clamp(160px, 18vw, 220px), 1fr)
   );
   gap: 1rem;
-  width: 100%;
+  width: 100%
+  ;
   margin-top: 1rem;
 `;
 const Center = styled.div`
@@ -82,7 +81,6 @@ function normalizeCreatorsField(src) {
   const out = [];
   const push = (v) => {
     if (typeof v !== 'string') return;
-    // split on commas, semicolons, or whitespace/newlines
     const parts = v.split(/[,\s;]+/).map((x) => x.trim()).filter(Boolean);
     for (const p of parts) {
       if (isTz(p)) out.push(p.toLowerCase());
@@ -94,12 +92,10 @@ function normalizeCreatorsField(src) {
       if (typeof v === 'string') push(v);
       else if (v && typeof v.address === 'string') push(v.address);
       else if (v && typeof v === 'object') {
-        // flatten any object-ish creators
         Object.values(v).forEach((x) => push(String(x || '')));
       }
     }
   } else if (typeof src === 'string') {
-    // if JSON array string, try parse; else split directly
     try {
       const parsed = JSON.parse(src);
       if (Array.isArray(parsed)) return normalizeCreatorsField(parsed);
@@ -121,7 +117,6 @@ function isValidPreview(m = {}) {
     'mediaUri',   'media_uri',
   ];
   const mediaRe = /^data:(image\/|video\/|audio\/)/i;
-  // Pick the first preview data URI
   let uri = null;
   for (const k of keys) {
     const v = m && typeof m === 'object' ? m[k] : undefined;
@@ -155,7 +150,6 @@ function isValidPreview(m = {}) {
     let binary;
     if (typeof atob === 'function') binary = atob(b64);
     else {
-      // SSR safety: Buffer may exist in Node
       // eslint-disable-next-line no-undef
       const buf = Buffer.from(b64, 'base64');
       binary = String.fromCharCode.apply(null, buf);
@@ -190,7 +184,7 @@ function isValidPreview(m = {}) {
     if (mime === 'image/webp') {
       return binary.slice(0, 4) === 'RIFF' && binary.slice(8, 12) === 'WEBP';
     }
-    return true; // accept other media types (audio/video/svg…)
+    return true;
   } catch {
     return false;
   }
@@ -205,12 +199,10 @@ const VALID_TYPE_HASHES = new Set(
  * Component
  *───────────────────────────────────────────────────────────*/
 export default function MyTokens() {
-  const { address, toolkit } = useWalletContext() || {};
+  const walletCtx = useWallet() || {};
+  const address = walletCtx.walletAddress || walletCtx.address || '';
+  const { toolkit } = walletCtx || {};
   const tzktV1 = useTzktV1Base(toolkit);
-  const network = useMemo(
-    () => (tzktV1.includes('ghostnet') ? 'ghostnet' : 'mainnet'),
-    [tzktV1]
-  );
 
   const [tab, setTab] = useState('creations'); // 'creations' | 'owned'
   const [creations, setCreations] = useState([]);
@@ -307,7 +299,6 @@ export default function MyTokens() {
     const results = await Promise.all(urls.map((u) => jFetch(u).catch(() => [])));
     const all = results.flat().filter(Boolean);
 
-    // typeHash gating
     const cSet = new Set(all.map((r) => r?.contract?.address || r?.contract).filter(Boolean));
     const typeMap = await fetchTypeHashes([...cSet]);
 
@@ -329,7 +320,6 @@ export default function MyTokens() {
       seen.add(key);
       out.push(t);
     }
-    // newest first by tokenId (best we can without firstTime in select)
     out.sort((a, b) => Number(b.tokenId) - Number(a.tokenId));
     return out;
   }, [tzktV1, fetchTypeHashes, prepareToken]);
@@ -340,18 +330,13 @@ export default function MyTokens() {
     setPhase('loading'); setError(null); setVisible(24);
 
     try {
-      // Admin collections (for excluding from "Owned")
-      const createdContracts = await discoverCreated(address, network);
-      if (signal.aborted) return;
-      const adminSet = new Set((createdContracts || []).map((c) => c.address));
-
       // CREATIONS: strictly tokens minted by me (creator/firstMinter/metadata creators|authors)
       const minted = await fetchMintedBy(address);
       if (signal.aborted) return;
 
-      // OWNED: balances where (a) ZeroContract, (b) not admin collection, (c) NOT minted by me
+      // OWNED: balances where (a) ZeroContract, (b) NOT minted by me (even if I'm admin of the collection)
       const balRows = await jFetch(
-        `${tzktV1}/tokens/balances?account=${address}&balance.ne=0&limit=1000`
+        `${tzktV1}/tokens/balances?account=${encodeURIComponent(address)}&balance.ne=0&limit=1000`
       ).catch(() => []);
       const balances = Array.isArray(balRows) ? balRows : [];
 
@@ -369,33 +354,34 @@ export default function MyTokens() {
       const seenO = new Set();
       const finalOwned = [];
       for (const [cAddr, tId, tokObj] of ownedTriples) {
-        // Only ZeroContract collections
         const th = String(typeMapOwned.get(cAddr) || '');
         if (!VALID_TYPE_HASHES.has(th)) continue;
-        // Exclude tokens from collections the user administers
-        if (adminSet.has(cAddr)) continue;
 
-        // Metadata: prefer existing; else lookup
+        // Metadata: prefer existing; else lookup for creator/firstMinter too
         let meta = tokObj?.metadata;
-        if (!meta) {
+        let creator = tokObj?.creator;
+        let firstMinter = tokObj?.firstMinter;
+        if (!meta || (!creator && !firstMinter)) {
           const [row] = await jFetch(
             `${tzktV1}/tokens?contract=${cAddr}&tokenId=${tId}&limit=1&select=contract,tokenId,metadata,holdersCount,totalSupply,creator,firstMinter`
           ).catch(() => []);
-          meta = row?.metadata;
+          meta = row?.metadata ?? meta;
+          creator = row?.creator ?? creator;
+          firstMinter = row?.firstMinter ?? firstMinter;
         }
 
-        // Build a minimal row object to reuse prepareToken + mintedByUser predicate
         const prepared = prepareToken({
           contract: { address: cAddr },
           tokenId: tId,
           metadata: meta,
           holdersCount: tokObj?.holdersCount,
           totalSupply: tokObj?.totalSupply,
-          creator: tokObj?.creator,
-          firstMinter: tokObj?.firstMinter,
+          creator,
+          firstMinter,
         });
         if (!prepared) continue;
         if (mintedByUser(prepared, address)) continue; // exclude anything I minted anywhere
+
         const key = `${cAddr}:${String(tId)}`;
         if (seenO.has(key)) continue;
         seenO.add(key);
@@ -416,7 +402,7 @@ export default function MyTokens() {
         setError((err && (err.message || String(err))) || 'Network error');
       }
     }
-  }, [address, network, tzktV1, fetchTypeHashes, prepareToken, resetAll, fetchMintedBy, mintedByUser]);
+  }, [address, tzktV1, fetchTypeHashes, prepareToken, resetAll, fetchMintedBy, mintedByUser]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -456,7 +442,7 @@ export default function MyTokens() {
         <Subtle>Connect your wallet to see your tokens.</Subtle>
       )}
 
-      {phase === 'loading' && (
+      {phase === 'loading' && address && (
         <Subtle>Fetching your tokens…</Subtle>
       )}
 
@@ -500,13 +486,11 @@ export default function MyTokens() {
   );
 }
 
-/* What changed & why (r81):
-   • Creations logic: replaced admin-based sweep with a strict minted‑by‑me
-     aggregator (creator, firstMinter, metadata creators/authors). Only
-     ZeroContract (v1–v4e) tokens pass, deduped + preview‑validated.
-   • Owned logic: exclude (a) any collection I admin and (b) any token I
-     minted anywhere — fixes “My Owned” showing my own works.
-   • Added creators/authors normalization (split commas/newlines, lc + tz‑guard)
-     to prevent malformed Tezos Domains reverse‑lookup queries (400s).
-   • Kept wallet/network‑aware TzKT v1 base, counts, pagination, and UX states. */
-/* EOF */
+/* What changed & why (r82):
+   • Switched to useWallet() hook and unified address selection, fixing the
+     “Connect your wallet…” false-negative.
+   • OWNED tab now includes tokens from collections the wallet admins if
+     they were minted by others (removes admin‑set exclusion).
+   • Kept strict minted‑by‑me detection, ZeroContract typeHash gating,
+     creators/authors normalization, and /v1 base guard.
+   • Minor UX: only show “Fetching…” when a wallet is connected. */ /* EOF */

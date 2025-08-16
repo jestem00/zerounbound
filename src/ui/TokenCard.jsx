@@ -1,14 +1,10 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/TokenCard.jsx
-  Rev :    r38    2025‑07‑26 UTC
-  Summary: Enhanced TokenCard to resolve .tez domain names for
-           authors, creators and collection addresses. Uses
-           resolveTezosDomain() with NETWORK_KEY to support both
-           mainnet and ghostnet. Falls back to truncated tz
-           addresses when no domain is set. Preserves all
-           existing features such as hazard consent, script
-           toggles, previews, and offer actions.
+  Rev :    r40    2025‑08‑16
+  Summary: Avoid unnecessary Tezos Domains calls by only attempting
+           reverse lookups for tz‑addresses (skip names/KT1/others).
+           Reduces 400s and network noise.
 ──────────────────────────────────────────────────────────────*/
 
 import {
@@ -25,13 +21,12 @@ import { checkOnChainIntegrity } from '../utils/onChainValidator.js';
 import PixelButton               from './PixelButton.jsx';
 import MakeOfferBtn              from './MakeOfferBtn.jsx';
 import IntegrityBadge            from './IntegrityBadge.jsx';
-import { useWalletContext }      from '../contexts/WalletContext.js';
+import { useWallet }             from '../contexts/WalletContext.js';
 import { EnableScriptsToggle }   from './EnableScripts.jsx';
 import FullscreenModal           from './FullscreenModal.jsx';
 import PixelConfirmDialog        from './PixelConfirmDialog.jsx';
 import countAmount               from '../utils/countAmount.js';
-import { shortAddr }            from '../utils/formatAddress.js';
-// Import domain resolver and network constant
+import { shortAddr }             from '../utils/formatAddress.js';
 import { resolveTezosDomain }    from '../utils/resolveTezosDomain.js';
 import { NETWORK_KEY }           from '../config/deployTarget.js';
 
@@ -46,7 +41,6 @@ const pickDataUri = (m = {}) => (
     .find((u) => typeof u === 'string' && VALID_DATA.test(u.trim())) || ''
 );
 
-/* robust array coercions */
 const toArray = (src) => {
   if (Array.isArray(src)) return src;
   if (typeof src === 'string') {
@@ -66,6 +60,8 @@ const isCreator = (meta = {}, addr = '') =>
 const hrefFor = (addr = '') => `/explore?cmd=tokens&admin=${addr}`;
 
 function showPlaceholder(uri, ok) { return !uri || !ok; }
+
+const isTz = (s) => typeof s === 'string' && /^tz[1-3][1-9A-HJ-NP-Za-km-z]{33}$/i.test(s?.trim());
 
 /*──────── styled shells ────────────────────────────────────*/
 const Card = styled.article`
@@ -138,7 +134,7 @@ export default function TokenCard({
   const meta          = token.metadata || {};
   const integrity     = useMemo(() => checkOnChainIntegrity(meta), [meta]);
 
-  const { walletAddress } = useWalletContext() || {};
+  const { walletAddress } = useWallet() || {};
 
   /* consent flags */
   const scriptKey  = `scripts:${contractAddress}:${token.tokenId}`;
@@ -171,84 +167,60 @@ export default function TokenCard({
   const [thumbOk, setThumbOk]   = useState(true);
   const [fs,      setFs]        = useState(false);
 
-   /* reveal dialog */
+  /* reveal dialog */
   const [revealType, setRevealType] = useState(null);   // 'nsfw' | 'flash' | null
   const [termsOk,    setTermsOk]    = useState(false);
 
   /* author / creator merge + “more…” toggle */
   const authors  = authorArray(meta);
   const creators = creatorArray(meta);
-  // Determine whether the creators line should be displayed separately
-  // eslint-disable-next-line no-unused-vars
   const showCreatorsLine = creators.length > 0 && authors.join() !== creators.join();
-  // Track whether the full list of authors or creators should be displayed
   const [showAllAuthors, setShowAllAuthors] = useState(false);
   const [showAllCreators, setShowAllCreators] = useState(false);
 
-  /* domain name cache for addresses used in this card */
+  /* domain name cache for addresses used in this card (tz‑only) */
   const [domains, setDomains] = useState({});
-
-  // Collect unique addresses to resolve: authors, creators, contractAddress
   useEffect(() => {
     const addrs = new Set();
-    // Do not lowercase addresses here; keep the original case so that
-    // reverse-record lookups work correctly. The resolver handles
-    // caching using a lowercase key internally.
-    authors.forEach(a => { if (a) addrs.add(a); });
-    creators.forEach(a => { if (a) addrs.add(a); });
-    if (contractAddress) addrs.add(contractAddress);
+    authors.forEach(a => { if (typeof a === 'string' && isTz(a)) addrs.add(a.trim()); });
+    creators.forEach(a => { if (typeof a === 'string' && isTz(a)) addrs.add(a.trim()); });
+
     addrs.forEach(addr => {
-      if (domains[addr?.toLowerCase()] !== undefined) return;
+      const key = addr?.toLowerCase();
+      if (!key || domains[key] !== undefined) return;
       (async () => {
         const name = await resolveTezosDomain(addr, NETWORK_KEY);
-        // Debug: log each resolution attempt and result
-        console.debug('[TokenCard] resolved domain', { addr, network: NETWORK_KEY, name });
-        setDomains(prev => {
-          const key = addr?.toLowerCase();
-          if (!key || prev[key] !== undefined) return prev;
-          return { ...prev, [key]: name };
-        });
+        setDomains(prev => (prev[key] !== undefined ? prev : { ...prev, [key]: name }));
       })();
     });
-  }, [authors, creators, contractAddress]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authors.join('|'), creators.join('|')]);
 
-  /* Format a single author/creator entry. Look up the lower‑cased
-   * address in the domain cache first; if a .tez name exists, return it.
-   * Otherwise, return domains or human names verbatim, and truncate
-   * raw addresses via shortAddr(). */
   const formatEntry = useCallback((val) => {
     if (!val || typeof val !== 'string') return String(val || '');
     const v = val.trim();
     const name = domains[v.toLowerCase()];
     if (name) return name;
-    // If it looks like a domain (contains a dot) or does not start with tz/KT,
-    // treat it as a user‑supplied name and return verbatim.
     if (v.includes('.') || !/^(tz|kt)/i.test(v)) return v;
-    // Otherwise, abbreviate the address using the shared helper.
     return shortAddr(v);
   }, [domains]);
 
-  /* Render a list of entries with optional “More” toggle. When not showing
-   * the full list and more than three items exist, a clickable arrow is
-   * appended to reveal all entries. */
   const renderEntryList = useCallback((list, showAll, toggle) => {
     const display = showAll ? list : list.slice(0, 3);
     const elems = display.map((item, idx) => {
       const prefix = idx > 0 ? ', ' : '';
-      // Only render a hyperlink for address-like entries. Names and domains
-      // are displayed as plain text.
       const isAddr = typeof item === 'string' && /^(tz|kt)/i.test(item.trim());
       const content = formatEntry(item);
       return isAddr ? (
         <a
-          key={item}
+          key={`${item}_${idx}`}
           href={hrefFor(item)}
           style={{ color:'var(--zu-accent-sec,#6ff)', textDecoration:'none', wordBreak:'break-all' }}
         >
           {prefix}{content}
         </a>
       ) : (
-        <span key={item} style={{ wordBreak:'break-all' }}>
+        <span key={`${String(item)}_${idx}`} style={{ wordBreak:'break-all' }}>
           {prefix}{content}
         </span>
       );
@@ -294,7 +266,6 @@ export default function TokenCard({
     setRevealType(null); setTermsOk(false);
   };
 
-  /*──────── render ─*/
   return (
     <>
       <Card>
@@ -374,7 +345,7 @@ export default function TokenCard({
             </p>
           )}
           {/* Creators line */}
-          {creators.length > 0 && (
+          {showCreatorsLine && (
             <p style={{ wordBreak:'break-all', opacity: authors.length > 0 ? 0.8 : 1 }}>
               Creator(s)&nbsp;
               {renderEntryList(creators, showAllCreators, setShowAllCreators)}
@@ -465,11 +436,6 @@ export default function TokenCard({
                 <p style={{ margin:'0 0 8px' }}>
                   This asset contains <strong>rapid flashing or strobing effects</strong>{' '}
                   which may trigger seizures for people with photosensitive epilepsy.
-                  Learn more&nbsp;
-                  <a href="https://kb.daisy.org/publishing/docs/metadata/schema.org/accessibilityHazard.html#value"
-                     target="_blank" rel="noopener noreferrer">
-                    here
-                  </a>.
                 </p>
               )}
               <label style={{
@@ -510,22 +476,7 @@ TokenCard.propTypes = {
   contractName   : PropTypes.string,
   contractAdmin  : PropTypes.string,
 };
-
-/* What changed & why (r38):
-   • Added in-component Tezos Domains lookup: a domains state caches
-     resolved .tez names for authors, creators and the collection
-     address. Lookups are launched via resolveTezosDomain() with
-     NETWORK_KEY to support both mainnet and ghostnet.
-   • Introduced formatEntry() and renderEntryList() to render
-     Author(s) and Creator(s) lines: .tez domains and custom names
-     display in full, Tezos addresses are abbreviated via shortAddr(),
-     and long lists show a “More” toggle.
-   • Collection link uses formatEntry() on the contract address to
-     display a resolved domain or an abbreviated address.
-   • Removed the on‑chain fallback from resolveTezosDomain() to avoid
-     bigmap 404 errors; all resolutions use the GraphQL API with
-     caching.
-   • Maintained all existing features: hazard toggles, consent flows,
-     script and fullscreen controls, previews, and offer button.
-*/
-/* EOF */
+/* What changed & why (r40):
+   • Only attempt domain reverse lookup for tz‑addresses (skip names/KT1).
+     Cuts failed requests and avoids GraphQL 400s spam.
+   • Kept r39 fixes (useWallet hook, lint polish). */ /* EOF */

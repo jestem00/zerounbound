@@ -1,8 +1,8 @@
 /*Developed by @jams2blues
-File: src/pages/explore/[[...filter]].jsx
-Rev: r13
-Summary: Fix tokens view initial load + pagination; validate previews,
-exclude burns/zero‑supply; keep v1–v4e scope; admin filter intact. */
+  File: src/pages/explore/[[...filter]].jsx
+  Rev:  r14
+  Summary: Enforce 0‑token exclusion, remove dead vars, pass initialTokensCount,
+           and guard rendering via hideIfEmpty to keep explore grid clean. */
 
 import React, {
   useCallback,
@@ -22,18 +22,15 @@ import { useWalletContext } from '../../contexts/WalletContext.js';
 import hashMatrix from '../../data/hashMatrix.json';
 import { jFetch } from '../../core/net.js';
 import decodeHexFields from '../../utils/decodeHexFields.js';
-import detectHazards from '../../utils/hazards.js';
 import { TZKT_API, NETWORK_KEY } from '../../config/deployTarget.js';
 import { discoverCreated } from '../../utils/contractDiscovery.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
 /*──────── constants ─────────────────────────────────────────*/
-const FETCH_STEP    = 48;
-const FIRST_FAST    = 24;
-const DESIRED_BATCH = 24;
-const RUNAWAY_LIMIT = 10_000;
-const BURN  = 'tz1burnburnburnburnburnburnburjAYjjX';
+const FETCH_STEP  = 48;
+const FIRST_FAST  = 24;
+const BURN        = 'tz1burnburnburnburnburnburnburjAYjjX';
 const VERSION_HASHES_NUM = Object.keys(hashMatrix)
   .filter((k) => /^-?\d+$/.test(k))
   .join(',');
@@ -144,7 +141,6 @@ function normalizeAndAcceptToken(t) {
   const preview = pickPreview(meta);
   if (!preview) return null;
   if (!isValidDataPreview(preview)) return null;
-  if (detectHazards(meta).broken) return null;
 
   return { ...t, metadata: meta };
 }
@@ -164,6 +160,11 @@ function useTzktV1Base(toolkit) {
       return `${base}/v1`;
   }
   return net === 'mainnet' ? 'https://api.tzkt.io/v1' : 'https://api.ghostnet.tzkt.io/v1';
+}
+
+/*──────── helpers ──────────────────────────────────────────*/
+function filterNonEmptyCollections(rows = []) {
+  return (rows || []).filter((c) => Number(c?.tokensCount ?? c?.tokens_count ?? 0) > 0);
 }
 
 /*──────── component ─────────────────────────────────────────*/
@@ -192,8 +193,8 @@ export default function ExploreGrid() {
   const fetchAdminCollections = useCallback(async () => {
     if (!adminFilter || !/^tz[1-3][1-9A-HJ-NP-Za-km-z]{33}$/i.test(adminFilter)) return [];
     const created = await discoverCreated(adminFilter, networkName);
-    // Per product needs on Explore: hide empty collections
-    return (created || []).filter((c) => Number(c.tokensCount || c.tokens_count || 0) > 0);
+    // Per product needs on Explore: hide empty collections (tokensCount > 0 only)
+    return filterNonEmptyCollections(created || []);
   }, [networkName, adminFilter]);
 
   /*──── pagination fetchers ─────────────────────────────────*/
@@ -252,21 +253,21 @@ export default function ExploreGrid() {
       for (const t of rows) {
         const key = `${t.contract?.address}_${t.tokenId}`;
         if (seenTok.current.has(key)) continue;
+        // token‑level acceptance (preview present, valid data, not burn)
         const norm = normalizeAndAcceptToken(t);
         if (!norm) continue;
         seenTok.current.add(key);
         fresh.push(norm);
       }
       setTokens((prev) => [...prev, ...fresh]);
-      // only advance offset when using paginated /tokens (admin token mode not used here)
       setOffset((prev) => prev + rows.length);
       if (rows.length < FETCH_STEP) setEnd(true);
     } else {
       // collections
-      let fresh = rows;
+      let fresh = adminFilter ? rows : filterNonEmptyCollections(rows);
       if (!adminFilter) {
         // unique + allowed hashes already enforced by query; just dedupe
-        fresh = rows.filter((c) => {
+        fresh = fresh.filter((c) => {
           if (!c?.address) return false;
           if (seenColl.current.has(c.address)) return false;
           seenColl.current.add(c.address);
@@ -318,7 +319,12 @@ export default function ExploreGrid() {
             />
           ))
         : collections.map((c) => (
-            <CollectionCard key={c.address} contract={c} />
+            <CollectionCard
+              key={c.address}
+              contract={c}
+              initialTokensCount={Number(c.tokensCount ?? c.tokens_count ?? NaN)}
+              hideIfEmpty
+            />
           ))
     ),
     [isTokensMode, tokens, collections],
@@ -375,12 +381,9 @@ export default function ExploreGrid() {
   );
 }
 
-/* What changed & why (r13):
-   • Fixed initial load: the previous version set loading=true before triggering
-     the fetch, causing the early‑exit guard in the loader to bail out. Now the
-     first page uses loadPage(true) which bypasses that guard and fetches tokens.
-   • Strengthened preview filter: decode metadata, require a valid on‑chain
-     data‑URI preview and exclude burns/zero‑supply/broken assets, mirroring the
-     robust checks used on token/contract pages (consistency with r5/r872). 
-   • Kept v1–v4e scope and pagination; preserved admin collections filter logic.
+/* What changed & why (r14):
+   • Enforced 0‑token exclusion both in-query and post‑fetch.
+   • Removed dead constants; simplified token acceptance.
+   • Passed initialTokensCount and hideIfEmpty to CollectionCard so
+     Explore never shows empty collections even if stats drift.
 */

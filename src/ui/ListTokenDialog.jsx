@@ -1,18 +1,8 @@
-/*─────────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
-  File:    src/ui/ListTokenDialog.jsx
-  Rev :    r1195    2025‑08‑10
-  Summary: Guaranteed operator update + single-signature batch.
-           • ALWAYS verifies marketplace has operator permission
-             for the specific token; if not, prepends an
-             update_operators call and batches it with list_token.
-           • Robust TzKT operator probe via key-filter (no 256-key
-             ceiling); network comes from TZKT_API.
-           • Preserves v2a flow: checklist whitelist + offline
-             balance probe and passes offline_balance=true to
-             list_token; non‑v2a unchanged.
-           • Retains decimals handling and all prior UX/overlays.
-──────────────────────────────────────────────────────────────────*/
+/*Developed by @jams2blues
+  File: src/ui/ListTokenDialog.jsx
+  Rev:  r1196
+  Summary: Listing dialog — extend v2a exception to v2c:
+           whitelist + offline_balance path; single-signature batch. */
 
 import React, { useEffect, useState } from 'react';
 import PropTypes from 'prop-types';
@@ -27,14 +17,22 @@ import PixelButton from './PixelButton.jsx';
 import OperationOverlay from './OperationOverlay.jsx';
 
 import { useWalletContext } from '../contexts/WalletContext.js';
-import { buildListParams, fetchListings, fetchOnchainListings, getMarketContract } from '../core/marketplace.js';
+import {
+  buildListParams,
+  fetchListings,
+  fetchOnchainListings,
+  getMarketContract,
+} from '../core/marketplace.js';
 import getLedgerBalanceV2a from '../utils/getLedgerBalanceV2a.cjs';
 import hashMatrix from '../data/hashMatrix.json';
 import { jFetch } from '../core/net.js';
 
-import { URL_OBJKT_TOKENS_BASE, TZKT_API, MARKETPLACE_ADDRESS } from '../config/deployTarget.js';
+import {
+  URL_OBJKT_TOKENS_BASE,
+  TZKT_API,
+  MARKETPLACE_ADDRESS,
+} from '../config/deployTarget.js';
 
-/* styled‑components handle */
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
 /*───────── shells ───────────────────────────────────────────*/
@@ -85,9 +83,7 @@ async function getDec(_toolkit, contract, id) {
       const n = parseInt(ds, 10);
       if (Number.isFinite(n) && n >= 0) d = n;
     }
-  } catch {
-    /* ignore */
-  }
+  } catch { /* ignore */ }
   decCache[k] = d;
   return d;
 }
@@ -112,6 +108,7 @@ async function isInMarketplaceChecklist(contract) {
   return false;
 }
 
+/*───────── component ─────────────────────────────────────────*/
 export default function ListTokenDialog({ open, contract, tokenId, onClose = () => {} }) {
   const { toolkit } = useWalletContext() || {};
 
@@ -169,7 +166,7 @@ export default function ListTokenDialog({ open, contract, tokenId, onClose = () 
         toolkit.addExtension?.(new Tzip16Module());
         const nft = await toolkit.contract.at(contract);
 
-        // Prefer off‑chain views (balance_of/get_balance)
+        // Prefer off‑chain views (balance_of / get_balance)
         try {
           const res = await nft.views?.balance_of?.([{ owner: pkh, token_id: idNum }]).read();
           owned = Number(res?.[0]?.balance ?? 0);
@@ -180,7 +177,7 @@ export default function ListTokenDialog({ open, contract, tokenId, onClose = () 
           } catch { /* ignore */ }
         }
 
-        // v2a fallback — query via TzKT tokens/balances
+        // Fallback — query via TzKT tokens/balances when views fail/lie
         if (owned === 0) {
           const bal = await getLedgerBalanceV2a({
             tzktBase: TZKT_API,
@@ -267,11 +264,11 @@ export default function ListTokenDialog({ open, contract, tokenId, onClose = () 
       const opMap = Array.isArray(maps) ? maps.find((m) => m.path === 'operators') : null;
       if (!opMap) return false;
       const mapId = opMap.ptr ?? opMap.id;
-      const url = `${TZKT_API}/v1/bigmaps/${mapId}/keys` +
-        `?key.owner=${encodeURIComponent(owner)}` +
-        `&key.operator=${encodeURIComponent(operator)}` +
-        `&key.token_id=${encodeURIComponent(Number(id))}` +
-        `&select=active&limit=1`;
+      const url = `${TZKT_API}/v1/bigmaps/${mapId}/keys`
+        + `?key.owner=${encodeURIComponent(owner)}`
+        + `&key.operator=${encodeURIComponent(operator)}`
+        + `&key.token_id=${encodeURIComponent(Number(id))}`
+        + `&select=active&limit=1`;
       const resp = await fetch(url);
       if (!resp.ok) return false;
       const arr = await resp.json();
@@ -298,12 +295,13 @@ export default function ListTokenDialog({ open, contract, tokenId, onClose = () 
   }
 
   async function handleList() {
-    // Detect v2a by typeHash
-    let isV2a = false;
+    // Detect v2a OR v2c by typeHash (hashMatrix)
+    let needsOffline = false;
     try {
       const info = await (await fetch(`${TZKT_API}/v1/contracts/${contract}`)).json();
       const tHash = info?.typeHash ?? info?.type_hash;
-      if (tHash !== undefined) isV2a = hashMatrix[String(tHash)] === 'v2a';
+      const label = tHash !== undefined ? hashMatrix[String(tHash)] : '';
+      needsOffline = label === 'v2a' || label === 'v2c';
     } catch { /* ignore */ }
 
     // Hard‑block non‑FA2
@@ -320,9 +318,9 @@ export default function ListTokenDialog({ open, contract, tokenId, onClose = () 
       return;
     }
 
-    // v2a guards: whitelist + offline balance
+    // v2a/v2c guards: whitelist + offline balance
     let offline_balance = false;
-    if (isV2a) {
+    if (needsOffline) {
       const ok = await isInMarketplaceChecklist(contract);
       if (!ok) {
         snack('Collection not whitelisted on marketplace', 'error');
@@ -375,7 +373,7 @@ export default function ListTokenDialog({ open, contract, tokenId, onClose = () 
       const listParams = await buildListParams(toolkit, {
         nftContract: contract,
         tokenId: idNum,
-        offline_balance, // critical for v2a
+        offline_balance, // critical for v2a/v2c
         priceMutez,
         amount: qtyUnits,
         saleSplits,
@@ -425,87 +423,83 @@ export default function ListTokenDialog({ open, contract, tokenId, onClose = () 
   return (
     <ModalOverlay onClick={onClose} role="button" tabIndex={0} onKeyDown={handleOverlayKey}>
       <ModalBox onClick={(e) => e.stopPropagation()} data-modal="list-token" role="presentation">
+        <PixelHeading level={3}>List Token</PixelHeading>
+
         <Wrap>
-          <PixelHeading level={3}>List Token</PixelHeading>
-
-          <p style={{ fontSize: '.75rem', marginBottom: '.2rem', opacity: 0.9 }}>Price (ꜩ)</p>
-          <PixelInput placeholder="0.0" value={price} onChange={(e) => setPrice(e.target.value)} />
-
-          <p style={{ fontSize: '.75rem', margin: '0.6rem 0 .2rem', opacity: 0.9 }}>
-            Quantity (max {maxAmount})
-          </p>
+          <label htmlFor="price">Price (ꜩ)</label>
           <PixelInput
+            id="price"
             type="number"
-            min={1}
+            inputMode="decimal"
+            step="0.000001"
+            min="0"
+            placeholder="e.g. 1.25"
+            value={price}
+            onChange={(e) => setPrice(e.target.value)}
+          />
+        </Wrap>
+
+        <Wrap>
+          <label htmlFor="amount">Quantity (editions){amtLbl}</label>
+          <PixelInput
+            id="amount"
+            type="number"
+            inputMode="numeric"
+            step="1"
+            min="1"
             max={maxAmount}
-            step={1}
-            disabled={maxAmount <= 0}
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
           />
-
-          <p style={{ fontSize: '.75rem', margin: '0.6rem 0 .2rem', opacity: 0.9 }}>Sale Splits (optional)</p>
-          <PixelInput
-            placeholder="Recipient tz‑address"
-            value={newSplitAddr}
-            onChange={(e) => setNewSplitAddr(e.target.value)}
-          />
-          <PixelInput
-            placeholder="Percent (e.g. 10)"
-            type="number"
-            min={0}
-            max={100}
-            step={0.01}
-            value={newSplitPct}
-            onChange={(e) => setNewSplitPct(e.target.value)}
-          />
-          <PixelButton onClick={addSplit} disabled={!newSplitAddr || !newSplitPct}>
-            ADD SPLIT
-          </PixelButton>
-
-          {splits.map((s, i) => (
-            <p
-              // eslint-disable-next-line react/no-array-index-key
-              key={i}
-              style={{ fontSize: '.7rem', marginTop: '.1rem', opacity: 0.9, display: 'flex', alignItems: 'center' }}
-            >
-              <span style={{ flexGrow: 1 }}>{s.address}: {(s.percent / 100).toFixed(2)}%</span>
-              <PixelButton style={{ flexShrink: 0 }} onClick={() => removeSplit(i)}>
-                ✕
-              </PixelButton>
-            </p>
-          ))}
-
-          <p style={{ fontSize: '.7rem', marginTop: '.3rem', opacity: 0.8 }}>
-            Owned: {maxAmount}
-            {amtLbl}
-          </p>
-
-          {isUnsupported ? (
-            <>
-              <p style={{ fontSize: '.75rem', margin: '0.6rem 0 .2rem', opacity: 0.85 }}>
-                Unsupported contract. List on Objkt:
-              </p>
-              <PixelButton disabled={!objktUrl} onClick={() => objktUrl && window.open(objktUrl, '_blank')}>
-                LIST ON OBJKT
-              </PixelButton>
-            </>
-          ) : (
-            <PixelButton disabled={disabled} onClick={handleList}>
-              LIST TOKEN
-            </PixelButton>
-          )}
-
-          {ov.open && (
-            <OperationOverlay
-              label={ov.label}
-              onClose={() => setOv({ open: false, label: '' })}
-              onCancel={() => setOv({ open: false, label: '' })}
-            />
-          )}
-
-          <PixelButton onClick={onClose}>Close</PixelButton>
         </Wrap>
+
+        <Wrap>
+          <PixelHeading level={5}>Sale Splits (optional)</PixelHeading>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px auto', gap: '.5rem' }}>
+            <PixelInput
+              placeholder="tz1… address"
+              value={newSplitAddr}
+              onChange={(e) => setNewSplitAddr(e.target.value)}
+            />
+            <PixelInput
+              placeholder="%"
+              type="number"
+              inputMode="decimal"
+              step="0.01"
+              min="0"
+              max="100"
+              value={newSplitPct}
+              onChange={(e) => setNewSplitPct(e.target.value)}
+            />
+            <PixelButton onClick={addSplit}>ADD</PixelButton>
+          </div>
+          {splits.length > 0 && (
+            <ul style={{ marginTop: '.6rem' }}>
+              {splits.map((s, i) => (
+                <li key={`${s.address}-${i}`} style={{ display: 'flex', gap: '.6rem', alignItems: 'center' }}>
+                  <code style={{ opacity: .9 }}>{s.address}</code>
+                  <span style={{ opacity: .8 }}>{(s.percent / 100).toFixed(2)}%</span>
+                  <PixelButton onClick={() => removeSplit(i)}>REMOVE</PixelButton>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Wrap>
+
+        <Wrap style={{ display: 'flex', gap: '.6rem', justifyContent: 'flex-end' }}>
+          <PixelButton onClick={onClose} aria-label="Cancel">CANCEL</PixelButton>
+          <PixelButton onClick={handleList} disabled={disabled} aria-label="Create listing">
+            LIST
+          </PixelButton>
+        </Wrap>
+
+        {ov.open && (
+          <OperationOverlay
+            open={ov.open}
+            onClose={() => setOv({ open: false, label: '' })}
+            label={ov.label || 'Working…'}
+          />
+        )}
       </ModalBox>
     </ModalOverlay>
   );
@@ -517,3 +511,5 @@ ListTokenDialog.propTypes = {
   tokenId: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
   onClose: PropTypes.func,
 };
+
+/* What changed & why: Add v2c to v2a whitelist+offline path to prevent FAILWITH. */

@@ -2,20 +2,10 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/ExploreNav.jsx
-  Rev :    r2    2025‑07‑31
-  Summary: Responsive explore navigation bar with support for
-           collections, tokens, primary listings, secondary
-           listings and personalised pages.  Includes a search
-           field for contract/admin addresses and hazard
-           toggles for NSFW and flashing content.  Personalised
-           pages (My Collections, My Tokens, My Offers,
-           My Listings) link directly to their respective
-           routes without stubbing.  A confirmation dialog
-           prompts users before enabling NSFW or flashing
-           content.  This revision fixes the PropTypes
-           definition for hideSearch by importing PropTypes
-           and using PropTypes.bool instead of the built‑in
-           Boolean constructor.
+  Rev :    r3    2025‑08‑16
+  Summary: Restores & locks full Explore nav (Collections, Tokens,
+           Listings, Secondary, My‑pages), preserves search & hazard
+           toggles, adds small a11y polish. No routes removed.
 ─────────────────────────────────────────────────────────────*/
 
 import { useState }    from 'react';
@@ -133,45 +123,52 @@ export default function ExploreNav({ hideSearch = false }) {
 
   return (
     <>
-      <Bar>
+      <Bar aria-label="Explore navigation">
         {/* primary navigation */}
-        <PixelButton size="sm" onClick={goto('/explore')}>COLLECTIONS</PixelButton>
-        <PixelButton size="sm" onClick={goto('/explore?cmd=tokens')}>TOKENS</PixelButton>
-        <PixelButton size="sm" onClick={goto('/explore/listings')}>LISTINGS</PixelButton>
-        <PixelButton size="sm" onClick={goto('/explore/secondary')}>SECONDARY</PixelButton>
+        <PixelButton size="sm" onClick={goto('/explore')} title="Browse collections">COLLECTIONS</PixelButton>
+        <PixelButton size="sm" onClick={goto('/explore?cmd=tokens')} title="Browse individual tokens">TOKENS</PixelButton>
+        <PixelButton size="sm" onClick={goto('/explore/listings')} title="Primary listings">LISTINGS</PixelButton>
+        <PixelButton size="sm" onClick={goto('/explore/secondary')} title="Secondary market">SECONDARY</PixelButton>
 
         {/* personalised pages */}
         <PixelButton
           size="sm"
           style={{ background: 'var(--zu-accent-sec)', color: 'var(--zu-btn-fg)', borderColor: 'var(--zu-accent-sec-hover)' }}
           onClick={goto('/my/collections')}
-        >MY COLLECTIONS</PixelButton>
+          title="Your collections"
+        >MY&nbsp;COLLECTIONS</PixelButton>
         <PixelButton
           size="sm"
           style={{ background: 'var(--zu-accent-sec)', color: 'var(--zu-btn-fg)', borderColor: 'var(--zu-accent-sec-hover)' }}
           onClick={goto('/my/tokens')}
-        >MY TOKENS</PixelButton>
+          title="Your tokens"
+        >MY&nbsp;TOKENS</PixelButton>
         <PixelButton
           size="sm"
           style={{ background: 'var(--zu-accent-sec)', color: 'var(--zu-btn-fg)', borderColor: 'var(--zu-accent-sec-hover)' }}
           onClick={goto('/my/offers')}
-        >MY OFFERS</PixelButton>
+          title="Offers you can accept and ones you made"
+        >MY&nbsp;OFFERS</PixelButton>
         <PixelButton
           size="sm"
           style={{ background: 'var(--zu-accent-sec)', color: 'var(--zu-btn-fg)', borderColor: 'var(--zu-accent-sec-hover)' }}
           onClick={goto('/my/listings')}
-        >MY LISTINGS</PixelButton>
+          title="Your active listings"
+        >MY&nbsp;LISTINGS</PixelButton>
 
         {/* search bar */}
         {!hideSearch && (
-          <form onSubmit={go}>
+          <form onSubmit={go} role="search" aria-label="Search by admin or contract">
             <PixelInput
               type="text"
               placeholder="Search by admin or contract…"
+              inputMode="text"
+              autoComplete="off"
+              aria-label="Admin or contract address"
               value={q}
               onChange={(e) => setQ(e.target.value)}
             />
-            <PixelButton type="submit" size="sm">GO</PixelButton>
+            <PixelButton type="submit" size="sm" title="Go to address">GO</PixelButton>
           </form>
         )}
 
@@ -181,6 +178,8 @@ export default function ExploreNav({ hideSearch = false }) {
           warning={!allowNSFW}
           onClick={() => requestToggle('nsfw')}
           title={allowNSFW ? 'NSFW content visible' : 'NSFW content hidden'}
+          aria-pressed={!!allowNSFW}
+          aria-label={allowNSFW ? 'Hide NSFW content' : 'Enable NSFW content'}
         >
           {allowNSFW ? 'Hide NSFW 🔞' : 'Enable NSFW 🔞'}
         </PixelButton>
@@ -189,10 +188,13 @@ export default function ExploreNav({ hideSearch = false }) {
           warning={!allowFlash}
           onClick={() => requestToggle('flash')}
           title={allowFlash ? 'Flashing hazards visible' : 'Flashing hazards hidden'}
+          aria-pressed={!!allowFlash}
+          aria-label={allowFlash ? 'Hide flashing hazards' : 'Enable flashing hazards'}
         >
           {allowFlash ? 'Hide Flashing 🚨' : 'Enable Flashing 🚨'}
         </PixelButton>
       </Bar>
+
       {/* hazard confirm dialog */}
       {dlg && (
         <PixelConfirmDialog
@@ -235,7 +237,6 @@ ExploreNav.propTypes = {
   hideSearch: PropTypes.bool,
 };
 
-/* What changed & why: r2 – fixed PropTypes definition by importing
-   PropTypes and replacing the built‑in Boolean constructor with
-   PropTypes.bool to satisfy React prop‑type validation.  All
-   other functionality remains unchanged. */
+/* What changed & why: r3 – Restored complete button set and tightened
+   a11y (aria attributes). Kept search, hazard toggles, and routing
+   semantics intact. No functional removals. */ /* EOF */

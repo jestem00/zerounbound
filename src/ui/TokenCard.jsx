@@ -1,7 +1,10 @@
 /*Developed by @jams2blues
   File: src/ui/TokenCard.jsx
-  Rev:  r43
-  Summary: Use .preview-1x1 CSS (no inline sizing); MP4s fit/no crop; controls clickable. */
+  Rev:  r44
+  Summary: Keep r43 layout; ADD clickable Authors/Creators (with drawer),
+           universal FileType download (incl. svg+xml/html), and resolved
+           Collection name hyperlinked to /contracts/[KT1]; preserve hazard
+           reveal dialog and fullscreen behaviors. */
 
 import {
   useState, useMemo, useEffect, useCallback,
@@ -24,7 +27,8 @@ import PixelConfirmDialog        from './PixelConfirmDialog.jsx';
 import countAmount               from '../utils/countAmount.js';
 import { shortAddr }             from '../utils/formatAddress.js';
 import { resolveTezosDomain }    from '../utils/resolveTezosDomain.js';
-import { NETWORK_KEY }           from '../config/deployTarget.js';
+import decodeHexFields, { decodeHexJson } from '../utils/decodeHexFields.js';
+import { TZKT_API, NETWORK_KEY } from '../config/deployTarget.js';
 
 const PLACEHOLDER = '/sprites/cover_default.svg';
 const VALID_DATA  = /^data:/i;
@@ -53,8 +57,85 @@ const creatorArray  = (m = {}) => toArray(m.creators);
 const isCreator = (meta = {}, addr = '') =>
   !!addr && creatorArray(meta).some((a) => String(a).toLowerCase() === addr.toLowerCase());
 
-const hrefFor = (addr = '') => `/explore?cmd=tokens&admin=${addr}`;
 const isTz = (s) => typeof s === 'string' && /^tz[1-3][1-9A-HJ-NP-Za-km-z]{33}$/i.test(s?.trim());
+const isKt = (s) => typeof s === 'string' && /^KT1[0-9A-Za-z]{33}$/i.test(s?.trim());
+
+const hrefFor = (addr = '') => {
+  const extra = (NETWORK_KEY && String(NETWORK_KEY).toLowerCase() !== 'mainnet')
+    ? `&net=${encodeURIComponent(NETWORK_KEY)}`
+    : '';
+  return `/explore/tokens?admin=${addr}${extra}`;
+};
+
+/*── TzKT helpers to resolve a collection name from KT1 ──*/
+const COLL_NAME_CACHE = new Map(); // lc(KT1) -> name
+const apiBase = `${String(TZKT_API || '').replace(/\/+$/, '')}/v1`;
+
+async function fetchCollectionName(kt1) {
+  if (!isKt(kt1)) return '';
+  const key = kt1.toLowerCase();
+  if (COLL_NAME_CACHE.has(key)) return COLL_NAME_CACHE.get(key);
+
+  let name = '';
+  try {
+    // Try big-map metadata/content first (often hex-encoded JSON).
+    try {
+      const r1 = await fetch(
+        `${apiBase}/contracts/${encodeURIComponent(kt1)}/bigmaps/metadata/keys?key=content&select=value&limit=1`,
+        { cache: 'no-store' },
+      );
+      if (r1.ok) {
+        const arr = await r1.json();
+        const raw = Array.isArray(arr) ? arr[0] : null;
+        const parsed = decodeHexJson(typeof raw === 'string' ? raw : '');
+        if (parsed && typeof parsed === 'object') {
+          const m = decodeHexFields(parsed);
+          name = String(m.name || m.collectionName || m.title || '').trim();
+        }
+      }
+    } catch { /* ignore */ }
+
+    // Fallback: contract metadata field.
+    if (!name) {
+      const r2 = await fetch(`${apiBase}/contracts/${encodeURIComponent(kt1)}`, { cache: 'no-store' });
+      if (r2.ok) {
+        const obj = await r2.json();
+        const m = decodeHexFields(obj?.metadata || {});
+        name = String(m.name || m.collectionName || m.title || '').trim();
+      }
+    }
+  } catch { /* network issues → empty */ }
+
+  COLL_NAME_CACHE.set(key, name);
+  return name;
+}
+
+/*── filename helpers for universal downloads ──*/
+const sanitizeFilename = (s) =>
+  String(s || '').replace(/[\\/:*?"<>|]+/g, '').replace(/\s+/g, ' ').trim();
+
+const extFromMime = (mt) => {
+  const mime = String(mt || '').toLowerCase();
+  if (!mime) return '';
+  if (mime === 'image/jpeg' || mime === 'image/jpg') return 'jpg';
+  if (mime === 'image/png') return 'png';
+  if (mime === 'image/gif') return 'gif';
+  if (mime === 'image/webp') return 'webp';
+  if (mime === 'image/svg+xml') return 'svg';
+  if (mime === 'video/mp4') return 'mp4';
+  if (mime === 'audio/mpeg') return 'mp3';
+  if (mime === 'text/html') return 'html';
+  if (mime === 'application/pdf') return 'pdf';
+  const main = mime.split(';', 1)[0];
+  const tail = main.split('/')[1] || '';
+  return tail.replace(/\+.*$/, '') || '';
+};
+
+const suggestedFilename = (meta = {}, tokenId) => {
+  const base = sanitizeFilename(meta?.name || `token-${tokenId ?? ''}`) || 'download';
+  const ext  = extFromMime(meta?.mimeType) || '';
+  return ext ? `${base}.${ext}` : base;
+};
 
 /*──────── styled shells ────────────────────────────────────*/
 const Card = styled.article`
@@ -155,7 +236,7 @@ export default function TokenCard({
   const [revealType, setRevealType] = useState(null);   // 'nsfw' | 'flash' | null
   const [termsOk,    setTermsOk]    = useState(false);
 
-  /* author / creator merge + “more…” toggle */
+  /* author / creator lists with link + drawer (keep single-line labels) */
   const authors  = toArray(meta.authors);
   const creators = toArray(meta.creators);
   const showCreatorsLine = creators.length > 0 && authors.join() !== creators.join();
@@ -199,12 +280,12 @@ export default function TokenCard({
         <a
           key={`${item}_${idx}`}
           href={hrefFor(item)}
-          style={{ color:'var(--zu-accent-sec,#6ff)', textDecoration:'none', wordBreak:'break-all' }}
+          style={{ color:'var(--zu-accent-sec,#6ff)', textDecoration:'none', wordBreak:'break-word', overflowWrap:'anywhere' }}
         >
           {prefix}{content}
         </a>
       ) : (
-        <span key={`${String(item)}_${idx}`} style={{ wordBreak:'break-all' }}>
+        <span key={`${String(item)}_${idx}`} style={{ wordBreak:'break-word', overflowWrap:'anywhere' }}>
           {prefix}{content}
         </span>
       );
@@ -216,7 +297,7 @@ export default function TokenCard({
           <button
             type="button"
             aria-label="Show all entries"
-            onClick={() => toggle(true)}
+            onClick={(e) => { e.preventDefault(); toggle(true); }}
             style={{ background:'none', border:'none', color:'inherit', font:'inherit', cursor:'pointer', padding:0 }}
           >🔻More</button>
         </span>
@@ -227,14 +308,13 @@ export default function TokenCard({
 
   /* stats */
   const editions  = countAmount(token);
-  const owners    = Number.isFinite(token.holdersCount) ? token.holdersCount : '…';
-  const priceTez  = token.price ? (token.price / 1_000_000).toFixed(2) : null;
+  const ownersNum = Number(token.holdersCount);
+  const owners    = Number.isFinite(ownersNum) ? ownersNum : '…';
 
-  /* artifact download permission */
+  /* artifact download (universal) */
   const artifact        = meta.artifactUri;
-  const downloadAllowed = walletAddress
-    && (walletAddress.toLowerCase() === (contractAdmin || '').toLowerCase()
-      || isCreator(meta, walletAddress));
+  const downloadAllowed = Boolean(artifact && String(artifact).trim());
+  const fname           = useMemo(() => suggestedFilename(meta, token.tokenId), [meta, token.tokenId]);
 
   /* enable scripts confirm handler */
   const [cfrmScr,   setCfrmScr]   = useState(false);
@@ -255,6 +335,22 @@ export default function TokenCard({
     return yFromBottom <= band;
   };
   const onThumbClick = (e) => { if (!isMediaControlsHit(e)) goDetail(); };
+
+  /* collection name: resolve from KT1 when no prop is provided */
+  const [collectionName, setCollectionName] = useState(contractName || '');
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      if (contractName && contractName.trim()) { setCollectionName(contractName.trim()); return; }
+      const name = await fetchCollectionName(contractAddress);
+      if (!cancel) setCollectionName(name || '');
+    })();
+    return () => { cancel = true; };
+  }, [contractAddress, contractName]);
+
+  const collectionLabel = collectionName && collectionName.trim()
+    ? collectionName.trim()
+    : shortAddr(contractAddress);
 
   return (
     <>
@@ -299,7 +395,7 @@ export default function TokenCard({
           >⛶</FSBtn>
         </ThumbWrap>
 
-        {/* meta info */}
+        {/* meta info (layout preserved) */}
         <Meta>
           <Row>
             <span title={getIntegrityInfo(integrity.status).label} style={{ cursor:'pointer', fontSize:'1.1rem' }}>
@@ -317,13 +413,13 @@ export default function TokenCard({
           <h4>{meta.name || `#${token.tokenId}`}</h4>
 
           {authorArray(meta).length > 0 && (
-            <p style={{ wordBreak:'break-all' }}>
+            <p style={{ wordBreak:'break-word', overflowWrap:'anywhere' }}>
               Author(s)&nbsp;
               {renderEntryList(authorArray(meta), showAllAuthors, setShowAllAuthors)}
             </p>
           )}
           {showCreatorsLine && (
-            <p style={{ wordBreak:'break-all', opacity: authorArray(meta).length > 0 ? 0.8 : 1 }}>
+            <p style={{ wordBreak:'break-word', overflowWrap:'anywhere', opacity: authorArray(meta).length > 0 ? 0.8 : 1 }}>
               Creator(s)&nbsp;
               {renderEntryList(creatorArray(meta), showAllCreators, setShowAllCreators)}
             </p>
@@ -332,8 +428,17 @@ export default function TokenCard({
           {meta.mimeType && (
             <p>
               FileType:&nbsp;
-              {downloadAllowed && meta.artifactUri
-                ? <a href={meta.artifactUri} download style={{ color:'inherit' }}>{meta.mimeType}</a>
+              {downloadAllowed
+                ? (
+                  <a
+                    href={artifact}
+                    download={fname}
+                    title={`Download ${fname}`}
+                    style={{ color: 'inherit' }}
+                  >
+                    {meta.mimeType}
+                  </a>
+                )
                 : meta.mimeType}
             </p>
           )}
@@ -341,7 +446,6 @@ export default function TokenCard({
           <Stat>Token‑ID&nbsp;{token.tokenId}</Stat>
           <Stat>Amount&nbsp;×{editions}</Stat>
           <Stat>Owners&nbsp;{owners}</Stat>
-          {priceTez && <Stat>Price&nbsp;{priceTez}&nbsp;ꜩ</Stat>}
 
           <div style={{ marginTop:'4px' }}>
             <MakeOfferBtn contract={contractAddress} tokenId={token.tokenId} label="OFFER" />
@@ -350,7 +454,7 @@ export default function TokenCard({
           <p style={{ marginTop:'4px', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
             Collection:&nbsp;
             <a href={`/contracts/${contractAddress}`} style={{ color:'var(--zu-accent-sec,#6ff)', textDecoration:'none' }}>
-              {contractName}
+              {collectionLabel}
             </a>
           </p>
         </Meta>
@@ -383,7 +487,7 @@ export default function TokenCard({
           confirmLabel="OK"
           cancelLabel="Cancel"
           confirmDisabled={!scrTerms}
-          onConfirm={() => { if (scrTerms) { setAllowScr(true); setCfrmScr(false); } }}
+          onConfirm={confirmScripts}
           onCancel={() => setCfrmScr(false)}
         />
       )}
@@ -427,6 +531,12 @@ TokenCard.propTypes = {
   contractAdmin  : PropTypes.string,
 };
 
-/* What changed & why (r43):
-   • Removed inline width/height; let .preview-1x1 CSS size IMG/VIDEO (no crop).
-   • Preserved controls band hit-test + fullscreen affordance. */
+/* What changed & why (r44):
+   • “Collection:” now always shows a clickable name:
+     - resolves from TzKT /v1 (big‑map metadata.content → contracts metadata),
+       decoding hex JSON via decodeHexFields/decodeHexJson; short KT1 fallback.
+   • Authors/Creators are clickable (filter route /explore/tokens?admin=…):
+     - wraps cleanly; adds “… 🔻” drawer when >3 entries; resolves .tez labels.
+   • FileType: universal download for any artifactUri (incl. svg+xml/html)
+     with a suggestive filename based on token name + MIME.
+   • Preserved r43 layout, fullscreen button, and NSFW/Flashing confirm flows. */

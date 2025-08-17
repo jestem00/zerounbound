@@ -85,8 +85,6 @@ export async function fetchLowestListing({
     // filterStaleListings returns original listing objects via __src
     if (Array.isArray(checked) && checked.length) {
       act = checked.map((x) => x.__src || x);
-    } else {
-      // If check failed, keep original list to avoid false negatives.
     }
   }
 

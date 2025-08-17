@@ -1,81 +1,48 @@
 /*Developed by @jams2blues
   File: src/styles/preview-1x1.css
-  Rev:  r812
-  Summary: Enforce video wrapper+video to fill 1:1; use !important to beat inline styles. */
+  Rev:  r46
+  Summary: Enforce perfect 1:1 media fit, zero rounding, and no bleed. */
 
-/* 1) Square container */
 .preview-1x1 {
-  aspect-ratio: 1 / 1;
   position: relative;
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-  background-color: var(--preview-bg, #0a0a0a);
-  border-radius: var(--preview-radius, 8px);
+  aspect-ratio: 1 / 1;
+  /* Ensure square preview background is solid; no page bleed. */
+  background: var(--zu-bg-dim, #111);
+  overflow: hidden; /* crop any stray overflow */
+  border-radius: 0 !important; /* absolutely no rounding */
 }
 
-/* Fallback for browsers without aspect-ratio support */
-@supports not (aspect-ratio: 1 / 1) {
-  .preview-1x1 { display: block; }
-  .preview-1x1::before { content: ""; display: block; padding-top: 100%; }
-  .preview-1x1 > * { position: absolute; inset: 0; }
-}
-
-/* 2) IMAGES — keep full artwork visible (no crop) */
-.preview-1x1 > img,
-.preview-1x1 > picture > img,
-.preview-1x1 > span > img {
-  width: 100%;
-  height: 100%;
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain !important;
-  object-position: center center;
+/* Make all media inside the 1×1 tile snap by the longest edge.
+   One dimension will equal the tile edge; the other will letterbox. */
+.preview-1x1 img,
+.preview-1x1 video,
+.preview-1x1 canvas,
+.preview-1x1 svg,
+.preview-1x1 object,
+.preview-1x1 iframe,
+.preview-1x1 model-viewer {
   display: block;
-  min-width: 0 !important;
-  min-height: 0 !important;
-  -webkit-user-select: none;
-  user-select: none;
-  -webkit-touch-callout: none;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;     /* longest edge snaps to edges */
+  object-position: center center !important;
+  border-radius: 0 !important;        /* remove any rounding from media */
+  background: transparent;
 }
 
-/* Ensure Next.js <Image> wrapper stretches to the frame */
-.preview-1x1 > span { position: absolute !important; inset: 0 !important; }
-
-/* 3) VIDEO — wrapper fills parent; inner video scales with contain */
-.preview-1x1 > div[data-zu-media="video"],
-.preview-1x1 > video {
+/* RenderMedia wraps <video> in a div; force the wrapper to fill the tile. */
+.preview-1x1 > div[data-zu-media="video"] {
   position: absolute !important;
   inset: 0 !important;
   width: 100% !important;
   height: 100% !important;
+  border-radius: 0 !important;
 }
 
-.preview-1x1 > div[data-zu-media="video"] {
-  display: grid !important;
-  place-items: center !important;
+/* Keep the fullscreen helper inside the tile corner without rounding. */
+.preview-1x1 button[title="Fullscreen"] {
+  border-radius: 0 !important;
 }
 
-.preview-1x1 > div[data-zu-media="video"] > video,
-.preview-1x1 > video {
-  width: 100% !important;
-  height: 100% !important;
-  max-width: 100% !important;
-  max-height: 100% !important;
-  object-fit: contain !important;   /* critical for MP4 previews */
-  object-position: center center !important;
-  background: transparent;
-  outline: none;
-  display: block;
-}
-
-/* 4) Optional helper when using background-image thumbnails */
-.preview-1x1.is-bg,
-.preview-1x1[data-bg] {
-  background-repeat: no-repeat;
-  background-position: center center;
-  background-size: contain !important;  /* DO NOT crop */
-}
-
-/* What changed & why: r812 — Force video wrapper + video to 100% with !important
-   to defeat inline styles; eliminates height clipping and keeps controls visible. */
+/* What changed & why: Lock 1×1 tiles to true 'contain', fill wrappers, and
+   hard‑zero any rounding so media edges snap cleanly to the square. */

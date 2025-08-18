@@ -1,306 +1,363 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/explore/secondary.jsx
-  Rev :    r4    2025‑08‑06 UTC
-  Summary: Secondary market page.  Displays listings where the
-           seller is not the original creator of the token.
-           Aggregates data across multiple marketplace
-           instances using on‑chain views, big‑map fallbacks and
-           off‑chain views. A dynamic TzKT API selector ensures
-           metadata is fetched from the correct chain when the
-           connected wallet’s network differs from the default.
-           Requires a connected wallet because on‑chain views are
-           needed to obtain seller addresses. Paginated at 10
-           items per page and works alongside the primary
-           listings page to differentiate between primary and
-           secondary sales.
+  Rev :    r12    2025‑08‑18 UTC
+  Summary: Secondary‑market listings only (true resales).
+           Aggregates listings like /explore/listings, then filters
+           out primaries where the seller ∈ {creator, firstMinter,
+           metadata.creators/authors}. Applies batch TzKT `/v1`
+           lookups, ZeroContract type‑hash gating, preview/supply
+           guards, and the same stale‑listing balance filter used by
+           the primary Listings page. Leaves TokenListingCard intact.
 ─────────────────────────────────────────────────────────────*/
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import styledPkg from 'styled-components';
 
-// Wallet context to determine the active wallet and toolkit
-import { useWalletContext } from '../../contexts/WalletContext.js';
-// Navigation bar
 import ExploreNav from '../../ui/ExploreNav.jsx';
-// Loading spinner for asynchronous operations
 import LoadingSpinner from '../../ui/LoadingSpinner.jsx';
-// Listing card component
 import TokenListingCard from '../../ui/TokenListingCard.jsx';
 
-// Network configuration for API base URLs
+import { useWalletContext } from '../../contexts/WalletContext.js';
 import { NETWORK_KEY } from '../../config/deployTarget.js';
 
-// Marketplace helpers for discovering collections
-import { listActiveCollections, listListingsForCollectionViaBigmap } from '../../utils/marketplaceListings.js';
-// Marketplace helpers for querying on‑chain views
-import { fetchOnchainListingsForCollection, fetchListings, marketplaceAddr } from '../../core/marketplace.js';
-
-// Helper to decode hex-encoded metadata strings
+import { jFetch } from '../../core/net.js';
 import decodeHexFields from '../../utils/decodeHexFields.js';
+import detectHazards from '../../utils/hazards.js';
+
+import {
+  listActiveCollections,
+  listListingsForCollectionViaBigmap,
+} from '../../utils/marketplaceListings.js';
+import { getAllowedTypeHashList } from '../../utils/allowedHashes.js';
+import { tzktBase } from '../../utils/tzkt.js';
+import { filterStaleListings } from '../../core/marketplace.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
-/* Grid definition: same responsive columns as other explore pages.
- * The CSS variable `--col` clamps the column width between 160px
- * and 220px, scaling at 18vw on intermediate screens.  See
- * invariant I105 for details. */
+/*──────── Layout ────────*/
 const Grid = styled.div`
   width: 100%;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(var(--col), 1fr));
   gap: 1.2rem;
   justify-content: stretch;
-  --col: clamp(160px, 18vw, 220px);
+  --col: clamp(160px, 18vw, 220px); /* I105 */
+`;
+const Center = styled.div`
+  text-align: center;
+  margin: 1.25rem 0 1.75rem;
 `;
 
-export default function SecondaryPage() {
+/*──────── Helpers ────────*/
+
+/** tolerant data‑URI test; supports base64 & utf8 (e.g. SVG/HTML) */
+function hasRenderablePreview(m = {}) {
+  const keys = [
+    'displayUri', 'display_uri',
+    'imageUri', 'image_uri', 'image',
+    'thumbnailUri', 'thumbnail_uri',
+    'artifactUri', 'artifact_uri',
+    'mediaUri', 'media_uri',
+  ];
+  let uri = null;
+  for (const k of keys) {
+    const v = m && typeof m === 'object' ? m[k] : undefined;
+    if (typeof v === 'string' && v.startsWith('data:')) { uri = v; break; }
+  }
+  if (!uri && Array.isArray(m.formats)) {
+    for (const f of m.formats) {
+      const cand = (f && (f.uri || f.url)) || '';
+      if (typeof cand === 'string' && cand.startsWith('data:')) { uri = cand; break; }
+    }
+  }
+  if (!uri) return false;
+  return /^data:(image|audio|video|application\/svg\+xml|text\/html)/i.test(uri);
+}
+
+/** chunk helper */
+const chunk = (arr, n) => {
+  const out = [];
+  for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
+  return out;
+};
+
+/** dedupe by contract+tokenId (keep first/cheapest later) */
+function uniqByPair(items) {
+  const seen = new Set();
+  const out  = [];
+  for (const it of items) {
+    const key = `${it.contract}|${it.tokenId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(it);
+  }
+  return out;
+}
+
+/** Normalize possibly‑JSON string → array of strings */
+function toArray(src) {
+  if (Array.isArray(src)) return src;
+  if (typeof src === 'string') {
+    try { const j = JSON.parse(src); return Array.isArray(j) ? j : [src]; }
+    catch { return [src]; }
+  }
+  if (src && typeof src === 'object') return Object.values(src);
+  return [];
+}
+
+/** address guard */
+const isTz = (s) => typeof s === 'string' && /^tz[1-3][0-9A-Za-z]{33}$/i.test(s.trim());
+
+/** Build tokenId → Set(minter addresses) map for a contract in batches. */
+async function fetchMintedByMap(TZKT, contract, tokenIds) {
+  const map = new Map(); // id (string) → Set(address)
+  for (const slice of chunk(tokenIds, 40)) {
+    const qs = new URLSearchParams({
+      contract,
+      'tokenId.in': slice.join(','),
+      select: 'tokenId,creator,firstMinter,metadata',
+      limit: String(slice.length),
+    });
+    // jFetch with retry depth returns JSON directly in our codebase (see listings page). 
+    const rows = await jFetch(`${TZKT}/tokens?${qs}`, 2).catch(() => []);
+    for (const r of rows || []) {
+      const id = String(r.tokenId);
+      const acc = new Set();
+      const c1 = String(r.creator || '').trim();
+      const c2 = String(r.firstMinter || '').trim();
+      if (isTz(c1)) acc.add(c1.toLowerCase());
+      if (isTz(c2)) acc.add(c2.toLowerCase());
+      // metadata creators/authors (hex‑decoded & tolerant JSON)
+      let md = r.metadata || {};
+      try { md = decodeHexFields(md || {}); } catch { /* best effort */ }
+      const creators = toArray(md.creators).concat(toArray(md.authors));
+      for (const v of creators) {
+        const s = typeof v === 'string' ? v : (v && (v.address || v.wallet)) || '';
+        if (isTz(s)) acc.add(String(s).toLowerCase());
+      }
+      map.set(id, acc);
+    }
+  }
+  return map;
+}
+
+/** Batch fetch token metadata + supply for a contract (for card acceptance). */
+async function fetchTokenMetaBatch(TZKT, contract, ids) {
+  const result = new Map(); // id -> { metadata, holdersCount, totalSupply }
+  for (const slice of chunk(ids, 40)) {
+    const qs = new URLSearchParams({
+      contract,
+      'tokenId.in': slice.join(','),
+      select: 'tokenId,metadata,holdersCount,totalSupply',
+      limit: String(slice.length),
+    });
+    const rows = await jFetch(`${TZKT}/tokens?${qs}`, 2).catch(() => []);
+    for (const t of rows || []) {
+      let md = t.metadata || {};
+      try { md = decodeHexFields(md || {}); } catch {}
+      if (md && typeof md.creators === 'string') {
+        try { const j = JSON.parse(md.creators); if (Array.isArray(j)) md.creators = j; } catch {}
+      }
+      result.set(String(t.tokenId), {
+        metadata: md,
+        holdersCount: Number(t.holdersCount || t.holders_count || 0),
+        totalSupply : Number(t.totalSupply  || t.total_supply  || 0),
+      });
+    }
+  }
+  return result;
+}
+
+/*──────── Component ────────*/
+export default function SecondaryListingsPage() {
   const { toolkit } = useWalletContext() || {};
-  const [items, setItems]     = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [showCount, setShowCount] = useState(10);
+  const net = useMemo(() => {
+    if (toolkit?._network?.type && /mainnet/i.test(toolkit._network.type)) return 'mainnet';
+    return (NETWORK_KEY || 'ghostnet').toLowerCase().includes('mainnet') ? 'mainnet' : 'ghostnet';
+  }, [toolkit]);
+
+  // IMPORTANT: tzktBase() already includes `/v1` → do NOT append it again.
+  const TZKT = useMemo(() => tzktBase(net), [net]);
+
+  const [loading, setLoading]   = useState(true);
+  const [error, setError]       = useState(null);
+  const [showCount, setCount]   = useState(24);
+  const [items, setItems]       = useState([]); // [{contract, tokenId, priceMutez, metadata, contractName}]
+
+  const allowedHashes = useMemo(() => new Set(getAllowedTypeHashList()), []);
+
+  /** batch query: filter to ZeroContract family via typeHash */
+  const filterAllowedContracts = useCallback(async (addrs) => {
+    if (!addrs.length) return [];
+    const out = [];
+    for (const slice of chunk(addrs, 50)) {
+      const qs = new URLSearchParams({
+        'address.in': slice.join(','),
+        select: 'address,typeHash,metadata',
+        limit: String(slice.length),
+      });
+      const rows = await jFetch(`${TZKT}/contracts?${qs}`, 2).catch(() => []);
+      for (const r of rows || []) {
+        const th = Number(r?.typeHash ?? r?.type_hash);
+        if (allowedHashes.has(th)) {
+          out.push({ address: r.address, name: r?.metadata?.name || '' });
+        }
+      }
+    }
+    return out;
+  }, [TZKT, allowedHashes]);
 
   useEffect(() => {
-    // Reset when wallet or toolkit changes
-    setItems([]);
-    setShowCount(10);
-    // Secondary page requires a connected wallet to query on‑chain views
-    if (!toolkit) {
-      setLoading(false);
-      return;
-    }
-    let cancel = false;
-    (async () => {
-      setLoading(true);
-      const result = [];
-      // Determine network from toolkit or fallback.  This is used to
-      // derive the correct TzKT API base URL when fetching token
-      // metadata so that listings on both Ghostnet and Mainnet are
-      // resolved properly.
-      const net = toolkit._network?.type && /mainnet/i.test(toolkit._network.type)
-        ? 'mainnet'
-        : (NETWORK_KEY || 'ghostnet');
-      // Choose the appropriate TzKT API for the resolved network.
-      // When the active network differs from the default network
-      // configured in deployTarget.js, using a static TZKT_API will
-      // query the wrong chain and no listings will be found.  This
-      // dynamic selector ensures the metadata lookup always hits the
-      // correct chain.
-      const tzktBase = net === 'mainnet'
-        ? 'https://api.tzkt.io'
-        : 'https://api.ghostnet.tzkt.io';
+    let abort = false;
+
+    async function load() {
+      setLoading(true); setError(null);
       try {
-        // Discover all collections with active listings (do not filter by metadata)
-        let addrs = [];
-        try {
-          addrs = await listActiveCollections(net, false);
-        } catch {
-          addrs = [];
-        }
-        // For each collection, fetch listings via on‑chain view and filter
-        for (const contract of addrs) {
-          let listings = [];
-          try {
-            const raw = await fetchOnchainListingsForCollection({ toolkit, nftContract: contract });
-            if (Array.isArray(raw) && raw.length) {
-              listings = raw.filter((l) => l.active && Number(l.amount) > 0);
-            }
-          } catch {
-            listings = [];
+        /* 1) discover collections with listings (unfiltered) */
+        let candidates = await listActiveCollections(net, false).catch(() => []);
+        if (!Array.isArray(candidates) || candidates.length === 0) candidates = [];
+
+        /* 2) keep only ZeroContract family (typeHash filter) */
+        const allowed = await filterAllowedContracts(candidates);
+
+        /* 3) for each allowed contract, fetch listings via big‑map,
+              drop stale sellers (TzKT balances), and retain only *secondary* sellers */
+        const assembled = [];
+
+        for (const { address: kt, name } of allowed) {
+          // raw listings candidates (active, amount>0)
+          const ls = await listListingsForCollectionViaBigmap(kt, net).catch(() => []);
+          if (!Array.isArray(ls) || ls.length === 0) continue;
+
+          // keep "active, amount>0" first
+          let active = ls.filter((l) => Number(l.amount ?? l.available ?? 0) > 0 && (l.active ?? true));
+
+          // stale‑listing filter (batched TzKT balance checks via helper used on primary page)
+          active = await filterStaleListings(
+            toolkit,
+            active.map((l) => ({
+              nftContract: kt,
+              tokenId: Number(l.tokenId ?? l.token_id),
+              seller: String(l.seller || ''),
+              amount: Number(l.amount ?? 1),
+              __src: l,
+            })),
+          ).catch(() => active).then((arr) => (arr[0]?.__src ? arr.map((x) => x.__src) : arr));
+
+          if (!active.length) continue;
+
+          // group by tokenId → list of {seller,price}
+          const byId = new Map(); // id -> [{seller, price}]
+          for (const l of active) {
+            const id = Number(l.tokenId ?? l.token_id);
+            if (!Number.isFinite(id)) continue;
+            const price = Number(l.priceMutez ?? l.price);
+            if (!Number.isFinite(price)) continue;
+            const seller = String(l.seller || '').toLowerCase();
+            if (!isTz(seller)) continue;
+            const arr = byId.get(id) || [];
+            arr.push({ seller, price });
+            byId.set(id, arr);
           }
-          // Fallback: if no listings were returned from the on‑chain view,
-          // attempt to recover listings via the listings big‑map and
-          // off‑chain views.  This ensures secondary sales are still
-          // discoverable when the on‑chain view is unavailable or empty.
-          if ((!listings || listings.length === 0) && toolkit) {
-            try {
-              const viaBigmap = await listListingsForCollectionViaBigmap(contract, net);
-              if (Array.isArray(viaBigmap) && viaBigmap.length) {
-                const fallback = [];
-                for (const { tokenId: id } of viaBigmap) {
-                  try {
-                    const offchain = await fetchListings({
-                      toolkit,
-                      nftContract: contract,
-                      tokenId: id,
-                    });
-                    if (Array.isArray(offchain) && offchain.length) {
-                      offchain.forEach((oc) => {
-                        if (oc.active && Number(oc.amount) > 0) {
-                          fallback.push({
-                            tokenId: Number(id),
-                            seller : oc.seller,
-                            price  : oc.priceMutez,
-                            priceMutez: oc.priceMutez,
-                            amount : oc.amount,
-                            active : oc.active,
-                          });
-                        }
-                      });
-                    }
-                  } catch {
-                    /* ignore off‑chain view errors */
-                  }
-                }
-                listings = fallback;
-              }
-            } catch {
-              /* ignore fallback errors */
-            }
-            // If still no listings found after off‑chain fallback, attempt to
-            // parse listings directly from the marketplace’s listings big‑map.
-            if (!listings || listings.length === 0) {
-              try {
-                const markets = marketplaceAddr(net);
-                const aggregated = [];
-                for (const market of markets) {
-                  try {
-                    const maps = await fetch(`${tzktBase}/v1/contracts/${market}/bigmaps?path=listings`).then((r) => r.json());
-                    let ptr;
-                    if (Array.isArray(maps) && maps.length > 0) {
-                      const match = maps.find((m) => (m.path || m.name) === 'listings');
-                      ptr = match ? (match.ptr ?? match.id) : undefined;
-                    }
-                    if (ptr == null) continue;
-                    const entries = await fetch(`${tzktBase}/v1/bigmaps/${ptr}/keys?active=true`).then((r) => r.json());
-                    for (const entry of entries) {
-                      const keyAddr = entry.key?.address || entry.key?.value || entry.key;
-                      if (!keyAddr || typeof keyAddr !== 'string' || keyAddr.toLowerCase() !== contract.toLowerCase()) {
-                        continue;
-                      }
-                      const values = entry.value || {};
-                      for (const listing of Object.values(values)) {
-                        if (!listing || typeof listing !== 'object') continue;
-                        const tokenId = Number(listing.token_id ?? listing.tokenId);
-                        let price = listing.price ?? listing.priceMutez;
-                        let amount = listing.amount ?? listing.quantity ?? listing.amountTokens;
-                        price = typeof price === 'string' ? Number(price) : price;
-                        amount = typeof amount === 'string' ? Number(amount) : amount;
-                        const active = listing.active !== false;
-                        if (!active || !Number.isFinite(tokenId) || !Number.isFinite(price) || amount <= 0) continue;
-                        aggregated.push({
-                          tokenId,
-                          seller : listing.seller,
-                          priceMutez: price,
-                          price : price,
-                          amount,
-                          active,
-                        });
-                      }
-                    }
-                  } catch {
-                    /* ignore individual market errors */
-                  }
-                }
-                listings = aggregated;
-              } catch {
-                /* ignore TzKT big‑map errors */
-              }
-            }
+          if (!byId.size) continue;
+
+          // fetch minted‑by addresses in batch for all tokenIds present
+          const ids = [...byId.keys()];
+          const mintedBy = await fetchMintedByMap(TZKT, kt, ids);
+
+          // for each token, keep only listings whose seller is *not* original minter/creator
+          const secondaries = [];
+          for (const id of ids) {
+            const sellers = byId.get(id) || [];
+            const mintSet = mintedBy.get(String(id)) || new Set();
+            const sec = sellers.filter((s) => !mintSet.has(s.seller));
+            if (!sec.length) continue;
+            // choose the *lowest* priced secondary listing for this token
+            sec.sort((a, b) => a.price - b.price);
+            secondaries.push({ id, seller: sec[0].seller, priceMutez: sec[0].price });
           }
-          for (const l of listings) {
-            const tokenId = Number(l.tokenId ?? l.token_id ?? l.tokenId);
-            // Normalise seller string (off‑chain fallback may set .seller)
-            const seller  = (l.seller || '').toLowerCase();
-            // Fetch token metadata to determine creators list
-            try {
-              const metaUrl = `${tzktBase}/v1/tokens?contract=${contract}&tokenId=${tokenId}&select=metadata,creators`;
-              const res    = await fetch(metaUrl);
-              if (res.ok) {
-                const data = await res.json();
-                if (Array.isArray(data) && data.length > 0) {
-                  let md = data[0].metadata;
-                  if (typeof md === 'string') {
-                    try { md = decodeHexFields(md); } catch { md = {}; }
-                  }
-                  // Extract creators from metadata first; fallback to top‑level creators
-                  const creatorsField = md.creators ?? data[0].creators ?? [];
-                  const creators = Array.isArray(creatorsField)
-                    ? creatorsField
-                    : typeof creatorsField === 'string'
-                      ? creatorsField.split(/[,;]\s*/)
-                      : [];
-                  const creatorMatch = creators
-                    .map((c) => {
-                      if (typeof c === 'string') return c.toLowerCase();
-                      if (c && typeof c.address === 'string') return c.address.toLowerCase();
-                      return '';
-                    })
-                    .filter(Boolean)
-                    .includes(seller);
-                  if (!creatorMatch) {
-                    // Secondary sale; add to results
-                    result.push({
-                      contract,
-                      tokenId,
-                      priceMutez: Number(l.priceMutez ?? l.price),
-                    });
-                  }
-                }
-              }
-            } catch {
-              /* ignore metadata errors */
-            }
+          if (!secondaries.length) continue;
+
+          // metadata batch & acceptance (preview, non‑zero supply, hazard)
+          const metaMap = await fetchTokenMetaBatch(TZKT, kt, secondaries.map((s) => s.id));
+          for (const { id, priceMutez } of secondaries) {
+            const metaEntry = metaMap.get(String(id)) || {};
+            const md        = metaEntry.metadata || {};
+            const supply    = metaEntry.totalSupply ?? 0;
+            if (!hasRenderablePreview(md)) continue;
+            if (detectHazards(md).broken) continue;
+            if (Number(supply) === 0) continue;
+            assembled.push({
+              contract: kt,
+              tokenId : id,
+              priceMutez,
+              metadata: md,
+              contractName: name || undefined,
+            });
           }
         }
-      } finally {
-        if (!cancel) {
-          setItems(result);
+
+        // final dedupe/order
+        const unique = uniqByPair(assembled);
+        unique.sort((a, b) => b.tokenId - a.tokenId);
+
+        if (!abort) {
+          setItems(unique);
+          setLoading(false);
+        }
+      } catch (err) {
+        if (!abort) {
+          setError((err && (err.message || String(err))) || 'Network error');
+          setItems([]);
           setLoading(false);
         }
       }
-    })();
-    return () => { cancel = true; };
-  }, [toolkit]);
+    }
 
-  const loadMore = () => {
-    setShowCount((c) => c + 10);
-  };
+    load();
+    return () => { abort = true; };
+  }, [net, TZKT, filterAllowedContracts, toolkit]);
 
-  // Prompt user to connect wallet when not connected
-  if (!toolkit) {
-    return (
-      <>
-        <ExploreNav />
-        <p style={{ marginTop: '2rem', textAlign: 'center' }}>Connect your wallet to view the secondary market.</p>
-      </>
-    );
-  }
-
-  // Show spinner while loading
-  if (loading) {
-    return (
-      <>
-        <ExploreNav />
-        <div style={{ marginTop: '2rem', textAlign: 'center' }}>
-          <LoadingSpinner />
-        </div>
-      </>
-    );
-  }
+  const visible = useMemo(() => items.slice(0, showCount), [items, showCount]);
 
   return (
     <>
-      <ExploreNav />
-      {items.length === 0 ? (
-        <p style={{ marginTop: '2rem' }}>No secondary listings found.</p>
-      ) : (
+      <ExploreNav hideSearch />
+      {loading && (
+        <div style={{ marginTop: '2rem', textAlign: 'center' }}>
+          <LoadingSpinner />
+        </div>
+      )}
+      {!loading && error && (
+        <p role="alert" style={{ marginTop: '1.25rem', textAlign: 'center' }}>
+          Could not load secondary listings. Please try again.
+        </p>
+      )}
+      {!loading && !error && items.length === 0 && (
+        <p style={{ marginTop: '1.25rem', textAlign: 'center' }}>
+          No secondary listings found.
+        </p>
+      )}
+      {!loading && !error && items.length > 0 && (
         <>
           <Grid>
-            {items.slice(0, showCount).map(({ contract, tokenId, priceMutez }) => (
+            {visible.map(({ contract, tokenId, priceMutez, metadata, contractName }) => (
               <TokenListingCard
                 key={`${contract}-${tokenId}`}
                 contract={contract}
                 tokenId={tokenId}
                 priceMutez={priceMutez}
+                metadata={metadata}
+                contractName={contractName}
               />
             ))}
           </Grid>
           {showCount < items.length && (
-            <div style={{ textAlign: 'center', marginTop: '1rem' }}>
+            <Center>
               <button
                 type="button"
-                onClick={loadMore}
+                onClick={() => setCount((n) => n + 24)}
                 style={{
                   background: 'none',
                   border: '2px solid var(--zu-accent,#00c8ff)',
@@ -310,9 +367,9 @@ export default function SecondaryPage() {
                   cursor: 'pointer',
                 }}
               >
-                Load More 🔻
+                Load&nbsp;More&nbsp;🔻
               </button>
-            </div>
+            </Center>
           )}
         </>
       )}
@@ -320,11 +377,12 @@ export default function SecondaryPage() {
   );
 }
 
-/* What changed & why: r3 – Added robust fallbacks for listing
-   discovery.  When the on‑chain view returns no listings, the
-   component now consults the marketplace’s listings big‑map and
-   off‑chain views via `listListingsForCollectionViaBigmap` and
-   `fetchListings` to recover active sales.  Metadata creators
-   extraction prioritises the metadata field over the top‑level
-   creators array and normalises object forms.  The dynamic TzKT
-   API selection introduced in r2 remains intact. */
+/* What changed & why (r12):
+   • True secondary listings only: seller is excluded if they match token
+     creator, firstMinter or any address inside metadata creators/authors.
+   • Reused the listings page’s stale‑listing filter (TzKT FA2 balance)
+     so dead listings never render. 
+   • Kept /v1 handling via tzktBase(); no double‑append, per invariant.
+   • Type‑hash gate (ZeroContract only), preview & non‑zero supply guards,
+     dedupe to lowest‑priced secondary per token, robust batching with jFetch.
+   • TokenListingCard left untouched; page works with or without a wallet. */

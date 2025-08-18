@@ -1,10 +1,9 @@
 /*Developed by @jams2blues
   File: src/ui/TokenCard.jsx
-  Rev:  r44
-  Summary: Keep r43 layout; ADD clickable Authors/Creators (with drawer),
-           universal FileType download (incl. svg+xml/html), and resolved
-           Collection name hyperlinked to /contracts/[KT1]; preserve hazard
-           reveal dialog and fullscreen behaviors. */
+  Rev:  r45
+  Summary: Listing card. Separate Author(s)/Creator(s) rows, remove Owners,
+           preserve r44 features; fix click‑through to detail when scripts
+           enabled via full‑tile anchor; keep universal download & KT1 link. */
 
 import {
   useState, useMemo, useEffect, useCallback,
@@ -55,7 +54,7 @@ const authorArray   = (m = {}) => toArray(m.authors);
 const creatorArray  = (m = {}) => toArray(m.creators);
 
 const isCreator = (meta = {}, addr = '') =>
-  !!addr && creatorArray(meta).some((a) => String(a).toLowerCase() === addr.toLowerCase());
+  !!addr && creatorArray(meta).some((a) => String(a).toLowerCase() === String(addr).toLowerCase());
 
 const isTz = (s) => typeof s === 'string' && /^tz[1-3][1-9A-HJ-NP-Za-km-z]{33}$/i.test(s?.trim());
 const isKt = (s) => typeof s === 'string' && /^KT1[0-9A-Za-z]{33}$/i.test(s?.trim());
@@ -164,13 +163,24 @@ const ThumbWrap = styled.div`
   &:focus-visible { box-shadow: inset 0 0 0 3px rgba(0,200,255,.45); }
 `;
 
+/* Full-tile invisible <a> that restores navigation when scripts are enabled.
+   Stacks above the preview media but below floating controls. */
+const LinkCover = styled.a`
+  position: absolute;
+  inset: 0;
+  z-index: 6;             /* FS button is z:7 → stays above */
+  text-decoration: none;
+  /* Keep it focusable only via container key handlers; avoid duplicate focus rings. */
+  outline: none;
+`;
+
 const FSBtn = styled(PixelButton)`
   position:absolute;
   bottom:4px;
   right:4px;
   opacity:.45;
   &:hover{ opacity:1; }
-  z-index:7; /* above preview */
+  z-index:7; /* above preview + LinkCover */
 `;
 
 const Meta = styled.section`
@@ -192,6 +202,14 @@ const Stat = styled.span`
 
 const Row = styled.div`
   display:flex;justify-content:space-between;align-items:center;
+`;
+
+/* Single row for Token-ID (#) ⟷ Amount (×n) */
+const StatRow = styled.div`
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:8px;
 `;
 
 /*──────── component ───────────────────────────────────────*/
@@ -236,10 +254,9 @@ export default function TokenCard({
   const [revealType, setRevealType] = useState(null);   // 'nsfw' | 'flash' | null
   const [termsOk,    setTermsOk]    = useState(false);
 
-  /* author / creator lists with link + drawer (keep single-line labels) */
+  /* author / creator lists with link + drawer (single-line labels; separate rows) */
   const authors  = toArray(meta.authors);
   const creators = toArray(meta.creators);
-  const showCreatorsLine = creators.length > 0 && authors.join() !== creators.join();
   const [showAllAuthors, setShowAllAuthors] = useState(false);
   const [showAllCreators, setShowAllCreators] = useState(false);
 
@@ -306,10 +323,8 @@ export default function TokenCard({
     return elems;
   }, [formatEntry]);
 
-  /* stats */
+  /* stats (card layout removes Owners here per user request) */
   const editions  = countAmount(token);
-  const ownersNum = Number(token.holdersCount);
-  const owners    = Number.isFinite(ownersNum) ? ownersNum : '…';
 
   /* artifact download (universal) */
   const artifact        = meta.artifactUri;
@@ -322,19 +337,39 @@ export default function TokenCard({
   const askEnableScripts = () => { setScrTerms(false); setCfrmScr(true); };
   const confirmScripts   = () => { if (scrTerms) { setAllowScr(true); setCfrmScr(false); } };
 
-  /* navigation helpers (tile = link; keep video controls functional) */
+  /* navigation helpers (tile = link; keep video controls functional). 
+     IMPORTANT: if blocked by NSFW/Flashing, do not navigate. */
   const tokenHref = `/tokens/${contractAddress}/${token.tokenId}`;
   const goDetail = useCallback(() => { window.location.href = tokenHref; }, [tokenHref]);
-  const onKey = (e) => { if (e.key === 'Enter') goDetail(); };
-  const isMediaControlsHit = (e) => {
+
+  const onKey = useCallback((e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      if (blocked) {
+        setRevealType(needsNSFW ? 'nsfw' : 'flash');
+      } else {
+        goDetail();
+      }
+    }
+  }, [blocked, needsNSFW, goDetail]);
+
+  const isMediaControlsHit = useCallback((e) => {
     const v = e.target?.closest?.('video, audio');
     if (!v) return false;
     const r = v.getBoundingClientRect?.(); if (!r) return true;
     const band = Math.max(34, Math.min(64, r.height * 0.22));
     const yFromBottom = r.bottom - (e.clientY ?? 0);
     return yFromBottom <= band;
-  };
-  const onThumbClick = (e) => { if (!isMediaControlsHit(e)) goDetail(); };
+  }, []);
+
+  const onThumbClick = useCallback((e) => {
+    if (blocked) {
+      e.preventDefault();
+      setRevealType(needsNSFW ? 'nsfw' : 'flash');
+      return;
+    }
+    if (!isMediaControlsHit(e)) goDetail();
+  }, [blocked, needsNSFW, goDetail, isMediaControlsHit]);
 
   /* collection name: resolve from KT1 when no prop is provided */
   const [collectionName, setCollectionName] = useState(contractName || '');
@@ -352,11 +387,23 @@ export default function TokenCard({
     ? collectionName.trim()
     : shortAddr(contractAddress);
 
+  /* Is the preview scripted and currently allowed? 
+     If yes, overlay a full‑tile <a> so clicks always route to detail,
+     avoiding event capture by iframes/interactive HTML. */
+  const scriptedPreviewActive = Boolean(scriptHaz && allowScr);
+
   return (
     <>
       <Card>
         {/* preview (1:1 clickable tile) */}
-        <ThumbWrap className="preview-1x1" role="link" tabIndex={0} aria-label="View token detail" onClick={onThumbClick} onKeyDown={onKey}>
+        <ThumbWrap
+          className="preview-1x1"
+          role="link"
+          tabIndex={0}
+          aria-label="View token detail"
+          onClick={onThumbClick}
+          onKeyDown={onKey}
+        >
           {!blocked && preview && !(!thumbOk || !preview) && (
             <RenderMedia
               uri={preview}
@@ -387,6 +434,16 @@ export default function TokenCard({
             </div>
           )}
 
+          {/* When scripts are enabled on a scripted preview, mount a cover link
+              so the entire tile remains a reliable navigation target. */}
+          {!blocked && scriptedPreviewActive && (
+            <LinkCover
+              href={tokenHref}
+              aria-label="Go to token details"
+              title="Open token details"
+            />
+          )}
+
           <FSBtn
             size="xs"
             disabled={!(!scriptHaz || allowScr)}
@@ -395,13 +452,13 @@ export default function TokenCard({
           >⛶</FSBtn>
         </ThumbWrap>
 
-        {/* meta info (layout preserved) */}
+        {/* meta info (re‑ordered; uncluttered) */}
         <Meta>
+          {/* ⭐ + scripts toggle (if any) */}
           <Row>
             <span title={getIntegrityInfo(integrity.status).label} style={{ cursor:'pointer', fontSize:'1.1rem' }}>
               <IntegrityBadge status={integrity.status} />
             </span>
-
             {scriptHaz && (
               <EnableScriptsToggle
                 enabled={allowScr}
@@ -410,24 +467,31 @@ export default function TokenCard({
             )}
           </Row>
 
-          <h4>{meta.name || `#${token.tokenId}`}</h4>
+          {/* Token name */}
+          <h4 style={{ wordBreak:'break-word', overflowWrap:'anywhere' }}>
+            {meta.name || `#${token.tokenId}`}
+          </h4>
 
+          {/* Author(s) — own row */}
           {authorArray(meta).length > 0 && (
             <p style={{ wordBreak:'break-word', overflowWrap:'anywhere' }}>
-              Author(s)&nbsp;
+              <strong>Author(s)</strong>&nbsp;
               {renderEntryList(authorArray(meta), showAllAuthors, setShowAllAuthors)}
             </p>
           )}
-          {showCreatorsLine && (
-            <p style={{ wordBreak:'break-word', overflowWrap:'anywhere', opacity: authorArray(meta).length > 0 ? 0.8 : 1 }}>
-              Creator(s)&nbsp;
+
+          {/* Creator(s) — own row (always show if present, even if same as authors) */}
+          {creatorArray(meta).length > 0 && (
+            <p style={{ wordBreak:'break-word', overflowWrap:'anywhere' }}>
+              <strong>Creator(s)</strong>&nbsp;
               {renderEntryList(creatorArray(meta), showAllCreators, setShowAllCreators)}
             </p>
           )}
 
+          {/* FileType with universal download */}
           {meta.mimeType && (
             <p>
-              FileType:&nbsp;
+              <strong>FileType</strong>:&nbsp;
               {downloadAllowed
                 ? (
                   <a
@@ -443,16 +507,20 @@ export default function TokenCard({
             </p>
           )}
 
-          <Stat>Token‑ID&nbsp;{token.tokenId}</Stat>
-          <Stat>Amount&nbsp;×{editions}</Stat>
-          <Stat>Owners&nbsp;{owners}</Stat>
+          {/* Token‑ID & Amount on a single compact row */}
+          <StatRow>
+            <Stat>Token‑ID&nbsp;{token.tokenId}</Stat>
+            <Stat>Amount&nbsp;×{editions}</Stat>
+          </StatRow>
 
+          {/* Offer CTA */}
           <div style={{ marginTop:'4px' }}>
             <MakeOfferBtn contract={contractAddress} tokenId={token.tokenId} label="OFFER" />
           </div>
 
+          {/* Collection (clickable; KT1 fallback) */}
           <p style={{ marginTop:'4px', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
-            Collection:&nbsp;
+            <strong>Collection</strong>:&nbsp;
             <a href={`/contracts/${contractAddress}`} style={{ color:'var(--zu-accent-sec,#6ff)', textDecoration:'none' }}>
               {collectionLabel}
             </a>
@@ -524,19 +592,21 @@ TokenCard.propTypes = {
     tokenId      : PropTypes.oneOfType([PropTypes.string,PropTypes.number]).isRequired,
     metadata     : PropTypes.object,
     price        : PropTypes.number,
-    holdersCount : PropTypes.number,
+    holdersCount : PropTypes.oneOfType([PropTypes.number,PropTypes.string]),
   }).isRequired,
   contractAddress: PropTypes.string.isRequired,
   contractName   : PropTypes.string,
   contractAdmin  : PropTypes.string,
 };
 
-/* What changed & why (r44):
-   • “Collection:” now always shows a clickable name:
-     - resolves from TzKT /v1 (big‑map metadata.content → contracts metadata),
-       decoding hex JSON via decodeHexFields/decodeHexJson; short KT1 fallback.
-   • Authors/Creators are clickable (filter route /explore/tokens?admin=…):
-     - wraps cleanly; adds “… 🔻” drawer when >3 entries; resolves .tez labels.
-   • FileType: universal download for any artifactUri (incl. svg+xml/html)
-     with a suggestive filename based on token name + MIME.
-   • Preserved r43 layout, fullscreen button, and NSFW/Flashing confirm flows. */
+/* What changed & why (r45):
+   • Authors/Creators now always render on separate rows; improved wrapping.
+   • Removed Owners from the card (kept on ContractMetaPanel).
+   • Kept order: ⭐ + scripts toggle → name → Author(s) → Creator(s) →
+     FileType (download) → Token‑ID & Amount (inline) → Offer → Collection.
+   • Fixed “can’t click preview when scripts are enabled” by adding a z‑layered
+     full‑tile <a> cover for scripted previews; FS button remains accessible.
+   • Preserved r44 behaviours: clickable author/creator filters with .tez
+     reverse lookup, universal download naming, KT1‑name resolver, NSFW/Flash
+     reveal, and fullscreen modal. */
+//EOF

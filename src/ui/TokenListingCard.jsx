@@ -1,9 +1,10 @@
 /* Developed by @jams2blues
    File: src/ui/TokenListingCard.jsx
-   Rev:  r1242
-   Summary: Stop TzKT 404 flood, memoize name resolver via jFetch,
-            coalesce lookups (TTL), switch all HTTP calls to core/net.js,
-            minor a11y/title polish. */
+   Rev:  r1244
+   Summary: Preserve preview interactivity and guarantee navigation when
+            scripts are enabled by adding a conditional top-layer link
+            overlay for embedded document media (SVG/HTML). FS button and
+            native media controls remain clickable; NSFW/Flash gating intact. */
 
 import React, {
   useEffect,
@@ -66,12 +67,25 @@ const Thumb = styled.div`
   &:focus-visible { box-shadow: inset 0 0 0 3px rgba(0,200,255,.45); }
 `;
 
+/* NEW: top-layer navigation overlay (pointer-events toggled).
+   We use a $active prop to avoid leaking attributes to the DOM. */
+const NavOverlay = styled.a`
+  position: absolute;
+  inset: 0;
+  z-index: 6; /* below FSBtn (7), above media content */
+  pointer-events: ${p => (p.$active ? 'auto' : 'none')};
+  background: transparent;
+  /* hide text, keep accessible name via aria-label/title */
+  text-indent: -9999px;
+`;
+
+/* Fullscreen button stays on top of the overlay */
 const FSBtn = styled(PixelButton).attrs({ noActiveFx: true })`
   position: absolute;
   bottom: 4px;
   right: 4px;
   opacity: .45;
-  z-index: 7; /* keep above tile click layer */
+  z-index: 7; /* keep above tile click layer & overlay */
   &:hover { opacity: 1; }
 `;
 
@@ -279,12 +293,7 @@ async function _fetchJson(url, opts) {
   }
 }
 
-/** Best‑effort TZIP‑16/alias resolver without hitting 404 endpoints.
- *  Strategy:
- *   1) GET /contracts/{KT1}?select=metadata  → use name/title/symbol if present (200 even if empty).
- *   2) GET /contracts/{KT1}?select=alias     → fallback to TzKT alias if set (also 200/null).
- *  Results memoized for NAME_TTL_MS and coalesced across concurrent calls.
- */
+/** Best‑effort TZIP‑16/alias resolver without hitting 404 endpoints. */
 async function resolveContractName(tzktV1, kt1, signal) {
   const addr = String(kt1 || '').trim();
   if (!/^KT1[0-9A-Za-z]{33}$/i.test(addr)) return '';
@@ -585,6 +594,51 @@ export default function TokenListingCard({
     if (!isMediaControlsHit(e)) goDetail();
   }, [blocked, needsNSFW, goDetail, isMediaControlsHit]);
 
+  /* Capture‑phase guard for nested elements that stop propagation (non-embed cases). */
+  const onThumbClickCapture = useCallback((e) => {
+    // Don’t interfere with explicit interactive targets inside the tile
+    if (e.target?.closest?.('[data-no-nav="true"],button,[role="button"],a,input,select,textarea,label')) return;
+
+    if (blocked) {
+      e.preventDefault();
+      e.stopPropagation();
+      setRevealType(needsNSFW ? 'nsfw' : 'flash');
+      return;
+    }
+    if (!isMediaControlsHit(e)) {
+      e.stopPropagation(); // prevent duplicate handlers
+      goDetail();
+    }
+  }, [blocked, needsNSFW, isMediaControlsHit, goDetail]);
+
+  /*──────── embedded‑document detection for overlay activation ────────*/
+  const previewMime = useMemo(() => {
+    const m = String(meta?.mimeType || meta?.mime || '').toLowerCase().trim();
+    if (m) return m;
+    const u = String(previewUri || '').toLowerCase();
+    if (!u) return '';
+    if (u.startsWith('data:')) {
+      const head = u.slice(5);
+      const at = Math.min(
+        ...[head.indexOf(';'), head.indexOf(','), head.length].filter(n => n >= 0),
+      );
+      return head.slice(0, at);
+    }
+    if (/\.svg(\?|#|$)/i.test(u)) return 'image/svg+xml';
+    if (/\.html?(\?|#|$)/i.test(u)) return 'text/html';
+    return '';
+  }, [meta, previewUri]);
+
+  // Overlay should be active only when click events won’t bubble: script-enabled SVG/HTML previews.
+  const overlayActive = useMemo(
+    () =>
+      !blocked &&
+      hazards.scripts &&
+      allowScr &&
+      /^(image\/svg\+xml|text\/html)\b/.test(previewMime),
+    [blocked, hazards.scripts, allowScr, previewMime],
+  );
+
   /*────────────────────── render ───────────────────────────────────────────*/
   return (
     <Card aria-label={`Token listing card for ${title}`}>
@@ -594,6 +648,7 @@ export default function TokenListingCard({
         role="link"
         tabIndex={0}
         aria-label={`View ${title}`}
+        onClickCapture={onThumbClickCapture}
         onClick={onThumbClick}
         onKeyDown={onKey}
       >
@@ -653,7 +708,21 @@ export default function TokenListingCard({
           </div>
         )}
 
+        {/* NEW: navigation overlay – only active when embedded documents swallow clicks */}
+        <NavOverlay
+          href={tokenHref}
+          $active={overlayActive}
+          aria-label={`Open ${title}`}
+          title={title}
+          tabIndex={-1}       /* keep keyboard flow on the tile itself */
+          aria-hidden={!overlayActive}
+        >
+          {/* hidden text for screen readers when active */}
+          Open {title}
+        </NavOverlay>
+
         <FSBtn
+          data-no-nav="true"                 /* exclude from tile navigation */
           size="xs"
           aria-label={
             blocked
@@ -850,8 +919,12 @@ TokenListingCard.defaultProps = {
   contractName: '',
 };
 
-/* What changed & why (r1242):
-   • Eliminated 404‑prone /contracts/{KT1}/metadata probe.
-   • Name resolver now uses /contracts?select=metadata→alias (200‑safe), memoized with TTL & inflight dedupe.
-   • Switched all HTTP to core/net.js jFetch (I40), silent/back‑off aware.
-   • Kept preview safety & consent gating; minor a11y/title polish. */
+/* What changed & why (r1244):
+   • Fix: clicks inside script-enabled SVG/HTML previews (object/iframe) no
+     longer get swallowed. Added NavOverlay (<a>) above media that activates
+     only when previewMime indicates an embedded doc and scripts are enabled.
+   • Safety: overlay disabled when NSFW/Flash gating blocks preview.
+   • UX: FS button (z-index 7) remains clickable above overlay (z-index 6);
+     for normal img/video, tile click handlers continue to work.
+   • Kept previous capture-phase guard and media-controls heuristics intact. */
+// EOF

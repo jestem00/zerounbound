@@ -1,6 +1,7 @@
+/*──────── src/core/marketplace.js ────────*/
 /*Developed by @jams2blues – ZeroContract Studio
   File:    src/core/marketplace.js
-  Rev:     r982  2025‑08‑19
+  Rev:     r983  2025‑08‑19
   Summary: Keep full marketplace API; normalize splits;
            auto-batch update_operators + list_token (1 signature);
            fix list_token permutations (no price=true); stale guards. */
@@ -80,8 +81,8 @@ export async function fetchLowestListing({
     const checked = await filterStaleListings(toolkit, act.map((l) => ({
       nftContract, tokenId, seller: l.seller, amount: l.amount, __src: l,
     }))).catch(() => act);
-    if (Array.isArray(checked) && checked.length) {
-      act = checked.map((x) => x.__src || x);
+    if (Array.isArray(checked)) {
+      act = checked.length ? checked.map((x) => x.__src || x) : [];
     }
   }
 
@@ -725,11 +726,29 @@ export async function filterStaleListings(_toolkit, listings) {
   return keep;
 }
 
+/** Preflight guard: verify the seller still has at least `amount` balance for (contract, tokenId).
+ *  Throws an Error tagged with code 'STALE_LISTING_NO_BALANCE' when insufficient.
+ *  Note: `toolkit` param kept for API parity; network is derived inside getFa2BalanceViaTzkt via TZKT_BASE.
+ */
+export async function preflightBuy(toolkit, { nftContract, tokenId, seller, amount = 1 }) {
+  const bal = await getFa2BalanceViaTzkt(String(seller), String(nftContract), Number(tokenId));
+  const need = Number(amount) || 1;
+  if (!Number.isFinite(bal) || bal < need) {
+    const err = new Error('Listing is stale: seller does not own required balance for this token.');
+    err.code = 'STALE_LISTING_NO_BALANCE';
+    err.details = { seller: String(seller), nftContract: String(nftContract), tokenId: Number(tokenId), amount: need, balance: Number(bal || 0) };
+    throw err;
+  }
+  return { ok: true, balance: Number(bal) };
+}
+
 /* What changed & why:
    • Restored single‑signature UX: auto‑prepend update_operators when needed.
    • Hardened list_token builder: try offline flag both before/after price +
      both split orders → no more "[price] … true".
    • Normalized splits: accept {address,bps} or {address,percent}; seller
      remainder added deterministically; cap royalties to 25%.
-   • Kept full view/fetch API & TzKT stale‑guards. */
+   • Kept full view/fetch API & TzKT stale‑guards.
+   • Added `preflightBuy` export and fixed empty-result handling in `fetchLowestListing`. */
 // EOF
+

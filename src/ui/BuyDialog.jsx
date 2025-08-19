@@ -1,8 +1,8 @@
 /* Developed by @jams2blues
-   File: src/ui/BuyDialog.jsx
-   Rev:  r11   2025‑09‑21
-   Summary: Accept prop aliases (isOpen/contractAddress/listingNonce),
-            preflight stale-check, improved errors & focus flow. */
+   File: zerounbound/src/ui/BuyDialog.jsx
+   Rev:  r12   2025‑10‑24
+   Summary: Unified messaging + strict preflight + core buy builder
+            (v1–v4e). Keeps prop aliases and focus flow intact. */
 
 import React, { useEffect, useRef, useState } from 'react';
 import PropTypes                 from 'prop-types';
@@ -62,7 +62,9 @@ export default function BuyDialog(props) {
 
   if (!OPEN || priceMutez == null || !seller || NONCE == null) return null;
 
-  const priceXTZ = (priceMutez / 1_000_000).toLocaleString();
+  const priceXTZ = (priceMutez / 1_000_000).toLocaleString(undefined, {
+    minimumFractionDigits: 6, maximumFractionDigits: 6,
+  });
 
   async function handleBuy() {
     if (!toolkit) { snack('Wallet unavailable', 'error'); return; }
@@ -96,12 +98,17 @@ export default function BuyDialog(props) {
     } catch (err) {
       console.error('Purchase failed:', err);
       setOv({ open: false, label: '' });
-      const msg = String(err?.message || 'Transaction failed');
 
+      // Prefer tagged messages; fall back to plain text
       if (err?.code === 'STALE_LISTING_NO_BALANCE') {
-        snack('Purchase failed: listing appears stale (seller has insufficient balance). Ask seller to re‑list.', 'error');
+        snack('Purchase failed: listing appears stale (seller balance insufficient). Ask seller to re‑list.', 'error');
         return;
       }
+      if (err?.code === 'UNSUPPORTED_MARKET_BUY') {
+        snack('Unsupported marketplace buy/collect entrypoint for this version.', 'error');
+        return;
+      }
+      const msg = String(err?.message || 'Transaction failed');
       if (/FA2_NOT_OPERATOR/i.test(msg) || /not the (Owner|owner)/i.test(msg)) {
         snack('Seller has not granted operator rights or is no longer the owner. They must re‑list.', 'error');
         return;
@@ -149,4 +156,6 @@ BuyDialog.propTypes = {
   onClose   : PropTypes.func,
   amount    : PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
 };
-/* What changed & why: prop aliases + preflight stale check + clearer errors. */
+/* What changed & why: unified error for unsupported entrypoints; kept stale
+   preflight + aliases; still defers param building to core (v1–v4e). */
+// EOF

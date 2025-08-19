@@ -1,25 +1,24 @@
-/*Developed by @jams2blues
-  File: src/ui/MarketplaceBar.jsx
-  Rev:  r926   2025‑08‑17
-  Summary:
-    - Guard against STALE listings (seller must still own >= amount).
-    - Hide price & disable BUY when stale or unverifiable (safe default).
-    - Preserve previous UX:
-        • OFFER always clickable (even when wallet disconnected).
-        • BUY disabled if no listing or when user is the seller.
-        • CANCEL only for the seller of the active listing.
-        • ACCEPT only for the seller when offers exist.
-    - Keep legacy layout and $noActiveFx jiggle fix intact. */
+/*─────────────────────────────────────────────────────────────
+  Developed by @jams2blues – ZeroContract Studio
+  File:    src/ui/MarketplaceBar.jsx
+  Rev:     r929  2025‑08‑19
+  Summary(of what this file does): Marketplace action bar shown on
+           token detail pages. Shows current listing price and
+           exposes BUY/LIST/OFFER/CANCEL/ACCEPT actions.
+           This revision enables BUY when the seller’s **live**
+           FA2 balance is ≥ 1 (partial‑stock friendly). The Buy
+           dialog still runs a strict preflight for the actual
+           requested quantity. */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import PropTypes                                from 'prop-types';
+import PropTypes from 'prop-types';
 
-import PixelButton       from './PixelButton.jsx';
-import BuyDialog         from './BuyDialog.jsx';
-import ListTokenDialog   from './ListTokenDialog.jsx';
-import MakeOfferDialog   from './MakeOfferDialog.jsx';
-import CancelListing     from './Entrypoints/CancelListing.jsx';
-import AcceptOffer       from './Entrypoints/AcceptOffer.jsx';
+import PixelButton     from './PixelButton.jsx';
+import BuyDialog       from './BuyDialog.jsx';
+import ListTokenDialog from './ListTokenDialog.jsx';
+import MakeOfferDialog from './MakeOfferDialog.jsx';
+import CancelListing   from './Entrypoints/CancelListing.jsx';
+import AcceptOffer     from './Entrypoints/AcceptOffer.jsx';
 
 import { useWalletContext } from '../contexts/WalletContext.js';
 import {
@@ -35,18 +34,18 @@ function toNumberOrNull(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-/** Stale check status enum (string union for easy debugging). */
+/** Stale check status enum. */
 const STALE = {
-  IDLE: 'idle',
-  CHECKING: 'checking',
-  FRESH: 'fresh',
-  STALE: 'stale',
+  IDLE     : 'idle',
+  CHECKING : 'checking',
+  FRESH    : 'fresh',
+  STALE    : 'stale',
 };
 
 export default function MarketplaceBar({
   contractAddress,
   tokenId,
-  marketplace, // reserved for parity with legacy call-sites
+  marketplace, // reserved parity with legacy callers
 }) {
   const { toolkit, address: walletAddr } = useWalletContext() || {};
 
@@ -54,23 +53,20 @@ export default function MarketplaceBar({
   const [hasOffers, setHasOffers] = useState(false);
   const [dlg, setDlg]             = useState(null);
 
-  // Stale-listing detection state
+  // We verify freshness independently (async) so the bar can show price first.
   const [staleStatus, setStaleStatus] = useState(STALE.IDLE);
 
-  // Load the cheapest listing and whether any offers exist (best effort)
+  // Load the cheapest listing and whether any offers exist (best effort).
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
-      if (!toolkit) return; // preserve legacy behavior when disconnected
-
       try {
         const l = await fetchLowestListing({
           toolkit,
           nftContract: contractAddress,
           tokenId,
-          // core guard already enabled by default; UI guard below double-checks
-          staleCheck: true,
+          staleCheck: false, // we run our own live‑balance probe below
         });
         if (!cancelled) {
           setLowest(l || null);
@@ -96,12 +92,12 @@ export default function MarketplaceBar({
     return () => { cancelled = true; };
   }, [toolkit, contractAddress, tokenId]);
 
-  // UI‑level stale check (defense in depth): seller must still hold >= amount
+  // Partial‑stock‑safe freshness probe — treat listing as fresh if seller balance ≥ 1.
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
-      if (!lowest || !lowest.seller || !Number.isFinite(Number(lowest.amount))) {
+      if (!lowest || !lowest.seller) {
         if (!cancelled) setStaleStatus(lowest ? STALE.CHECKING : STALE.IDLE);
         return;
       }
@@ -114,21 +110,17 @@ export default function MarketplaceBar({
           Number(tokenId),
         );
         if (!cancelled) {
-          // Safe default: if we couldn’t verify, core helper returns 0 (UI-safe)
-          setStaleStatus(bal >= Number(lowest.amount) ? STALE.FRESH : STALE.STALE);
+          setStaleStatus(bal >= 1 ? STALE.FRESH : STALE.STALE);
         }
       } catch {
-        if (!cancelled) {
-          // Network failure → treat as stale at UI layer (safe, prevents accidental buys)
-          setStaleStatus(STALE.STALE);
-        }
+        if (!cancelled) setStaleStatus(STALE.STALE);
       }
     })();
 
     return () => { cancelled = true; };
   }, [lowest, contractAddress, tokenId]);
 
-  // Derived state
+  // Derived state for rendering.
   const {
     hasListing,
     priceMutez,
@@ -153,8 +145,8 @@ export default function MarketplaceBar({
       && !!_seller
       && walletAddr.toLowerCase() === _seller.toLowerCase();
 
-    // Final "active" flag considers stale guard
-    const uiActive = _hasListingRaw && staleStatus !== STALE.STALE;
+    // Final active flag reflects live‑balance probe (≥1).
+    const uiActive = _hasListingRaw && staleStatus === STALE.FRESH;
 
     return {
       hasListing : uiActive,
@@ -162,15 +154,14 @@ export default function MarketplaceBar({
       priceXTZ   : _priceXTZ,
       isSeller   : _isSeller,
     };
-    // include staleStatus so we recompute hasListing when check completes
   }, [lowest, walletAddr, staleStatus]);
 
   const disableBuy = !toolkit || !hasListing || isSeller;
 
   return (
     <>
-      {/* Price indicator — only when listing is verified fresh */}
-      {hasListing && priceXTZ && staleStatus === STALE.FRESH && (
+      {/* Show the price only when confirmed fresh */}
+      {hasListing && priceXTZ && (
         <span
           aria-label={`Listing price ${priceXTZ} tez`}
           style={{
@@ -187,7 +178,7 @@ export default function MarketplaceBar({
         </span>
       )}
 
-      {/* BUY — disabled when not purchasable or you are seller */}
+      {/* BUY — enabled when live FA2 balance ≥ 1 and user isn’t the seller */}
       <PixelButton
         $noActiveFx
         disabled={disableBuy}
@@ -202,7 +193,7 @@ export default function MarketplaceBar({
             : staleStatus === STALE.CHECKING
               ? 'Verifying availability…'
               : staleStatus === STALE.STALE
-                ? 'Listing unavailable (seller no longer holds the token)'
+                ? 'Listing unavailable (seller balance is 0)'
                 : !hasListing
                   ? 'No active listing to buy'
                   : isSeller
@@ -213,7 +204,7 @@ export default function MarketplaceBar({
         BUY
       </PixelButton>
 
-      {/* LIST — unchanged (requires wallet for the eventual tx, but UI can open dialog) */}
+      {/* LIST — unchanged */}
       <PixelButton
         $noActiveFx
         disabled={!toolkit}
@@ -225,7 +216,7 @@ export default function MarketplaceBar({
         LIST
       </PixelButton>
 
-      {/* OFFER — always clickable; dialog will guide connection/validation */}
+      {/* OFFER — always clickable; dialog guides connection/validation */}
       <PixelButton
         $noActiveFx
         disabled={false}
@@ -237,7 +228,7 @@ export default function MarketplaceBar({
         OFFER
       </PixelButton>
 
-      {/* CANCEL — only when *you* are the seller of the active (fresh) listing */}
+      {/* CANCEL — only when *you* are the seller of the active listing */}
       {isSeller && hasListing && (
         <PixelButton
           $noActiveFx
@@ -266,15 +257,15 @@ export default function MarketplaceBar({
       )}
 
       {/* dialogs */}
-      {dlg === 'buy' && hasListing && priceMutez != null && staleStatus === STALE.FRESH && (
+      {dlg === 'buy' && hasListing && priceMutez != null && (
         <BuyDialog
           open
           contract={contractAddress}
           tokenId={tokenId}
           priceMutez={priceMutez}
-          seller={lowest.seller}
-          nonce={lowest.nonce}
-          available={toNumberOrNull(lowest.amount) ?? undefined}
+          seller={lowest?.seller}
+          nonce={lowest?.nonce}
+          available={toNumberOrNull(lowest?.amount) ?? undefined}
           onClose={() => setDlg(null)}
         />
       )}
@@ -325,11 +316,12 @@ MarketplaceBar.propTypes = {
   marketplace    : PropTypes.any,
 };
 
-/* What changed & why (r926):
-   • UI stale‑listing check using live FA2 balances via TzKT to ensure the
-     seller still holds >= amount: hides price & disables Buy when stale.
-   • Safe default: if TzKT is unreachable, treat as stale in UI (prevents
-     accidental attempts). Core logic remains authoritative for tx building.
-   • All other button rules remain exactly as in r924 (OFFER always enabled,
-     BUY disabled without an active listing or when you are the seller, and
-     CANCEL/ACCEPT only for the seller of an active listing). */
+/* What changed & why:
+   • BUY is now enabled when the seller’s live FA2 balance (via TzKT
+     tokens/balances) is ≥ 1 for the token. This handles “partial stock”
+     scenarios caused by cross‑market sales (e.g., on Objkt) while still
+     blocking truly stale listings (balance 0). TzKT is the recommended
+     indexer API for live token balances on Tezos. 
+   • The Buy dialog’s preflight remains strict for the requested quantity,
+     preventing over‑purchases when inventory runs low. */
+//EOF

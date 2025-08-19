@@ -89,8 +89,8 @@ const nets = {
     startUrl:     '/?source=pwa-mainnet',
     rpc: [
       // Primary mainnet RPC (recommended by ECAD Infra) – supports views
-      'https://mainnet.tezos.ecadinfra.com',
-      'https://prod.tcinfra.net/rpc/mainnet',
+      'https://prod.tcinfra.net/rpc/mainnet', //tezos commons recommended RPC node switcher, selects best node
+      'https://mainnet.tezos.ecadinfra.com', // ECAD Infra mainnet RPC fallback
     ],
     tzkt:         'https://api.tzkt.io',
     redirects:    [],

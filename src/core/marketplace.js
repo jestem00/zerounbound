@@ -1,10 +1,11 @@
-/*──────── src/core/marketplace.js ────────*/
 /*Developed by @jams2blues – ZeroContract Studio
   File:    src/core/marketplace.js
-  Rev:     r983  2025‑08‑19
-  Summary: Keep full marketplace API; normalize splits;
-           auto-batch update_operators + list_token (1 signature);
-           fix list_token permutations (no price=true); stale guards. */
+  Rev:     r985  2025‑08‑19
+  Summary(of what this file does): ZeroSum marketplace helpers: contract
+           resolver, on/off‑chain listing/offer readers, robust lowest‑listing
+           fallback (on‑chain → off‑chain view → TzKT big‑map), param builders
+           (buy/list/cancel/accept/make offer), operator auto‑ensure for
+           single‑sig listing, and TzKT‑backed stale‑listing preflight. */
 
 import { OpKind } from '@taquito/taquito';
 import { Tzip16Module } from '@taquito/tzip16';
@@ -61,9 +62,80 @@ export async function fetchListings({ toolkit, nftContract, tokenId }) {
   } catch { return []; }
 }
 
+/*─────────────────────────────────────────────────────────────
+  Robust listing discovery fallbacks (NEW, non‑breaking)
+  1) on‑chain view  2) off‑chain TZIP‑16 view  3) TzKT big‑map
+──────────────────────────────────────────────────────────────*/
+async function getViewCaller(market, toolkit) {
+  try {
+    const pkh = await toolkit.signer.publicKeyHash();
+    if (typeof pkh === 'string' && /^tz/i.test(pkh)) return pkh;
+  } catch { /* ignore */ }
+  return market.address;
+}
+
+/** Off‑chain TZIP‑16 view fallback — `get_listings_for_token` */
+async function fetchOffchainListingsForToken(toolkit, nftContract, tokenId) {
+  try {
+    const market = await getMarketContract(toolkit);
+    const views  = await market.tzip16().metadataViews();
+    const fn = views?.get_listings_for_token;
+    if (!fn || typeof fn().executeView !== 'function') return [];
+    const raw = await fn().executeView(String(nftContract), Number(tokenId));
+    const out = [];
+    const push = (n, o) => out.push({
+      nonce     : Number(n),
+      priceMutez: Number(o?.price ?? 0),
+      amount    : Number(o?.amount ?? 0),
+      seller    : String(o?.seller ?? ''),
+      active    : !!o?.active,
+    });
+    if (raw?.entries) for (const [k, v] of raw.entries()) push(k, v);
+    else if (raw && typeof raw === 'object') Object.entries(raw).forEach(([k, v]) => push(k, v));
+    return out;
+  } catch { return []; }
+}
+
+/** Direct TzKT big‑map fallback — reads marketplace `listings` for (KT1,tokenId) */
+async function fetchListingsViaTzktBigmap(toolkit, nftContract, tokenId) {
+  const mkt = marketplaceAddr(NETWORK_KEY);
+  try {
+    // Find the 'listings' big‑map pointer
+    const maps = await jFetch(`${TZKT_BASE}/v1/contracts/${mkt}/bigmaps`).catch(() => []);
+    const meta = Array.isArray(maps) ? maps.find((m) => (m.path || m.name) === 'listings') : null;
+    const ptr  = meta?.ptr ?? meta?.id;
+    if (ptr == null) return [];
+
+    // Pull the single key row for (fa2Address, tokenId)
+    const qs = new URLSearchParams({
+      'key.address': String(nftContract),
+      'key.nat'    : String(Number(tokenId)),
+      limit        : '1',
+    });
+    const rows = await jFetch(`${TZKT_BASE}/v1/bigmaps/${ptr}/keys?${qs.toString()}`, 1).catch(() => []);
+    const value = Array.isArray(rows) && rows[0] ? rows[0].value : null;
+    if (!value || typeof value !== 'object') return [];
+
+    // value is a map nonce→details; normalise all
+    const out = [];
+    Object.entries(value).forEach(([nonce, det]) => {
+      if (!det) return;
+      out.push({
+        nonce     : Number(nonce),
+        priceMutez: Number(det.price ?? 0),
+        amount    : Number(det.amount ?? 0),
+        seller    : String(det.seller ?? ''),
+        active    : !!det.active,
+      });
+    });
+    return out;
+  } catch { return []; }
+}
+
 /**
  * Lowest active listing with optional stale‑filter (seller must still
  * own >= amount). Keeps behaviour stable if staleCheck=false.
+ * Now with fallbacks: on‑chain → off‑chain TZIP‑16 → TzKT big‑map.
  */
 export async function fetchLowestListing({
   toolkit,
@@ -73,9 +145,11 @@ export async function fetchLowestListing({
 }) {
   let list = [];
   try { list = await fetchOnchainListings({ toolkit, nftContract, tokenId }); } catch {}
+  if (!list?.length) list = await fetchOffchainListingsForToken(toolkit, nftContract, tokenId);
+  if (!list?.length) list = await fetchListingsViaTzktBigmap(toolkit, nftContract, tokenId);
   if (!list?.length) return null;
 
-  let act = list.filter((l) => l.active && Number(l.amount) > 0);
+  let act = list.filter((l) => (l.active ?? true) && Number(l.amount) > 0);
 
   if (staleCheck && act.length) {
     const checked = await filterStaleListings(toolkit, act.map((l) => ({
@@ -126,14 +200,6 @@ export async function fetchListingDetails({ toolkit, nftContract, tokenId, nonce
 }
 
 /*──────── On‑chain views (unchanged API shape) ─────────────────*/
-async function getViewCaller(market, toolkit) {
-  try {
-    const pkh = await toolkit.signer.publicKeyHash();
-    if (typeof pkh === 'string' && /^tz/i.test(pkh)) return pkh;
-  } catch { /* ignore */ }
-  return market.address;
-}
-
 export async function fetchOnchainListings({ toolkit, nftContract, tokenId }) {
   const market = await getMarketContract(toolkit);
   const viewCaller = await getViewCaller(market, toolkit);
@@ -743,12 +809,10 @@ export async function preflightBuy(toolkit, { nftContract, tokenId, seller, amou
 }
 
 /* What changed & why:
-   • Restored single‑signature UX: auto‑prepend update_operators when needed.
-   • Hardened list_token builder: try offline flag both before/after price +
-     both split orders → no more "[price] … true".
-   • Normalized splits: accept {address,bps} or {address,percent}; seller
-     remainder added deterministically; cap royalties to 25%.
-   • Kept full view/fetch API & TzKT stale‑guards.
-   • Added `preflightBuy` export and fixed empty-result handling in `fetchLowestListing`. */
-// EOF
-
+   • Restored/kept the entire marketplace API surface.
+   • Added robust discovery fallback: off‑chain view + TzKT big‑map
+     if on‑chain listings view returns empty (transiently).
+   • Retained operator auto‑prepend for single‑sig list, split
+     normalization, and TzKT stale‑listing guards.
+   • fetchLowestListing now returns null only when none of the three
+     sources report an active row (guarded). */

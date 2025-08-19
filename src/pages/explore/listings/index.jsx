@@ -1,14 +1,11 @@
 /*Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/explore/listings/index.jsx
-  Rev:     r13   2025‑08‑19
+  Rev:     r14   2025‑08‑19
   Summary(of what this file does): Explore → Listings grid for all
-           active ZeroSum listings (ZeroContract family only). This
-           revision adds a partial‑stock‑safe seller‑balance check
-           (TzKT `/v1/tokens/balances`) so a listing remains visible
-           when the seller still holds ≥1 edition, even if the
-           listing’s recorded amount is higher due to sales on other
-           markets. Also retains preview/supply gating and stable
-           ordering. */
+           active ZeroSum listings (ZeroContract family only). Adds
+           partial‑stock‑safe seller‑balance checks (TzKT balances),
+           fixes marketplace big‑map discovery to avoid hitting
+           /contracts/undefined/bigmaps, and keeps stable ordering. */
 
 import React, {
   useEffect,
@@ -35,6 +32,7 @@ import {
   listListingsForCollectionViaBigmap,
 } from '../../../utils/marketplaceListings.js';
 
+import { marketplaceAddr }  from '../../../core/marketplace.js';
 import { getAllowedTypeHashList } from '../../../utils/allowedHashes.js';
 
 /* styled-components import guard (v5/v6 ESM/CJS) */
@@ -108,8 +106,7 @@ function uniqByPair(items) {
  * Uses `/v1/tokens/balances` with `account.in`, `token.contract`, `token.tokenId`.
  */
 async function keepSellersWithBalanceAtLeast(TZKT, nftContract, tokenId, sellers, minUnits = 1) {
-  // Deduplicate; TzKT accepts up to a reasonable number via account.in
-  const unique = [...new Set(sellers.filter(Boolean))];
+  const unique = [...new Set((sellers || []).filter(Boolean))];
   if (unique.length === 0) return new Set();
 
   const kept = new Set();
@@ -118,11 +115,11 @@ async function keepSellersWithBalanceAtLeast(TZKT, nftContract, tokenId, sellers
   for (let i = 0; i < unique.length; i += CHUNK) {
     const slice = unique.slice(i, i + CHUNK);
     const qs = new URLSearchParams({
-      'account.in': slice.join(','),
+      'account.in'    : slice.join(','),
       'token.contract': nftContract,
-      'token.tokenId': String(tokenId),
-      select: 'account,balance',
-      limit: String(slice.length),
+      'token.tokenId' : String(tokenId),
+      select          : 'account,balance',
+      limit           : String(slice.length),
     });
     const rows = await jFetch(`${TZKT}/tokens/balances?${qs}`, 1).catch(() => []);
     for (const r of rows || []) {
@@ -138,10 +135,14 @@ async function keepSellersWithBalanceAtLeast(TZKT, nftContract, tokenId, sellers
  * Fallback discovery from the marketplace’s big‑maps:
  * prefer `listings_active` if present, else scan `listings`.
  * Returns a list of KT1 contract addresses potentially having active listings.
+ * NOTE: Derives the marketplace KT1 when not provided; avoids /contracts/undefined/bigmaps.
  */
-async function discoverActiveCollectionsViaTzkt(TZKT, net, marketplaceAddress) {
+async function discoverActiveCollectionsViaTzkt(TZKT, net, mktAddr) {
   try {
-    const maps = await jFetch(`${TZKT}/contracts/${marketplaceAddress}/bigmaps`).catch(() => []);
+    const market = String(mktAddr || marketplaceAddr(net) || '').trim();
+    if (!/^KT1[0-9A-Za-z]{33}$/.test(market)) return [];
+
+    const maps = await jFetch(`${TZKT}/contracts/${market}/bigmaps`, 1).catch(() => []);
     let ptr = null;
     if (Array.isArray(maps)) {
       const active   = maps.find((m) => (m.path || m.name) === 'listings_active');
@@ -150,8 +151,7 @@ async function discoverActiveCollectionsViaTzkt(TZKT, net, marketplaceAddress) {
       else if (listings) ptr = listings.ptr ?? listings.id;
     }
     if (ptr == null) return [];
-    // Extract KT1 addresses from big‑map keys.
-    const rows = await jFetch(`${TZKT}/bigmaps/${ptr}/keys?limit=5000&active=true`).catch(() => []);
+    const rows = await jFetch(`${TZKT}/bigmaps/${ptr}/keys?limit=5000&active=true`, 1).catch(() => []);
     const out = new Set();
     for (const r of rows || []) {
       const s = JSON.stringify(r?.key || r);
@@ -167,18 +167,18 @@ export default function ListingsPage() {
   const { toolkit } = useWalletContext() || {};
 
   const net = useMemo(() => {
-    if (toolkit?.[ '_network' ]?.type && /mainnet/i.test(toolkit._network.type)) return 'mainnet';
+    if (toolkit?.['_network']?.type && /mainnet/i.test(toolkit._network.type)) return 'mainnet';
     const key = (NETWORK_KEY || 'ghostnet').toLowerCase();
     return key.includes('mainnet') ? 'mainnet' : 'ghostnet';
   }, [toolkit]);
 
-  // IMPORTANT: tzktBase() already includes "/v1" — do not append again (Invariant I121/I152).
+  // tzktBase() already includes "/v1" — do not append again.
   const TZKT = useMemo(() => tzktBase(net), [net]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState(null);
   const [showCount, setCount] = useState(24);
-  const [items, setItems]     = useState([]); // [{contract, tokenId, priceMutez, metadata, contractName}]
+  const [items, setItems]     = useState([]);
 
   const allowedHashes = useMemo(() => new Set(getAllowedTypeHashList()), []);
 
@@ -251,7 +251,7 @@ export default function ListingsPage() {
         const marketplaceCandidates = await discoverActiveCollectionsViaTzkt(
           TZKT,
           net,
-          undefined,
+          /* mktAddr */ undefined, // auto‑derive inside helper
         ).catch(() => []);
         if (Array.isArray(marketplaceCandidates) && marketplaceCandidates.length) {
           for (const kt of marketplaceCandidates) if (!candidates.includes(kt)) candidates.push(kt);
@@ -286,7 +286,7 @@ export default function ListingsPage() {
             const id = Number(l.tokenId ?? l.token_id);
             const s  = String(l.seller || '');
             const set = sellersById.get(id) || new Set();
-            set.add(s);
+            if (s) set.add(s);
             sellersById.set(id, set);
           }
 
@@ -304,7 +304,7 @@ export default function ListingsPage() {
             const price    = Number(l.priceMutez ?? l.price);
             const seller   = String(l.seller || '');
             const keepSet  = keptById.get(id);
-            if (!keepSet || !keepSet.has(seller)) continue; // seller has 0 in stock → hide
+            if (!seller || !keepSet || !keepSet.has(seller)) continue; // seller has 0 in stock → hide
             if (!Number.isFinite(price) || price <= 0) continue;
             const prev = byId.get(id);
             if (!prev || price < prev.priceMutez) {
@@ -426,11 +426,9 @@ export default function ListingsPage() {
   );
 }
 
-/* What changed & why:
-   • Partial‑stock‑safe visibility: retain listings when any seller still has
-     ≥1 unit (TzKT `/v1/tokens/balances` batch check). Avoids false negatives
-     caused by cross‑market trades lowering balances without updating original
-     listing amounts.
-   • Kept: ZeroContract allow‑list via typeHash, preview & non‑zero supply
-     guards, dedupe (contract|tokenId), and stable “newest‑first” ordering.
-   • TzKT base via tzktBase(net) already ends with `/v1` (no double‑append). */
+/* What changed & why (r14):
+   • FIX: derive the marketplace address (via marketplaceAddr) for TzKT big‑map
+     discovery; prevents /contracts/undefined/bigmaps 400s.
+   • KEEP: partial‑stock‑safe balance checks (≥1), ZeroContract allow‑list via
+     typeHash, preview/supply gating, dedupe & stable ordering.
+   • Guarded TzKT JSON selects (use 'account,balance') to support both shapes. */

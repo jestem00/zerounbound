@@ -1,8 +1,9 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Header.jsx
-  Rev :    r744-a7  2025-07-23
-  Summary: reorder controls; shrink all header buttons; use icon for reset
+  Rev :    r744-a8  2025‑08‑18 UTC
+  Summary: Reorder controls; compact header buttons; reset icon;
+           + add ZeroArt.app external link; bump app version.
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useCallback, useEffect, useMemo, useRef, useState,
@@ -24,7 +25,7 @@ const NET_COL = {
 const BREAK        = 800;
 const COPY_TIMEOUT = 1800;
 /* Application version (increment for each deploy) */
-const APP_VERSION = '0.84';
+const APP_VERSION = '0.85';
 
 /*──────── styled shells ─────*/
 const selectCSS = css`
@@ -218,6 +219,10 @@ export default function Header() {
       <a href="https://sifrzero.art" target="_blank" rel="noopener noreferrer">
         SIFR ZERO Mint
       </a>
+      {/* NEW: external header link to ZeroArt.app */}
+      <a href="https://zeroart.app/" target="_blank" rel="noopener noreferrer">
+        ZeroArt.app
+      </a>
       <Link href="/terms">Terms</Link>
     </>
   );
@@ -312,15 +317,7 @@ export default function Header() {
   );
 }
 /* What changed & why:
-   • Introduced APP_VERSION constant and displayed “v.0.69” next to the β symbol
-     in the header; this helps authors verify they’re running the latest build.
-   • Added handleCacheRefresh() helper which unregisters all service workers,
-     clears caches and forces a hard reload; provided Reset controls in desktop
-     and mobile header.
-   • Converted all header PixelButtons (Connect, address, Disconnect) to a
-     smaller variant via HeaderBtn for better spacing.  The Reset button is
-     now an icon (🔁) via the ResetBtn variant.
-   • Updated revision and summary lines to reflect new size adjustments and
-     icon change; preserved existing wallet refresh logic and styling.
+   • Added external “ZeroArt.app” link (desktop & mobile via shared NavLinks).
+   • Bumped APP_VERSION → 0.85 for the upcoming deploy banner.
+   • Kept all invariants (SSR‑safe hooks, transient props, /no‑sentinel).
 */
-/* EOF */

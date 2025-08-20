@@ -214,6 +214,7 @@ export const FALLBACK_RPCS = {
 // compatibility and avoid build errors we export a constant that
 // always resolves to an empty string.  Additional URLs could be
 // mapped per network if remote forging is ever reintroduced.
+// eslint-disable-next-line no-unused-vars
 const FORGE_URLS = {
   ghostnet: '',
   mainnet:  '',

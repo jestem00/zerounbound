@@ -2,14 +2,12 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/Mint.jsx
-  Rev :    r891   2025-09-06
-  Summary: Corrected mint parameter ordering across versions by
-           updating buildMintCall().  All v1/v2/v3/v4 (except v4a)
-           now call mint(amount, metadata, to).  v4a calls
-           mint(to, amount, metadata).  Legacy version detection
-           remains normalised by stripping the leading “v”.  Heuristic
-           fee estimation still applies to v2 and oversize logic
-           remains disabled for v2; append operations remain v4‑only.
+  Rev :    r892   2025-09-06
+  Summary: Canonicalise mint call shapes per version and export
+           buildMintCall for tests.  v1/v2b use (map,to); v2a/v3/v4*
+           use (nat,map,to); v4a keeps (to,nat,map).  Legacy version
+           detection still strips leading “v”.  Heuristic fee estimation
+           for v2 remains and append stays v4‑only.
 ──────────────────────────────────────────────────────────────*/
 
 import React, {
@@ -38,6 +36,7 @@ import {
   MAX_ROY_PCT, MAX_EDITIONS, MAX_META_BYTES, LOCK_SELF_BYTES,
   isTezosAddress, royaltyUnder25, validAttributes,
 } from '../../core/validator.js';
+import { buildMintCall } from './mintCallShape.cjs';
 import { ROOT_URL }                   from '../../config/deployTarget.js';
 import { SLICE_MAX_BYTES, SLICE_MIN_BYTES, planSlices } from '../../core/batch.js';
 import {
@@ -165,38 +164,7 @@ const mapSize = (map) => {
   return total;
 };
 
-/**
- * Build a mint call for the given version.  Versions v1 and all v2.*
- * contracts mint new tokens by calling `mint(map, to)` with implicit
- * edition count of 1.  For v3 and later contracts the signature is
- * `mint(n, map, to)` where `n` is the amount/edition count.  This
- * function normalises the call across versions.
- *
- * @param {object} c Taquito contract instance
- * @param {string} ver Contract version string (e.g. v1, v2b, v4c)
- * @param {string|number} amt Edition amount (string or numeric)
- * @param {MichelsonMap} map Metadata map
- * @param {string} to Recipient address
- */
-const buildMintCall = (c, ver, amt, map, to) => {
-  // Normalise version by stripping any leading “v” and lowercasing.
-  const v = String(ver || '').replace(/^v/i, '').toLowerCase();
-  const n = parseInt(amt, 10) || 1;
-  /*
-   * Determine the parameter order for the mint entrypoint based on
-   * the contract version.  Most versions (v1, v2*, v3, v4, v4b, v4c, v4d)
-   * implement mint as (nat amount, map metadata, address to).  A single
-   * exception exists for v4a, which flips the first two parameters to
-   * (address, nat amount, map metadata).  If additional variants are
-   * introduced in the future they should be added here.  The default
-   * branch handles the common three‑parameter signature.
-   */
-  if (v === '4a') {
-    return c.methods.mint(to, n, map);
-  }
-  // All other versions use (nat amount, map metadata, address to)
-  return c.methods.mint(n, map, to);
-};
+// buildMintCall is imported from ./mintCallShape.js
 
 /*──────── snackbar helper ──────────────────────────────────*/
 function useSnackbarBridge(cb) {
@@ -951,6 +919,7 @@ export default function Mint({
       <Grid>
         <div>
           <Note>
+            {/* eslint-disable-next-line jsx-a11y/anchor-is-valid */}
             <a
               href="#"
               onClick={(e) => { e.preventDefault(); setNsfwInfoOpen(true); }}
@@ -968,6 +937,7 @@ export default function Mint({
         </div>
         <div>
           <Note>
+            {/* eslint-disable-next-line jsx-a11y/anchor-is-valid */}
             <a
               href="#"
               onClick={(e) => { e.preventDefault(); setFlashInfoOpen(true); }}
@@ -1162,4 +1132,6 @@ export default function Mint({
      logic, append support and heuristic estimation.  SupportsAppend
      now uses the unprefixed version when checking for v4.  Oversize
      and large‑file flags no longer mis‑detect legacy versions.
+   • Canonicalised mint call shapes per version and exported
+     buildMintCall for unit tests.
 */

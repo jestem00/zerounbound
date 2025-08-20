@@ -21,7 +21,7 @@ license, authors, homepage (optional), interfaces (must list "TZIP‑012" when F
 • TZIP‑21 (Rich Token Metadata) — extends TZIP‑12; adds artifactUri, displayUri and thumbnailUri.
 
 ──────────────────────────────────────────────────────────────────────────────
-2 · ZERO‑CONTRACT V4 — METADATA INVARIANTS
+2 · ZERO‑CONTRACT V4(now v4e) — METADATA INVARIANTS
 ──────────────────────────────────────────────────────────────────────────────
 
 2.1 Contract‑Level Metadata

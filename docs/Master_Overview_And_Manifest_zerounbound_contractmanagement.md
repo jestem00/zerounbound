@@ -324,6 +324,7 @@ I153 [F] **ExploreNav mandatory** — reaffirmed for all `explore/*` and `my/*` 
 I154 [F,E] **Tagged errors** — marketplace helpers surface actionable tags (`MISSING_LISTING_DETAILS`, `STALE_LISTING_NO_BALANCE`).
 I155 [I] **No sentinels in JS/JSX** — comment footers end with `*/` only.
 I156 [E] **Preflight budget & TTL** — balance checks observe jFetch limits; cache per `(seller,KT1,tokenId)` for ≤60 s (network‑scoped).
+I157 [C,E,F] **EP_MINT_SIGNATURES** — v1,v2b → mint(map,address); v2a,v3–v4e → mint(nat,map,address); v4a → mint(address,nat,map). Unit test asserts UI builds these shapes.
 
 ───────────────────────────────────────────────────────────────
 3 · RESERVED
@@ -658,7 +659,27 @@ and ensure back‑compat across loaders and UIs; includes v4e hash
 B. entrypointRegistry.json — canonical entrypoints per version,
 including v4e as an $extends of v4 where applicable.
 C. allowedHashes.js — programmatic accessor over A; append‑only.
+D. ZeroContract Version Map:
+v1 — original zerocontract
+v2 series — community “homebrews”; v2b = “original without lock adding parent/child”
+v3 — first collaborator contract
+v4 — legacy append contract (our append_* entrypoints)
+v4a — zeroterminal main contract (ZT entrypoints, different names/order)
+v4b — sifrzero (default collaborative, like HEN collection; no add/remove_collaborator, anyone can mint)
+v4c — zeroterminal default collaborative
+v4d — zeroterminal updated with add collaborators
+v4e — current grail, canonical deployable contract on zerounbound.art (extends v4 where applicable)
 
+Entrypoint differences (canonical, from our registry):
+v1/v3/v4 mint(nat, map(string,bytes), address); v2a/v2b mint(map(string,bytes), address); v4a/v4d (ZT) mint(address, nat, map(string,bytes)). v4e extends v4. Using these signatures is required; do not mix ZT’s append_token_metadata/update_token_metadata with our append_artifact_uri/edit_token_metadata.
+
+Who can mint <32,768 bytes vs >32,768 bytes (multisig batching + diff‑aware repairs/retries):
+
+Our v4 / v4e: support chunked appends via append_artifact_uri and edit_token_metadata. These are the contracts we batch and repair automatically (multisig‑safe, retryable).
+
+ZT v4a/v4c/v4d: use different entrypoints (append_token_metadata, update_token_metadata). In our UI, v4a UX opens Zeroterminal—we do not run our append/repair pipeline on ZT contracts to avoid mangling parameters.
+
+Why the delineation matters: AdminTools introspects the typeHash → version to choose the correct UX component and entrypoint names/argument order. We gate discoverability and version badges using hashMatrix.json + allowedHashes.js, and we pick per‑version entrypoints directly from entrypointRegistry.json. This is what prevents calling, e.g., append_artifact_uri on a ZT v4a (which would 100% “codex‑wreck” metadata).
 ───────────────────────────────────────────────────────────────
 CHANGELOG
 ───────────────────────────────────────────────────────────────

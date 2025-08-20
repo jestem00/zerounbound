@@ -1,3 +1,4 @@
+/* eslint-env jest */
 /*Developed by @jams2blues
   File: __tests__/ui/exploreNav.regression.test.jsx
   Rev:  r1

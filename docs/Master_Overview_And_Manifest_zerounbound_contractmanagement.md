@@ -1,9 +1,9 @@
 /*─────────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    docs/Master_Overview_And_Manifest_zerounbound_contractmanagement.md
-  Rev :    r1181    2025‑08‑16 UTC
-  Summary: Add Explore/Tokens doc (scan‑ahead + accurate totals),
-           clarify TzKT /v1 normalization & listings stale‑check.
+  Rev :    r1182    2025‑08‑19 UTC
+  Summary: Document marketplace dialogs & entrypoints;
+           extend manifest coverage.
 ──────────────────────────────────────────────────────────────────*/
 
 ════════════════════════════════════════════════════════════════
@@ -53,6 +53,9 @@ offers and tokens pages under /explore and /my.
   styled‑components **transient props** (`$prop`) or caller‑side filtering.
 • **Sentinel ban reminder**: do **not** place `EOF` (or any sentinel text) after
   comment footers in JS/JSX—this breaks Next builds (Invariant I145).
+• **Manifest coverage**: source‑tree map now lists marketplace dialogs
+  (Buy/List/MakeOffer) and marketplace entrypoints (AcceptOffer,
+  CancelListing, CancelOffer) for completeness.
 
 See the TZIP invariants companion for standard compliance rules.
 
@@ -148,6 +151,8 @@ differ by page purpose).
   grid (imports MarketplaceBuyBar/MarketplaceBar).
 • `src/ui/MarketplaceBuyBar.jsx` — compact buy‑action bar variant for
   listings cards.
+• `src/ui/BuyDialog.jsx` — buy modal with TzKT preflight and tagged stale
+  listings errors.
 • `src/core/marketplace.js` — **ZeroSum helpers + stale‑listing guard**:
   `getMarketContract`, `fetchLowestListing`, on‑chain/off‑chain view readers,
   **`getFa2BalanceViaTzkt()`**, **`preflightBuy()`** (seller FA2 balance via
@@ -507,6 +512,9 @@ zerounbound/src/ui/ZerosBackground.jsx — animated zeros field; Exports: ZerosB
 zerounbound/src/ui/IntegrityBadge.jsx — on‑chain integrity badge; Exports: IntegrityBadge
 
 — marketplace bars & dialogs —
+zerounbound/src/ui/BuyDialog.jsx — buy modal; Imports: buildBuyParams,preflightBuy; Exports: BuyDialog
+zerounbound/src/ui/ListTokenDialog.jsx — single‑sig listing wizard; Imports: marketplace helpers; Exports: ListTokenDialog
+zerounbound/src/ui/MakeOfferDialog.jsx — offer modal with dynamic method resolution; Exports: MakeOfferDialog
 zerounbound/src/ui/MarketplaceBar.jsx — token action bar (buy/list/offer); Imports: BuyDialog,ListTokenDialog,MakeOfferDialog; Exports: MarketplaceBar
 zerounbound/src/ui/MarketplaceBuyBar.jsx — compact buy/list UI for listing cards; Imports: BuyDialog; Exports: MarketplaceBuyBar
 zerounbound/src/ui/TokenListingCard.jsx — listing grid card; Imports: RenderMedia, MarketplaceBuyBar/MarketplaceBar; Exports: TokenListingCard
@@ -527,6 +535,7 @@ zerounbound/src/ui/MakeOfferBtn.jsx — XS make‑offer button; Exports: MakeOff
 
 — Entrypoints (v4 & v4a) —
 zerounbound/src/ui/Entrypoints/index.js — lazy EP resolver; Exports: resolveEp
+zerounbound/src/ui/Entrypoints/AcceptOffer.jsx — accept marketplace offers; dynamic accept_offer resolution; Exports: AcceptOffer
 zerounbound/src/ui/Entrypoints/AddRemoveCollaborator.jsx — collab mutator; Exports: AddRemoveCollaborator
 zerounbound/src/ui/Entrypoints/AddRemoveCollaboratorsv4a.jsx — v4a bulk collab; Exports: AddRemoveCollaboratorsv4a
 zerounbound/src/ui/Entrypoints/AddRemoveParentChild.jsx — relation manager; Exports: AddRemoveParentChild
@@ -535,6 +544,8 @@ zerounbound/src/ui/Entrypoints/AppendExtraUri.jsx — extra media uploader; Expo
 zerounbound/src/ui/Entrypoints/BalanceOf.jsx — balance viewer; Exports: BalanceOf
 zerounbound/src/ui/Entrypoints/Burn.jsx — burn token; Exports: Burn
 zerounbound/src/ui/Entrypoints/BurnV4.jsx — burn v4a‑safe; Exports: BurnV4
+zerounbound/src/ui/Entrypoints/CancelListing.jsx — cancel marketplace listings; paginated table; Exports: CancelListing
+zerounbound/src/ui/Entrypoints/CancelOffer.jsx — withdraw offers; Exports: CancelOffer
 zerounbound/src/ui/Entrypoints/ClearUri.jsx — clear artifactUri; Exports: ClearUri
 zerounbound/src/ui/Entrypoints/Destroy.jsx — destroy contract; Exports: Destroy
 zerounbound/src/ui/Entrypoints/EditContractMetadata.jsx — contract meta editor; Exports: EditContractMetadata
@@ -651,6 +662,8 @@ C. allowedHashes.js — programmatic accessor over A; append‑only.
 ───────────────────────────────────────────────────────────────
 CHANGELOG
 ───────────────────────────────────────────────────────────────
+r1182 — Document marketplace dialogs (Buy/List/MakeOffer) and
+Accept/Cancel entrypoints; extend manifest coverage for completeness.
 r1181 — Add Explore/Tokens documentation (scan‑ahead min‑yield pagination,
 accurate totals reconciliation, preview/supply gating), clarify TzKT `/v1`
 normalization, reaffirm listings stale‑listing guard & transient‑prop rule.
@@ -658,4 +671,5 @@ normalization, reaffirm listings stale‑listing guard & transient‑prop rule.
 r1180 — Add ZeroSum stale‑listing guard based on TzKT balances,
 enforce /v1 base normalization, codify transient‑prop rule, reaffirm no‑sentinel.
 
-/* What changed & why: Add Tokens page doc, totals reconcile & /v1 guard. */
+/* What changed & why: Added marketplace dialog & entrypoint coverage
+   and extended manifest completeness. */

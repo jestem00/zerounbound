@@ -7,13 +7,13 @@
 
   "v1": {
     "$extends": "common",
-    "mint":  ["nat","map(string,bytes)","address"],
+    "mint":  ["map(string,bytes)","address"],
     "burn":  ["nat","nat"]
   },
 
   "v2a": {
     "$extends": "v1",
-    "mint":  ["map(string,bytes)","address"],
+    "mint":  ["nat","map(string,bytes)","address"],
     "burn":  ["nat"],
     "add_parent":  ["address"],
     "remove_parent": ["address"],
@@ -21,7 +21,7 @@
     "remove_child": ["address"],
     "lock_metadata": []
   },
-  "v2b": { "$extends": "v2a", "lock_metadata": false },
+  "v2b": { "$extends": "v2a", "mint": ["map(string,bytes)","address"], "lock_metadata": false },
   "v2c": { "$extends": "v2a", "lock_metadata": false },
   "v2d": { "$extends": "v2a", "lock_metadata": false },
   "v2e": { "$extends": "v2a", "lock_metadata": false },

@@ -324,6 +324,7 @@ I153 [F] **ExploreNav mandatory** — reaffirmed for all `explore/*` and `my/*` 
 I154 [F,E] **Tagged errors** — marketplace helpers surface actionable tags (`MISSING_LISTING_DETAILS`, `STALE_LISTING_NO_BALANCE`).
 I155 [I] **No sentinels in JS/JSX** — comment footers end with `*/` only.
 I156 [E] **Preflight budget & TTL** — balance checks observe jFetch limits; cache per `(seller,KT1,tokenId)` for ≤60 s (network‑scoped).
+I157 [C,E,F] **EP_MINT_SIGNATURES** — v1,v2b → mint(map,address); v2a,v3–v4e → mint(nat,map,address); v4a → mint(address,nat,map). Unit test asserts UI builds these shapes.
 
 ───────────────────────────────────────────────────────────────
 3 · RESERVED

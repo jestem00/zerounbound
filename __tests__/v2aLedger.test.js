@@ -21,7 +21,7 @@ describe('getLedgerBalanceV2a', () => {
     expect(bal).toBe(7);
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch.mock.calls[0][0]).toBe(
-      `${tzktBase}/v1/tokens/balances?token.contract=KT1TEST&token.tokenId=0&account=tz1abc`,
+      `${tzktBase}/v1/tokens/balances?account=tz1abc&token.contract=KT1TEST&token.tokenId=0`,
     );
   });
 });

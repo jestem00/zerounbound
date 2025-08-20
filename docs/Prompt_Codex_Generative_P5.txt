@@ -1,0 +1,49 @@
+/*─────────────────────────────────────────────────────────────────
+Developed by @jams2blues – ZeroContract Studio
+File: docs/Prompt_Codex_Generative_P5.txt
+Rev:  r2   2025‑08‑20 UTC
+Summary: One‑shot prompt for Codex to wire the Generative P5 module (text/html‑only).
+──────────────────────────────────────────────────────────────────*/
+
+You are Codex operating on the Zero Unbound repo. Follow EXACTLY:
+
+1) Read:
+   - docs/Generative_P5_Module_Spec.md
+   - src/modules/generative/p5/README.md
+
+2) Vendor:
+   - Ensure src/modules/generative/p5/lib/p5-1.7.0.min.js exists and is the **unmodified** upstream build.
+   - Verify the SHA‑256 in lib/README.md.
+
+3) Webpack rule:
+   - In next.config.js, add:
+     // BEGIN ADD [P5-ASSET-SOURCE]
+     config.module.rules.push({ test: /p5-\d+\.\d+\.\d+\.min\.js$/, type: 'asset/source' });
+     // END ADD [P5-ASSET-SOURCE]
+
+4) Dev route:
+   - Create src/pages/dev/generative/p5-lab.jsx that re-exports `src/ui/Generative/GenerativePreviewHarness.jsx` as default.
+
+5) Creator Wizard:
+   - Ensure `GeneratorWizard.jsx` can be shown from Deploy/Mint flows **as a dev‑only modal** when a “Generative P5 Wizard (dev)” button is clicked (lazy import). Do not alter production pages if the button is not used.
+
+6) Mint integration (guarded):
+   - In src/ui/Entrypoints/Mint.jsx, **before** computing `artifactHex`/`appendSlices`, insert:
+     // BEGIN ADD [P5-MINT-INJECT]
+     (…the block from the spec…)
+     // END ADD [P5-MINT-INJECT]
+   - Do **not** touch the batch/append logic. Your existing resume/checkpoints stay.
+
+7) No playback changes:
+   - Do not modify src/utils/RenderMedia.jsx. It already sandboxes HTML behind consent and prefers preview PNGs.
+
+8) Feature flag (optional UI):
+   - Add an optional “Attributes” pane on contract/token pages using src/utils/attributesIndex.js under `if (process.env.NEXT_PUBLIC_ENABLE_ATTRS)`.
+
+9) Tests (minimal):
+   - Add a test that `deriveSeedHex(...)` is stable for a fixed tuple and that `seed32FromHex` produces the same first 3 randoms from `sfc32`.
+
+10) Commit message:
+   - chore(generative): add p5 generator (text/html only), seed utils, dev wizard; wire guarded mint inject.
+
+/* What changed & why: r2 removes ZIP/formats wiring; keeps text/html‑only path. */

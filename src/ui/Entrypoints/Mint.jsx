@@ -142,10 +142,13 @@ const buildMeta = ({
     f.creators.split(',').map((x) => x.trim()).filter(Boolean)
   )));
   m.set('rights', hex(f.license === 'Custom' ? f.customLicense : f.license));
-  m.set('mintingTool', hex(ROOT_URL));
   m.set('royalties', hex(JSON.stringify({ decimals: 4, shares })));
-
-  if (f.flashing === 'Does contain Flashing Hazard') {
+  m.set('mintingTool', hex(ROOT_URL));
+  if (f.displayUri) m.set('displayUri', hex(f.displayUri));
+  if (f.thumbnailUri) m.set('thumbnailUri', hex(f.thumbnailUri));
+  if (f.accessibility) {
+    m.set('accessibility', hex(JSON.stringify(f.accessibility)));
+  } else if (f.flashing === 'Does contain Flashing Hazard') {
     m.set('accessibility', hex(JSON.stringify({ hazards: ['flashing'] })));
   }
   if (f.nsfw === 'Does contain NSFW') m.set('contentRating', hex('mature'));
@@ -221,6 +224,7 @@ export default function Mint({
   const [file, setFile]   = useState(null);
   const [url, setUrl]     = useState('');
   const [roys, setRoys]   = useState([{ address: wallet || '', sharePct: '' }]);
+  const baseIdRef = useRef(0);
 
   const [batches, setBatches]       = useState(null);
   const [stepIdx, setStepIdx]       = useState(0);
@@ -236,6 +240,37 @@ export default function Mint({
   const [flashInfoOpen, setFlashInfoOpen]   = useState(false);
 
   const tagRef = useRef(null);
+
+  // BEGIN ADD [P5-MINT-INJECT]
+  useEffect(() => {
+    (async () => {
+      if (f.generator?.engine === 'p5' && f.generator?.sketch) {
+        const { buildP5Html, toDataHtmlBase64, buildPosterPng, downscalePng } =
+          await import('../../modules/generative/p5/buildP5Html.js');
+        const { deriveSeedHex } =
+          await import('../../utils/generativeSeed.js');
+
+        const seedHex = deriveSeedHex(contractAddress, baseIdRef.current, f.toAddress, f.generator?.salt || '');
+        const html = buildP5Html({
+          sketchSource: f.generator.sketch,
+          seedHex,
+          tokenId: baseIdRef.current,
+          contract: contractAddress,
+          projectName: f.name || 'P5-Project',
+        });
+
+        const artifactUri = toDataHtmlBase64(html);
+        setUrl(artifactUri);
+        setFile({ name: 'index.html' });
+
+        const displayUri = await buildPosterPng(html, f.generator?.posterFrame ?? 90);
+        const thumb = await downscalePng(displayUri, 512);
+        setF((p) => ({ ...p, displayUri, thumbnailUri: thumb, accessibility: { hazards: ['scripts'] } }));
+        setAttrs((p) => [...p, { name: 'engine', value: 'p5' }, { name: 'seed', value: seedHex.slice(0, 16) + '…' }]);
+      }
+    })();
+  }, [f.generator, f.toAddress, f.name, contractAddress]);
+  // END ADD [P5-MINT-INJECT]
 
   /* wallet autofill */
   useEffect(() => {
@@ -577,7 +612,6 @@ export default function Mint({
   };
 
   /*──────── batch builder (diff‑aware) ─────────────────────*/
-  const baseIdRef = useRef(0);
   const buildBatches = useCallback(async () => {
     const c = await toolkit.wallet.at(contractAddress);
     let baseId = 0;

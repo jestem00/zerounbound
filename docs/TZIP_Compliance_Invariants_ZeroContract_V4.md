@@ -52,23 +52,28 @@ is stored during the single‑stage origination; no placeholder is used.
 /contracts/metadata/views/Zero_Contract_v4_views.json). The full JSON view
 array is encoded and stored at origination; no placeholder pointer is used.
 
-2.2 Token‑Level Metadata (applied at mint, and in this order)
-• name · Mandatory — NFT title.
-• description · Optional — strongly recommended (warning toast when blank).
-• mimeType · Mandatory — auto‑detected on upload.
-• authors · Optional — multiline comma‑list (warning when blank).
-• artists · Optional — multiline comma‑list (warning when blank). (only exists for v4b SIFR ZERO initial deployment by Retro Manni, grandfathered in)
-• creators · Mandatory — editable; pre‑filled from wallet.
-• license · Mandatory — auto‑copied from contract metadata if present (editable).
-• royalties · Mandatory — JSON string, max aggregate 25 %; UI enforces split logic.
-• mintingTool · Mandatory — auto‑injected diverging constant from deployTarget.js (https://zerounbound.art | https://ghostnet.zerounbound.art).
-• accessibility · Optional — JSON string. Format: {"hazards":["flashing"]}. ⚠ IMMUTABLE: once “flashing” hazard is set it can never be removed (see invariant I101). Omitting the key in a later edit is ignored.
-• contentRating · Optional — string "mature". ⚠ IMMUTABLE: once "mature" is stored it can never be downgraded (see invariant I101).
-• tags · Optional — array, clone‑protected.
-• attributes · Optional — array, name/value pairs, clone‑protected.
-• decimals · Mandatory — fixed to bytes("0"), hidden from user.
-• artifactUri · Mandatory — base64 data‑URI, auto‑detected. Oversize uploads are chunked (see invariants I60–I61).
-• extraUri · Optional — for v4 contracts only, appends extra Uri after artifactUri to allow infinite multiple assets in same token.
+### 2.2 Token‑Level Metadata (applied at mint, and in this order)
+
+- **name** · Mandatory — NFT title.  
+- **description** · Optional — strongly recommended (warning toast when blank).  
+- **mimeType** · **Mandatory** — auto‑detected on upload.  
+- **authors** · Optional — multiline comma‑list (warning when blank).  
+- **artists** · Optional — multiline comma‑list (legacy/v4b only).  
+- **creators** · **Mandatory** — editable; pre‑filled from wallet.  
+- **license** · **Mandatory** — copied from contract metadata if present (editable).  
+- **royalties** · **Mandatory** — JSON object; max aggregate 25 %; UI enforces split logic.  
+- **mintingTool** · **Mandatory** — injected constant reflecting deploy target (ghostnet/mainnet).  
+- **accessibility** · Optional — e.g. `{"hazards":["flashing"]}`. **Immutable flags**: cannot be removed later.  
+- **contentRating** · Optional — `"mature"`. **Immutable** once present.  
+- **tags** · Optional — array, clone‑protected.  
+- **attributes** · Optional — **array** of `{name, value}` pairs (TZIP‑21 style), clone‑protected.  
+- **decimals** · **Mandatory** — fixed to bytes("0"), hidden in UI.  
+- **artifactUri** · **Mandatory** — base64 data‑URI preferred; oversize uploads are chunked in Append flows.  
+- **displayUri** · **Optional (soft)** — recommended for some off‑chain card views, **not required** on ZeroUnbound’s fully on‑chain flow.  Can add in our EditTokenMetadata.jsx, but not manditory on Mint.jsx  
+- **thumbnailUri** · **Optional (soft)** — recommended for off‑chain card views, **not required** on ZeroUnbound’s fully on‑chain flow.  Can add in our EditTokenMetadata.jsx, but not manditory on Mint.jsx  
+- **extraUri** · Optional (v4) — allows additional assets.
+
+> **Soft policy**: while `displayUri` and `thumbnailUri` exist in TZIP‑21, ZeroUnbound’s fully on‑chain platform does not require them. The UI shows a soft “➖” when missing and only warns if a present media key is **not** a `data:` URI.
 
 2.3 additional minting minutiae. not keys, but mandatory for mint forms:
 • recipient address · Mandatory‑editable; pre‑filled from wallet. Wallet that receives token(s) after mint.

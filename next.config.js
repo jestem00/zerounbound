@@ -40,6 +40,9 @@ const nextConfig = {
       ...(config.resolve.fallback || {}),
       fs: false, path: false, crypto: false, stream: false,
     };
+    // BEGIN ADD [P5-ASSET-SOURCE]
+    config.module.rules.push({ test: /p5-\d+\.\d+\.\d+\.min\.js$/, type: 'asset/source' });
+    // END ADD [P5-ASSET-SOURCE]
 
     /* PWA service‑worker for prod client build */
     if (!isServer && !dev) {

@@ -43,6 +43,10 @@ function draw(){background(0);stroke(255);for(let i=0;i<200;i++){point(random(wi
   return (
     <div style={{ padding: 12, maxWidth: 960 }}>
       <h3>Generative P5 Wizard</h3>
+      <p style={{ fontSize: '0.9em' }}>
+        1) Paste your P5 sketch (no external <code>&lt;script&gt;</code> tags). 2) Pick a project name, salt and poster frame. 3)
+        Press <b>Build token metadata</b>; the artifact and poster URIs will appear below for copy‑pasting into the Mint form.
+      </p>
       <label>Project name</label><input value={projectName} onChange={(e) => setProjectName(e.target.value)} style={{ width: '100%' }} />
       <label>Project salt</label><input value={salt} onChange={(e) => setSalt(e.target.value)} style={{ width: '100%' }} />
       <label>Poster frame (frames ~ 60fps)</label><input type="number" value={frame} onChange={(e) => setFrame(parseInt(e.target.value, 10) || 0)} style={{ width: '100%' }} />

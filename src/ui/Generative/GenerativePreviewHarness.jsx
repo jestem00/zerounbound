@@ -39,6 +39,10 @@ export default function GenerativePreviewHarness() {
   return (
     <div style={{ padding: 16 }}>
       <h2>Generative P5 — Dev Preview (data:text/html)</h2>
+      <p style={{ fontSize: '0.9em' }}>
+        Paste your sketch on the left, tweak seed inputs on the right and the sandboxed canvas below updates. Use
+        <b>Capture Poster</b> to grab a PNG for previews.
+      </p>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         <textarea value={sketch} onChange={(e) => setSketch(e.target.value)} rows={20} spellCheck={false} style={{ width: '100%' }} />
         <div>

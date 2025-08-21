@@ -23,11 +23,11 @@ Summary: Step-by-step guide for minting p5.js generators.
    - Paste the sketch into the Wizard and set project name, salt and poster frame.
 4. **Build token metadata**
    - Click **Build token metadata**.
-   - The wizard displays:
-     - `artifactUri` (HTML `data:text/html`) 
+   - The wizard shows a JSON block containing:
+     - `artifactUri` (HTML `data:text/html`)
      - `displayUri` / `thumbnailUri` (PNG data URIs)
      - seed information and attributes.
-   - Copy the artifact and poster URIs for minting.
+   - Copy this block into the mint form when testing on ghostnet.
 5. **Mint on ghostnet**
    - On your contract page, click **Mint**.
    - Fill out standard fields and paste the URIs and attributes from the wizard.

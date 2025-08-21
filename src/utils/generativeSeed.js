@@ -1,7 +1,7 @@
 /*─────────────────────────────────────────────────────────────────
 Developed by @jams2blues – ZeroContract Studio
 File: src/utils/generativeSeed.js
-Rev:  r2   2025‑08‑20 UTC
+Rev:  r3   2025‑09‑08 UTC
 Summary: Deterministic 128‑bit seed + helpers (xmur3 → sfc32).
 ──────────────────────────────────────────────────────────────────*/
 
@@ -41,6 +41,15 @@ export function deriveSeedHex(contract, tokenId, recipient = '', projectSalt = '
 export function seed32FromHex(hex128) {
   const parts = (hex128 || '0'.repeat(32)).match(/.{1,8}/g).map((h) => parseInt(h, 16) >>> 0);
   return parts.reduce((acc, n) => (acc ^ n) >>> 0, 0) >>> 0;
+}
+
+const api = { xmur3, sfc32, deriveSeedHex, seed32FromHex };
+export default api;
+
+// CommonJS fallback for environments that require() this module directly.
+// eslint-disable-next-line no-undef
+if (typeof module !== 'undefined') {
+  module.exports = api;
 }
 
 /* What changed & why: stable seed derivation & fold‑to‑32 for p5. */

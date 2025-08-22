@@ -199,8 +199,11 @@ export default function AppendExtraUri({
   /*──── slice-cache ───*/
   useEffect(() => { purgeExpiredSliceCache(); }, []);
   useEffect(() => {
-    if (!tokenId || !finalLabel) { setResumeInfo(null); return; }
-    setResumeInfo(loadSliceCheckpoint(contractAddress, tokenId, finalLabel, network));
+    let active = true;
+    if (!tokenId || !finalLabel) { setResumeInfo(null); return undefined; }
+    loadSliceCheckpoint(contractAddress, tokenId, finalLabel, network)
+      .then((r) => { if (active) setResumeInfo(r); });
+    return () => { active = false; };
   }, [contractAddress, tokenId, finalLabel, network]);
 
   /*──────── build flat ops ─────*/
@@ -254,7 +257,7 @@ export default function AppendExtraUri({
       const packed = await splitPacked(toolkit, ops, PACKED_SAFE_BYTES);
       setBatches(packed);
 
-      saveSliceCheckpoint(contractAddress, tokenId, finalLabel, {
+      await saveSliceCheckpoint(contractAddress, tokenId, finalLabel, {
         total: allSlices.length,
         next: startIdx,
         slices: allSlices,
@@ -294,11 +297,11 @@ export default function AppendExtraUri({
       const op = await toolkit.wallet.batch(batches[idx]).send();
       setOv({ open: true, status: 'Broadcasting…', current: idx + 1, total: batches.length });
       await op.confirmation();
-      saveSliceCheckpoint(contractAddress, tokenId, finalLabel, {
+      await saveSliceCheckpoint(contractAddress, tokenId, finalLabel, {
         ...resumeInfo, next: idx + 1,
       }, network);
       if (idx + 1 === batches.length) {
-        clearSliceCheckpoint(contractAddress, tokenId, finalLabel, network);
+        await clearSliceCheckpoint(contractAddress, tokenId, finalLabel, network);
         onMutate();
         setOv({ open: true, opHash: op.opHash, current: batches.length, total: batches.length });
       } else {

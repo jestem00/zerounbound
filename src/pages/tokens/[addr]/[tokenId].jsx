@@ -173,17 +173,25 @@ export default function TokenDetailPage() {
             if (toolkit) {
               try { toolkit.addExtension?.(new Tzip16Module()); } catch {}
               const contract = await toolkit.contract.at(addr, tzip16);
-              const viewResult = await contract.metadataViews.get_extrauris(tokenId).executeView();
-              if (viewResult && typeof viewResult === 'object') {
-                const entries = viewResult.entries ? viewResult.entries() : Object.entries(viewResult);
-                for (const [, value] of entries) {
-                  if (value && typeof value === 'object') {
-                    extras.push({
-                      description: value.description,
-                      key       : value.key,
-                      name      : value.name,
-                      value     : value.value,
-                    });
+              const views = typeof contract.metadataViews === 'function'
+                ? await contract.metadataViews()
+                : contract.metadataViews;
+              const fn = views?.get_extrauris;
+              if (typeof fn === 'function') {
+                const viewResult = await fn(tokenId).executeView();
+                if (viewResult && typeof viewResult === 'object') {
+                  const entries = viewResult.entries
+                    ? viewResult.entries()
+                    : Object.entries(viewResult);
+                  for (const [, value] of entries) {
+                    if (value && typeof value === 'object') {
+                      extras.push({
+                        description: value.description,
+                        key       : value.key,
+                        name      : value.name,
+                        value     : value.value,
+                      });
+                    }
                   }
                 }
               }

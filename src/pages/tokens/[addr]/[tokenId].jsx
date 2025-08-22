@@ -30,7 +30,6 @@ import decodeHexFields, { decodeHexJson } from '../../../utils/decodeHexFields.j
 import { mimeFromDataUri } from '../../../utils/uriHelpers.js';
 import { TezosToolkit } from '@taquito/taquito';
 import { Tzip16Module, tzip16 } from '@taquito/tzip16';
-import { chooseFastestRpc } from '../../../utils/chooseFastestRpc.js';
 
 /*──────────────── helpers ───────────────────────────────────────────*/
 // Convert a hex-encoded string into a UTF‑8 string.  TzKT returns
@@ -141,7 +140,7 @@ export default function TokenDetailPage() {
   // script consent key scoped per token: scripts:<addr>:<tokenId>
   const scriptKey = useMemo(() => {
     return `scripts:${addr || ''}:${tokenId || ''}`;
-  }, [addr, tokenId]);
+  }, [addr, tokenId, toolkit]);
   const [allowJs, setAllowJs] = useConsent(scriptKey, false);
 
   /* dialog state for hazard/script confirm */
@@ -171,36 +170,51 @@ export default function TokenDetailPage() {
 
           let extras = [];
           try {
-            let tk = toolkit;
-            if (!tk) {
-              const rpc = await chooseFastestRpc().catch(() => '');
-              if (rpc) tk = new TezosToolkit(rpc);
+            // Attempt direct off‑chain view execution against an RPC node via Taquito.
+            if (toolkit) {
+              try { toolkit.addExtension?.(new Tzip16Module()); } catch {}
+              const contract = await toolkit.contract.at(addr, tzip16);
+              const viewResult = await contract.views.get_extrauris(tokenId).executeView();
+              if (viewResult && typeof viewResult === 'object') {
+                const entries = viewResult.entries ? viewResult.entries() : Object.entries(viewResult);
+                for (const [, value] of entries) {
+                  if (value && typeof value === 'object') {
+                    extras.push({
+                      description: value.description,
+                      key       : value.key,
+                      name      : value.name,
+                      value     : value.value,
+                    });
+                  }
+                }
+              }
             }
-            if (tk) {
-              try { tk.addExtension?.(new Tzip16Module()); } catch {}
-              const c = await tk.contract.at(addr, tzip16);
-              extras = await c.views.get_extrauris(tokenId).read().catch(() => []);
-            }
-            if (!Array.isArray(extras) || !extras.length) {
+
+            // Fallback to TzKT view runner if RPC method fails or returns empty.
+            if (!extras.length) {
               const viewBase = `${apiBase}/contracts/${addr}/views/get_extrauris`;
-              extras = await jFetch(
+              const tzktResult = await jFetch(
                 `${viewBase}?input=${tokenId}&unlimited=true&format=json`,
               ).catch(() => []);
+              if (Array.isArray(tzktResult)) extras = tzktResult;
             }
+
             if (!Array.isArray(extras)) extras = [];
-          } catch { /* ignore network errors */ }
-          const parsed = Array.isArray(extras)
-            ? extras.map((e) => {
-                const val = hexToString(String(e.value || '').replace(/^0x/, ''));
-                return {
-                  key        : e.key,
-                  name       : e.name,
-                  description: e.description,
-                  value      : val,
-                  mime       : mimeFromDataUri(val),
-                };
-              })
-            : [];
+          } catch (err) {
+            console.error('Failed to fetch extra URIs:', err);
+            extras = [];
+          }
+
+          const parsed = extras.map((e) => {
+            const val = hexToString(String(e.value || '').replace(/^0x/, ''));
+            return {
+              key        : e.key || '',
+              name       : e.name || '',
+              description: e.description || '',
+              value      : val,
+              mime       : mimeFromDataUri(val),
+            };
+          });
           const mainUri = meta.artifactUri || '';
           setUris([
             {
@@ -257,7 +271,7 @@ export default function TokenDetailPage() {
     })();
 
     return () => { cancelled = true; };
-  }, [addr, tokenId]);
+    }, [addr, tokenId, toolkit]);
 
   const cur = uris[uriIdx] || { value: '', mime: '' };
   const meta = token?.metadata || {};

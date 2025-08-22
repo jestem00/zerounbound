@@ -320,11 +320,16 @@ export default function RepairUriV4a({
         requestAnimationFrame(() => runSlice(idx + 1));
       } else {
         await clearSliceCheckpoint(...checkpointArgs);
-        setOverlay({ open:false });
-        setBatches(null);
         setResumeInfo(null);
+        setBatches(null);
         snack('Repair complete', 'success');
         onMutate();
+        setOverlay({
+          open: true,
+          opHash: op.opHash,
+          current: batches.length,
+          total: batches.length,
+        });
       }
     } catch (e) {
       setOverlay({ open:true, error:true,

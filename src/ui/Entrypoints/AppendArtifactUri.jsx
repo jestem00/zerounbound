@@ -128,8 +128,11 @@ export default function AppendArtifactUri({
   /* housekeeping */
   useEffect(() => { purgeExpiredSliceCache(); }, []);
   useEffect(() => {
-    if (!tokenId) { setResume(null); return; }
-    setResume(loadSliceCheckpoint(contractAddress, tokenId, 'artifactUri', network));
+    let active = true;
+    if (!tokenId) { setResume(null); return undefined; }
+    loadSliceCheckpoint(contractAddress, tokenId, 'artifactUri', network)
+      .then((r) => { if (active) setResume(r); });
+    return () => { active = false; };
   }, [contractAddress, tokenId, network]);
 
   /*──── meta loader ───*/
@@ -224,7 +227,7 @@ export default function AppendArtifactUri({
       const packed = await splitPacked(toolkit, ops, PACKED_SAFE_BYTES);
       setBatches(packed);
 
-      saveSliceCheckpoint(contractAddress, tokenId, 'artifactUri', {
+      await saveSliceCheckpoint(contractAddress, tokenId, 'artifactUri', {
         total: slices.length,
         next: startIdx,
         slices,
@@ -265,11 +268,11 @@ export default function AppendArtifactUri({
       const op = await toolkit.wallet.batch(batches[idx]).send();
       setOv({ open: true, status: 'Broadcasting…', current: idx + 1, total: batches.length });
       await op.confirmation();
-      saveSliceCheckpoint(contractAddress, tokenId, 'artifactUri', {
+      await saveSliceCheckpoint(contractAddress, tokenId, 'artifactUri', {
         ...resume, next: idx + 1,
       }, network);
       if (idx + 1 === batches.length) {
-        clearSliceCheckpoint(contractAddress, tokenId, 'artifactUri', network);
+        await clearSliceCheckpoint(contractAddress, tokenId, 'artifactUri', network);
         onMutate();
         setOv({ open: true, opHash: op.opHash, current: batches.length, total: batches.length });
       } else {

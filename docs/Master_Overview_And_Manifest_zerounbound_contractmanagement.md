@@ -586,8 +586,8 @@ zerounbound/src/utils/onChainValidator.js — fast FOC heuristic (I99); Exports:
 zerounbound/src/utils/pixelUpscale.js — css helpers for pixel‑art upscaling; Exports: pixelUpscaleStyle
 zerounbound/src/utils/RenderMedia.jsx — data‑URI media viewer; Exports: RenderMedia
 zerounbound/src/utils/resolveTezosDomain.js — reverse resolver; imports DOMAIN_CONTRACTS/FALLBACK_RPCS; Exports: resolveTezosDomain
-zerounbound/src/utils/sliceCache.js — localStorage cache (legacy; not used by discovery); Exports: saveSlice,loadSlice,purgeExpired
-zerounbound/src/utils/sliceCacheV4a.js — v4a slice cache; Exports: saveSliceCheckpoint,loadSliceCheckpoint,clearSliceCheckpoint,purgeExpiredSliceCache,strHash
+zerounbound/src/utils/sliceCache.js — IndexedDB slice checkpoint cache; Exports: saveSliceCheckpoint,loadSliceCheckpoint,clearSliceCheckpoint,purgeExpiredSliceCache
+zerounbound/src/utils/sliceCacheV4a.js — v4a slice cache (IndexedDB); Exports: saveSliceCheckpoint,loadSliceCheckpoint,clearSliceCheckpoint,purgeExpiredSliceCache,strHash
 zerounbound/src/utils/toNat.js — address→nat util; Exports: toNat
 zerounbound/src/utils/uriHelpers.js — data‑URI helpers; Exports: ensureDataUri,getMime
 zerounbound/src/utils/useIsoLayoutEffect.js — SSR‑safe layout effect; Exports: useIsoLayoutEffect

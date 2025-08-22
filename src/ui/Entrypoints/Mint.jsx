@@ -614,7 +614,7 @@ export default function Mint({
 
       for (let i = 0; i < amt; i += 1) {
         const tokenId = baseId + i;
-        const cp = loadSliceCheckpoint(contractAddress, tokenId, 'artifactUri') || {};
+        const cp = await loadSliceCheckpoint(contractAddress, tokenId, 'artifactUri') || {};
         const startSlice = cp.next ?? 1;                  // 1‑based index
         for (let s = startSlice; s <= appendSlices.length; s += 1) {
           const hx = appendSlices[s - 1];
@@ -625,7 +625,7 @@ export default function Mint({
         }
 
         /* persist / update checkpoint */
-        saveSliceCheckpoint(contractAddress, tokenId, 'artifactUri', {
+        await saveSliceCheckpoint(contractAddress, tokenId, 'artifactUri', {
           total: appendSlices.length + 1,
           next: startSlice,
           hash: cp.hash || `sha256:${digest}`,
@@ -656,7 +656,7 @@ export default function Mint({
       try {
         const tokenId = Number(first.value.args[0].int);
         const hx      = `0x${first.value.args[1].bytes}`;
-        const cp      = loadSliceCheckpoint(contractAddress, tokenId, 'artifactUri');
+        const cp      = await loadSliceCheckpoint(contractAddress, tokenId, 'artifactUri');
         const already = cp && appendSlices.findIndex((s) => s === hx) < (cp.next ?? 1) - 1;
         if (!already) break;     /* needs to send */
       } catch { break; }         /* parse failure → just send */
@@ -692,10 +692,10 @@ export default function Mint({
       if (first?.entrypoint === 'append_artifact_uri') {
         try {
           const tokenId = Number(first.value.args[0].int);
-          const cp = loadSliceCheckpoint(contractAddress, tokenId, 'artifactUri');
+          const cp = await loadSliceCheckpoint(contractAddress, tokenId, 'artifactUri');
           if (cp) {
             const next = Math.min(cp.next + 1, cp.total);
-            saveSliceCheckpoint(contractAddress, tokenId, 'artifactUri', { ...cp, next });
+            await saveSliceCheckpoint(contractAddress, tokenId, 'artifactUri', { ...cp, next });
           }
         } catch {/* ignore parse errors */}
       }

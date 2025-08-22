@@ -186,8 +186,12 @@ export default function RepairUriV4a({
 
   /* resume checkpoint fetch */
   useEffect(() => {
-    if (!contractAddress || tokenId === '') { setResumeInfo(null); return; }
-    setResumeInfo(loadSliceCheckpoint(...checkpointArgs));
+    let active = true;
+    if (!contractAddress || tokenId === '') { setResumeInfo(null); return undefined; }
+    loadSliceCheckpoint(...checkpointArgs).then((r) => {
+      if (active) setResumeInfo(r);
+    });
+    return () => { active = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contractAddress, tokenId, storageLabel]);
 
@@ -268,7 +272,7 @@ export default function RepairUriV4a({
       const packs = await splitPacked(toolkit, flat, PACKED_SAFE_BYTES);
       setBatches(packs.length ? packs : [flat]);
 
-      saveSliceCheckpoint(...checkpointArgs, {
+      await saveSliceCheckpoint(...checkpointArgs, {
         total : packs.length,
         next  : resumeInfo?.next ?? 0,
         slices,
@@ -304,7 +308,7 @@ export default function RepairUriV4a({
       // Persist progress and update local resumeInfo to reflect the
       // completed batch. Without updating resumeInfo state, the next
       // retry would reset to the first batch. See issue #retryReset.
-      saveSliceCheckpoint(...checkpointArgs, {
+      await saveSliceCheckpoint(...checkpointArgs, {
         ...resumeInfo,
         next: idx + 1,
       });
@@ -315,7 +319,7 @@ export default function RepairUriV4a({
       if (idx + 1 < batches.length) {
         requestAnimationFrame(() => runSlice(idx + 1));
       } else {
-        clearSliceCheckpoint(...checkpointArgs);
+        await clearSliceCheckpoint(...checkpointArgs);
         setOverlay({ open:false });
         setBatches(null);
         setResumeInfo(null);

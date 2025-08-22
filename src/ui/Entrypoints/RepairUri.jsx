@@ -291,8 +291,12 @@ export default function RepairUri({
 
   /*──────── resume checkpoint ───*/
   useEffect(() => {
-    if (!contractAddress || tokenId === '') { setResumeInfo(null); return; }
-    setResumeInfo(loadSliceCheckpoint(...checkpointKeyArgs));
+    let active = true;
+    if (!contractAddress || tokenId === '') { setResumeInfo(null); return undefined; }
+    loadSliceCheckpoint(...checkpointKeyArgs).then((r) => {
+      if (active) setResumeInfo(r);
+    });
+    return () => { active = false; };
   }, [contractAddress, tokenId, checkpointKeyArgs]);
 
   /*──────── original hex on uriKey change ─*/
@@ -399,7 +403,7 @@ export default function RepairUri({
 
   /*──────── ops builder ────────*/
   const buildOps = useCallback(async () => {
-    const latestResume = loadSliceCheckpoint(...checkpointKeyArgs);
+    const latestResume = await loadSliceCheckpoint(...checkpointKeyArgs);
     setResumeInfo(latestResume);
     const offset = latestResume?.next ?? 0;
     const { tail: freshTail } = sliceTail(origHex, fullHex, sliceSize, offset);
@@ -483,7 +487,7 @@ export default function RepairUri({
       setBatches(packs);
 
       const totalBytes = tail.reduce((sum, hx) => sum + (hx.length - 2) / 2, 0);
-      saveSliceCheckpoint(...checkpointKeyArgs, {
+      await saveSliceCheckpoint(...checkpointKeyArgs, {
         total: totalBytes,
         next: resumeInfo?.next ?? 0,
         slices: tail,
@@ -581,7 +585,7 @@ export default function RepairUri({
             return sum;
           }, 0);
           currentByte += batchBytes;
-          saveSliceCheckpoint(...checkpointKeyArgs, { ...resumeInfo, next: currentByte });
+          await saveSliceCheckpoint(...checkpointKeyArgs, { ...resumeInfo, next: currentByte });
           setResumeInfo((prev) => ({ ...prev, next: currentByte }));
         } catch (e) {
           let errMsg = e?.message || (e?.name ? `${e.name}: ${e.description || e.message || ''}` : String(e));
@@ -601,7 +605,7 @@ export default function RepairUri({
                 return sum;
               }, 0);
               currentByte += batchBytes;
-              saveSliceCheckpoint(...checkpointKeyArgs, { ...resumeInfo, next: currentByte });
+              await saveSliceCheckpoint(...checkpointKeyArgs, { ...resumeInfo, next: currentByte });
               setResumeInfo((prev) => ({ ...prev, next: currentByte }));
               continue;
             }
@@ -620,7 +624,7 @@ export default function RepairUri({
         }
       }
       snack('Repair complete', 'success');
-      clearSliceCheckpoint(...checkpointKeyArgs);
+      await clearSliceCheckpoint(...checkpointKeyArgs);
       setResumeInfo(null);
       setOverlay({ open: true, opHash: lastOpHash, current: packs.length, total: packs.length });
       onMutate();

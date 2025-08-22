@@ -25,7 +25,7 @@ const NET_COL = {
 const BREAK        = 800;
 const COPY_TIMEOUT = 1800;
 /* Application version (increment for each deploy) */
-const APP_VERSION = '0.85';
+const APP_VERSION = '0.86';
 
 /*──────── styled shells ─────*/
 const selectCSS = css`
@@ -318,6 +318,6 @@ export default function Header() {
 }
 /* What changed & why:
    • Added external “ZeroArt.app” link (desktop & mobile via shared NavLinks).
-   • Bumped APP_VERSION → 0.85 for the upcoming deploy banner.
+   • Bumped APP_VERSION → 0.86 for the upcoming deploy banner.
    • Kept all invariants (SSR‑safe hooks, transient props, /no‑sentinel).
 */

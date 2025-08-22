@@ -107,7 +107,8 @@ The fee estimator and batch builder share this module so expected signature
 counts match wallet prompts. Data URIs must pass `isValidDataUri`/`isLikelySvg`
 checks before slicing; malformed payloads are rejected.
 
+Tokens with `extrauri_*` metadata MUST expose those assets via the `get_extrauris` view. UIs MUST provide navigation across all returned items and offer a MIME‑accurate download link for each value.
+
 ──────────────────────────────────────────────────────────────────────────────
 /* What changed & why: Updated to r7. Added canonical slicer rules,
-IndexedDB-only checkpoint note, and data-URI validation guidance. Other sections
-remain unchanged. */
+IndexedDB-only checkpoint note, data-URI validation guidance, and extrauri viewer requirement. Other sections remain unchanged. */

@@ -71,6 +71,13 @@ const CloseWrap = styled.div`
   z-index: ${TOPMOST_Z + 2};
 `;
 
+const NavBtn = styled(PixelButton)`
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: ${TOPMOST_Z + 2};
+`;
+
 /* ephemeral helper badge */
 const Hint = styled.div`
   position: fixed;
@@ -160,6 +167,10 @@ export default function FullscreenModal({
   hideControlsDefault = false,
   lockControlsHidden  = false,
   showHint            = true,
+  hasPrev             = false,
+  hasNext             = false,
+  onPrev              = () => {},
+  onNext              = () => {},
 }) {
   const [nat, setNat]          = useState({ w: 0, h: 0 });
   const [scale, setScale]      = useState(1);
@@ -379,6 +390,17 @@ export default function FullscreenModal({
       {hintVisible && !lockControlsHidden && (
         <Hint>H — hide controls · two‑finger tap/long‑press on mobile</Hint>
       )}
+
+      {hasPrev && uiVisible && (
+        <NavBtn style={{ left: '.75rem' }} onClick={onPrev} aria-label="Previous">
+          ◀
+        </NavBtn>
+      )}
+      {hasNext && uiVisible && (
+        <NavBtn style={{ right: '.75rem' }} onClick={onNext} aria-label="Next">
+          ▶
+        </NavBtn>
+      )}
     </Back>
   );
 }
@@ -393,6 +415,10 @@ FullscreenModal.propTypes = {
   hideControlsDefault : PropTypes.bool,
   lockControlsHidden  : PropTypes.bool,
   showHint            : PropTypes.bool,
+  hasPrev             : PropTypes.bool,
+  hasNext             : PropTypes.bool,
+  onPrev              : PropTypes.func,
+  onNext              : PropTypes.func,
 };
 
 /* What changed & why (r16):

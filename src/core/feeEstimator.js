@@ -6,6 +6,7 @@
 ──────────────────────────────────────────────────────────────*/
 import { OpKind } from '@taquito/taquito';
 import { Buffer } from 'buffer';
+import { planHead, buildAppendCalls } from './slicing.js';
 
 /*──────── chain‑wide constants ─────────────────────────────*/
 export const MINIMAL_FEE_MUTEZ         = 100;     /* base per op */
@@ -29,6 +30,14 @@ const PACKING_OVERHEAD            = 50;       /* per-batch packing est */
 
 /*──────── unit helpers ─────────────────────────────────────*/
 export const toTez = (m = 0) => (m / 1_000_000).toFixed(6);
+
+/*──────── slice counter ─────────────────────────────────────*/
+export function countSlices(dataUri = '') {
+  const { remainingHex } = planHead(dataUri);
+  const calls = buildAppendCalls({ contract: '', tokenId: 0, tailHex: remainingHex });
+  const total = 1 + calls.length;
+  return { expectedSlices: total, expectedSignatures: total };
+}
 
 /*──────── storage‑burn calculator ──────────────────────────*/
 /**

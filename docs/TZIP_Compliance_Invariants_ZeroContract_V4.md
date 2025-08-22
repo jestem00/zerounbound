@@ -98,6 +98,9 @@ Implementations MAY provide resume support if desired: if the origination fails
 after signing but before confirmation, the UI should persist the contract address
 and metadata JSON in localStorage and allow the user to retry.
 
+Slice checkpoints for oversized uploads are now stored in IndexedDB only;
+legacy localStorage paths must be migrated on first access.
+
 ──────────────────────────────────────────────────────────────────────────────
 /* What changed & why: Updated to r6. Removed dual‑stage origination guidance
 and remote forge service references; clarified that the full metadata,

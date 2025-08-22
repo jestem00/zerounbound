@@ -6,11 +6,9 @@
 ──────────────────────────────────────────────────────────────*/
 import { OpKind } from '@taquito/taquito';
 import { HARD_STORAGE_LIMIT } from './feeEstimator.js';
+import { SLICE_MAX_BYTES, PACKED_SAFE_BYTES } from './slicing.js';
+export { SLICE_MAX_BYTES, SLICE_MIN_BYTES, PACKED_SAFE_BYTES } from './slicing.js';
 
-/*────────────────── public constants ──────────────────*/
-export const SLICE_MAX_BYTES   = 20_000;   /* optimistic start */
-export const SLICE_MIN_BYTES   = 1_024;    /* fallback min */
-export const PACKED_SAFE_BYTES = 31_000;   /* bytes per op-pack */
 const SLICE_OVERHEAD = 512;                /* Michelson/encoding padding */
 const OP_SIZE_OVERHEAD = 200;              /* forged bytes per op */
 

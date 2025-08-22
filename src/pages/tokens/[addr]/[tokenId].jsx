@@ -169,8 +169,23 @@ export default function TokenDetailPage() {
 
           let extras = [];
           try {
-            extras = await jFetch(`${apiBase}/contracts/${addr}/views/get_extrauris?arg=${tokenId}&format=json`).catch(() => []);
-          } catch { /* ignore */ }
+            const viewBase = `${apiBase}/contracts/${addr}/views/get_extrauris`;
+            // First attempt: GET with arg query.
+            extras = await jFetch(`${viewBase}?arg=${tokenId}&format=json`).catch(() => []);
+            // Fallback: POST with raw nat body.
+            if (!Array.isArray(extras) || !extras.length) {
+              const opts = { method: 'POST', headers: { 'Content-Type': 'application/json' } };
+              extras = await jFetch(viewBase, 2, { ...opts, body: JSON.stringify(tokenId) }).catch(() => []);
+            }
+            // Fallback: POST with { input: nat } body (Alt TzKT shape).
+            if (!Array.isArray(extras) || !extras.length) {
+              extras = await jFetch(viewBase, 2, {
+                method : 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body   : JSON.stringify({ input: tokenId }),
+              }).catch(() => []);
+            }
+          } catch { /* ignore network errors */ }
           const parsed = Array.isArray(extras)
             ? extras.map((e) => {
                 const val = hexToString(String(e.value || '').replace(/^0x/, ''));
@@ -194,6 +209,7 @@ export default function TokenDetailPage() {
             },
             ...parsed,
           ]);
+          setUriIdx(0);
         }
 
         if (collRow) {

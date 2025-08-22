@@ -28,6 +28,7 @@ import { useWalletContext } from '../../../contexts/WalletContext.js';
 import { jFetch } from '../../../core/net.js';
 import { TZKT_API } from '../../../config/deployTarget.js';
 import decodeHexFields, { decodeHexJson } from '../../../utils/decodeHexFields.js';
+import { mimeFromDataUri } from '../../../utils/uriHelpers.js';
 
 /*──────────────── helpers ───────────────────────────────────────────*/
 // Convert a hex-encoded string into a UTF‑8 string.  TzKT returns
@@ -104,6 +105,15 @@ const Obscure = styled.div`
   p { margin: 0; width: 80%; }
 `;
 
+const NavBtn = styled(PixelButton)`
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 5;
+  opacity: .8;
+  &:hover { opacity: 1; }
+`;
+
 /*──────── helpers ───────────────────────────────────────────*/
 // Use the centralised TZKT_API constant from deployTarget.  Append /v1
 // to access the v1 REST endpoints.  This ensures the token page
@@ -121,6 +131,8 @@ export default function TokenDetailPage() {
   const [collection, setCollection] = useState(null);
   const [loading, setLoading] = useState(true);
   const [fsOpen, setFsOpen] = useState(false);
+  const [uris, setUris]   = useState([]);
+  const [uriIdx, setUriIdx] = useState(0);
 
   const [allowNSFW, setAllowNSFW] = useConsent('nsfw', false);
   const [allowFlash, setAllowFlash] = useConsent('flash', false);
@@ -154,6 +166,34 @@ export default function TokenDetailPage() {
             ? decodeHexFields(decodeHexJson(tokRow.metadata) || {})
             : decodeHexFields(tokRow.metadata || {});
           setToken({ ...tokRow, metadata: meta });
+
+          let extras = [];
+          try {
+            extras = await jFetch(`${apiBase}/contracts/${addr}/views/get_extrauris?arg=${tokenId}&format=json`).catch(() => []);
+          } catch { /* ignore */ }
+          const parsed = Array.isArray(extras)
+            ? extras.map((e) => {
+                const val = hexToString(String(e.value || '').replace(/^0x/, ''));
+                return {
+                  key        : e.key,
+                  name       : e.name,
+                  description: e.description,
+                  value      : val,
+                  mime       : mimeFromDataUri(val),
+                };
+              })
+            : [];
+          const mainUri = meta.artifactUri || '';
+          setUris([
+            {
+              key: 'artifactUri',
+              name: meta.name || '',
+              description: meta.description || '',
+              value: mainUri,
+              mime: meta.mimeType || mimeFromDataUri(mainUri),
+            },
+            ...parsed,
+          ]);
         }
 
         if (collRow) {
@@ -200,20 +240,28 @@ export default function TokenDetailPage() {
     return () => { cancelled = true; };
   }, [addr, tokenId]);
 
+  const cur = uris[uriIdx] || { value: '', mime: '' };
   const meta = token?.metadata || {};
-  const hazards = detectHazards(meta);
+  const hazards = detectHazards({ artifactUri: cur.value, mimeType: cur.mime });
 
   const needsNSFW = hazards.nsfw && !allowNSFW;
   const needsFlash = hazards.flashing && !allowFlash;
   const hidden = needsNSFW || needsFlash;
 
-  const mediaUri = meta.artifactUri || meta.displayUri || meta.imageUri || '';
+  const mediaUri = cur.value || '';
 
   /* handlers to open confirm dialogs */
   const requestReveal = useCallback((type) => {
     setDlgType(type);
     setDlgTerms(false);
   }, []);
+
+  const prevUri = useCallback(() => {
+    setUriIdx((i) => (i - 1 + uris.length) % uris.length);
+  }, [uris.length]);
+  const nextUri = useCallback(() => {
+    setUriIdx((i) => (i + 1) % uris.length);
+  }, [uris.length]);
 
   /* confirm hazard or script reveal */
   const confirmReveal = useCallback(() => {
@@ -258,14 +306,19 @@ export default function TokenDetailPage() {
       <Grid>
         {/*──────── media preview ────────*/}
         <MediaWrap>
+          {uris.length > 1 && (
+            <>
+              <NavBtn style={{ left: '.5rem' }} onClick={prevUri} aria-label="Previous">◀</NavBtn>
+              <NavBtn style={{ right: '.5rem' }} onClick={nextUri} aria-label="Next">▶</NavBtn>
+            </>
+          )}
           {/* show media when not hidden by hazard overlays */}
           {!hidden && (
             <RenderMedia
               uri={mediaUri}
-              mime={meta.mimeType}
+              mime={cur.mime}
               alt={meta.name || `Token #${tokenId}`}
               allowScripts={hazards.scripts && allowJs}
-              /* force re-mount when script consent toggles */
               key={String(allowJs)}
               style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
             />
@@ -300,6 +353,7 @@ export default function TokenDetailPage() {
           onRequestScriptReveal={() => requestReveal('scripts')}
           onFullscreen={openFullscreen}
           fsDisabled={fsDisabled}
+          currentUri={cur}
         />
       </Grid>
 
@@ -308,9 +362,13 @@ export default function TokenDetailPage() {
         open={fsOpen}
         onClose={() => setFsOpen(false)}
         uri={mediaUri}
-        mime={meta.mimeType}
+        mime={cur.mime}
         allowScripts={hazards.scripts && allowJs}
         scriptHazard={hazards.scripts}
+        hasPrev={uris.length > 1}
+        hasNext={uris.length > 1}
+        onPrev={prevUri}
+        onNext={nextUri}
       />
 
       {/*──────── hazard / script confirm dialog ──────*/}

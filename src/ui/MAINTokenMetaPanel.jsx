@@ -31,12 +31,40 @@ import PixelConfirmDialog           from './PixelConfirmDialog.jsx';
 import countAmount                  from '../utils/countAmount.js';
 import hashMatrix                   from '../data/hashMatrix.json';
 import decodeHexFields, { decodeHexJson } from '../utils/decodeHexFields.js';
+import { mimeFromDataUri }         from '../utils/uriHelpers.js';
 
 // Import domain resolution helper and network key for reverse lookups.
 import { resolveTezosDomain } from '../utils/resolveTezosDomain.js';
 import { NETWORK_KEY }           from '../config/deployTarget.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
+
+/*──────── helpers ───────────────────────────────────────────*/
+const sanitizeFilename = (s) =>
+  String(s || '').replace(/[\\/:*?"<>|]+/g, '').replace(/\s+/g, ' ').trim();
+
+const extFromMime = (mt) => {
+  const mime = String(mt || '').toLowerCase();
+  if (!mime) return '';
+  if (mime === 'image/jpeg' || mime === 'image/jpg') return 'jpg';
+  if (mime === 'image/png') return 'png';
+  if (mime === 'image/gif') return 'gif';
+  if (mime === 'image/webp') return 'webp';
+  if (mime === 'image/svg+xml') return 'svg';
+  if (mime === 'video/mp4') return 'mp4';
+  if (mime === 'audio/mpeg') return 'mp3';
+  if (mime === 'text/html') return 'html';
+  if (mime === 'application/pdf') return 'pdf';
+  const main = mime.split(';', 1)[0];
+  const tail = main.split('/')[1] || '';
+  return tail.replace(/\+.*$/, '') || '';
+};
+
+const suggestedFilename = (meta = {}, tokenId) => {
+  const base = sanitizeFilename(meta?.name || `token-${tokenId ?? ''}`) || 'download';
+  const ext  = extFromMime(meta?.mime) || '';
+  return ext ? `${base}.${ext}` : base;
+};
 
 /*──────── styled shells ─────────────────────────────────────*/
 const Panel = styled.aside`
@@ -219,6 +247,7 @@ export default function MAINTokenMetaPanel({
   onRequestScriptReveal,
   onFullscreen,
   fsDisabled,
+  currentUri,
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -227,7 +256,20 @@ export default function MAINTokenMetaPanel({
   // fields via decodeHexFields().
   const collObj = useMemo(() => toMetaObject(collection.metadata), [collection.metadata]);
   const collHaz = detectHazards(collObj);
-  const tokHaz = detectHazards(token.metadata || {});
+  const cur = useMemo(() => {
+    if (currentUri) {
+      return { ...currentUri, mime: currentUri.mime || mimeFromDataUri(currentUri.value) };
+    }
+    const uri = token.metadata?.artifactUri || '';
+    return {
+      key: 'artifactUri',
+      name: token.metadata?.name || '',
+      description: token.metadata?.description || '',
+      value: uri,
+      mime: token.metadata?.mimeType || mimeFromDataUri(uri),
+    };
+  }, [currentUri, token.metadata]);
+  const tokHaz = detectHazards({ artifactUri: cur.value, mimeType: cur.mime });
 
   const [allowScr, setAllowScr] = useConsent(`scripts:${collection.address}`, false);
   const [allowNSFW, setAllowNSFW] = useConsent('nsfw', false);
@@ -547,7 +589,27 @@ export default function MAINTokenMetaPanel({
         <Section>
           <MetaGrid>
             <dt>MIME Type</dt>
-            <dd>{token.metadata?.mimeType || 'N/A'}</dd>
+            <dd>
+              {cur.mime ? (
+                <a
+                  href={cur.value}
+                  download={suggestedFilename({ name: cur.name, mime: cur.mime }, token.tokenId)}
+                  style={{ color: 'inherit' }}
+                >
+                  {cur.mime}
+                </a>
+              ) : 'N/A'}
+            </dd>
+            {cur.key !== 'artifactUri' && (
+              <>
+                <dt>Extra Key</dt>
+                <dd>{cur.key}</dd>
+                <dt>Name</dt>
+                <dd>{cur.name || '—'}</dd>
+                <dt>Description</dt>
+                <dd>{cur.description || '—'}</dd>
+              </>
+            )}
             {token.metadata?.rights && (
               <>
                 <dt>Rights</dt>
@@ -632,6 +694,13 @@ MAINTokenMetaPanel.propTypes = {
   onRequestScriptReveal: PropTypes.func,
   onFullscreen: PropTypes.func,
   fsDisabled : PropTypes.bool,
+  currentUri : PropTypes.shape({
+    key        : PropTypes.string,
+    name       : PropTypes.string,
+    description: PropTypes.string,
+    value      : PropTypes.string,
+    mime       : PropTypes.string,
+  }),
 };
 
 /* What changed & why (r14):

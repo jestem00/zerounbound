@@ -478,7 +478,7 @@ zerounbound/src/pages/my/tokens.jsx — minted/owned discovery; live‑balance f
 
 — contracts/tokens —
 zerounbound/src/pages/contracts/[addr].jsx — collection detail; Imports: ContractMetaPanelContracts,TokenCard,hazards; Exports: ContractPage
-zerounbound/src/pages/tokens/[addr]/[tokenId].jsx — token detail; integrates MAINTokenMetaPanel & hazard overlays; Exports: TokenDetailPage
+zerounbound/src/pages/tokens/[addr]/[tokenId].jsx — token detail; integrates MAINTokenMetaPanel, extrauri viewer with prev/next navigation & hazard overlays; Exports: TokenDetailPage
 
 ╭── src/styles ──────────────────────────────────────────────────────────────╮
 zerounbound/src/styles/globalStyles.js — root CSS + scrollbar; Imports: styled‑components,palettes.json; Exports: GlobalStyles
@@ -500,6 +500,7 @@ zerounbound/src/ui/ThemeToggle.jsx — palette switch button; Exports: ThemeTogg
 zerounbound/src/ui/WalletNotice.jsx — wallet status banner; Exports: WalletNotice
 zerounbound/src/ui/ZerosBackground.jsx — animated zeros field; Exports: ZerosBackground
 zerounbound/src/ui/IntegrityBadge.jsx — on‑chain integrity badge; Exports: IntegrityBadge
+zerounbound/src/ui/MAINTokenMetaPanel.jsx — token detail meta panel with extrauri navigation & downloadable MIME links; Imports: RenderMedia, hazards; Exports: MAINTokenMetaPanel
 
 — marketplace bars & dialogs —
 zerounbound/src/ui/BuyDialog.jsx — buy modal; Imports: buildBuyParams,preflightBuy; Exports: BuyDialog
@@ -672,6 +673,7 @@ Why the delineation matters: AdminTools introspects the typeHash → version to 
 ───────────────────────────────────────────────────────────────
 CHANGELOG
 ───────────────────────────────────────────────────────────────
+r1184 — Add extrauri viewer with navigation and downloadable MIME links on token detail page.
 r1183 — Introduce canonical slicer, migrate slice checkpoints to IndexedDB only, add data‑URI tests.
 r1182 — Document marketplace dialogs (Buy/List/MakeOffer) and
 Accept/Cancel entrypoints; extend manifest coverage for completeness.
@@ -682,4 +684,4 @@ normalization, reaffirm listings stale‑listing guard & transient‑prop rule.
 r1180 — Add ZeroSum stale‑listing guard based on TzKT balances,
 enforce /v1 base normalization, codify transient‑prop rule, reaffirm no‑sentinel.
 
-/* What changed & why: Introduced canonical slicer and IDB-only checkpoints; updated manifest and invariants accordingly. */
+/* What changed & why: Added extrauri viewer with navigation and downloadable MIME links; appended changelog. */

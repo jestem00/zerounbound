@@ -26,7 +26,7 @@ import detectHazards from '../../../utils/hazards.js';
 import useConsent from '../../../hooks/useConsent.js';
 import { useWalletContext } from '../../../contexts/WalletContext.js';
 import { jFetch } from '../../../core/net.js';
-import { TZKT_API } from '../../../config/deployTarget.js';
+import { TZKT_API, NETWORK_KEY } from '../../../config/deployTarget.js';
 import decodeHexFields, { decodeHexJson } from '../../../utils/decodeHexFields.js';
 import { mimeFromDataUri } from '../../../utils/uriHelpers.js';
 
@@ -170,21 +170,14 @@ export default function TokenDetailPage() {
           let extras = [];
           try {
             const viewBase = `${apiBase}/contracts/${addr}/views/get_extrauris`;
-            // First attempt: GET with arg query.
-            extras = await jFetch(`${viewBase}?arg=${tokenId}&format=json`).catch(() => []);
-            // Fallback: POST with raw nat body.
+            extras = await jFetch(
+              `${viewBase}?input=${tokenId}&unlimited=true&format=json`,
+            ).catch(() => []);
             if (!Array.isArray(extras) || !extras.length) {
-              const opts = { method: 'POST', headers: { 'Content-Type': 'application/json' } };
-              extras = await jFetch(viewBase, 2, { ...opts, body: JSON.stringify(tokenId) }).catch(() => []);
+              const bcd = `https://api.better-call.dev/v1/contract/${NETWORK_KEY}/${addr}/views/get_extrauris?arg=${tokenId}`;
+              extras = await jFetch(bcd, 1).catch(() => []);
             }
-            // Fallback: POST with { input: nat } body (Alt TzKT shape).
-            if (!Array.isArray(extras) || !extras.length) {
-              extras = await jFetch(viewBase, 2, {
-                method : 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body   : JSON.stringify({ input: tokenId }),
-              }).catch(() => []);
-            }
+            if (!Array.isArray(extras)) extras = [];
           } catch { /* ignore network errors */ }
           const parsed = Array.isArray(extras)
             ? extras.map((e) => {

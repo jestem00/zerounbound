@@ -200,9 +200,11 @@ export default function TokenDetailPage() {
             // Fallback to TzKT view runner if RPC method fails or returns empty.
             if (!extras.length) {
               const viewBase = `${apiBase}/contracts/${addr}/views/get_extrauris`;
-              const tzktResult = await jFetch(
-                `${viewBase}?input=${tokenId}&unlimited=true&format=json`,
-              ).catch(() => []);
+              const tzktResult = await jFetch(viewBase, 1, {
+                method : 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body   : JSON.stringify({ input: Number(tokenId), unlimited: true, format: 'json' }),
+              }).catch(() => []);
               if (Array.isArray(tzktResult)) extras = tzktResult;
             }
 

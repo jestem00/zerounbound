@@ -1,9 +1,8 @@
 /*─────────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    docs/Master_Overview_And_Manifest_zerounbound_contractmanagement.md
-  Rev :    r1182    2025‑08‑19 UTC
-  Summary: Document marketplace dialogs & entrypoints;
-           extend manifest coverage.
+  Rev :    r1183    2025‑09‑07 UTC
+  Summary: canonical slicer, IDB‑only slice cache, and data‑URI tests.
 ──────────────────────────────────────────────────────────────────*/
 
 ════════════════════════════════════════════════════════════════
@@ -31,31 +30,13 @@ the UI falls back to toolkit.wallet.originate() with the full
 metadata big‑map. Marketplace integration includes listings,
 offers and tokens pages under /explore and /my.
 
-**New in this revision** — Explore/Tokens page & API hygiene:
-• **Explore/Tokens r15**: dedicated tokens grid with **scan‑ahead** pagination
-  that yields a **minimum batch of visible cards** per click (avoids “dead”
-  clicks), **non‑zero supply** and **renderable preview** gating, ZeroContract
-  **type‑hash allow‑list**, and **accurate header totals** via fallback +
-  end‑of‑paging reconciliation (no “all FA2” inflation).  
-• **UI‑level stale‑listing elimination** (unchanged from r1180): before buy
-  and when building listing cards, check the seller’s **live FA2 balance**
-  via TzKT `/v1/tokens/balances` with:
-  `account=<tz>`, `token.contract=<KT1>`, `token.tokenId=<nat>`,
-  `select=balance`, `limit=1`. If `< balance` than the required amount,
-  **suppress the listing** and make the Buy flow throw tagged
-  `STALE_LISTING_NO_BALANCE`.  
-• **TzKT query‑shape fixes**: never use `account.address` in `/tokens/balances`;
-  use `account` (400 otherwise).
-• **Explore/Listings r7** (reaffirmed): the page’s data‑plane is strict about
-  not double‑appending `/v1` to the TzKT base URL; metadata is prefetched,
-  previews validated, hazards filtered, and duplicates removed.
-• **Transient‑prop rule**: DOM warnings (e.g., `noActiveFx`) resolved by
-  styled‑components **transient props** (`$prop`) or caller‑side filtering.
-• **Sentinel ban reminder**: do **not** place `EOF` (or any sentinel text) after
-  comment footers in JS/JSX—this breaks Next builds (Invariant I145).
-• **Manifest coverage**: source‑tree map now lists marketplace dialogs
-  (Buy/List/MakeOffer) and marketplace entrypoints (AcceptOffer,
-  CancelListing, CancelOffer) for completeness.
+**New in this revision** — Canonical slicing & IDB checkpoints:
+• Introduced `src/core/slicing.js` used by Mint/Append/Repair and the fee
+  estimator, ensuring deterministic head/tail splits and matching signature
+  counts.
+• Slice checkpoints now persist in IndexedDB only with automatic migration;
+  legacy localStorage paths were removed.
+• Added Jest coverage for resume logic and SVG data‑URI validation.
 
 See the TZIP invariants companion for standard compliance rules.
 
@@ -325,6 +306,11 @@ I154 [F,E] **Tagged errors** — marketplace helpers surface actionable tags (`M
 I155 [I] **No sentinels in JS/JSX** — comment footers end with `*/` only.
 I156 [E] **Preflight budget & TTL** — balance checks observe jFetch limits; cache per `(seller,KT1,tokenId)` for ≤60 s (network‑scoped).
 I157 [C,E,F] **EP_MINT_SIGNATURES** — v1,v2b → mint(map,address); v2a,v3–v4e → mint(nat,map,address); v4a → mint(address,nat,map). Unit test asserts UI builds these shapes.
+I158 [F,E] Canonical slicer shared by estimator and batch; signature counts must align.
+I159 [F] Slice checkpoints persist in IndexedDB only; migrate legacy localStorage then purge.
+I160 [F,E] Append/Repair recompute on-chain prefix after each confirmation; duplicate bytes dropped; mismatch aborts.
+I161 [F] OperationOverlay surfaces “Resume” when wallet prompts stall.
+I162 [F] Data URIs validated via `isValidDataUri`/`isLikelySvg` before slicing.
 
 ───────────────────────────────────────────────────────────────
 3 · RESERVED
@@ -366,6 +352,8 @@ zerounbound/yarn.lock — Yarn lockfile; Imports: ·; Exports: ·
 
 ╭── __tests__ ───────────────────────────────────────────────────────────────╮
 zerounbound/__tests__/dummy.test.js — placeholder test; Imports: ·; Exports: ·
+zerounbound/__tests__/sliceResume.test.js — resume-safe slicer tests; Imports: planHead,cutTail; Exports: ·
+zerounbound/__tests__/svgDataUri.test.js — data-URI validation tests; Imports: isValidDataUri; Exports: ·
 zerounbound/__tests__/v2aLedger.test.js — tests v2a ledger fallback; Imports: getLedgerBalanceV2a; Exports: ·
 
 ╭── build / infra ───────────────────────────────────────────────────────────╮
@@ -454,6 +442,7 @@ zerounbound/src/core/marketplace.js — ZeroSum helpers; Imports: net.js,@taquit
   • param builders: `buildBuyParams`, `buildListParams`, `buildCancelParams`, `buildAcceptOfferParams`, `buildOfferParams`,  
   • **preflight**: `getFa2BalanceViaTzkt(account, nftContract, tokenId)`, **`preflightBuy()`** (throws `STALE_LISTING_NO_BALANCE`).
 zerounbound/src/core/net.js — network helpers (jFetch limiter/back‑off, safe fetch), forging; Imports: Parser,@taquito/michelson-encoder,deployTarget; Exports: jFetch,forgeOrigination,injectSigned
+zerounbound/src/core/slicing.js — canonical head/tail slicer; Imports: @taquito/utils; Exports: planHead,computeOnChainPrefix,cutTail,buildAppendCalls,SLICE_MAX_BYTES,SLICE_MIN_BYTES,PACKED_SAFE_BYTES,HEADROOM_BYTES
 zerounbound/src/core/validator.js — schema & form validators; Exports: validateContract,validateToken,validateMintFields,validateDeployFields
 
 ╭── src/data ────────────────────────────────────────────────────────────────╮
@@ -586,10 +575,10 @@ zerounbound/src/utils/onChainValidator.js — fast FOC heuristic (I99); Exports:
 zerounbound/src/utils/pixelUpscale.js — css helpers for pixel‑art upscaling; Exports: pixelUpscaleStyle
 zerounbound/src/utils/RenderMedia.jsx — data‑URI media viewer; Exports: RenderMedia
 zerounbound/src/utils/resolveTezosDomain.js — reverse resolver; imports DOMAIN_CONTRACTS/FALLBACK_RPCS; Exports: resolveTezosDomain
-zerounbound/src/utils/sliceCache.js — IndexedDB slice checkpoint cache; Exports: saveSliceCheckpoint,loadSliceCheckpoint,clearSliceCheckpoint,purgeExpiredSliceCache
+zerounbound/src/utils/sliceCache.js — IndexedDB-only slice checkpoint cache (migrates legacy localStorage); Exports: saveSliceCheckpoint,loadSliceCheckpoint,clearSliceCheckpoint,purgeExpiredSliceCache
 zerounbound/src/utils/sliceCacheV4a.js — v4a slice cache (IndexedDB); Exports: saveSliceCheckpoint,loadSliceCheckpoint,clearSliceCheckpoint,purgeExpiredSliceCache,strHash
 zerounbound/src/utils/toNat.js — address→nat util; Exports: toNat
-zerounbound/src/utils/uriHelpers.js — data‑URI helpers; Exports: ensureDataUri,getMime
+zerounbound/src/utils/uriHelpers.js — data‑URI helpers; Exports: URI_KEY_REGEX,listUriKeys,mimeFromDataUri,isValidDataUri,isLikelySvg,ensureDataUri
 zerounbound/src/utils/useIsoLayoutEffect.js — SSR‑safe layout effect; Exports: useIsoLayoutEffect
 zerounbound/src/utils/useWheelTunnel.js — wheel event tunnel (I64); Exports: useWheelTunnel
 
@@ -683,6 +672,7 @@ Why the delineation matters: AdminTools introspects the typeHash → version to 
 ───────────────────────────────────────────────────────────────
 CHANGELOG
 ───────────────────────────────────────────────────────────────
+r1183 — Introduce canonical slicer, migrate slice checkpoints to IndexedDB only, add data‑URI tests.
 r1182 — Document marketplace dialogs (Buy/List/MakeOffer) and
 Accept/Cancel entrypoints; extend manifest coverage for completeness.
 r1181 — Add Explore/Tokens documentation (scan‑ahead min‑yield pagination,
@@ -692,5 +682,4 @@ normalization, reaffirm listings stale‑listing guard & transient‑prop rule.
 r1180 — Add ZeroSum stale‑listing guard based on TzKT balances,
 enforce /v1 base normalization, codify transient‑prop rule, reaffirm no‑sentinel.
 
-/* What changed & why: Added marketplace dialog & entrypoint coverage
-   and extended manifest completeness. */
+/* What changed & why: Introduced canonical slicer and IDB-only checkpoints; updated manifest and invariants accordingly. */

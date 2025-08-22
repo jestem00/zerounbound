@@ -2,8 +2,8 @@
 /─────────────────────────────────────────────────────────────────
 Developed by @jams2blues – ZeroContract Studio
 File: docs/TZIP_Compliance_Invariants_ZeroContract_V4.md
-Rev : r6 2025-07-24 UTC
-Summary: update metadata invariants for single‑stage origination and remove dual‑stage guidance.
+Rev : r7 2025-09-07 UTC
+Summary: add canonical slicing + IDB-only checkpoints; reinforce diff-aware append rules.
 ──────────────────────────────────────────────────────────────/
 
 TZIP_Compliance_Invariants_ZeroContract_V4.md
@@ -101,8 +101,13 @@ and metadata JSON in localStorage and allow the user to retry.
 Slice checkpoints for oversized uploads are now stored in IndexedDB only;
 legacy localStorage paths must be migrated on first access.
 
+All append/repair flows must recompute the on-chain artifactUri prefix after
+each confirmed slice using the canonical slicer to prevent duplicate bytes.
+The fee estimator and batch builder share this module so expected signature
+counts match wallet prompts. Data URIs must pass `isValidDataUri`/`isLikelySvg`
+checks before slicing; malformed payloads are rejected.
+
 ──────────────────────────────────────────────────────────────────────────────
-/* What changed & why: Updated to r6. Removed dual‑stage origination guidance
-and remote forge service references; clarified that the full metadata,
-including the views array and imageUri, is stored during a single‑stage
-origination. Other sections are unchanged from the previous revision. */
+/* What changed & why: Updated to r7. Added canonical slicer rules,
+IndexedDB-only checkpoint note, and data-URI validation guidance. Other sections
+remain unchanged. */

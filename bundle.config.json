@@ -219,10 +219,15 @@
       "patterns": [
         "src/pages/manage.js",
         "src/ui/Entrypoints/Mint.jsx",
-        "src/ui/ContractCarousels.jsx",
+        "src/ui/Entrypoints/MintUpload.jsx",
+        "src/ui/Entrypoints/MintPreview.jsx",
+        "src/ui/Entrypoints/AppendArtifactUri.jsx",
+        "src/ui/Entrypoints/AppendExtraUri.jsx",
+        "src/ui/Entrypoints/EditTokenMetadata.jsx",
+        "src/ui/Entrypoints/RepairUri.jsx",
         "src/ui/LoadingSpinner.jsx",
-        "src/core/feeEstimator.js",
         "src/hooks/useTxEstimate.js",
+        "src/hooks/useConsent.js",
         "src/core/**",
         "src/ui/OperationOverlay.jsx",
         "src/ui/GlobalSnackbar.jsx",
@@ -231,17 +236,15 @@
         "src/ui/PixelInput.jsx",
         "src/ui/PixelButton.jsx",
         "src/ui/AdminTools.jsx",
-        "src/utils/RenderMedia.jsx",
         "src/ui/LoadingSpinner.jsx",
         "src/contexts/WalletContext.js",
         "src/data/**",
-        "src/hooks/useConsent.js",
         "src/ui/IntegrityBadge.jsx",
         "src/ui/EnableScripts.jsx",
-        "src/utils/onChainValidator.js",
         "src/ui/PixelConfirmDialog.jsx",
         "src/constants/**",
-        "src/config/**"
+        "src/config/**",
+        "src/ui/ContractCarousels.jsx"
       ]
     },
 

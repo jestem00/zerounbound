@@ -90,13 +90,16 @@ see zerounbound\contracts\StorageReference in the repo or contracts bundle
 ──────────────────────────────────────────────────────────────────────────────
 Dual‑stage origination has been retired. The recommended method is a single‑stage
 origination where the full contract metadata (including views and imageUri) is
-encoded and stored at origination. All wallets now originate via a single
+encoded and stored at origination using our contract factories for origination assistance (see master overview/manifest docs)! All wallets now originate via a single
 operation using TezosToolkit.wallet.originate(). The remote forge service and
 FAST_ORIGIN flag are no longer used.
 
 Implementations MAY provide resume support if desired: if the origination fails
 after signing but before confirmation, the UI should persist the contract address
 and metadata JSON in localStorage and allow the user to retry.
+
+Slice checkpoints for oversized uploads are now stored in IndexedDB only;
+legacy localStorage paths must be migrated on first access.
 
 ──────────────────────────────────────────────────────────────────────────────
 /* What changed & why: Updated to r6. Removed dual‑stage origination guidance

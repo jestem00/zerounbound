@@ -56,6 +56,8 @@ const fallbackCosts = (opsLen = 1) => {
   return {
     feeTez:     toTez(feeMutez),
     storageTez: '0',
+    expectedSlices: opsLen,
+    expectedSignatures: opsLen,
     isLoading:  false,
     isInsufficient: false,
     error: null,
@@ -128,6 +130,8 @@ export default function useTxEstimate(toolkit, params) {
         setState({
           feeTez: toTez(feeMutez),
           storageTez: toTez(storageMutez),
+          expectedSlices: params.length,
+          expectedSignatures: params.length,
           isLoading: false,
           isInsufficient: feeMutez + storageMutez > balance.toNumber(),
           error: null,

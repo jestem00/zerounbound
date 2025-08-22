@@ -1,11 +1,10 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/tokens/[addr]/[tokenId].jsx
-  Rev :    r872    2025‑10‑23
-  Summary: reposition script & fullscreen controls; remove script
-           overlay from preview; freeze scripts when disabled;
-           show script toggle and fullscreen button in meta panel;
-           hide bottom‑left lightning icon.
+  Rev :    r873    2025‑10‑23
+  Summary: fetch extrauris via RPC off‑chain view with TzKT fallback;
+           removed Better Call Dev dependency; retains script &
+           fullscreen control layout.
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useEffect,
@@ -29,6 +28,9 @@ import { jFetch } from '../../../core/net.js';
 import { TZKT_API, NETWORK_KEY } from '../../../config/deployTarget.js';
 import decodeHexFields, { decodeHexJson } from '../../../utils/decodeHexFields.js';
 import { mimeFromDataUri } from '../../../utils/uriHelpers.js';
+import { TezosToolkit } from '@taquito/taquito';
+import { Tzip16Module, tzip16 } from '@taquito/tzip16';
+import { chooseFastestRpc } from '../../../utils/chooseFastestRpc.js';
 
 /*──────────────── helpers ───────────────────────────────────────────*/
 // Convert a hex-encoded string into a UTF‑8 string.  TzKT returns
@@ -125,7 +127,7 @@ const apiBase = `${TZKT_API}/v1`;
 export default function TokenDetailPage() {
   const router = useRouter();
   const { addr, tokenId } = router.query;
-  const { address: walletAddr } = useWalletContext() || {};
+  const { address: walletAddr, toolkit } = useWalletContext() || {};
 
   const [token, setToken] = useState(null);
   const [collection, setCollection] = useState(null);
@@ -169,13 +171,21 @@ export default function TokenDetailPage() {
 
           let extras = [];
           try {
-            const viewBase = `${apiBase}/contracts/${addr}/views/get_extrauris`;
-            extras = await jFetch(
-              `${viewBase}?input=${tokenId}&unlimited=true&format=json`,
-            ).catch(() => []);
+            let tk = toolkit;
+            if (!tk) {
+              const rpc = await chooseFastestRpc().catch(() => '');
+              if (rpc) tk = new TezosToolkit(rpc);
+            }
+            if (tk) {
+              try { tk.addExtension?.(new Tzip16Module()); } catch {}
+              const c = await tk.contract.at(addr, tzip16);
+              extras = await c.views.get_extrauris(tokenId).read().catch(() => []);
+            }
             if (!Array.isArray(extras) || !extras.length) {
-              const bcd = `https://api.better-call.dev/v1/contract/${NETWORK_KEY}/${addr}/views/get_extrauris?arg=${tokenId}`;
-              extras = await jFetch(bcd, 1).catch(() => []);
+              const viewBase = `${apiBase}/contracts/${addr}/views/get_extrauris`;
+              extras = await jFetch(
+                `${viewBase}?input=${tokenId}&unlimited=true&format=json`,
+              ).catch(() => []);
             }
             if (!Array.isArray(extras)) extras = [];
           } catch { /* ignore network errors */ }

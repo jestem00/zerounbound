@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    docs/Master_Overview_And_Manifest_zerounbound_contractmanagement.md
-  Rev :    r1183    2025‑09‑07 UTC
-  Summary: canonical slicer, IDB‑only slice cache, and data‑URI tests.
+  Rev :    r1185    2025‑09‑07 UTC
+  Summary: canonical slicer, IDB‑only slice cache, data‑URI tests, and RPC-backed extrauri view.
 ──────────────────────────────────────────────────────────────────*/
 
 ════════════════════════════════════════════════════════════════
@@ -478,7 +478,7 @@ zerounbound/src/pages/my/tokens.jsx — minted/owned discovery; live‑balance f
 
 — contracts/tokens —
 zerounbound/src/pages/contracts/[addr].jsx — collection detail; Imports: ContractMetaPanelContracts,TokenCard,hazards; Exports: ContractPage
-zerounbound/src/pages/tokens/[addr]/[tokenId].jsx — token detail; integrates MAINTokenMetaPanel, extrauri viewer with prev/next navigation & hazard overlays; Exports: TokenDetailPage
+zerounbound/src/pages/tokens/[addr]/[tokenId].jsx — token detail; integrates MAINTokenMetaPanel, extrauri viewer with prev/next navigation & hazard overlays; fetches get_extrauris via RPC (tzip16) with TzKT fallback; Exports: TokenDetailPage
 
 ╭── src/styles ──────────────────────────────────────────────────────────────╮
 zerounbound/src/styles/globalStyles.js — root CSS + scrollbar; Imports: styled‑components,palettes.json; Exports: GlobalStyles
@@ -673,6 +673,7 @@ Why the delineation matters: AdminTools introspects the typeHash → version to 
 ───────────────────────────────────────────────────────────────
 CHANGELOG
 ───────────────────────────────────────────────────────────────
+r1185 — Token detail page fetches get_extrauris via RPC (tzip16) with TzKT fallback, removing Better Call Dev dependency.
 r1184 — Add extrauri viewer with navigation and downloadable MIME links on token detail page.
 r1183 — Introduce canonical slicer, migrate slice checkpoints to IndexedDB only, add data‑URI tests.
 r1182 — Document marketplace dialogs (Buy/List/MakeOffer) and
@@ -684,4 +685,4 @@ normalization, reaffirm listings stale‑listing guard & transient‑prop rule.
 r1180 — Add ZeroSum stale‑listing guard based on TzKT balances,
 enforce /v1 base normalization, codify transient‑prop rule, reaffirm no‑sentinel.
 
-/* What changed & why: Added extrauri viewer with navigation and downloadable MIME links; appended changelog. */
+/* What changed & why: Token page now calls get_extrauris via RPC (tzip16) with TzKT fallback, removing BCD dependency; appended changelog. */

@@ -7,6 +7,7 @@
 
 const DB_NAME = 'ZeroUnboundCache';
 const STORE_NAME = 'KeyValueStore';
+const DB_VERSION = 2;
 
 let dbPromise = null;
 
@@ -16,9 +17,12 @@ function getDb() {
   }
   if (!dbPromise) {
     dbPromise = new Promise((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, 1);
+      const request = indexedDB.open(DB_NAME, DB_VERSION);
       request.onupgradeneeded = () => {
-        request.result.createObjectStore(STORE_NAME);
+        const { result } = request;
+        if (!result.objectStoreNames.contains(STORE_NAME)) {
+          result.createObjectStore(STORE_NAME);
+        }
       };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);

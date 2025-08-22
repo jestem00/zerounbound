@@ -28,7 +28,6 @@ import { jFetch } from '../../../core/net.js';
 import { TZKT_API, NETWORK_KEY } from '../../../config/deployTarget.js';
 import decodeHexFields, { decodeHexJson } from '../../../utils/decodeHexFields.js';
 import { mimeFromDataUri } from '../../../utils/uriHelpers.js';
-import { TezosToolkit } from '@taquito/taquito';
 import { Tzip16Module, tzip16 } from '@taquito/tzip16';
 
 /*──────────────── helpers ───────────────────────────────────────────*/
@@ -174,7 +173,7 @@ export default function TokenDetailPage() {
             if (toolkit) {
               try { toolkit.addExtension?.(new Tzip16Module()); } catch {}
               const contract = await toolkit.contract.at(addr, tzip16);
-              const viewResult = await contract.views.get_extrauris(tokenId).executeView();
+              const viewResult = await contract.metadataViews.get_extrauris(tokenId).executeView();
               if (viewResult && typeof viewResult === 'object') {
                 const entries = viewResult.entries ? viewResult.entries() : Object.entries(viewResult);
                 for (const [, value] of entries) {

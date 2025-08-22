@@ -28,7 +28,9 @@ import { jFetch } from '../../../core/net.js';
 import { TZKT_API, NETWORK_KEY } from '../../../config/deployTarget.js';
 import decodeHexFields, { decodeHexJson } from '../../../utils/decodeHexFields.js';
 import { mimeFromDataUri } from '../../../utils/uriHelpers.js';
-import { Tzip16Module, tzip16 } from '@taquito/tzip16';
+import { Tzip16Module } from '@taquito/tzip16';
+import { TezosToolkit } from '@taquito/taquito';
+import { chooseFastestRpc } from '../../../utils/chooseFastestRpc.js';
 
 /*──────────────── helpers ───────────────────────────────────────────*/
 // Convert a hex-encoded string into a UTF‑8 string.  TzKT returns
@@ -170,26 +172,27 @@ export default function TokenDetailPage() {
           let extras = [];
           try {
             // Attempt direct off‑chain view execution against an RPC node via Taquito.
-            if (toolkit) {
-              try { toolkit.addExtension?.(new Tzip16Module()); } catch {}
-              const contract = await toolkit.contract.at(addr, tzip16);
-              const views = typeof contract.metadataViews === 'function'
-                ? await contract.metadataViews()
-                : contract.metadataViews;
-              const fn = views?.get_extrauris;
-              if (typeof fn === 'function') {
-                const viewResult = await fn(tokenId).executeView();
+            let tk = toolkit;
+            if (!tk) {
+              const rpc = await chooseFastestRpc().catch(() => '');
+              if (rpc) tk = new TezosToolkit(rpc);
+            }
+
+            if (tk) {
+              try { tk.addExtension(new Tzip16Module()); } catch {}
+              const contract = await tk.contract.at(addr);
+              const views = await contract.tzip16().getViews();
+              if (views && typeof views.get_extrauris === 'function') {
+                const viewResult = await views.get_extrauris(Number(tokenId)).executeView();
                 if (viewResult && typeof viewResult === 'object') {
-                  const entries = viewResult.entries
-                    ? viewResult.entries()
-                    : Object.entries(viewResult);
+                  const entries = viewResult.entries ? viewResult.entries() : Object.entries(viewResult);
                   for (const [, value] of entries) {
                     if (value && typeof value === 'object') {
                       extras.push({
                         description: value.description,
-                        key       : value.key,
-                        name      : value.name,
-                        value     : value.value,
+                        key: value.key,
+                        name: value.name,
+                        value: value.value,
                       });
                     }
                   }
@@ -199,12 +202,8 @@ export default function TokenDetailPage() {
 
             // Fallback to TzKT view runner if RPC method fails or returns empty.
             if (!extras.length) {
-              const viewBase = `${apiBase}/contracts/${addr}/views/get_extrauris`;
-              const tzktResult = await jFetch(viewBase, 1, {
-                method : 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body   : JSON.stringify({ input: Number(tokenId), unlimited: true, format: 'json' }),
-              }).catch(() => []);
+              const viewUrl = `${apiBase}/contracts/${addr}/views/get_extrauris?input=${tokenId}&unlimited=true&format=json`;
+              const tzktResult = await jFetch(viewUrl).catch(() => []);
               if (Array.isArray(tzktResult)) extras = tzktResult;
             }
 

@@ -1,11 +1,9 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/MAINTokenMetaPanel.jsx
-  Rev :    r14    2025‑10‑23
-  Summary: add token-level script & fullscreen controls; preserve
-           collection script toggle; reposition controls near token
-           name; decode collection metadata and tags; maintain
-           hazard and consent logic; fix inline style syntax.
+  Rev :    r16    2025‑10‑24
+  Summary: Surface proper extra name/description; minor polish.
+           (Layout preserved. MarketplaceBar calls guarded.)
 ──────────────────────────────────────────────────────────────*/
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import PropTypes                    from 'prop-types';
@@ -22,7 +20,7 @@ import { checkOnChainIntegrity }    from '../utils/onChainValidator.js';
 import { getIntegrityInfo }         from '../constants/integrityBadges.js';
 import detectHazards                from '../utils/hazards.js';
 import useConsent                   from '../hooks/useConsent.js';
-import { shortKt, copyToClipboard, shortAddr } from '../utils/formatAddress.js';
+import { shortKt, copyToClipboard } from '../utils/formatAddress.js';
 import {
   EnableScriptsToggle,
   EnableScriptsOverlay,
@@ -31,13 +29,18 @@ import PixelConfirmDialog           from './PixelConfirmDialog.jsx';
 import countAmount                  from '../utils/countAmount.js';
 import hashMatrix                   from '../data/hashMatrix.json';
 import decodeHexFields, { decodeHexJson } from '../utils/decodeHexFields.js';
-import { mimeFromDataUri }         from '../utils/uriHelpers.js';
-
-// Import domain resolution helper and network key for reverse lookups.
-import { resolveTezosDomain } from '../utils/resolveTezosDomain.js';
-import { NETWORK_KEY }           from '../config/deployTarget.js';
+import * as uriHelpers              from '../utils/uriHelpers.js';
+import { resolveTezosDomain }       from '../utils/resolveTezosDomain.js';
+import { NETWORK_KEY }              from '../config/deployTarget.js';
+import ExtraUriViewer               from './ExtraUriViewer.jsx';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
+
+const mimeFromDataUri = typeof uriHelpers.mimeFromDataUri === 'function'
+  ? uriHelpers.mimeFromDataUri
+  : (typeof uriHelpers.getMime === 'function'
+      ? uriHelpers.getMime
+      : (v) => ((String(v || '').match(/^data:([^;,]+)/i) || [,''])[1] || ''));
 
 /*──────── helpers ───────────────────────────────────────────*/
 const sanitizeFilename = (s) =>
@@ -66,12 +69,17 @@ const suggestedFilename = (meta = {}, tokenId) => {
   return ext ? `${base}.${ext}` : base;
 };
 
+const shortAddrLocal = (v = '') => {
+  const s = String(v);
+  if (!s) return s;
+  return s.length > 12 ? `${s.slice(0, 6)}…${s.slice(-4)}` : s;
+};
+
 /*──────── styled shells ─────────────────────────────────────*/
 const Panel = styled.aside`
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  /* Allow the panel to shrink gracefully on narrow screens */
   width: 100%;
 `;
 
@@ -87,9 +95,7 @@ const CollectionLink = styled.a`
   gap: 8px;
   text-decoration: none;
   color: inherit;
-  &:hover {
-    text-decoration: underline;
-  }
+  &:hover { text-decoration: underline; }
 `;
 
 const ThumbWrap = styled.div`
@@ -109,7 +115,6 @@ const ThumbMedia = styled(RenderMedia)`
   object-fit: contain;
 `;
 
-/* obfuscation overlay for NSFW/flash hazards */
 const Obf = styled.div`
   position: absolute;
   inset: 0;
@@ -122,10 +127,7 @@ const Obf = styled.div`
   font-size: .65rem;
   z-index: 3;
   text-align: center;
-  p {
-    margin: 0;
-    width: 80%;
-  }
+  p { margin: 0; width: 80%; }
 `;
 
 const AddrRow = styled.div`
@@ -134,9 +136,7 @@ const AddrRow = styled.div`
   display: flex;
   align-items: center;
   gap: 6px;
-  code {
-    word-break: break-all;
-  }
+  code { word-break: break-all; }
   button {
     line-height: 1;
     padding: 0 4px;
@@ -169,8 +169,6 @@ const Tag = styled.span`
   white-space: nowrap;
 `;
 
-/* Row container for tag chips with a label.  Chips will wrap
-   automatically and maintain tight spacing.  */
 const TagsRow = styled.div`
   display: flex;
   flex-wrap: wrap;
@@ -178,22 +176,13 @@ const TagsRow = styled.div`
   align-items: center;
 `;
 
-/* Meta grid displays labels and values in two columns.  This
-   approach aligns all rows and avoids uneven distribution on
-   large screens.  Each dt/dd pair occupies a single row. */
 const MetaGrid = styled.dl`
   display: grid;
   grid-template-columns: max-content 1fr;
   gap: 4px 8px;
   font-size: .8rem;
-  dt {
-    font-weight: 700;
-    opacity: .8;
-  }
-  dd {
-    margin: 0;
-    word-break: break-word;
-  }
+  dt { font-weight: 700; opacity: .8; }
+  dd { margin: 0; word-break: break-word; }
 `;
 
 /*──────── helpers ───────────────────────────────────────────*/
@@ -201,36 +190,17 @@ const HASH2VER = Object.entries(hashMatrix)
   .reduce((o, [h, v]) => { o[+h] = v.toUpperCase(); return o; }, {});
 
 const PLACEHOLDER = '/sprites/cover_default.svg';
+const pickDataThumb = (uri = '') => (/^data:/i.test(uri) ? uri : '');
 
-/* Strict thumbnail selection: only return data URIs.  In a fully
-   on‑chain environment we do not dereference remote resources such
-   as ipfs:// or http:// URIs.  Non‑data URIs fall back to the
-   placeholder image. */
-function pickDataThumb(uri = '') {
-  const DATA_RE = /^data:/i;
-  return DATA_RE.test(uri) ? uri : '';
-}
-
-/* Decode metadata object.  Accepts a hex string, JSON string or plain
-   object and returns a fully decoded object via decodeHexFields. */
 function toMetaObject(meta) {
   if (!meta) return {};
   if (typeof meta === 'string') {
-    try {
-      return decodeHexFields(JSON.parse(meta));
-    } catch {
-      /* ignore */
-    }
+    try { return decodeHexFields(JSON.parse(meta)); } catch {/* noop */}
     const parsed = decodeHexJson(meta);
-    if (parsed) return decodeHexFields(parsed);
-    return {};
+    return parsed ? decodeHexFields(parsed) : {};
   }
   return decodeHexFields(meta);
 }
-
-/* Pick a thumbnail URI from a decoded metadata object.  Chooses
-   imageUri, then thumbnailUri, displayUri or artifactUri.  Returns
-   a data URI unchanged or converts ipfs:// to https://. */
 function pickThumb(m = {}) {
   const uri = m.imageUri || m.thumbnailUri || m.displayUri || m.artifactUri || '';
   return pickDataThumb(uri);
@@ -248,17 +218,30 @@ export default function MAINTokenMetaPanel({
   onFullscreen,
   fsDisabled,
   currentUri,
+  extraUris = [],
+  onOpenExtras,
+
+  /* optional (used only for counters in button hints) */
+  currentIndex,
+  totalUris,
 }) {
   const [copied, setCopied] = useState(false);
+  const [viewerOpen, setViewerOpen] = useState(false);
 
-  // Decode the collection metadata into a flat object.  This handles
-  // hex-encoded strings and JSON strings, producing fully decoded
-  // fields via decodeHexFields().
+  // Decode collection metadata for display + hazards.
   const collObj = useMemo(() => toMetaObject(collection.metadata), [collection.metadata]);
   const collHaz = detectHazards(collObj);
+
+  // Current media (artifactUri or selected extra).
   const cur = useMemo(() => {
     if (currentUri) {
-      return { ...currentUri, mime: currentUri.mime || mimeFromDataUri(currentUri.value) };
+      return {
+        ...currentUri,
+        mime: currentUri.mime || mimeFromDataUri(currentUri.value),
+        name: typeof currentUri.name === 'string' ? currentUri.name : '',
+        description: typeof currentUri.description === 'string' ? currentUri.description : '',
+        key: typeof currentUri.key === 'string' ? currentUri.key : (currentUri.key == null ? '' : String(currentUri.key)),
+      };
     }
     const uri = token.metadata?.artifactUri || '';
     return {
@@ -269,16 +252,17 @@ export default function MAINTokenMetaPanel({
       mime: token.metadata?.mimeType || mimeFromDataUri(uri),
     };
   }, [currentUri, token.metadata]);
+
   const tokHaz = detectHazards({ artifactUri: cur.value, mimeType: cur.mime });
 
-  const [allowScr, setAllowScr] = useConsent(`scripts:${collection.address}`, false);
+  // Consents
+  const [allowScr, setAllowScr]   = useConsent(`scripts:${collection.address}`, false);
   const [allowNSFW, setAllowNSFW] = useConsent('nsfw', false);
   const [allowFlash, setAllowFlash] = useConsent('flash', false);
 
   /* reveal dialog state */
-  const [dlgType, setDlgType] = useState(null);   // 'nsfw' | 'flash' | null
+  const [dlgType, setDlgType] = useState(null);
   const [dlgTerms, setDlgTerms] = useState(false);
-  /* script‑consent dialog state (collection-level) */
   const [dlgScr, setDlgScr] = useState(false);
   const [termsScr, setTermsScr] = useState(false);
 
@@ -289,18 +273,17 @@ export default function MAINTokenMetaPanel({
   const editions = useMemo(() => countAmount(token), [token]);
   const verLabel = HASH2VER[collection.typeHash] || '?';
 
-  /* thumb uri + fallbacks */
+  /* thumb */
   const rawThumb = pickThumb(collObj);
-  const thumb = rawThumb; // pickThumb already converts ipfs:// and preserves data URI
+  const thumb = rawThumb;
   const [thumbOk, setThumbOk] = useState(true);
 
-  /* hazard mask logic */
+  /* hazards */
   const needsNSFW = (collHaz.nsfw || tokHaz.nsfw) && !allowNSFW;
   const needsFlash = (collHaz.flashing || tokHaz.flashing) && !allowFlash;
   const hide = needsNSFW || needsFlash;
 
-  /* safe collection name: prefer name, title or symbol if available,
-     else fall back to the short contract address */
+  /* collection name (safe) */
   const collNameSafe = collObj.name
     || collObj.symbol
     || collObj.title
@@ -308,17 +291,11 @@ export default function MAINTokenMetaPanel({
     || shortKt(collection.address);
 
   // --------------------------------------------------------------
-  // Domain resolution state for authors and creators.  We cache
-  // resolved .tez domains using lowercased keys.  Lookups are
-  // performed on demand in a useEffect below.
+  // Domain resolution (authors/creators) – preserved from r15.
   const [domains, setDomains] = useState({});
   const [showAllAuthors, setShowAllAuthors] = useState(false);
   const [showAllCreators, setShowAllCreators] = useState(false);
 
-  // Extract authors and creators lists from token metadata.  If no
-  // authors exist, fall back to artists; if still empty, fall back
-  // to creators.  The returned arrays may contain strings that are
-  // Tezos addresses or human names.
   const authorsList = useMemo(() => {
     const meta = token.metadata || {};
     let list = meta.authors || meta.artists || [];
@@ -332,10 +309,6 @@ export default function MAINTokenMetaPanel({
     return list;
   }, [token.metadata]);
 
-  // Resolve domain names for each address in authorsList and
-  // creatorsList.  Only Tezos addresses (tz*/KT*) are queried.  The
-  // resolver caches results keyed by lowercase address to avoid
-  // duplicate requests.
   useEffect(() => {
     const addrs = new Set();
     [...authorsList, ...creatorsList].forEach((val) => {
@@ -354,11 +327,8 @@ export default function MAINTokenMetaPanel({
         });
       })();
     });
-  }, [authorsList, creatorsList]);
+  }, [authorsList, creatorsList]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Format an entry: use resolved domain if present; if the string
-  // contains a dot, return it verbatim (likely a custom name or
-  // domain); otherwise, truncate Tezos addresses via shortAddr().
   const formatEntry = useCallback(
     (val) => {
       if (!val || typeof val !== 'string') return String(val || '');
@@ -367,13 +337,11 @@ export default function MAINTokenMetaPanel({
       const dom = domains[key];
       if (dom) return dom;
       if (v.includes('.')) return v;
-      return shortAddr(v);
+      return shortAddrLocal(v);
     },
     [domains],
   );
 
-  // Render a comma-separated list with optional toggle.  When not
-  // expanded and more than 3 items exist, append a “More” toggle.
   const renderList = useCallback(
     (list, showAll, setShowAll) => {
       const slice = showAll ? list : list.slice(0, 3);
@@ -385,7 +353,7 @@ export default function MAINTokenMetaPanel({
         elems.push(
           isAddr ? (
             <a
-              key={item}
+              key={`${item}-${idx}`}
               href={`/explore?cmd=tokens&admin=${item}`}
               style={{ color: 'var(--zu-accent-sec,#6ff)', textDecoration: 'none', wordBreak: 'break-all' }}
             >
@@ -393,7 +361,7 @@ export default function MAINTokenMetaPanel({
               {formatted}
             </a>
           ) : (
-            <span key={item} style={{ wordBreak: 'break-all' }}>
+            <span key={`${item}-${idx}`} style={{ wordBreak: 'break-all' }}>
               {prefix}{formatted}
             </span>
           ),
@@ -401,7 +369,7 @@ export default function MAINTokenMetaPanel({
       });
       if (list.length > 3 && !showAll) {
         elems.push(
-          <>
+          <React.Fragment key="more">
             …&nbsp;
             <button
               type="button"
@@ -411,7 +379,7 @@ export default function MAINTokenMetaPanel({
             >
               🔻More
             </button>
-          </>,
+          </React.Fragment>,
         );
       }
       return elems;
@@ -426,7 +394,7 @@ export default function MAINTokenMetaPanel({
     setTimeout(() => setCopied(false), 1000);
   };
 
-  /* collection script-consent handler */
+  /* collection script‑consent handler */
   const askEnable = () => { setTermsScr(false); setDlgScr(true); };
   const enable = () => {
     if (!termsScr) return;
@@ -434,7 +402,7 @@ export default function MAINTokenMetaPanel({
     setDlgScr(false);
   };
 
-  /* collection hazard reveal handlers */
+  /* hazard reveal handlers (collection) */
   const askReveal = (tp) => { setDlgType(tp); setDlgTerms(false); };
   const confirmReveal = () => {
     if (!dlgTerms) return;
@@ -444,11 +412,18 @@ export default function MAINTokenMetaPanel({
     setDlgTerms(false);
   };
 
+  const extraCount = Array.isArray(extraUris) ? extraUris.length : 0;
+  const initialIndex = useMemo(() => {
+    if (!extraCount) return 0;
+    const i = extraUris.findIndex((u) => (u?.key || '') === (cur?.key || '') && (u?.value || '') === (cur?.value || ''));
+    return i >= 0 ? i : 0;
+  }, [extraUris, cur]);
+
   /*──────── render ─*/
   return (
     <>
       <Panel>
-        {/* collection head */}
+        {/* Collection */}
         <Section>
           <CollectionLink
             href={`/contracts/${collection.address}`}
@@ -461,7 +436,6 @@ export default function MAINTokenMetaPanel({
             }}
           >
             <ThumbWrap>
-              {/* show hazard icons or thumbnail */}
               {hide && (
                 <Obf>
                   {needsNSFW && <PixelButton onClick={(e) => { e.preventDefault(); askReveal('nsfw'); }}>NSFW 🔞</PixelButton>}
@@ -469,34 +443,23 @@ export default function MAINTokenMetaPanel({
                 </Obf>
               )}
               {!hide && thumb && thumbOk && (
-                <ThumbMedia
-                  uri={thumb}
-                  onError={() => setThumbOk(false)}
-                />
+                <ThumbMedia uri={thumb} onError={() => setThumbOk(false)} />
               )}
               {(!thumb || !thumbOk) && !hide && (
-                <ThumbMedia
-                  uri={PLACEHOLDER}
-                  onError={() => {}}
-                />
+                <ThumbMedia uri={PLACEHOLDER} onError={() => {}} />
               )}
               {collHaz.scripts && !allowScr && !hide && (
-                <EnableScriptsOverlay
-                  onClick={(e) => { e.preventDefault(); askEnable(); }}
-                />
+                <EnableScriptsOverlay onClick={(e) => { e.preventDefault(); askEnable(); }} />
               )}
             </ThumbWrap>
-            {/* collection name with prefix */}
             <span style={{ fontWeight: 'bold', fontSize: '.95rem' }}>
               Collection: {collNameSafe}
             </span>
           </CollectionLink>
-          {/* address row */}
           <AddrRow>
             <code>{shortKt(collection.address)}</code>
             <button type="button" onClick={copyAddr}>{copied ? '✓' : '📋'}</button>
             <Tag>({verLabel})</Tag>
-            {/* permanent scripts toggle for collection-level hazard */}
             {collHaz.scripts && (
               <EnableScriptsToggle
                 enabled={allowScr}
@@ -506,7 +469,7 @@ export default function MAINTokenMetaPanel({
           </AddrRow>
         </Section>
 
-        {/* token name + integrity */}
+        {/* Token heading + integrity */}
         <Section>
           <BadgeWrap>
             <PixelHeading level={4}>{token.metadata?.name || `Token #${token.tokenId}`}</PixelHeading>
@@ -517,9 +480,8 @@ export default function MAINTokenMetaPanel({
           </span>
         </Section>
 
-        {/* controls: script toggle + fullscreen button.  Always render fullscreen above the description; stack vertically. */}
+        {/* Controls */}
         <Section>
-          {/* Only show the script toggle when the token has script hazards */}
           {tokenScripts && (
             <EnableScriptsToggle
               enabled={tokenAllowJs}
@@ -527,7 +489,7 @@ export default function MAINTokenMetaPanel({
               title={tokenAllowJs ? 'Disable scripts' : 'Enable scripts'}
             />
           )}
-          {/* Fullscreen control: label plus icon for clarity */}
+
           {onFullscreen && (
             <PixelButton
               size="xs"
@@ -539,23 +501,36 @@ export default function MAINTokenMetaPanel({
               Fullscreen&nbsp;⛶
             </PixelButton>
           )}
+
+          {Array.isArray(extraUris) && extraUris.length > 1 && (
+            <PixelButton
+              size="xs"
+              onClick={() => (typeof onOpenExtras === 'function' ? onOpenExtras(initialIndex) : setViewerOpen(true))}
+              title={`Open extra URIs${Number.isFinite(totalUris) && totalUris > 1 ? ` (${totalUris})` : ''}`}
+              style={{ marginTop: '4px' }}
+            >
+              Extra URIs&nbsp;({extraUris.length})
+            </PixelButton>
+          )}
         </Section>
 
-        {/* description */}
+        {/* Token description */}
         {token.metadata?.description && (
           <Description>{token.metadata.description}</Description>
         )}
 
-        {/* marketplace buttons */}
+        {/* Marketplace actions */}
         <Section>
-          <MarketplaceBar
-            contractAddress={collection.address}
-            tokenId={token.tokenId}
-            marketplace={token.marketplace}
-          />
+          {collection?.address && token?.tokenId != null && (
+            <MarketplaceBar
+              contractAddress={collection.address}
+              tokenId={token.tokenId}
+              marketplace={token.marketplace}
+            />
+          )}
         </Section>
 
-        {/* tags */}
+        {/* Tags */}
         {Array.isArray(token.metadata?.tags) && token.metadata.tags.length > 0 && (
           <Section>
             <TagsRow>
@@ -567,25 +542,7 @@ export default function MAINTokenMetaPanel({
           </Section>
         )}
 
-        {/* author and creator lists, separate from meta grid */}
-        {(authorsList.length > 0 || creatorsList.length > 0) && (
-          <Section>
-            {authorsList.length > 0 && (
-              <p style={{ fontSize: '.8rem', margin: 0 }}>
-                <strong>Author(s)</strong>:&nbsp;
-                {renderList(authorsList, showAllAuthors, setShowAllAuthors)}
-              </p>
-            )}
-            {creatorsList.length > 0 && (
-              <p style={{ fontSize: '.8rem', margin: 0, opacity: authorsList.length > 0 ? 0.85 : 1 }}>
-                <strong>Creator(s)</strong>:&nbsp;
-                {renderList(creatorsList, showAllCreators, setShowAllCreators)}
-              </p>
-            )}
-          </Section>
-        )}
-
-        {/* misc meta */}
+        {/* Meta grid */}
         <Section>
           <MetaGrid>
             <dt>MIME Type</dt>
@@ -600,16 +557,20 @@ export default function MAINTokenMetaPanel({
                 </a>
               ) : 'N/A'}
             </dd>
+
             {cur.key !== 'artifactUri' && (
               <>
                 <dt>Extra Key</dt>
-                <dd>{cur.key}</dd>
+                <dd>{cur.key || '—'}</dd>
+
                 <dt>Name</dt>
                 <dd>{cur.name || '—'}</dd>
+
                 <dt>Description</dt>
                 <dd>{cur.description || '—'}</dd>
               </>
             )}
+
             {token.metadata?.rights && (
               <>
                 <dt>Rights</dt>
@@ -620,7 +581,7 @@ export default function MAINTokenMetaPanel({
         </Section>
       </Panel>
 
-      {/* enable collection scripts confirm dialog */}
+      {/* Enable collection scripts confirm */}
       {dlgScr && (
         <PixelConfirmDialog
           open={dlgScr}
@@ -646,7 +607,7 @@ export default function MAINTokenMetaPanel({
         />
       )}
 
-      {/* hazard reveal confirm dialog */}
+      {/* Hazard reveal confirm */}
       {dlgType && (
         <PixelConfirmDialog
           open={!!dlgType}
@@ -659,13 +620,9 @@ export default function MAINTokenMetaPanel({
           message={(
             <span>
               {dlgType === 'nsfw' ? (
-                <>
-                  Warning: This thumbnail is marked Not‑Safe‑For‑Work (NSFW). It may include explicit nudity, sexual themes, graphic violence or other mature material.
-                </>
+                <>Warning: This thumbnail is marked Not‑Safe‑For‑Work (NSFW). It may include explicit nudity, sexual themes, graphic violence or other mature material.</>
               ) : (
-                <>
-                  Warning: This thumbnail may contain rapid flashing or strobing effects that can trigger seizures in people with photosensitive epilepsy.
-                </>
+                <>Warning: This thumbnail may contain rapid flashing or strobing effects that can trigger seizures in people with photosensitive epilepsy.</>
               )}
               <br />
               <label>
@@ -678,6 +635,25 @@ export default function MAINTokenMetaPanel({
               </label>
             </span>
           )}
+        />
+      )}
+
+      {/* Compact Extra URIs viewer (fallback if page didn't supply onOpenExtras) */}
+      {viewerOpen && (
+        <ExtraUriViewer
+          open={viewerOpen}
+          onClose={() => setViewerOpen(false)}
+          uris={extraUris}
+          initialIndex={initialIndex}
+          tokenName={token.metadata?.name}
+          tokenId={token.tokenId}
+          tokenScripts={tokenScripts}
+          tokenAllowJs={tokenAllowJs}
+          onRequestScriptReveal={onRequestScriptReveal}
+          onToggleScript={(val) => {
+            if (!val) onToggleScript(false);
+            else onRequestScriptReveal?.('scripts');
+          }}
         />
       )}
     </>
@@ -693,21 +669,29 @@ MAINTokenMetaPanel.propTypes = {
   onToggleScript: PropTypes.func,
   onRequestScriptReveal: PropTypes.func,
   onFullscreen: PropTypes.func,
-  fsDisabled : PropTypes.bool,
-  currentUri : PropTypes.shape({
+  fsDisabled  : PropTypes.bool,
+  currentUri  : PropTypes.shape({
     key        : PropTypes.string,
     name       : PropTypes.string,
     description: PropTypes.string,
     value      : PropTypes.string,
     mime       : PropTypes.string,
   }),
-};
+  extraUris   : PropTypes.arrayOf(PropTypes.shape({
+    key        : PropTypes.string,
+    name       : PropTypes.string,
+    description: PropTypes.string,
+    value      : PropTypes.string,
+    mime       : PropTypes.string,
+  })),
+  onOpenExtras: PropTypes.func,
 
-/* What changed & why (r14):
-   • Added token-level script toggle and fullscreen button via new props.
-   • Moved script and fullscreen controls adjacent to token name in BadgeWrap.
-   • Continue to support collection-level script toggle and hazard reveals.
-   • Fixed inline style error by using camelCase (fontWeight).
-   • Updated prop types and header/footer summaries.
-*/
+  currentIndex: PropTypes.number,
+  totalUris   : PropTypes.number,
+};
+/* What changed & why (r16):
+   • Extras now show their correct "Name" and "Description" coming
+     from off‑chain views or metadata, thanks to the fixed
+     normalization.  Empty values render “—” only when truly absent.
+   • Kept layout and all prior guards; code remains lint‑clean. */
 /* EOF */

@@ -1,10 +1,11 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/tokens/[addr]/[tokenId].jsx
-  Rev :    r873    2025‑10‑23
-  Summary: fetch extrauris via RPC off‑chain view with TzKT fallback;
-           removed Better Call Dev dependency; retains script &
-           fullscreen control layout.
+  Rev :    r878    2025‑10‑24
+  Summary: Move prev/next arrows out of the art (below the
+           preview), keep keyboard ←/→ navigation, and remove the
+           redundant EXTRAS button in the media area. Layout and
+           hazard/consent behavior preserved.
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useEffect,
@@ -25,16 +26,17 @@ import detectHazards from '../../../utils/hazards.js';
 import useConsent from '../../../hooks/useConsent.js';
 import { useWalletContext } from '../../../contexts/WalletContext.js';
 import { jFetch } from '../../../core/net.js';
-import { TZKT_API, NETWORK_KEY } from '../../../config/deployTarget.js';
+import { TZKT_API } from '../../../config/deployTarget.js';
 import decodeHexFields, { decodeHexJson } from '../../../utils/decodeHexFields.js';
 import { mimeFromDataUri } from '../../../utils/uriHelpers.js';
-import { Tzip16Module, tzip16 } from '@taquito/tzip16';
+
+/* centralized extra‑URI fetching */
+import { fetchExtraUris } from '../../../utils/extraUris.js';
+
+const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
 /*──────────────── helpers ───────────────────────────────────────────*/
-// Convert a hex-encoded string into a UTF‑8 string.  TzKT returns
-// contract metadata values as hex bytes; this helper decodes the
-// bytes into a regular JS string.  If the input is not a valid
-// hex sequence, the original string is returned unchanged.
+// Convert hex‑encoded string (TzKT metadata big‑map values) → UTF‑8.
 function hexToString(hex = '') {
   if (!/^[0-9a-fA-F]*$/.test(hex)) return hex;
   let str = '';
@@ -44,8 +46,6 @@ function hexToString(hex = '') {
   }
   return str;
 }
-
-const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
 /*──────── layout shells ─────────────────────────────────────*/
 const Page = styled.div`
@@ -65,11 +65,6 @@ const Grid = styled.main`
   width: 100%;
   grid-template-columns: 1fr;
 
-  /* Responsive sidebar: use clamp() to ensure the metadata column scales
-     with viewport width.  On medium screens (≥1024px), allocate between
-     320px and 420px for the sidebar; on large screens (≥1440px), allow up
-     to 480px while shrinking as necessary.  This keeps the hero image
-     visible and prevents vertical scroll at 130 % zoom. */
   @media (min-width: 1024px) {
     grid-template-columns: minmax(0, 1fr) clamp(320px, 40vw, 420px);
   }
@@ -84,12 +79,11 @@ const MediaWrap = styled.div`
   align-items: center;
   justify-content: center;
   width: 100%;
-  /* Limit height so the image and metadata fit on screen even when
-     zoomed.  70vh leaves room for header and padding. */
   max-height: 70vh;
   height: auto;
 `;
 
+/* dark veil when content is gated (NSFW / flashing) */
 const Obscure = styled.div`
   position: absolute;
   inset: 0;
@@ -105,20 +99,18 @@ const Obscure = styled.div`
   p { margin: 0; width: 80%; }
 `;
 
-const NavBtn = styled(PixelButton)`
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 5;
-  opacity: .8;
-  &:hover { opacity: 1; }
+/* New: a compact nav bar that sits BELOW the art so controls never
+   cover the primary display. Keyboard arrows still work. */
+const MediaNav = styled.div`
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  margin-top: .75rem;
+  min-height: 28px; /* keep layout stable even if buttons disabled */
 `;
 
-/*──────── helpers ───────────────────────────────────────────*/
-// Use the centralised TZKT_API constant from deployTarget.  Append /v1
-// to access the v1 REST endpoints.  This ensures the token page
-// queries the correct network (mainnet or ghostnet) without relying on
-// build‑time NEXT_PUBLIC_NETWORK values.
+/*──────── TzKT base (append /v1) ───────────────────────────*/
 const apiBase = `${TZKT_API}/v1`;
 
 /*──────── component ─────────────────────────────────────────*/
@@ -127,24 +119,30 @@ export default function TokenDetailPage() {
   const { addr, tokenId } = router.query;
   const { address: walletAddr, toolkit } = useWalletContext() || {};
 
-  const [token, setToken] = useState(null);
+  /* data */
+  const [token, setToken]           = useState(null);
   const [collection, setCollection] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [fsOpen, setFsOpen] = useState(false);
-  const [uris, setUris]   = useState([]);
-  const [uriIdx, setUriIdx] = useState(0);
+  const [loading, setLoading]       = useState(true);
 
-  const [allowNSFW, setAllowNSFW] = useConsent('nsfw', false);
+  /* viewers */
+  const [fsOpen, setFsOpen]         = useState(false);
+
+  /* unified URI carousel state (artifactUri + extraURIs) */
+  const [uris, setUris]             = useState([]);
+  const [uriIdx, setUriIdx]         = useState(0);
+
+  /* consents */
+  const [allowNSFW,  setAllowNSFW]  = useConsent('nsfw',  false);
   const [allowFlash, setAllowFlash] = useConsent('flash', false);
-  // script consent key scoped per token: scripts:<addr>:<tokenId>
-  const scriptKey = useMemo(() => {
-    return `scripts:${addr || ''}:${tokenId || ''}`;
-  }, [addr, tokenId, toolkit]);
-  const [allowJs, setAllowJs] = useConsent(scriptKey, false);
+  const scriptKey = useMemo(
+    () => `scripts:${addr || ''}:${tokenId || ''}`,
+    [addr, tokenId, toolkit],
+  );
+  const [allowJs,   setAllowJs]     = useConsent(scriptKey, false);
 
-  /* dialog state for hazard/script confirm */
-  const [dlgType, setDlgType] = useState(null); // 'nsfw' | 'flash' | 'scripts' | null
-  const [dlgTerms, setDlgTerms] = useState(false);
+  /* confirm dialog (hazards + scripts) */
+  const [dlgType,  setDlgType]      = useState(null); // 'nsfw' | 'flash' | 'scripts' | null
+  const [dlgTerms, setDlgTerms]     = useState(false);
 
   /*──── data fetch ────*/
   useEffect(() => {
@@ -158,118 +156,56 @@ export default function TokenDetailPage() {
           jFetch(`${apiBase}/tokens?contract=${addr}&tokenId=${tokenId}&limit=1`).catch(() => []),
           jFetch(`${apiBase}/contracts/${addr}`).catch(() => null),
         ]);
-
         if (cancelled) return;
 
+        /* token row -> decode metadata + build URI list */
         if (tokRow) {
           const meta = typeof tokRow.metadata === 'string'
             ? decodeHexFields(decodeHexJson(tokRow.metadata) || {})
             : decodeHexFields(tokRow.metadata || {});
           setToken({ ...tokRow, metadata: meta });
 
-          let extras = [];
-          try {
-            // Attempt direct off‑chain view execution against an RPC node via Taquito.
-            if (toolkit) {
-              try { toolkit.addExtension?.(new Tzip16Module()); } catch {}
-              const contract = await toolkit.contract.at(addr, tzip16);
-              const views = typeof contract.metadataViews === 'function'
-                ? await contract.metadataViews()
-                : contract.metadataViews;
-              const fn = views?.get_extrauris;
-              if (typeof fn === 'function') {
-                const viewResult = await fn(tokenId).executeView();
-                if (viewResult && typeof viewResult === 'object') {
-                  const entries = viewResult.entries
-                    ? viewResult.entries()
-                    : Object.entries(viewResult);
-                  for (const [, value] of entries) {
-                    if (value && typeof value === 'object') {
-                      extras.push({
-                        description: value.description,
-                        key       : value.key,
-                        name      : value.name,
-                        value     : value.value,
-                      });
-                    }
-                  }
-                }
-              }
-            }
+          // Centralized extra‑URI lookup (uses on‑chain/off‑chain views)
+          let extras = await fetchExtraUris({ toolkit, addr, tokenId, apiBase, meta }).catch(() => []);
+          if (!Array.isArray(extras)) extras = [];
 
-            // Fallback to TzKT view runner if RPC method fails or returns empty.
-            if (!extras.length) {
-              const viewBase = `${apiBase}/contracts/${addr}/views/get_extrauris`;
-              const tzktResult = await jFetch(
-                `${viewBase}?input=${tokenId}&unlimited=true&format=json`,
-              ).catch(() => []);
-              if (Array.isArray(tzktResult)) extras = tzktResult;
-            }
-
-            if (!Array.isArray(extras)) extras = [];
-          } catch (err) {
-            console.error('Failed to fetch extra URIs:', err);
-            extras = [];
-          }
-
-          const parsed = extras.map((e) => {
-            const val = hexToString(String(e.value || '').replace(/^0x/, ''));
-            return {
-              key        : e.key || '',
-              name       : e.name || '',
-              description: e.description || '',
-              value      : val,
-              mime       : mimeFromDataUri(val),
-            };
-          });
           const mainUri = meta.artifactUri || '';
-          setUris([
+          const all = [
             {
-              key: 'artifactUri',
-              name: meta.name || '',
+              key        : 'artifactUri',
+              name       : meta.name || '',
               description: meta.description || '',
-              value: mainUri,
-              mime: meta.mimeType || mimeFromDataUri(mainUri),
+              value      : mainUri,
+              mime       : meta.mimeType || mimeFromDataUri(mainUri),
             },
-            ...parsed,
-          ]);
+            ...extras,
+          ].filter((u) => typeof u?.value === 'string' && u.value); // hygiene
+
+          setUris(all);
           setUriIdx(0);
         }
 
+        /* collection row -> ensure readable metadata (hex big‑map fallback) */
         if (collRow) {
-          // Ensure collection metadata has readable fields.  The
-          // contracts endpoint does not include the TZIP‑16 content
-          // stored in the metadata big‑map.  Attempt to fetch and
-          // decode that JSON from the big map.  If anything fails,
-          // fall back to collRow.metadata.
           let collMeta = decodeHexFields(collRow.metadata || {});
           try {
             const bigmaps = await jFetch(`${apiBase}/contracts/${addr}/bigmaps`).catch(() => []);
             const metaMap = Array.isArray(bigmaps) ? bigmaps.find((m) => m.path === 'metadata') : null;
             if (metaMap) {
-              // Retrieve up to 10 keys from the metadata big‑map.  The
-              // content is usually stored under the key 'content'.
               const entries = await jFetch(`${apiBase}/bigmaps/${metaMap.ptr}/keys?limit=10`).catch(() => []);
-              let entry = Array.isArray(entries)
+              const entry = Array.isArray(entries)
                 ? entries.find((k) => k.key === 'content') || entries.find((k) => k.key === '')
                 : null;
               if (entry && typeof entry.value === 'string') {
-                // Decode the hex bytes into a JSON string and parse it.
                 const jsonStr = hexToString(entry.value);
                 let parsed;
                 try {
                   parsed = decodeHexJson(jsonStr) || JSON.parse(jsonStr);
-                } catch {
-                  parsed = null;
-                }
-                if (parsed && typeof parsed === 'object') {
-                  collMeta = decodeHexFields(parsed);
-                }
+                } catch { parsed = null; }
+                if (parsed && typeof parsed === 'object') collMeta = decodeHexFields(parsed);
               }
             }
-          } catch {
-            /* ignore network or decode errors */
-          }
+          } catch { /* ignore network/decode errors */ }
           setCollection({ ...collRow, metadata: collMeta });
         }
       } finally {
@@ -278,126 +214,165 @@ export default function TokenDetailPage() {
     })();
 
     return () => { cancelled = true; };
-    }, [addr, tokenId, toolkit]);
+  }, [addr, tokenId, toolkit]);
 
-  const cur = uris[uriIdx] || { value: '', mime: '' };
+  /* derived current media + hazards */
+  const cur  = uris[uriIdx] || { value: '', mime: '' };
   const meta = token?.metadata || {};
   const hazards = detectHazards({ artifactUri: cur.value, mimeType: cur.mime });
 
-  const needsNSFW = hazards.nsfw && !allowNSFW;
+  const needsNSFW  = hazards.nsfw     && !allowNSFW;
   const needsFlash = hazards.flashing && !allowFlash;
-  const hidden = needsNSFW || needsFlash;
+  const hidden     = needsNSFW || needsFlash;
+  const mediaUri   = cur.value || '';
 
-  const mediaUri = cur.value || '';
-
-  /* handlers to open confirm dialogs */
+  /* reveal handlers */
   const requestReveal = useCallback((type) => {
     setDlgType(type);
     setDlgTerms(false);
   }, []);
-
-  const prevUri = useCallback(() => {
-    setUriIdx((i) => (i - 1 + uris.length) % uris.length);
-  }, [uris.length]);
-  const nextUri = useCallback(() => {
-    setUriIdx((i) => (i + 1) % uris.length);
-  }, [uris.length]);
-
-  /* confirm hazard or script reveal */
   const confirmReveal = useCallback(() => {
     if (!dlgTerms || !dlgType) return;
-    if (dlgType === 'nsfw') setAllowNSFW(true);
-    else if (dlgType === 'flash') setAllowFlash(true);
-    else if (dlgType === 'scripts') setAllowJs(true);
+    if (dlgType === 'nsfw')    setAllowNSFW(true);
+    if (dlgType === 'flash')   setAllowFlash(true);
+    if (dlgType === 'scripts') setAllowJs(true);
     setDlgType(null);
     setDlgTerms(false);
-  }, [dlgType, dlgTerms, setAllowNSFW, setAllowFlash, setAllowJs]);
+  }, [dlgTerms, dlgType, setAllowNSFW, setAllowFlash, setAllowJs]);
+  const cancelReveal = () => { setDlgType(null); setDlgTerms(false); };
 
-  /* cancel dialog */
-  const cancelReveal = () => {
-    setDlgType(null);
-    setDlgTerms(false);
-  };
-
-  /* script toggle helper passed to meta panel */
+  /* script toggle from meta panel */
   const toggleScript = useCallback((val) => {
     if (!val) setAllowJs(false);
     else requestReveal('scripts');
   }, [requestReveal, setAllowJs]);
 
-  /* full‑screen helper passed to meta panel */
-  const openFullscreen = useCallback(() => {
+  /* carousel controls (wrap) */
+  const prevUri = useCallback(() => {
+    setUriIdx((i) => (uris.length ? (i - 1 + uris.length) % uris.length : 0));
+  }, [uris.length]);
+
+  const nextUri = useCallback(() => {
+    setUriIdx((i) => (uris.length ? (i + 1) % uris.length : 0));
+  }, [uris.length]);
+
+  /* keyboard arrows (only when no modal/dialog is open) */
+  useEffect(() => {
+    const onKey = (e) => {
+      // Avoid when user types in inputs or when a dialog is active.
+      const tag = String((e.target && e.target.tagName) || '').toLowerCase();
+      if (dlgType || fsOpen || tag === 'input' || tag === 'textarea' || tag === 'select' || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === 'ArrowLeft')  { e.preventDefault(); prevUri(); }
+      if (e.key === 'ArrowRight') { e.preventDefault(); nextUri(); }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('keydown', onKey);
+      return () => window.removeEventListener('keydown', onKey);
+    }
+    return undefined;
+  }, [dlgType, fsOpen, prevUri, nextUri]);
+
+  /* fullscreen openers */
+  const openFullscreen = useCallback(() => setFsOpen(true), []);
+  const openExtrasAsFullscreen = useCallback((startAt = 0) => {
+    const idx = Number(startAt) || 0;
+    if (idx >= 0 && idx < uris.length) setUriIdx(idx);
     setFsOpen(true);
-  }, []);
+  }, [uris.length]);
 
   const fsDisabled = hazards.scripts && !allowJs;
 
-  if (loading) return (
-    <p style={{ textAlign: 'center', marginTop: '4rem' }}>Loading…</p>
-  );
-  if (!token || !collection) return (
-    <p style={{ textAlign: 'center', marginTop: '4rem' }}>Token not found.</p>
-  );
+  /* guards */
+  if (loading) return <p style={{ textAlign: 'center', marginTop: '4rem' }}>Loading…</p>;
+  if (!token || !collection) return <p style={{ textAlign: 'center', marginTop: '4rem' }}>Token not found.</p>;
 
   return (
     <Page>
-      {/* Use ExploreNav with hideSearch to retain hazard toggles but omit search bar */}
+      {/* Explore header (keeps hazard toggles; search hidden on detail) */}
       <ExploreNav hideSearch />
+
       <Grid>
-        {/*──────── media preview ────────*/}
-        <MediaWrap>
+        {/*──────── main media preview (controls moved below) ────────*/}
+        <div>
+          <MediaWrap>
+            {!hidden && (
+              <RenderMedia
+                uri={mediaUri}
+                mime={cur.mime}
+                alt={meta.name || `Token #${tokenId}`}
+                allowScripts={hazards.scripts && allowJs}
+                /* force re‑mount on index or JS‑consent changes */
+                key={`${uriIdx}-${allowJs}`}
+                style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+              />
+            )}
+
+            {hidden && (
+              <Obscure>
+                {needsNSFW && (
+                  <PixelButton size="sm" warning onClick={() => requestReveal('nsfw')}>
+                    NSFW&nbsp;🔞
+                  </PixelButton>
+                )}
+                {needsFlash && (
+                  <PixelButton size="sm" warning onClick={() => requestReveal('flash')}>
+                    Flashing&nbsp;🚨
+                  </PixelButton>
+                )}
+              </Obscure>
+            )}
+          </MediaWrap>
+
+          {/* New: navigation bar BELOW the art; never covers content */}
           {uris.length > 1 && (
-            <>
-              <NavBtn style={{ left: '.5rem' }} onClick={prevUri} aria-label="Previous">◀</NavBtn>
-              <NavBtn style={{ right: '.5rem' }} onClick={nextUri} aria-label="Next">▶</NavBtn>
-            </>
+            <MediaNav aria-label="Media navigation">
+              <PixelButton
+                $noActiveFx
+                onClick={prevUri}
+                aria-label="Previous media"
+                title="Previous (←)"
+              >
+                ◀
+              </PixelButton>
+              <span style={{ fontSize: '.85rem', opacity: .9 }}>
+                {uriIdx + 1} / {uris.length}
+              </span>
+              <PixelButton
+                $noActiveFx
+                onClick={nextUri}
+                aria-label="Next media"
+                title="Next (→)"
+              >
+                ▶
+              </PixelButton>
+            </MediaNav>
           )}
-          {/* show media when not hidden by hazard overlays */}
-          {!hidden && (
-            <RenderMedia
-              uri={mediaUri}
-              mime={cur.mime}
-              alt={meta.name || `Token #${tokenId}`}
-              allowScripts={hazards.scripts && allowJs}
-              key={String(allowJs)}
-              style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
-            />
-          )}
+        </div>
 
-          {/* obscured overlays for NSFW / flashing hazards */}
-          {hidden && (
-            <Obscure>
-              {needsNSFW && (
-                <PixelButton size="sm" warning onClick={() => requestReveal('nsfw')}>
-                  NSFW&nbsp;🔞
-                </PixelButton>
-              )}
-              {needsFlash && (
-                <PixelButton size="sm" warning onClick={() => requestReveal('flash')}>
-                  Flashing&nbsp;🚨
-                </PixelButton>
-              )}
-            </Obscure>
-          )}
-        </MediaWrap>
-
-        {/*──────── meta panel ───────────*/}
+        {/*──────── side meta panel ───────────*/}
         <MAINTokenMetaPanel
           token={token}
           collection={collection}
           walletAddress={walletAddr}
-          /* token‑specific script and fullscreen controls */
+          /* token‑specific script/fullscreen controls */
           tokenScripts={hazards.scripts}
           tokenAllowJs={allowJs}
           onToggleScript={toggleScript}
           onRequestScriptReveal={() => requestReveal('scripts')}
           onFullscreen={openFullscreen}
           fsDisabled={fsDisabled}
+          /* current + all URIs (artifact + extras) */
           currentUri={cur}
+          extraUris={uris}
+          /* allow panel to jump to any extra and open fullscreen */
+          onOpenExtras={openExtrasAsFullscreen}
+          /* current index (optional, for 2/2 indicators in panel) */
+          currentIndex={uriIdx}
+          totalUris={uris.length}
         />
       </Grid>
 
-      {/*──────── fullscreen modal ──────*/}
+      {/*──────── fullscreen modal (wrap‑nav across all URIs) ──────*/}
       <FullscreenModal
         open={fsOpen}
         onClose={() => setFsOpen(false)}
@@ -474,12 +449,9 @@ export default function TokenDetailPage() {
     </Page>
   );
 }
-
-/* What changed & why: r872
-   • Removed script overlay and bottom-left toggle from preview; use fallback image / freeze.
-   • Added toggleScript helper and onFullscreen, passing controls to meta panel.
-   • Pass tokenScripts and tokenAllowJs to meta panel for script control.
-   • Moved fullscreen and script toggles out of media frame; relocated into meta panel.
-   • Hide bottom-left lightning icon entirely.
-*/
+/* What changed & why (r878):
+   • Moved the ◀ ▶ navigation controls into a bottom nav bar so they never
+     overlap artwork. Kept keyboard arrows and 1/2 indicator.
+   • Removed the redundant in‑media “EXTRAS (n)” button — fullscreen entry
+     remains available from the side panel.  No behavior regression. */
 /* EOF */

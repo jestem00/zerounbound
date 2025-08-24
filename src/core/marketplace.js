@@ -1,15 +1,14 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/core/marketplace.js
-  Rev:     r987  2025‑08‑19
+  Rev:     r988  2025‑08‑22
   Summary(of what this file does): Marketplace helpers — full API
            (listings/offers/details, buy/list/cancel/offer param
            builders, operator ensure), lowest‑listing with multi‑
            source fallback (on‑chain → off‑chain TZIP‑16 → TzKT
-           big‑map), plus TzKT‑backed stale‑seller guards. This
-           rev merges r985 with r986’s hardened TzKT fallbacks
-           (no /contracts/undefined/bigmaps), safe addr guards,
-           and view‑caller resiliency. */
+           big‑map), plus TzKT‑backed stale‑seller guards. Hardened
+           TzKT fallbacks, safe addr guards, view‑caller resiliency,
+           and network‑scoped caches. */
 // NOTE: keep API shape stable; other modules rely on these exports.
 
 import { OpKind } from '@taquito/taquito';
@@ -44,8 +43,9 @@ export const marketplaceAddr = (net = NETWORK_KEY) => {
 const safeMarketplaceAddress = (net = NETWORK_KEY) =>
   String(MARKETPLACE_ADDRESS || marketplaceAddr(net) || '').trim();
 
-const isTz = (s) => /^tz[1-3][0-9A-Za-z]{33}$/i.test(String(s || ''));
-const isKt = (s) => /^KT1[0-9A-Za-z]{33}$/i.test(String(s || ''));
+const isTz  = (s) => /^tz[1-3][0-9A-Za-z]{33}$/i.test(String(s || ''));
+const isKt  = (s) => /^KT1[0-9A-Za-z]{33}$/i.test(String(s || ''));
+const isNat = (n) => Number.isFinite(Number(n)) && Number(n) >= 0;
 
 /* Normalize a Taquito toolkit and ensure tzip16 plugin is present */
 function ensureTzip16(toolkit) {
@@ -109,7 +109,7 @@ export async function fetchOnchainOffers({ toolkit, nftContract, tokenId }) {
 
   const offers = [];
   const push = (k, o) => offers.push({
-    offeror   : k,
+    offeror   : String(k || o?.offeror || ''),
     priceMutez: Number(o?.price),
     amount    : Number(o?.amount),
     nonce     : Number(o?.nonce),
@@ -299,6 +299,11 @@ export async function fetchOffers({ toolkit, nftContract, tokenId }) {
 export async function fetchListingDetails({ toolkit, nftContract, tokenId, nonce }) {
   const market = await getMarketContract(toolkit);
   const views  = await market.tzip16().metadataViews();
+  if (!views?.offchain_listing_details) {
+    const err = new Error('Metadata view offchain_listing_details unavailable');
+    err.code = 'MISSING_LISTING_DETAILS';
+    throw err;
+  }
   let raw;
   try {
     raw = await views.offchain_listing_details().executeView({
@@ -377,11 +382,11 @@ export async function fetchOnchainOffersForBuyer({ toolkit, buyer }) {
 
   return Array.isArray(raw)
     ? raw.map((r) => ({
-        offeror  : r.offeror,
-        priceMutez: Number(r.price),
-        amount   : Number(r.amount),
-        nonce    : Number(r.nonce),
-        accepted : !!r.accepted,
+        offeror    : r.offeror,
+        priceMutez : Number(r.price),
+        amount     : Number(r.amount),
+        nonce      : Number(r.nonce),
+        accepted   : !!r.accepted,
       }))
     : [];
 }
@@ -727,25 +732,86 @@ export async function buildOfferParams(toolkit, { nftContract, tokenId, priceMut
   return [{ kind: OpKind.TRANSACTION, ...transferParams }];
 }
 
+/** Cancel/withdraw an offer for a token. Robust to entrypoint naming. */
+export async function buildCancelOfferParams(toolkit, { nftContract, tokenId, offerNonce }) {
+  const c = await getMarketContract(toolkit);
+  let transferParams;
+
+  // Accept a variety of likely entrypoint names
+  const candidatesObj = [
+    'cancel_offer', 'withdraw_offer', 'cancel_token_offer', 'withdraw_token_offer',
+  ].filter(Boolean);
+  const candidatesPos = candidatesObj.slice();
+
+  let objFn = null;
+  let posFn = null;
+
+  for (const name of candidatesObj) {
+    if (typeof c.methodsObject?.[name] === 'function') { objFn = c.methodsObject[name]; break; }
+  }
+  if (!objFn && c.methodsObject) {
+    // fuzzy search
+    const key = Object.keys(c.methodsObject).find((k) => k.toLowerCase().replace(/_/g, '').includes('cancel') && k.toLowerCase().includes('offer'));
+    if (key) objFn = c.methodsObject[key];
+  }
+  for (const name of candidatesPos) {
+    if (typeof c.methods?.[name] === 'function') { posFn = c.methods[name]; break; }
+  }
+  if (!posFn && c.methods) {
+    const key = Object.keys(c.methods).find((k) => k.toLowerCase().replace(/_/g, '').includes('cancel') && k.toLowerCase().includes('offer'));
+    if (key) posFn = c.methods[key];
+  }
+
+  if (typeof objFn === 'function') {
+    // Try (offer_nonce, nft_contract, token_id) & also (nft_contract, token_id, offer_nonce)
+    const attempt = () => {
+      try {
+        return objFn({
+          offer_nonce: Number(offerNonce),
+          nft_contract: nftContract,
+          token_id: Number(tokenId),
+        }).toTransferParams();
+      } catch {
+        return objFn({
+          nft_contract: nftContract,
+          token_id: Number(tokenId),
+          offer_nonce: Number(offerNonce),
+        }).toTransferParams();
+      }
+    };
+    transferParams = attempt();
+  } else if (typeof posFn === 'function') {
+    const tryPos = (...args) => { try { return posFn(...args).toTransferParams(); } catch { return null; } };
+    const tries = [
+      [Number(offerNonce), nftContract, Number(tokenId)],
+      [nftContract, Number(tokenId), Number(offerNonce)],
+    ];
+    for (const t of tries) { transferParams = tryPos(...t); if (transferParams) break; }
+  } else {
+    throw new Error('cancel_offer entrypoint unavailable on marketplace contract');
+  }
+  return [{ kind: OpKind.TRANSACTION, ...transferParams }];
+}
+
 /*──────────────── STALE‑LISTING GUARDS (TzKT‑backed) ────────────────*/
-const SELLER_BAL_TTL = 30_000; // 30s cache per (seller,contract,token)
+const SELLER_BAL_TTL = 30_000; // 30s cache per (seller,contract,token,network)
 const sellerBalCache = new Map(); // key -> { at, balance }
 const now = () => Date.now();
-const cacheKey = (a, c, t) => `${a}|${c}|${t}`;
-function readCache(a, c, t) {
-  const k = cacheKey(a, c, t);
+const cacheKey = (net, a, c, t) => `${String(net || NETWORK_KEY)}|${a}|${c}|${t}`;
+function readCache(net, a, c, t) {
+  const k = cacheKey(net, a, c, t);
   const hit = sellerBalCache.get(k);
   if (hit && now() - hit.at < SELLER_BAL_TTL) return hit.balance;
   return null;
 }
-function writeCache(a, c, t, balance) {
-  sellerBalCache.set(cacheKey(a, c, t), { at: now(), balance: Number(balance || 0) });
+function writeCache(net, a, c, t, balance) {
+  sellerBalCache.set(cacheKey(net, a, c, t), { at: now(), balance: Number(balance || 0) });
 }
 
 /** Single‑account FA2 balance via TzKT. Exported (used by UI preflight). */
 export async function getFa2BalanceViaTzkt(account, nftContract, tokenId, net = NETWORK_KEY) {
   if (!isTz(account) || !isKt(nftContract)) return 0;
-  const cached = readCache(account, nftContract, tokenId);
+  const cached = readCache(net, account, nftContract, tokenId);
   if (cached != null) return cached;
 
   const TZKT_V1 = tzktV1(net);
@@ -762,10 +828,10 @@ export async function getFa2BalanceViaTzkt(account, nftContract, tokenId, net = 
     const first = Array.isArray(rows) && rows.length ? rows[0] : 0;
     const n = Number(first || 0);
     const bal = Number.isFinite(n) ? n : 0;
-    writeCache(account, nftContract, tokenId, bal);
+    writeCache(net, account, nftContract, tokenId, bal);
     return bal;
   } catch {
-    writeCache(account, nftContract, tokenId, 0);
+    writeCache(net, account, nftContract, tokenId, 0);
     return 0;
   }
 }
@@ -777,7 +843,7 @@ export async function getFa2BalancesForAccounts(accounts, nftContract, tokenId, 
   const out = new Map();
 
   for (const a of (accounts || [])) {
-    const hit = readCache(a, nftContract, tokenId);
+    const hit = readCache(net, a, nftContract, tokenId);
     if (hit != null) out.set(a, hit);
     else need.push(a);
   }
@@ -799,10 +865,10 @@ export async function getFa2BalancesForAccounts(accounts, nftContract, tokenId, 
       const bal  = Number(r?.balance ?? 0);
       if (typeof addr === 'string') {
         out.set(addr, bal);
-        writeCache(addr, nftContract, tokenId, bal);
+        writeCache(net, addr, nftContract, tokenId, bal);
       }
     }
-    for (const a of slice) if (!out.has(a)) { out.set(a, 0); writeCache(a, nftContract, tokenId, 0); }
+    for (const a of slice) if (!out.has(a)) { out.set(a, 0); writeCache(net, a, nftContract, tokenId, 0); }
   }
   return out;
 }
@@ -875,11 +941,11 @@ export async function preflightBuy(toolkit, { nftContract, tokenId, seller, amou
   return { ok: true, balance: Number(bal) };
 }
 
-/* What changed & why (r987):
-   • MERGE: r985 full API surface with r986’s hardened TzKT fallbacks, safe
-     marketplace address guards, and resilient metadata view detection.
-   • FIX: TzKT base handling — use util base (already /v1) without double‑append;
-     default to RAW_TZKT+/v1 if util unavailable.
-   • ADD: Robust off‑chain listings view name detection; broadened big‑map scan
-     (collection_listings + listings with nested filters/broad scan).
-   • KEEP: Param builders, operator ensure, and TzKT stale‑seller guards. */
+/* What changed & why (r988):
+   • ADD: network‑scoped cache keys for FA2 balance TTL (I156 ≤60s); prevents
+     cross‑network leakage when TARGET is switched.
+   • ADD: buildCancelOfferParams with robust name/signature discovery to match
+     CancelOffer UI entry‑point.
+   • HARDEN: fetchListingDetails throws tagged error when metadata view missing.
+   • KEEP: hardened TzKT fallbacks (+ no double‑/v1), safe addr guards, dynamic
+     method resolution for all param builders, and stale‑listing guards. */

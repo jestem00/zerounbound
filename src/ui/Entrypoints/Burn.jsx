@@ -1,8 +1,12 @@
-/*Developed by @jams2blues – ZeroContract Studio
-  File: src/ui/Entrypoints/Burn.jsx
-  Rev:  r905   2025‑08‑15
-  Summary: warn‑first confirm + quick repair links */
-import React, { useCallback, useEffect, useState } from 'react';
+/*─────────────────────────────────────────────────────────────────
+  Developed by @jams2blues – ZeroContract Studio
+  File:    src/ui/Entrypoints/Burn.jsx
+  Rev:     r911   2025‑08‑25 UTC
+  Summary: Version‑aware burn for v1/v2/v3. Gates repair/edit links
+           to v4/v4b/v4e only; safer confirm copy; version‑specific
+           argument shapes for legacy burn entrypoints.
+──────────────────────────────────────────────────────────────────*/
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Buffer }            from 'buffer';
 import BigNumber             from 'bignumber.js';
 import styledPkg             from 'styled-components';
@@ -69,6 +73,7 @@ const hex2str = (h) => Buffer.from(h.replace(/^0x/, ''), 'hex').toString('utf8')
 /*════════ component ════════════════════════════════════════*/
 export default function Burn({
   contractAddress = '',
+  contractVersion = '',         /* ← AdminTools passes this; used to gate UI and args. */
   setSnackbar     = () => {},
   onMutate        = () => {},
   $level,
@@ -92,6 +97,23 @@ export default function Burn({
       }
     } catch { /* noop */ }
   }, [contractAddress]);
+
+  /*──────── version features & burn shapes ──────────*/
+  const vLow = (contractVersion || '').toLowerCase();
+
+  // ZeroContract “repair/edit” flows exist only on v4/v4b/v4e; hide for legacy.
+  const canRepair = useMemo(() => (
+    vLow === 'v4' || vLow === 'v4b' || vLow === 'v4e'
+  ), [vLow]);
+
+  // Family bucket for burn argument shapes.
+  const burnFamily = useMemo(() => {
+    if (vLow === 'v1') return 'v1';
+    if (vLow === 'v3') return 'v3';
+    if (vLow.startsWith('v2')) return 'v2';
+    if (vLow === 'v4' || vLow === 'v4b' || vLow === 'v4e') return 'v4';
+    return 'unknown';
+  }, [vLow]);
 
   /*──────── token list (wallet-owned only) ──────────*/
   const [tokOpts, setTokOpts]       = useState([]);
@@ -208,12 +230,37 @@ export default function Burn({
          ms?.burn        ?? ms?.burn_tokens ?? ms?.retire ?? null;
 
   const toNat = (v) => new BigNumber(v).toFixed();
-  const argPerms = (tid, amt) => {
+
+  // Version‑specific argument permutations to minimize encode failures.
+  const argPerms = (family, tid, amt) => {
     const T = toNat(tid); const A = toNat(amt);
-    return [
-      { amount:A, token_id:T }, { amount:A, tokenId:T }, { amount:A, id:T },
-      [A, T], [T, A], [[A, T]], [[T, A]],
-    ];
+    switch (family) {
+      case 'v2':
+        // v2a/b/c/d/e — registry shape ["nat"] (single value; tokenId).
+        // Try tokenId first, then amount as fallback (some homebrews flipped semantics).
+        return [T, A];
+      case 'v1':
+      case 'v3':
+        // registry: ["nat","nat"] — order may vary across vintages.
+        return [
+          [A, T], [T, A],
+          { amount:A, token_id:T }, { amount:A, tokenId:T }, { amount:A, id:T },
+          [[A, T]], [[T, A]],
+        ];
+      case 'v4':
+        // Our v4/v4b/v4e shouldn't reach here via AdminTools (mapped to BurnV4),
+        // but keep a safe fallback identical to modern FA2 patterns.
+        return [
+          { amount:A, token_id:T }, { amount:A, tokenId:T }, { amount:A, id:T },
+          [A, T], [T, A], [[A, T]], [[T, A]], T, A,
+        ];
+      default:
+        // Unknown: try broad set.
+        return [
+          { amount:A, token_id:T }, { amount:A, tokenId:T }, { amount:A, id:T },
+          [A, T], [T, A], [[A, T]], [[T, A]], T, A,
+        ];
+    }
   };
 
   const run = async () => {
@@ -233,10 +280,10 @@ export default function Burn({
       setOv({ open:true, status:'Waiting for signature…' });
 
       let tx = null; let lastErr;
-      for (const arg of argPerms(tokenId, nQty)) {
+      for (const arg of argPerms(burnFamily, tokenId, nQty)) {
         try {
-          tx = Array.isArray(arg) ? fn(...arg) : fn(arg);
-          tx = await tx.send();
+          const sent = Array.isArray(arg) ? fn(...arg) : fn(arg);
+          tx = await sent.send();
           break;
         } catch (e) { lastErr = e; }
       }
@@ -260,20 +307,34 @@ export default function Burn({
   return (
     <Wrap $level={$level}>
       <PixelHeading level={3} style={{ gridColumn: '1 / -1' }}>Burn Tokens</PixelHeading>
+
       <HelpBox>
         Removes your editions from circulation. It reduces <em>your</em> balance only.
-        <br />
-        <strong>Prefer repair:</strong> storage is already paid — fix mistakes instead of burning.
+        {!canRepair && (
+          <>
+            <br />
+            <strong>Note:</strong>&nbsp;This contract version (<code>{contractVersion || 'unknown'}</code>)
+            does not support ZeroContract’s metadata repair/edit flows. Burning cannot be undone.
+          </>
+        )}
+        {canRepair && (
+          <>
+            <br />
+            <strong>Prefer repair:</strong>&nbsp;storage is already paid — fix mistakes instead of burning.
+          </>
+        )}
       </HelpBox>
 
-      {/* quick alternatives */}
-      <LinkRow>
-        <PixelButton size="xs" onClick={() => openAdminTool('append_artifact_uri')}>Replace Artifact</PixelButton>
-        <PixelButton size="xs" onClick={() => openAdminTool('append_extrauri')}>Replace ExtraUri</PixelButton>
-        <PixelButton size="xs" onClick={() => openAdminTool('repair_uri')}>Repair URI</PixelButton>
-        <PixelButton size="xs" onClick={() => openAdminTool('clear_uri')}>Clear URI</PixelButton>
-        <PixelButton size="xs" onClick={() => openAdminTool('edit_token_metadata')}>Edit Token Meta</PixelButton>
-      </LinkRow>
+      {/* quick alternatives – shown only when the contract family actually supports them */}
+      {canRepair && (
+        <LinkRow>
+          <PixelButton size="xs" onClick={() => openAdminTool('append_artifact_uri')}>Replace Artifact</PixelButton>
+          <PixelButton size="xs" onClick={() => openAdminTool('append_extrauri')}>Replace ExtraUri</PixelButton>
+          <PixelButton size="xs" onClick={() => openAdminTool('repair_uri')}>Repair URI</PixelButton>
+          <PixelButton size="xs" onClick={() => openAdminTool('clear_uri')}>Clear URI</PixelButton>
+          <PixelButton size="xs" onClick={() => openAdminTool('edit_token_metadata')}>Edit Token Meta</PixelButton>
+        </LinkRow>
+      )}
 
       {/* Token‑ID picker */}
       <FormRow>
@@ -356,33 +417,45 @@ export default function Burn({
         title="Before you Burn"
         message={(
           <>
-            <p style={{ marginTop: 0 }}>
-              <strong>WAIT!</strong>&nbsp;Are you sure you don’t want to <strong>repair</strong>?
-              Storage is already paid — you can usually fix mistakes without burning.
-            </p>
-            <ul style={{ margin: '8px 0 10px 16px' }}>
-              <li><a href="#"
-                     onClick={(e)=>{e.preventDefault(); setConfirm(false); openAdminTool('append_artifact_uri');}}>
-                Replace Artifact
-              </a></li>
-              <li><a href="#"
-                     onClick={(e)=>{e.preventDefault(); setConfirm(false); openAdminTool('append_extrauri');}}>
-                Replace ExtraUri
-              </a></li>
-              <li><a href="#"
-                     onClick={(e)=>{e.preventDefault(); setConfirm(false); openAdminTool('repair_uri');}}>
-                Repair URI
-              </a></li>
-              <li><a href="#"
-                     onClick={(e)=>{e.preventDefault(); setConfirm(false); openAdminTool('clear_uri');}}>
-                Clear URI
-              </a></li>
-              <li><a href="#"
-                     onClick={(e)=>{e.preventDefault(); setConfirm(false); openAdminTool('edit_token_metadata');}}>
-                Edit Token Metadata
-              </a></li>
-            </ul>
-            <p>Proceed to burn <code>{qty}</code> edition(s) of token <code>{tokenId}</code>?</p>
+            {!canRepair ? (
+              <>
+                <p style={{ marginTop: 0 }}>
+                  This contract version (<code>{contractVersion || 'unknown'}</code>) does not
+                  support on‑platform metadata repair/edit flows.
+                </p>
+                <p>Proceed to burn <code>{qty}</code> edition(s) of token&nbsp;<code>{tokenId}</code>?</p>
+              </>
+            ) : (
+              <>
+                <p style={{ marginTop: 0 }}>
+                  <strong>WAIT!</strong>&nbsp;Are you sure you don’t want to <strong>repair</strong>?
+                  Storage is already paid — you can usually fix mistakes without burning.
+                </p>
+                <ul style={{ margin: '8px 0 10px 16px' }}>
+                  <li><a href="#"
+                         onClick={(e)=>{e.preventDefault(); setConfirm(false); openAdminTool('append_artifact_uri');}}>
+                    Replace Artifact
+                  </a></li>
+                  <li><a href="#"
+                         onClick={(e)=>{e.preventDefault(); setConfirm(false); openAdminTool('append_extrauri');}}>
+                    Replace ExtraUri
+                  </a></li>
+                  <li><a href="#"
+                         onClick={(e)=>{e.preventDefault(); setConfirm(false); openAdminTool('repair_uri');}}>
+                    Repair URI
+                  </a></li>
+                  <li><a href="#"
+                         onClick={(e)=>{e.preventDefault(); setConfirm(false); openAdminTool('clear_uri');}}>
+                    Clear URI
+                  </a></li>
+                  <li><a href="#"
+                         onClick={(e)=>{e.preventDefault(); setConfirm(false); openAdminTool('edit_token_metadata');}}>
+                    Edit Token Metadata
+                  </a></li>
+                </ul>
+                <p>Proceed to burn <code>{qty}</code> edition(s) of token&nbsp;<code>{tokenId}</code>?</p>
+              </>
+            )}
           </>
         )}
         onOk={() => { setConfirm(false); run(); }}
@@ -400,5 +473,10 @@ export default function Burn({
   );
 }
 /* What changed & why:
-   • Added repair‑first quick links + deep‑linked confirm dialog.
-   • Prevented $level from leaking to DOM; rev‑bump to r905. */
+   • Gated repair/edit quick-links to v4/v4b/v4e to prevent misleading UI
+     on legacy versions (v1/v2/v3).
+   • Adjusted confirm dialog copy to mirror gating and avoid dead links.
+   • Version-aware arg permutations for v1 (nat,nat), v3 (nat,nat),
+     and v2* (single nat) per registry; kept broad fallbacks for safety.
+   • Preserved transient prop guard ($level) and existing UX.
+*/

@@ -45,11 +45,7 @@
       "bundleName": "explore_bundle",
       "patterns": [
         "src/hooks/useConsent.js",
-        "src/pages/contracts/**/*.jsx",
-        "src/pages/explore/**/*.jsx",
-        "src/pages/tokens/**/*.jsx",
-        "src/pages/my/**/*.jsx",
-        "src/pages/_app.js",
+        "src/pages/**",
         "src/core/marketplace.js",
         "src/ui/CollectionCard.jsx",
         "src/ui/ContractMetaPanelContracts.jsx",
@@ -66,6 +62,7 @@
         "src/ui/MarketplaceBar.jsx",
         "src/ui/GlobalSnackbar.jsx",
         "src/ui/MAINTokenMetaPanel.jsx",
+        "src/ui/ExtraUriViewer.jsx",
 		    "src/ui/Entrypoints/index.js",
 	    	"src/ui/Entrypoints/AcceptOffer.jsx",
 	    	"src/ui/Entrypoints/CancelListing.jsx",
@@ -91,7 +88,8 @@
         "src/constants/integrityBadges.js",
         "src/ui/IntegrityBadge.jsx",
         "src/config/**/*.js",
-        "src/data/**/*.json"
+        "src/data/**/*.json",
+        "contracts/**"
       ]
     },
     {

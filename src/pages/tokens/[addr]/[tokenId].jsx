@@ -168,6 +168,12 @@ export default function TokenDetailPage() {
           // Centralized extra‑URI lookup (uses on‑chain/off‑chain views)
           let extras = await fetchExtraUris({ toolkit, addr, tokenId, apiBase, meta }).catch(() => []);
           if (!Array.isArray(extras)) extras = [];
+          // Debug: log extras for inspection in browser console
+          try {
+            console.log('Extras payload:', extras);
+          } catch (err) {
+            /* no-op */
+          }
 
           const mainUri = meta.artifactUri || '';
           const all = [

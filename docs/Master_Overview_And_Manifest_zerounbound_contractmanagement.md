@@ -653,7 +653,7 @@ D. ZeroContract Version Map:
 v1 — original zerocontract
 v2 series — community “homebrews”; v2b = “original without lock adding parent/child”
 v3 — first collaborator contract
-v4 — legacy append contract (our append_* entrypoints)
+v4 — legacy append contract (our append_* and edit_* entrypoints)
 v4a — zeroterminal main contract (ZT entrypoints, different names/order)
 v4b — sifrzero (default collaborative, like HEN collection; no add/remove_collaborator, anyone can mint)
 v4c — zeroterminal default collaborative

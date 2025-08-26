@@ -1,9 +1,12 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/PixelHeading.jsx
-  Rev :    r10     2025‑08‑08
-  Summary: block 'level' prop leak + stable componentId
-──────────────────────────────────────────────────────────────*/
+  Rev :    r12     2025‑10‑26
+  Summary: Customized heading component for pixel‑styled titles.  This
+           revision allows long names to wrap by switching to normal
+           white‑space behaviour, adding overflow‑wrap and word-break
+           support, and ensures headings span the full available width.
+─────────────────────────────────────────────────────────────*/
 import React from 'react';
 import styled, { css } from 'styled-components';
 
@@ -13,10 +16,12 @@ const frame = css`
   line-height: 1.05;
   margin: 0 0 1rem;
   text-align: center;
-  white-space: nowrap;
+  white-space: normal;         /* allow headings to wrap */
+  overflow-wrap: anywhere;     /* break long words and addresses */
+  word-break: break-word;      /* ensure long names wrap within container */
+  max-width: 100%;             /* prevent shrinking when used in flex layouts */
   color: var(--zu-fg);
   text-rendering: optimizeLegibility;
-  overflow: hidden;
 `;
 
 /*──────── responsive sizes ─────────────────────────────────*/
@@ -44,20 +49,13 @@ export default function PixelHeading({
 }) {
   const tag = as || `h${level}`;
   return (
-    <HeadingBase
-      as={tag}
-      role="heading"
-      aria-level={level}
-      $level={level}
-      {...rest}
-    >
+    <HeadingBase as={tag} $level={level} {...rest}>
       {children}
     </HeadingBase>
   );
 }
 /* What changed & why:
-   • shouldForwardProp now blocks both 'level' & '$level', removing
-     React warning about unknown prop leakage.
-   • Fixed className hydration mismatch by pinning deterministic
-     componentId (`px-heading-base`) so SSR & client hashes align. */
+   • Updated white-space to normal and added overflow-wrap: anywhere so
+     long collection or token names wrap gracefully without clipping.
+   • Retains responsive font sizing and stable componentId for SSR. */
 /* EOF */

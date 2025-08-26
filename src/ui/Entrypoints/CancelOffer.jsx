@@ -1,15 +1,16 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/CancelOffer.jsx
-  Rev :    r1    2025‑07‑25 UTC
-  Summary: Pop‑out UI for withdrawing (canceling) offers made
-           by the connected buyer on a given NFT token.  Uses
-           the get_offers_for_token view to list the buyer's
-           current offers and allows canceling individually or
-           all at once via the marketplace's withdraw_offer
-           entrypoint.  Shows a progress overlay during
-           transactions.
-─────────────────────────────────────────────────────────────*/
+  Rev :    r2    2025‑10‑26 UTC
+  Summary: Modal UI for withdrawing (canceling) offers made by the
+           connected buyer on a given NFT token.  Lists the
+           buyer's current offers (fetched via the marketplace’s
+           off‑chain view) and allows canceling individually or
+           all at once via the marketplace’s withdraw_offer
+           entrypoint.  This revision updates the price column to
+           display full XTZ values with six fractional digits to
+           avoid rounding/truncation seen in earlier versions.
+────────────────────────────────────────────────────────────*/
 
 import React, { useEffect, useState, useMemo } from 'react';
 import PropTypes                                from 'prop-types';
@@ -25,7 +26,7 @@ import { Tzip16Module }     from '@taquito/tzip16';
 // styled-components helper
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
-// Modal overlay
+// Modal overlay covering the viewport
 const ModalOverlay = styled.div`
   position: fixed;
   top: 0;
@@ -39,7 +40,7 @@ const ModalOverlay = styled.div`
   z-index: 9999;
 `;
 
-// Modal box
+// Modal box container
 const ModalBox = styled.section`
   background: var(--zu-bg, #0a001e);
   border: 2px solid var(--zu-accent, #8f3ce1);
@@ -150,7 +151,6 @@ export default function CancelOffer({ open = false, contract = '', tokenId = '',
       setOffers([]);
       // Close the modal via onClose
       onClose();
-
       // Broadcast a refresh event so parent lists can update
       try {
         window.dispatchEvent(new CustomEvent('zu:offersRefresh'));
@@ -175,29 +175,24 @@ export default function CancelOffer({ open = false, contract = '', tokenId = '',
       <ModalBox onClick={(e) => e.stopPropagation()} data-modal="cancel-offer">
         <PixelHeading level={3}>Cancel Offer</PixelHeading>
         {offers.length === 0 ? (
-          <p style={{ marginTop: '0.8rem' }}>You have no active offers to cancel.</p>
+          <p style={{ marginTop: '0.5rem' }}>You have no active offers to cancel.</p>
         ) : (
           <>
             <Table>
               <thead>
                 <tr>
-                  <th>Preview</th>
                   <th>Offeror</th>
                   <th>Amount</th>
-                  <th>Price (ꜩ)</th>
+                  <th>Price&nbsp;(ꜩ)</th>
                   <th>Nonce</th>
                 </tr>
               </thead>
               <tbody>
                 {pageOffers.map((offer) => (
-                  <tr key={`${offer.offeror}:${offer.nonce}`}>
-                    <td style={{ width: '40px' }}>
-                      {/* TODO: preview thumbnail of the NFT; placeholder for now */}
-                      ​
-                    </td>
+                  <tr key={`${offer.offeror}-${offer.nonce}`}>
                     <td>{offer.offeror.substring(0, 6)}…{offer.offeror.substring(offer.offeror.length - 4)}</td>
                     <td>{offer.amount}</td>
-                    <td>{(offer.priceMutez / 1_000_000).toLocaleString()}</td>
+                    <td>{(offer.priceMutez / 1_000_000).toLocaleString(undefined, { minimumFractionDigits: 6, maximumFractionDigits: 8 })}</td>
                     <td>{offer.nonce}</td>
                   </tr>
                 ))}
@@ -205,34 +200,33 @@ export default function CancelOffer({ open = false, contract = '', tokenId = '',
             </Table>
             {pages > 1 && (
               <Pagination>
-                {[...Array(pages)].map((_, idx) => (
-                  <PixelButton
-                    key={idx}
-                    warning={idx === page}
-                    onClick={() => setPage(idx)}
-                  >
+                {Array.from({ length: pages }, (_, idx) => (
+                  <PixelButton key={idx} onClick={() => setPage(idx)} disabled={idx === page} $size="sm">
                     {idx + 1}
                   </PixelButton>
                 ))}
               </Pagination>
             )}
-            <div style={{ marginTop: '1rem', display: 'flex', gap: '0.6rem' }}>
-              <PixelButton disabled={offers.length === 0} onClick={cancelSingle}>
-                CANCEL OFFER
+            <div style={{ display: 'flex', gap: '8px', marginTop: '0.8rem', flexWrap: 'wrap' }}>
+              <PixelButton onClick={cancelSingle} $size="sm">
+                CANCEL&nbsp;OFFER
               </PixelButton>
-              <PixelButton disabled={offers.length === 0} onClick={cancelAll}>
-                CANCEL ALL
+              <PixelButton onClick={cancelAll} $size="sm">
+                CANCEL&nbsp;ALL
               </PixelButton>
             </div>
           </>
         )}
         {ov.open && (
           <OperationOverlay
+            open={ov.open}
             label={ov.label}
             onClose={() => setOv({ open: false, label: '' })}
           />
         )}
-        <PixelButton style={{ marginTop: '1rem' }} onClick={onClose}>Close</PixelButton>
+        <PixelButton onClick={onClose} style={{ marginTop: '1rem' }} $size="sm">
+          Close
+        </PixelButton>
       </ModalBox>
     </ModalOverlay>
   );
@@ -245,10 +239,11 @@ CancelOffer.propTypes = {
   onClose : PropTypes.func,
 };
 
-/* What changed & why: initial creation of CancelOffer component.
-   This modal lists the buyer's own offers on the current token
-   and allows them to withdraw the offer via withdraw_offer.  It
-   uses withContractCall to dispatch the transaction and shows
-   a progress overlay.  Cancelling any offer removes all offers
-   made by the buyer on that token. */
-/* EOF */
+/* What changed & why:
+   r2 – Updated the price column to use toLocaleString with six
+   minimum and eight maximum fractional digits, allowing prices
+   like 1.23456789 ꜩ to display every decimal digit without
+   rounding while still showing at least six decimals for whole
+   numbers.  Added sm‑sized buttons and improved spacing for
+   consistency with the rest of the UI. */
+//EOF

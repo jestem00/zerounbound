@@ -1,14 +1,15 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/MarketplaceBar.jsx
-  Rev:     r929  2025‑08‑19
-  Summary(of what this file does): Marketplace action bar shown on
-           token detail pages. Shows current listing price and
-           exposes BUY/LIST/OFFER/CANCEL/ACCEPT actions.
-           This revision enables BUY when the seller’s **live**
-           FA2 balance is ≥ 1 (partial‑stock friendly). The Buy
-           dialog still runs a strict preflight for the actual
-           requested quantity. */
+  Rev:     r930  2025‑10‑26
+  Summary: Marketplace action bar shown on token detail pages.
+           Shows current listing price and exposes BUY/LIST/
+           OFFER/CANCEL/ACCEPT actions.  This revision reduces
+           button sizes by passing the `sm` variant to PixelButton
+           calls, ensuring the bar fits comfortably on smaller
+           displays (e.g., 1080p) without truncating adjacent
+           content.  Functional behaviour is unchanged from r929.
+─────────────────────────────────────────────────────────────*/
 
 import React, { useEffect, useMemo, useState } from 'react';
 import PropTypes from 'prop-types';
@@ -86,7 +87,9 @@ export default function MarketplaceBar({
           tokenId,
         });
         if (!cancelled) setHasOffers(Boolean(offers && offers.length > 0));
-      } catch { /* non‑fatal */ }
+      } catch {
+        /* non‑fatal */
+      }
     })();
 
     return () => { cancelled = true; };
@@ -135,8 +138,9 @@ export default function MarketplaceBar({
 
     const _priceXTZ = _hasListingRaw
       ? (_priceMutez / 1_000_000).toLocaleString(undefined, {
+          // Display the full decimal precision of the price (up to 8 places)
           minimumFractionDigits: 6,
-          maximumFractionDigits: 6,
+          maximumFractionDigits: 8,
         })
       : null;
 
@@ -181,6 +185,7 @@ export default function MarketplaceBar({
       {/* BUY — enabled when live FA2 balance ≥ 1 and user isn’t the seller */}
       <PixelButton
         $noActiveFx
+        $size="sm"
         disabled={disableBuy}
         warning={!hasListing}
         aria-disabled={disableBuy}
@@ -207,6 +212,7 @@ export default function MarketplaceBar({
       {/* LIST — unchanged */}
       <PixelButton
         $noActiveFx
+        $size="sm"
         disabled={!toolkit}
         aria-disabled={!toolkit}
         onClick={() => setDlg('list')}
@@ -219,6 +225,7 @@ export default function MarketplaceBar({
       {/* OFFER — always clickable; dialog guides connection/validation */}
       <PixelButton
         $noActiveFx
+        $size="sm"
         disabled={false}
         aria-disabled={false}
         onClick={() => setDlg('offer')}
@@ -232,6 +239,7 @@ export default function MarketplaceBar({
       {isSeller && hasListing && (
         <PixelButton
           $noActiveFx
+          $size="sm"
           disabled={!toolkit}
           aria-disabled={!toolkit}
           onClick={() => setDlg('cancel')}
@@ -246,6 +254,7 @@ export default function MarketplaceBar({
       {isSeller && hasListing && hasOffers && (
         <PixelButton
           $noActiveFx
+          $size="sm"
           disabled={!toolkit}
           aria-disabled={!toolkit}
           onClick={() => setDlg('accept')}
@@ -317,11 +326,12 @@ MarketplaceBar.propTypes = {
 };
 
 /* What changed & why:
-   • BUY is now enabled when the seller’s live FA2 balance (via TzKT
-     tokens/balances) is ≥ 1 for the token. This handles “partial stock”
-     scenarios caused by cross‑market sales (e.g., on Objkt) while still
-     blocking truly stale listings (balance 0). TzKT is the recommended
-     indexer API for live token balances on Tezos. 
-   • The Buy dialog’s preflight remains strict for the requested quantity,
-     preventing over‑purchases when inventory runs low. */
+   • r930 – Added `$size="sm"` prop to every PixelButton in the bar to
+     reduce their footprint, ensuring the bar remains legible and
+     functional on lower‑resolution displays (e.g., 1080p).  Also
+     increased the price display precision to show up to eight
+     fractional digits, ensuring prices like 1.23456789 ꜩ render
+     without rounding.  This improves compliance with our I00
+     styling invariant while preserving all marketplace functionality
+     from r929. */
 //EOF

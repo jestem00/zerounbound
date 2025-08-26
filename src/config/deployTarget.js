@@ -36,7 +36,7 @@
 // 'mainnet' or 'ghostnet' as appropriate; deployTarget.js is the sole
 // diverging file between network branches.  During development, the
 // scripts/setTarget.js helper rewrites this line to toggle networks.
-export const TARGET = 'ghostnet';
+export const TARGET = 'mainnet';
 
 // ---------------------------------------------------------------------------
 // Per‑network configuration
@@ -90,7 +90,7 @@ const nets = {
     rpc: [
       // Primary mainnet RPC (recommended by ECAD Infra) – supports views
       'https://prod.tcinfra.net/rpc/mainnet', //tezos commons recommended RPC node switcher, selects best node
-      'https://mainnet.tezos.ecadinfra.com', // ECAD Infra mainnet RPC fallback
+      //'https://mainnet.tezos.ecadinfra.com', // ECAD Infra mainnet RPC fallback
     ],
     tzkt:         'https://api.tzkt.io',
     redirects:    [],

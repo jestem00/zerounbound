@@ -591,16 +591,19 @@ export default function MAINTokenMetaPanel({
               name/description values (e.g. when RPCs return empty strings).
               The Extra Key is always displayed for non‑artifact URIs.
             */}
+            {/* Always show the Extra Key for non‑artifact URIs. */}
             {cur.key !== 'artifactUri' && (
               <>
                 <dt>Extra Key</dt>
                 <dd>{cur.key}</dd>
+                {/* Only show Name when non‑empty to avoid redundant blank labels */}
                 {cur.name && (
                   <>
                     <dt>Name</dt>
                     <dd>{cur.name}</dd>
                   </>
                 )}
+                {/* Only show Description when non‑empty */}
                 {cur.description && (
                   <>
                     <dt>Description</dt>

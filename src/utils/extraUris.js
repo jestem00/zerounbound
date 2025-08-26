@@ -2,15 +2,16 @@
 ─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/utils/extraUris.js
-  Rev :    r8     2025‑08‑26
+  Rev :    r9     2025‑08‑26
   Summary: Centralised discovery/normalisation of extra URIs for a
            given token. Scans token metadata (historical shapes) and
            reads off‑chain views via Taquito (primary) and TzKT (GET,
            fallback). Produces stable [{ key,name,description,value,mime }].
-           r8: Fixes view transport (GET), decodes Michelson bytes→UTF‑8,
-           preserves view-provided name/description, and merges by key
-           with meta extras so UI shows friendly fields (e.g. “OUROBOROS
-           tiny 250×250”). Robust pair/numeric/named shapes supported.
+           r9: Adds support for executing off‑chain views via
+           metadataViews.get_extrauris() using Taquito’s tzip16
+           extension, ensuring names and descriptions returned from
+           modern contracts are correctly parsed. Retains fallback to
+           executeView() and BCD/TzKT for older deployments.
 ──────────────────────────────────────────────────────────────*/
 
 import { jFetch } from '../core/net.js';
@@ -425,20 +426,51 @@ async function fetchViaToolkit(toolkit, contract, tokenId) {
  * @returns {Promise<Array<{key:string,name:string,description:string,value:string,mime:string}>>>}
  */
 async function fetchViaTzip16(toolkit, contract, tokenId) {
+  // Perform an off‑chain view call using Taquito’s tzip16 metadataViews API.
+  // When successful, returns a parsed list of objects containing key/name/description/value.
   if (!toolkit || !contract || tokenId == null) return [];
   try {
-    // Lazy import tzip16 so that environments without it don’t throw
+    // Dynamically import tzip16 extension so that builds lacking this package do not fail.
     const mod = await import('@taquito/tzip16');
     const tzip16 = mod.tzip16 || mod.default?.tzip16;
     const Tzip16Module = mod.Tzip16Module || mod.default?.Tzip16Module;
     if (!tzip16 || !Tzip16Module) return [];
-    try { toolkit.addExtension(new Tzip16Module()); } catch {/* ignore if already added */}
+    // Register the extension once. Catch duplicate extension errors.
+    try {
+      toolkit.addExtension(new Tzip16Module());
+    } catch {
+      /* ignore duplicate extension errors */
+    }
+    // Load the contract with tzip16 interface
     const c = await toolkit.contract.at(contract, tzip16);
+    // Retrieve the tzip16 interface
     const t16 = typeof c.tzip16 === 'function' ? c.tzip16() : c.tzip16;
-    if (!t16 || typeof t16.executeView !== 'function') return [];
-    // Execute the off-chain view. Parameter is an array of arguments; we pass tokenId.
+    if (!t16) return [];
+    // Prefer the metadataViews helper. This method lists all off‑chain views
+    // defined in the contract metadata and exposes them via executeView.
+    if (typeof t16.metadataViews === 'function') {
+      try {
+        const metaViews = await t16.metadataViews();
+        if (metaViews && typeof metaViews.get_extrauris === 'function') {
+          const viewRes = await metaViews.get_extrauris().executeView(Number(tokenId));
+          let entries = [];
+          if (Array.isArray(viewRes)) {
+            entries = viewRes;
+          } else if (viewRes && typeof viewRes.entries === 'function') {
+            for (const [, v] of viewRes.entries()) entries.push(v);
+          } else if (viewRes && typeof viewRes === 'object') {
+            entries = Object.values(viewRes);
+          }
+          const parsed = await parseEntries(entries);
+          if (parsed && parsed.length) return parsed;
+        }
+      } catch {
+        // ignore and fall back
+      }
+    }
+    // Fall back to generic executeView if metadataViews is unavailable or fails.
+    if (typeof t16.executeView !== 'function') return [];
     const viewResult = await t16.executeView('get_extrauris', [Number(tokenId)], undefined, { viewCaller: contract });
-    // viewResult may be Michelson typed values; convert to JS and parse
     let entries = [];
     if (Array.isArray(viewResult)) entries = viewResult;
     else if (viewResult && typeof viewResult.entries === 'function') {

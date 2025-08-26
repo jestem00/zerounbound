@@ -1,8 +1,7 @@
 /* Developed by @jams2blues – ZeroContract Studio
    File:    src/ui/Layout.jsx
-   Rev :    r744‑h13  2025‑07‑08 UTC
-   Summary: conditional ZerosBg – hidden on explore/marketplace routes */
-
+   Rev :    r744‑h14  2025‑08‑25 UTC
+   Summary: conditional ZerosBg – hidden on explore/marketplace routes; unify scroll region */
 import React          from 'react';
 import { useRouter }  from 'next/router';
 import styledPkg      from 'styled-components';
@@ -20,7 +19,7 @@ const Main = styled.main`
   min-height: calc(var(--vh) - var(--hdr));       /* fill viewport       */
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  /* Removed overflow-y:auto to avoid nested scrollbars and unify scroll region */
   overflow-x: hidden;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
@@ -45,7 +44,5 @@ export default function Layout({ children }) {
   );
 }
 
-/* What changed & why: Layout now inspects router pathname and skips
-   rendering <ZerosBg> on /explore, /contracts, /tokens & /search routes,
-   preventing generative background from overlaying marketplace content. */
+/* What changed & why: Updated to r744‑h14. Removed inner overflow (overflow-y:auto) to prevent nested scrollbars and unify the scroll region while maintaining conditional background hiding. */
 /* EOF */

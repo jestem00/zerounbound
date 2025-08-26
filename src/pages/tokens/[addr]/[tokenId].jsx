@@ -1,11 +1,8 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
-  File:    src/pages/tokens/[addr]/[tokenId].jsx
-  Rev :    r878    2025‑10‑24
-  Summary: Move prev/next arrows out of the art (below the
-           preview), keep keyboard ←/→ navigation, and remove the
-           redundant EXTRAS button in the media area. Layout and
-           hazard/consent behavior preserved.
+      Developed by @jams2blues – ZeroContract Studio
+      File:    src/pages/tokens/[addr]/[tokenId].jsx
+      Rev :    r882    2025‑08‑25
+      Summary: Flex‑grouped preview and navigation; clamp group height (min(70vh,calc(var(--vh)-var(--hdr)-160px))) to keep nav clear and resolution agnostic
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useEffect,
@@ -79,8 +76,25 @@ const MediaWrap = styled.div`
   align-items: center;
   justify-content: center;
   width: 100%;
-  max-height: 70vh;
-  height: auto;
+  /* The media flexes to use remaining vertical space within MediaGroup; its
+     height is capped by the parent’s max-height. Overflow is hidden to
+     prevent content from exceeding the container. */
+  flex: 1 1 0%;
+  overflow: hidden;
+`;
+
+/* Wrapper for preview and nav. A max-height clamp reserves space for
+   navigation and surrounding margins. Using flex column ensures the
+   navigation bar always appears beneath the artwork without overlap.
+   min-height:0 allows the preview to shrink on small screens. */
+const MediaGroup = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  width: 100%;
+  max-height: min(70vh, calc(var(--vh) - var(--hdr) - 160px));
+  min-height: 0;
 `;
 
 /* dark veil when content is gated (NSFW / flashing) */
@@ -299,7 +313,7 @@ export default function TokenDetailPage() {
 
       <Grid>
         {/*──────── main media preview (controls moved below) ────────*/}
-        <div>
+        <MediaGroup>
           <MediaWrap>
             {!hidden && (
               <RenderMedia
@@ -353,7 +367,7 @@ export default function TokenDetailPage() {
               </PixelButton>
             </MediaNav>
           )}
-        </div>
+        </MediaGroup>
 
         {/*──────── side meta panel ───────────*/}
         <MAINTokenMetaPanel
@@ -455,9 +469,14 @@ export default function TokenDetailPage() {
     </Page>
   );
 }
-/* What changed & why (r878):
-   • Moved the ◀ ▶ navigation controls into a bottom nav bar so they never
-     overlap artwork. Kept keyboard arrows and 1/2 indicator.
-   • Removed the redundant in‑media “EXTRAS (n)” button — fullscreen entry
-     remains available from the side panel.  No behavior regression. */
+/* What changed & why (r882):
+   • Refined MediaGroup: now clamps its maximum height to the smaller
+     of 70vh and calc(var(--vh) - var(--hdr) - 160px), reserving ample
+     space for the navigation controls and margins across all viewport sizes.
+   • Simplified MediaWrap to flex within MediaGroup and removed its own
+     height constraints; overflow is hidden so artwork never spills over.
+   • Maintained the flex column layout so the navigation bar always
+     appears below the artwork without overlap.
+   • Updated revision and summary to r882 to document the refined height
+     clamping and layout adjustments. */
 /* EOF */

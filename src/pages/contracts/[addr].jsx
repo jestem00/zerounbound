@@ -1,15 +1,12 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/pages/contracts/[addr].jsx
-  Rev :    r5  2025‑08‑XX – robust broken‑preview filtering
-  Summary: In addition to parsing JSON‑encoded creators and decoding
-           metadata, this version filters out tokens whose on‑chain
-           previews are invalid or truncated.  It validates data
-           URIs for JPEG, PNG/APNG, GIF, BMP, and WebP by checking
-           header and trailer signatures, mirroring the explore
-           grid’s logic.  Only tokens with intact previews or
-           non‑image media are shown, preventing broken images in
-           contract pages.  Authors filtering remains unchanged.
+  Rev :    r8    2025‑08‑27
+  Summary(of what this file does): Contract detail page with live
+           token grid, filtering, sorting, stats, and **accurate
+           For‑Sale count** using ZeroSum on‑chain view (TZIP‑16)
+           with TzKT/BCD fallbacks. Preserves robust preview
+           filtering and SSR‑safe behaviour.
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useEffect, useMemo, useState, useCallback,
@@ -31,6 +28,12 @@ import listLiveTokenIds from '../../utils/listLiveTokenIds.js';
 import decodeHexFields, { decodeHexJson } from '../../utils/decodeHexFields.js';
 import { jFetch }       from '../../core/net.js';
 import { TARGET }       from '../../config/deployTarget.js';
+
+/* Wallet toolkit (SSR‑safe context) */
+import { useWallet } from '../../contexts/WalletContext.js';
+
+/* ZeroSum marketplace on‑chain view */
+import { fetchOnchainListingsForCollection } from '../../core/zeroSumViews.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -65,30 +68,34 @@ const TZKT_API = NETWORK === 'mainnet'
   ? 'https://api.tzkt.io/v1'
   : 'https://api.ghostnet.tzkt.io/v1';
 
-/*──────── component ───────────────────────────────────────*/
 export default function ContractPage() {
   const router           = useRouter();
   const { addr }         = router.query;
 
-  const [meta, setMeta]       = useState(null);
-  const [tokens, setTokens]   = useState([]);
+  const { toolkit }      = useWallet() || {};
+
+  const [meta, setMeta]     = useState(null);
+  const [tokens, setTokens] = useState([]);
   const [tokCount, setTokCount] = useState('…');
-  const [owners, setOwners]   = useState('…');
+  const [owners, setOwners] = useState('…');
   const [loading, setLoading] = useState(true);
   const [tokOpts, setTokOpts] = useState([]);
   const [tokSel,  setTokSel]  = useState('');
 
-  /* ui */
-  const [search, setSearch]   = useState('');
-  const [sort, setSort]       = useState('newest');
+  /* On‑chain marketplace listings (deduped per tokenId → lowest price) */
+  const [saleListings, setSaleListings] = useState([]);
+
+  /* ui state */
+  const [search, setSearch] = useState('');
+  const [sort, setSort]     = useState('newest');
 
   /* filters */
   const [filters, setFilters] = useState({
     authors: new Set(),
     mime   : new Set(),
     tags   : new Set(),
-    type   : '',              /* '', 1of1, editions */
-    mature : 'include',        /* include | exclude | only */
+    type   : '',               // '', '1of1', 'editions'
+    mature : 'include',        // include | exclude | only
     flash  : 'include',
   });
 
@@ -99,11 +106,11 @@ export default function ContractPage() {
     /* 1 · contract metadata (hex → JSON fallback) */
     (async () => {
       try {
-        const r = await jFetch(`${TZKT_API}/contracts/${addr}`);
+        const r = await jFetch(`${TZKT_API.replace(/\/+$/,'')}/contracts/${addr}`);
         let m   = r?.metadata ?? {};
         if (!m?.name) {
           const [v] = await jFetch(
-            `${TZKT_API}/contracts/${addr}/bigmaps/metadata/keys?key=content&select=value`,
+            `${TZKT_API.replace(/\/+$/,'')}/contracts/${addr}/bigmaps/metadata/keys?key=content&select=value`,
           ).catch(() => []);
           const decoded = decodeHexJson(v);
           if (decoded) m = { ...decoded, ...m };
@@ -116,25 +123,22 @@ export default function ContractPage() {
     (async () => {
       try {
         const [raw, live] = await Promise.all([
-          jFetch(`${TZKT_API}/tokens?contract=${addr}&limit=10000`),
+          jFetch(`${TZKT_API.replace(/\/+$/,'')}/tokens?contract=${addr}&limit=10000`),
           listLiveTokenIds(addr, NETWORK, true),
         ]);
         if (cancel) return;
-        const allow = new Set(live.map((o) => +o.id));
-        // Helper to validate data URI previews.  Mirrors the robust checks
-        // used in the explore grid: JPEG must start with FFD8FF and end
-        // with FFD9; PNG/APNG must have an IEND chunk; GIF must have a
-        // proper header; BMP must begin with BM; WebP must be RIFF/WEBP.
+        const allow = new Set((live || []).map((o) => +o.id));
+
+        // Preview integrity checks (kept in full; matches project heuristics)
         const isValidPreview = (m = {}) => {
           const keys = [
             'artifactUri', 'artifact_uri',
-            'displayUri', 'display_uri',
-            'imageUri',   'image',
+            'displayUri',  'display_uri',
+            'imageUri',    'image',
             'thumbnailUri','thumbnail_uri',
-            'mediaUri',   'media_uri',
+            'mediaUri',    'media_uri',
           ];
           const mediaRe = /^data:(image\/|video\/|audio\/)/i;
-          // Find the first preview data URI
           let uri = null;
           for (const k of keys) {
             const v = m && typeof m === 'object' ? m[k] : undefined;
@@ -159,13 +163,12 @@ export default function ContractPage() {
           }
           if (!uri) return false;
           try {
-            const commaIndex = uri.indexOf(',');
-            if (commaIndex < 0) return false;
-            const header = uri.slice(5, commaIndex);
+            const comma = uri.indexOf(',');
+            if (comma < 0) return false;
+            const header = uri.slice(5, comma);
             const semi = header.indexOf(';');
             const mime = (semi >= 0 ? header.slice(0, semi) : header).toLowerCase();
-            const b64 = uri.slice(commaIndex + 1);
-            // decode entire base64; will throw on invalid base64
+            const b64 = uri.slice(comma + 1);
             let binary;
             if (typeof atob === 'function') {
               binary = atob(b64);
@@ -186,90 +189,88 @@ export default function ContractPage() {
               for (let i = bytes.length - 8; i >= 0; i--) {
                 if (bytes[i] === 0x49 && bytes[i + 1] === 0x45 &&
                     bytes[i + 2] === 0x4e && bytes[i + 3] === 0x44) {
-                  hasIEND = true;
-                  break;
+                  hasIEND = true; break;
                 }
               }
               return headerOk && hasIEND;
             }
-            if (mime === 'image/gif') {
-              const hdr = binary.slice(0, 6);
-              return hdr === 'GIF87a' || hdr === 'GIF89a';
-            }
-            if (mime === 'image/bmp') {
-              return bytes[0] === 0x42 && bytes[1] === 0x4d;
-            }
-            if (mime === 'image/webp') {
-              return binary.slice(0, 4) === 'RIFF' && binary.slice(8, 12) === 'WEBP';
-            }
-            // Accept other media types (audio/video/svg, etc.)
+            if (mime === 'image/gif')  return binary.slice(0, 6) === 'GIF87a' || binary.slice(0, 6) === 'GIF89a';
+            if (mime === 'image/bmp')  return bytes[0] === 0x42 && bytes[1] === 0x4d;
+            if (mime === 'image/webp') return binary.slice(0, 4) === 'RIFF' && binary.slice(8, 12) === 'WEBP';
             return true;
-          } catch {
-            return false;
-          }
+          } catch { return false; }
         };
+
         const decoded = (raw || [])
           .filter((t) => allow.has(+t.tokenId))
           .map((t) => {
             if (t.metadata && typeof t.metadata === 'object') {
-              t.metadata = decodeHexFields(t.metadata);                  // eslint-disable-line no-param-reassign
+              t.metadata = decodeHexFields(t.metadata); // eslint-disable-line no-param-reassign
             } else if (typeof t.metadata === 'string') {
               const j = decodeHexJson(t.metadata);
-              if (j) t.metadata = decodeHexFields(j);                    // eslint-disable-line no-param-reassign
+              if (j) t.metadata = decodeHexFields(j);   // eslint-disable-line no-param-reassign
             }
             const md = t.metadata || {};
             if (md && typeof md.creators === 'string') {
-              try {
-                const parsed = JSON.parse(md.creators);
-                if (Array.isArray(parsed)) md.creators = parsed;
-              } catch {/* ignore JSON errors */}
+              try { const p = JSON.parse(md.creators); if (Array.isArray(p)) md.creators = p; } catch {}
             }
             return t;
           })
-          // Filter out tokens without valid previews
           .filter((t) => isValidPreview(t.metadata));
+
         setTokens(decoded);
-        setTokOpts(live);
+        setTokOpts(live || []);
       } catch (err) {
-        console.error('Token fetch failed', err);
-        if (!cancel) {
-          setTokens([]);
-          setTokOpts([]);
-        }
+        console.error('Token fetch failed', err); // eslint-disable-line no-console
+        if (!cancel) { setTokens([]); setTokOpts([]); }
       } finally {
         if (!cancel) setLoading(false);
       }
     })();
 
     /* 3 · counts */
-    countOwners(addr, NETWORK).then((n) => {
-      if (!cancel) setOwners(n);
-    });
-    countTokens(addr, NETWORK).then((n) => {
-      if (!cancel) setTokCount(n);
-    });
+    countOwners(addr, NETWORK).then((n) => { if (!cancel) setOwners(n); });
+    countTokens(addr, NETWORK).then((n) => { if (!cancel) setTokCount(n); });
 
     return () => { cancel = true; };
   }, [addr]);
 
-  /*── filter helpers ───────────────────────────────────────*/
-  /**
-   * Derive a normalised array of authors/creators from a metadata object.
-   * Some ZeroContract versions store the creators field as a JSON‑encoded
-   * string or object.  This helper mirrors authorArray() from the explore
-   * grid and My Creations page.  It tries to JSON.parse() string values
-   * and falls back to a single‑element array.  Objects return their values.
-   */
+  /*── ZeroSum marketplace listings via **on‑chain view** ────*/
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      if (!addr) return;
+      try {
+        const rows = await fetchOnchainListingsForCollection({ toolkit, nftContract: String(addr), net: NETWORK });
+        if (cancelled) return;
+        setSaleListings(rows);
+      } catch (e) {
+        console.warn('collection listings view failed; leaving sale list empty', e); // eslint-disable-line no-console
+        setSaleListings([]);
+      }
+    }
+    run();
+    return () => { cancelled = true; };
+  }, [addr, toolkit]);
+
+  /* Overlay listing price into token cards for sort UX (optional) */
+  useEffect(() => {
+    if (!Array.isArray(saleListings) || saleListings.length === 0) return;
+    setTokens((prev) => prev.map((t) => {
+      const row = saleListings.find((l) => Number(l.tokenId) === Number(t.tokenId));
+      if (!row) return t;
+      const priceTez = Number(row.priceMutez) / 1_000_000;
+      const listedAt = row.startTime ? Date.parse(row.startTime) || 0 : 0;
+      return { ...t, price: priceTez, listedAt };
+    }));
+  }, [saleListings]);
+
+  /*── search + filter + sort ───────────────────────────────*/
   const getAuthors = useCallback((m = {}) => {
     const src = m.authors ?? m.artists ?? m.creators ?? [];
     if (Array.isArray(src)) return src;
     if (typeof src === 'string') {
-      try {
-        const j = JSON.parse(src);
-        if (Array.isArray(j)) return j;
-      } catch {
-        /* ignore parse errors */
-      }
+      try { const j = JSON.parse(src); if (Array.isArray(j)) return j; } catch {}
       return [src];
     }
     if (src && typeof src === 'object') return Object.values(src);
@@ -278,41 +279,33 @@ export default function ContractPage() {
 
   const applyFilters = useCallback((arr) => arr.filter((t) => {
     const m = t.metadata || {};
-    /* authors */
     if (filters.authors.size) {
       const aArr = getAuthors(m);
       if (!aArr.some((a) => filters.authors.has(a))) return false;
     }
-    /* mime */
     if (filters.mime.size && !filters.mime.has(m.mimeType)) return false;
-    /* tags */
     if (filters.tags.size) {
       const tagArr = m.tags || [];
       if (!tagArr.some((tg) => filters.tags.has(tg))) return false;
     }
-    /* 1/1 vs editions by totalSupply */
     const supply = Number(t.totalSupply || m.totalSupply || m.amount || 0);
-    if (filters.type === '1of1'   && supply !== 1) return false;
-    if (filters.type === 'editions' && supply <= 1) return false;
-    /* mature / flashing */
+    if (filters.type === '1of1'     && supply !== 1) return false;
+    if (filters.type === 'editions' && supply <= 1)  return false;
+
     const mature   = String(m.contentRating || '').toLowerCase().includes('mature');
     const flashing = String(m.accessibility || '').toLowerCase().includes('flash');
     if (filters.mature === 'exclude' && mature)   return false;
     if (filters.mature === 'only'    && !mature)  return false;
     if (filters.flash  === 'exclude' && flashing) return false;
-    if (filters.flash  === 'only'    && !flashing)return false;
+    if (filters.flash  === 'only'    && !flashing) return false;
     return true;
   }), [filters, getAuthors]);
 
-  /*── search + sort + token‑id filter ─────────────────────*/
-  const list = useMemo(() => {
+  const [list, cards] = useMemo(() => {
     let out = [...tokens];
-    if (tokSel) return out.filter((t) => String(t.tokenId) === String(tokSel));
-
-    /* filters */
+    if (tokSel) out = out.filter((t) => String(t.tokenId) === String(tokSel));
     out = applyFilters(out);
 
-    /* search */
     const q = search.trim().toLowerCase();
     if (q) {
       out = out.filter((t) => {
@@ -320,44 +313,40 @@ export default function ContractPage() {
         const hay = [
           m.name, m.description,
           ...(m.tags || []),
-          ...(Array.isArray(m.attributes)
-            ? m.attributes.map((a) => `${a.name}:${a.value}`)
-            : []),
+          ...(Array.isArray(m.attributes) ? m.attributes.map((a) => `${a.name}:${a.value}`) : []),
         ].join(' ').toLowerCase();
         return hay.includes(q);
       });
     }
 
-    /* sort */
     switch (sort) {
-      case 'oldest':                out.sort((a,b)=>a.tokenId-b.tokenId); break;
-      case 'recentlyListed':        out.sort((a,b)=>(b.listedAt||0)-(a.listedAt||0)); break;
-      case 'priceHigh':             out.sort((a,b)=>(b.price||0)-(a.price||0)); break;
-      case 'priceLow':              out.sort((a,b)=>(a.price||0)-(b.price||0)); break;
-      case 'offerHigh':             out.sort((a,b)=>(b.topOffer||0)-(a.topOffer||0)); break;
-      case 'offerLow':              out.sort((a,b)=>(a.topOffer||0)-(b.topOffer||0)); break;
-      default: /* newest */         out.sort((a,b)=>b.tokenId-a.tokenId);
+      case 'oldest':         out.sort((a,b)=>a.tokenId-b.tokenId); break;
+      case 'recentlyListed': out.sort((a,b)=>(b.listedAt||0)-(a.listedAt||0)); break;
+      case 'priceHigh':      out.sort((a,b)=>(b.price||0)-(a.price||0)); break;
+      case 'priceLow':       out.sort((a,b)=>(a.price||0)-(b.price||0)); break;
+      case 'offerHigh':      out.sort((a,b)=>(b.topOffer||0)-(a.topOffer||0)); break;
+      case 'offerLow':       out.sort((a,b)=>(a.topOffer||0)-(b.topOffer||0)); break;
+      default: /* newest */  out.sort((a,b)=>b.tokenId-a.tokenId);
     }
-    return out;
-  }, [tokens, search, sort, tokSel, applyFilters]);
 
-  const cards = useMemo(() =>
-    list.map((t) => (
-      <TokenCard
-        key={t.tokenId}
-        token={t}
-        contractAddress={addr}
-        contractName={meta?.name}
-      />
-    )),
-  [list, addr, meta]);
+    return [out,
+      out.map((t) => (
+        <TokenCard
+          key={t.tokenId}
+          token={t}
+          contractAddress={addr}
+          contractName={meta?.name}
+        />
+      )),
+    ];
+  }, [tokens, search, sort, tokSel, applyFilters, addr, meta]);
 
   /* stats */
-  const stats = {
-    tokens : tokCount,
-    owners : owners,
-    sales  : loading ? '…' : tokens.filter((t) => Number(t.price) > 0).length,
-  };
+  const saleCount = useMemo(() =>
+    (Array.isArray(saleListings) ? saleListings.length : 0),
+  [saleListings]);
+
+  const stats = { tokens: tokCount, owners, sales: loading ? '…' : saleCount };
 
   /*──────── render ─────────────────────────────────────────*/
   return (
@@ -376,6 +365,7 @@ export default function ContractPage() {
             meta={meta}
             contractAddress={addr}
             stats={stats}
+            saleListings={saleListings}
           />}
 
           <ControlsRow>
@@ -397,15 +387,9 @@ export default function ContractPage() {
               <option value="offerLow">Offer: low → high</option>
               <option value="oldest">Oldest</option>
             </select>
-            <TokenIdSelect
-              options={tokOpts}
-              value={tokSel}
-              onChange={setTokSel}
-            />
+            <TokenIdSelect options={tokOpts} value={tokSel} onChange={setTokSel} />
             {tokSel && (
-              <PixelButton size="sm" onClick={() => setTokSel('')}>
-                CLEAR
-              </PixelButton>
+              <PixelButton size="sm" onClick={() => setTokSel('')}>CLEAR</PixelButton>
             )}
           </ControlsRow>
 
@@ -418,15 +402,10 @@ export default function ContractPage() {
   );
 }
 
-/* What changed & why (r5):
-   • Added isValidPreview() helper and applied it during token
-     ingestion.  This function ensures that JPEG images start with
-     0xFFD8FF and end with 0xFFD9, PNG/APNG images include an IEND
-     chunk, GIFs have valid headers, BMPs begin with 'BM' and
-     WebP files contain RIFF/WEBP signatures.  Data URIs that do
-     not pass these checks are considered invalid and the token
-     is excluded from the contract page.
-   • Preserved existing authors filtering logic and metadata
-     decoding, including JSON‑encoded creators parsing.  Only the
-     preview validation logic was added. */
-/* EOF */
+/* What changed & why (r8):
+   • Wire in `fetchOnchainListingsForCollection` (TZIP‑16) to
+     compute **saleListings**; dedupe by tokenId (lowest price).
+   • “For Sale” stat derives from real view data and is passed to
+     the header component, which renders a clickable list.
+   • Keep full preview validation and SSR‑safe behaviour intact. */
+// EOF

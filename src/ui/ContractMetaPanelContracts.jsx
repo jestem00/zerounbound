@@ -1,9 +1,11 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/ContractMetaPanelContracts.jsx
-  Rev :    r5    2025‑10‑09
-  Summary: hazards + script‑toggle, shortKt, copyable addr,
-           fallback preview support (ipfs/http), confirm dlg
+  Rev :    r7    2025‑08‑27
+  Summary(of what this file does): Contract header panel with
+           integrity badge, admin/creator display, copyable KT1,
+           and a **clickable For‑Sale list** fed by on‑chain view.
+           The “For Sale” pill is now theme‑correct & readable.
 ──────────────────────────────────────────────────────────────*/
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import PropTypes                    from 'prop-types';
@@ -23,13 +25,8 @@ import {
   EnableScriptsOverlay,
 } from './EnableScripts.jsx';
 import decodeHexFields,{decodeHexJson} from '../utils/decodeHexFields.js';
-
-// Import domain resolver and network key for reverse lookups.  These helpers
-// allow conversion of Tezos addresses to .tez domains when a reverse
-// record exists.  shortAddr() abbreviates tz/KT addresses.  See
-// resolveTezosDomain.js for implementation details.
-import { resolveTezosDomain } from '../utils/resolveTezosDomain.js';
 import { NETWORK_KEY } from '../config/deployTarget.js';
+import { resolveTezosDomain } from '../utils/resolveTezosDomain.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -53,6 +50,11 @@ function pickThumb(m={}){
   if(!uri) return '';
   return DATA_RE.test(uri)?uri:(uri.startsWith('ipfs://')?ipfsToHttp(uri):uri);
 }
+const tez = (mutez) => {
+  const n = Number(mutez) / 1_000_000;
+  if (!Number.isFinite(n)) return '—';
+  return n.toLocaleString(undefined, { maximumFractionDigits: 6 });
+};
 
 /*──────── styled shells ─────────────────────────────────────*/
 const Card = styled.section`
@@ -84,13 +86,37 @@ const Desc   = styled.p`
   margin:6px 0 0;font-size:.8rem;line-height:1.35;white-space:pre-wrap;
 `;
 const StatRow= styled.div`
-  display:flex;gap:10px;font-size:.8rem;flex-wrap:wrap;
-  span{border:1px solid var(--zu-fg);padding:1px 6px;white-space:nowrap;}
+  display:flex;gap:10px;font-size:.8rem;flex-wrap:wrap;align-items:center;
+  .pill{
+    display:inline-flex;align-items:center;gap:.35rem;
+    padding:1px 8px;border:1px solid var(--zu-fg);
+    background:var(--zu-bg);color:var(--zu-fg);
+    text-decoration:none;white-space:nowrap;
+    line-height:1.2;cursor:default; user-select:none;
+  }
+  .pill.btn{
+    cursor:pointer;
+    transition:transform .05s ease;
+  }
+  .pill.btn:focus{ outline:1px dashed var(--zu-accent); outline-offset:2px; }
+  .pill.btn:hover{ transform:translateY(-1px); }
+  .pill.btn:disabled{ opacity:.6; cursor:default; }
+`;
+
+const SalePanel = styled.div`
+  margin-top:8px;border:2px dashed var(--zu-fg);padding:8px;display:grid;gap:6px;
+  background:var(--zu-bg-dim);
+`;
+const SaleRow = styled.div`
+  display:flex;gap:10px;align-items:center;justify-content:space-between;
+  font-size:.8rem;
+  a{ color: var(--zu-accent-sec,#6ff); text-decoration:none; }
+  code{ opacity:.85; }
 `;
 
 /*──────── component ───────────────────────────────────────*/
 export default function ContractMetaPanelContracts({
-  meta={}, contractAddress='', stats={tokens:'…',owners:'…',sales:'…'},
+  meta={}, contractAddress='', stats={tokens:'…',owners:'…',sales:'…'}, saleListings=[]
 }) {
   const metaObj = useMemo(()=>toMetaObject(meta),[meta]);
   const hazards = detectHazards(metaObj);
@@ -98,6 +124,8 @@ export default function ContractMetaPanelContracts({
   const [allowScr,setAllowScr] = useConsent(`scripts:${contractAddress}`,false);
   const [dlg,setDlg]           = useState(false);
   const [terms,setTerms]       = useState(false);
+
+  const [showSale, setShowSale] = useState(false);
 
   const integrity  = useMemo(()=>checkOnChainIntegrity(metaObj),[metaObj]);
   const {label}    = useMemo(()=>getIntegrityInfo(integrity.status),[integrity.status]);
@@ -111,15 +139,7 @@ export default function ContractMetaPanelContracts({
   const askEnable = () => {setTerms(false);setDlg(true);};
   const enable = () => {if(!terms)return;setAllowScr(true);setDlg(false);};
 
-  // --------------------------------------------------------------
-  // Address parsing and domain resolution logic.  The contract
-  // metadata may include fields such as authors, authoraddress and
-  // creators containing comma‑separated addresses or arrays.  We
-  // normalise these fields into arrays, resolve any Tezos addresses
-  // to .tez domains where possible, and provide optional copy
-  // functionality.  See resolveTezosDomain.js for details.
-
-  // Helper to parse a metadata field into an array of strings.
+  // ---------- Address & Domain helpers ----------
   const parseField = useCallback((field) => {
     if (!field) return [];
     if (Array.isArray(field)) return field.map((x) => String(x).trim()).filter(Boolean);
@@ -128,41 +148,15 @@ export default function ContractMetaPanelContracts({
     return [];
   }, []);
 
-  // Extract arrays for authors, admin (authoraddress) and creators.
   const authorsArr = useMemo(() => [], []);
   const adminArr   = useMemo(() => parseField(metaObj.authoraddress), [metaObj.authoraddress, parseField]);
   const creatorsArr= useMemo(() => parseField(metaObj.creators), [metaObj.creators, parseField]);
 
-  // Domain cache and list expansion flags.
   const [domains, setDomains] = useState({});
   const [showAllAuthors, setShowAllAuthors] = useState(false);
   const [showAllAdmins, setShowAllAdmins]   = useState(false);
   const [showAllCreators, setShowAllCreators] = useState(false);
 
-  // Derive a user‑friendly version label from the contract metadata.
-  // If the metadata includes a "version" key (e.g. "ZeroContractV4a"),
-  // extract the suffix after "ZeroContract" and lower‑case it (e.g. "v4a").
-  // Otherwise, leave blank.  This will be appended next to the contract
-  // address in parentheses.  A missing or malformed version yields an
-  // empty string so nothing extra is shown.
-  const verLabel = useMemo(() => {
-    const ver = String(metaObj.version || '').trim();
-    if (!ver) return '';
-    const lower = ver.toLowerCase();
-    const prefix = 'zerocontract';
-    const idx = lower.indexOf(prefix);
-    if (idx >= 0) {
-      const suffix = lower.slice(idx + prefix.length);
-      // ensure suffix starts with 'v'; if not, prepend 'v'
-      const trimmed = suffix.replace(/^v?/i, '');
-      return `v${trimmed}`;
-    }
-    return '';
-  }, [metaObj.version]);
-
-  // Resolve domain names for all addresses in the lists.  We use
-  // NETWORK_KEY to choose the correct Tezos Domains endpoint (mainnet
-  // or ghostnet).  The lookup only runs once per unique address.
   useEffect(() => {
     const addrs = new Set();
     [...authorsArr, ...adminArr, ...creatorsArr].forEach((val) => {
@@ -183,9 +177,6 @@ export default function ContractMetaPanelContracts({
     });
   }, [authorsArr, adminArr, creatorsArr]);
 
-  // Format a single value: return the resolved domain if present;
-  // return the value verbatim if it contains a dot (likely a name);
-  // otherwise abbreviate tz/KT addresses via shortAddr().
   const formatVal = useCallback((val) => {
     if (!val || typeof val !== 'string') return String(val || '');
     const v = val.trim();
@@ -196,10 +187,6 @@ export default function ContractMetaPanelContracts({
     return shortAddr(v);
   }, [domains]);
 
-  // Render a list of values with optional copy buttons.  When
-  // showAll is false and more than three entries exist, append a
-  // toggle to reveal the remainder.  Addresses are linked to the
-  // explore filter page.  Names/domains are rendered as plain text.
   const renderList = useCallback(
     (list, showAll, setShowAll, allowCopy) => {
       const display = showAll ? list : list.slice(0, 3);
@@ -255,19 +242,27 @@ export default function ContractMetaPanelContracts({
     [formatVal],
   );
 
+  // ---------- Sale list (deduped per token, lowest price) ----------
+  const saleRows = useMemo(() => {
+    const byToken = new Map();
+    for (const r of (saleListings || [])) {
+      if (!r) continue;
+      const id = Number(r.tokenId ?? r.token_id);
+      const price = Number(r.priceMutez ?? r.price);
+      const amt = Number(r.amount ?? 0);
+      const seller = String(r.seller || '');
+      const start = r.startTime || r.start_time || null;
+      if (!Number.isFinite(id) || !Number.isFinite(price) || price < 0 || amt <= 0) continue;
+      const prev = byToken.get(id);
+      if (!prev || price < prev.priceMutez) {
+        byToken.set(id, { tokenId: id, priceMutez: price, amount: amt, seller, startTime: start });
+      }
+    }
+    return Array.from(byToken.values()).sort((a,b)=>a.tokenId-b.tokenId);
+  }, [saleListings]);
+
   return (
     <>
-      {/*
-        Contract metadata panel for marketplace collections. Displays
-        a preview thumbnail, collection title with integrity badge,
-        contract address (abbreviated KT1 + copy button), admin
-        addresses with domain resolution and copy icons, and
-        additional metadata fields such as symbol, version, type,
-        license, homepage, authors and creators.  Author/creator
-        lists support multiple entries with "More" toggles and link
-        to the explore filter page.  All fields are optional and
-        hidden when absent.
-      */}
       <Card>
         <ThumbBox>
           {hazards.scripts&&(
@@ -304,12 +299,18 @@ export default function ContractMetaPanelContracts({
           <AddrRow>
             <code title={contractAddress}>
               {shortKt(contractAddress)}
-              {verLabel ? ` (${verLabel})` : ''}
+              {(() => {
+                const ver = String(metaObj.version || '').trim();
+                if(!ver) return '';
+                const idx = ver.toLowerCase().indexOf('zerocontract');
+                if(idx<0) return '';
+                const suffix = ver.toLowerCase().slice(idx+'zerocontract'.length).replace(/^v?/,'v');
+                return ` (${suffix})`;
+              })()}
             </code>
             <PixelButton size="xs" onClick={copy}>📋</PixelButton>
           </AddrRow>
 
-          {/* admin row with domain resolution and copy buttons */}
           {adminArr.length > 0 && (
             <AddrRow>
               <span>Admin:&nbsp;</span>
@@ -317,7 +318,6 @@ export default function ContractMetaPanelContracts({
             </AddrRow>
           )}
 
-          {/* optional metadata fields */}
           {metaObj.symbol && (
             <p style={{ fontSize: '.75rem', margin: '0 0 2px' }}>
               <strong>Symbol</strong>: {metaObj.symbol}
@@ -351,7 +351,6 @@ export default function ContractMetaPanelContracts({
             </p>
           )}
 
-          {/* creator list (authors suppressed) */}
           {creatorsArr.length > 0 && (
             <p style={{ fontSize: '.75rem', margin: '0 0 2px' }}>
               <strong>Creator(s)</strong>:&nbsp;
@@ -362,10 +361,37 @@ export default function ContractMetaPanelContracts({
           {metaObj.description && <Desc>{metaObj.description}</Desc>}
 
           <StatRow>
-            <span>{stats.tokens} Tokens</span>
-            <span>{stats.owners} Owners</span>
-            <span>{stats.sales} For Sale</span>
+            <span className="pill">{stats.tokens} Tokens</span>
+            <span className="pill">{stats.owners} Owners</span>
+            <button
+              type="button"
+              className="pill btn"
+              aria-expanded={showSale}
+              onClick={() => setShowSale((v) => !v)}
+              title={saleRows.length ? 'Click to view items for sale' : 'No active listings'}
+              disabled={!saleRows.length}
+            >
+              {String(saleRows.length)} For Sale
+            </button>
           </StatRow>
+
+          {showSale && saleRows.length > 0 && (
+            <SalePanel role="region" aria-label="Items for sale">
+              {saleRows.map((r) => (
+                <SaleRow key={`sale-${r.tokenId}`}>
+                  <div style={{display:'flex',gap:'8px',alignItems:'center',minWidth:0}}>
+                    <a href={`/tokens/${contractAddress}/${r.tokenId}`}>
+                      Token #{r.tokenId}
+                    </a>
+                    {r.amount > 1 && <code>×{r.amount}</code>}
+                  </div>
+                  <div>
+                    <strong>{tez(r.priceMutez)} ꜩ</strong>
+                  </div>
+                </SaleRow>
+              ))}
+            </SalePanel>
+          )}
         </Body>
       </Card>
 
@@ -401,5 +427,15 @@ ContractMetaPanelContracts.propTypes = {
     owners:PropTypes.oneOfType([PropTypes.number,PropTypes.string]),
     sales :PropTypes.oneOfType([PropTypes.number,PropTypes.string]),
   }),
+  saleListings: PropTypes.arrayOf(PropTypes.shape({
+    tokenId   : PropTypes.oneOfType([PropTypes.string,PropTypes.number]),
+    priceMutez: PropTypes.oneOfType([PropTypes.string,PropTypes.number]),
+    amount    : PropTypes.oneOfType([PropTypes.string,PropTypes.number]),
+    seller    : PropTypes.string,
+    startTime : PropTypes.oneOfType([PropTypes.string,PropTypes.number]),
+  })),
 };
-/* EOF */
+/* What changed & why: r7 – Fixed pill contrast (explicit theme
+   colors), kept semantic button behaviour, and added a clickable
+   sale panel listing lowest‑price items with token links. */
+// EOF

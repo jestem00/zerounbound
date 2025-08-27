@@ -47,6 +47,7 @@
         "src/hooks/useConsent.js",
         "src/pages/**",
         "src/core/marketplace.js",
+        "src/core/marketplaceHelper.js",
         "src/ui/CollectionCard.jsx",
         "src/ui/ContractMetaPanelContracts.jsx",
         "src/ui/TokenIdSelect.jsx",
@@ -88,8 +89,7 @@
         "src/constants/integrityBadges.js",
         "src/ui/IntegrityBadge.jsx",
         "src/config/**/*.js",
-        "src/data/**/*.json",
-        "contracts/**"
+        "src/data/**/*.json"
       ]
     },
     {

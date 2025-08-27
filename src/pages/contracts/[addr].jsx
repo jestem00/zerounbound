@@ -1,13 +1,11 @@
-/*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
-  File:    src/pages/contracts/[addr].jsx
-  Rev :    r8    2025‑08‑27
+/*Developed by @jams2blues – ZeroContract Studio
+  File: src/pages/contracts/[addr].jsx
+  Rev : r9    2025‑10‑12
   Summary(of what this file does): Contract detail page with live
-           token grid, filtering, sorting, stats, and **accurate
-           For‑Sale count** using ZeroSum on‑chain view (TZIP‑16)
-           with TzKT/BCD fallbacks. Preserves robust preview
-           filtering and SSR‑safe behaviour.
-──────────────────────────────────────────────────────────────*/
+           token grid, filtering, sorting, stats, and accurate
+           For‑Sale count+filter.  Wires header “For Sale” pill to a
+           popover of clickable token‑ids that filters the grid. */
+
 import React, {
   useEffect, useMemo, useState, useCallback,
 } from 'react';
@@ -29,11 +27,12 @@ import decodeHexFields, { decodeHexJson } from '../../utils/decodeHexFields.js';
 import { jFetch }       from '../../core/net.js';
 import { TARGET }       from '../../config/deployTarget.js';
 
+/* Marketplace helpers */
+import { fetchOnchainListingsForCollection } from '../../core/marketplace.js';
+import { countActiveListingsForCollection as countViaTzkt } from '../../core/marketplaceHelper.js';
+
 /* Wallet toolkit (SSR‑safe context) */
 import { useWallet } from '../../contexts/WalletContext.js';
-
-/* ZeroSum marketplace on‑chain view */
-import { fetchOnchainListingsForCollection } from '../../core/zeroSumViews.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -68,34 +67,35 @@ const TZKT_API = NETWORK === 'mainnet'
   ? 'https://api.tzkt.io/v1'
   : 'https://api.ghostnet.tzkt.io/v1';
 
+/*──────── component ───────────────────────────────────────*/
 export default function ContractPage() {
   const router           = useRouter();
   const { addr }         = router.query;
-
   const { toolkit }      = useWallet() || {};
 
-  const [meta, setMeta]     = useState(null);
-  const [tokens, setTokens] = useState([]);
+  const [meta, setMeta]       = useState(null);
+  const [tokens, setTokens]   = useState([]);
   const [tokCount, setTokCount] = useState('…');
-  const [owners, setOwners] = useState('…');
+  const [owners, setOwners]   = useState('…');
   const [loading, setLoading] = useState(true);
   const [tokOpts, setTokOpts] = useState([]);
   const [tokSel,  setTokSel]  = useState('');
 
-  /* On‑chain marketplace listings (deduped per tokenId → lowest price) */
+  /* On‑chain marketplace listings (deduped per tokenId) */
   const [saleListings, setSaleListings] = useState([]);
+  const [saleFallbackCount, setSaleFallbackCount] = useState(0);
 
-  /* ui state */
-  const [search, setSearch] = useState('');
-  const [sort, setSort]     = useState('newest');
+  /* ui */
+  const [search, setSearch]   = useState('');
+  const [sort, setSort]       = useState('newest');
 
   /* filters */
   const [filters, setFilters] = useState({
     authors: new Set(),
     mime   : new Set(),
     tags   : new Set(),
-    type   : '',               // '', '1of1', 'editions'
-    mature : 'include',        // include | exclude | only
+    type   : '',              /* '', 1of1, editions */
+    mature : 'include',        /* include | exclude | only */
     flash  : 'include',
   });
 
@@ -106,11 +106,11 @@ export default function ContractPage() {
     /* 1 · contract metadata (hex → JSON fallback) */
     (async () => {
       try {
-        const r = await jFetch(`${TZKT_API.replace(/\/+$/,'')}/contracts/${addr}`);
+        const r = await jFetch(`${TZKT_API}/contracts/${addr}`);
         let m   = r?.metadata ?? {};
         if (!m?.name) {
           const [v] = await jFetch(
-            `${TZKT_API.replace(/\/+$/,'')}/contracts/${addr}/bigmaps/metadata/keys?key=content&select=value`,
+            `${TZKT_API}/contracts/${addr}/bigmaps/metadata/keys?key=content&select=value`,
           ).catch(() => []);
           const decoded = decodeHexJson(v);
           if (decoded) m = { ...decoded, ...m };
@@ -123,20 +123,18 @@ export default function ContractPage() {
     (async () => {
       try {
         const [raw, live] = await Promise.all([
-          jFetch(`${TZKT_API.replace(/\/+$/,'')}/tokens?contract=${addr}&limit=10000`),
+          jFetch(`${TZKT_API}/tokens?contract=${addr}&limit=10000`),
           listLiveTokenIds(addr, NETWORK, true),
         ]);
         if (cancel) return;
-        const allow = new Set((live || []).map((o) => +o.id));
-
-        // Preview integrity checks (kept in full; matches project heuristics)
+        const allow = new Set(live.map((o) => +o.id));
         const isValidPreview = (m = {}) => {
           const keys = [
             'artifactUri', 'artifact_uri',
-            'displayUri',  'display_uri',
-            'imageUri',    'image',
+            'displayUri', 'display_uri',
+            'imageUri',   'image',
             'thumbnailUri','thumbnail_uri',
-            'mediaUri',    'media_uri',
+            'mediaUri',   'media_uri',
           ];
           const mediaRe = /^data:(image\/|video\/|audio\/)/i;
           let uri = null;
@@ -163,12 +161,12 @@ export default function ContractPage() {
           }
           if (!uri) return false;
           try {
-            const comma = uri.indexOf(',');
-            if (comma < 0) return false;
-            const header = uri.slice(5, comma);
+            const commaIndex = uri.indexOf(',');
+            if (commaIndex < 0) return false;
+            const header = uri.slice(5, commaIndex);
             const semi = header.indexOf(';');
             const mime = (semi >= 0 ? header.slice(0, semi) : header).toLowerCase();
-            const b64 = uri.slice(comma + 1);
+            const b64 = uri.slice(commaIndex + 1);
             let binary;
             if (typeof atob === 'function') {
               binary = atob(b64);
@@ -189,65 +187,99 @@ export default function ContractPage() {
               for (let i = bytes.length - 8; i >= 0; i--) {
                 if (bytes[i] === 0x49 && bytes[i + 1] === 0x45 &&
                     bytes[i + 2] === 0x4e && bytes[i + 3] === 0x44) {
-                  hasIEND = true; break;
+                  hasIEND = true;
+                  break;
                 }
               }
               return headerOk && hasIEND;
             }
-            if (mime === 'image/gif')  return binary.slice(0, 6) === 'GIF87a' || binary.slice(0, 6) === 'GIF89a';
-            if (mime === 'image/bmp')  return bytes[0] === 0x42 && bytes[1] === 0x4d;
-            if (mime === 'image/webp') return binary.slice(0, 4) === 'RIFF' && binary.slice(8, 12) === 'WEBP';
+            if (mime === 'image/gif') {
+              const hdr = binary.slice(0, 6);
+              return hdr === 'GIF87a' || hdr === 'GIF89a';
+            }
+            if (mime === 'image/bmp') {
+              return bytes[0] === 0x42 && bytes[1] === 0x4d;
+            }
+            if (mime === 'image/webp') {
+              return binary.slice(0, 4) === 'RIFF' && binary.slice(8, 12) === 'WEBP';
+            }
             return true;
-          } catch { return false; }
+          } catch {
+            return false;
+          }
         };
-
         const decoded = (raw || [])
           .filter((t) => allow.has(+t.tokenId))
           .map((t) => {
             if (t.metadata && typeof t.metadata === 'object') {
-              t.metadata = decodeHexFields(t.metadata); // eslint-disable-line no-param-reassign
+              t.metadata = decodeHexFields(t.metadata);                  // eslint-disable-line no-param-reassign
             } else if (typeof t.metadata === 'string') {
               const j = decodeHexJson(t.metadata);
-              if (j) t.metadata = decodeHexFields(j);   // eslint-disable-line no-param-reassign
+              if (j) t.metadata = decodeHexFields(j);                    // eslint-disable-line no-param-reassign
             }
             const md = t.metadata || {};
             if (md && typeof md.creators === 'string') {
-              try { const p = JSON.parse(md.creators); if (Array.isArray(p)) md.creators = p; } catch {}
+              try {
+                const parsed = JSON.parse(md.creators);
+                if (Array.isArray(parsed)) md.creators = parsed;
+              } catch {/* ignore */ }
             }
             return t;
           })
           .filter((t) => isValidPreview(t.metadata));
-
         setTokens(decoded);
-        setTokOpts(live || []);
+        setTokOpts(live);
       } catch (err) {
-        console.error('Token fetch failed', err); // eslint-disable-line no-console
-        if (!cancel) { setTokens([]); setTokOpts([]); }
+        console.error('Token fetch failed', err);
+        if (!cancel) {
+          setTokens([]);
+          setTokOpts([]);
+        }
       } finally {
         if (!cancel) setLoading(false);
       }
     })();
 
     /* 3 · counts */
-    countOwners(addr, NETWORK).then((n) => { if (!cancel) setOwners(n); });
-    countTokens(addr, NETWORK).then((n) => { if (!cancel) setTokCount(n); });
+    countOwners(addr, NETWORK).then((n) => {
+      if (!cancel) setOwners(n);
+    });
+    countTokens(addr, NETWORK).then((n) => {
+      if (!cancel) setTokCount(n);
+    });
 
     return () => { cancel = true; };
   }, [addr]);
 
-  /*── ZeroSum marketplace listings via **on‑chain view** ────*/
+  /*── marketplace listings via TZIP‑16 on‑chain view (with TzKT fallback) ─*/
   useEffect(() => {
     let cancelled = false;
     async function run() {
       if (!addr) return;
+
+      let listings = [];
+      let fallbackCount = 0;
+
       try {
-        const rows = await fetchOnchainListingsForCollection({ toolkit, nftContract: String(addr), net: NETWORK });
-        if (cancelled) return;
-        setSaleListings(rows);
+        if (toolkit) {
+          listings = await fetchOnchainListingsForCollection({ toolkit, nftContract: String(addr) });
+        }
       } catch (e) {
-        console.warn('collection listings view failed; leaving sale list empty', e); // eslint-disable-line no-console
-        setSaleListings([]);
+        console.warn('on‑chain collection listings view error', e);
       }
+
+      if ((!listings || listings.length === 0)) {
+        try {
+          // Fallback: fast TzKT scan for count only
+          fallbackCount = await countViaTzkt(String(addr), [], NETWORK);
+        } catch {
+          fallbackCount = 0;
+        }
+      }
+
+      if (cancelled) return;
+      setSaleListings(Array.isArray(listings) ? listings : []);
+      setSaleFallbackCount(Number(fallbackCount) || 0);
     }
     run();
     return () => { cancelled = true; };
@@ -270,7 +302,10 @@ export default function ContractPage() {
     const src = m.authors ?? m.artists ?? m.creators ?? [];
     if (Array.isArray(src)) return src;
     if (typeof src === 'string') {
-      try { const j = JSON.parse(src); if (Array.isArray(j)) return j; } catch {}
+      try {
+        const j = JSON.parse(src);
+        if (Array.isArray(j)) return j;
+      } catch {}
       return [src];
     }
     if (src && typeof src === 'object') return Object.values(src);
@@ -289,23 +324,21 @@ export default function ContractPage() {
       if (!tagArr.some((tg) => filters.tags.has(tg))) return false;
     }
     const supply = Number(t.totalSupply || m.totalSupply || m.amount || 0);
-    if (filters.type === '1of1'     && supply !== 1) return false;
-    if (filters.type === 'editions' && supply <= 1)  return false;
-
+    if (filters.type === '1of1'   && supply !== 1) return false;
+    if (filters.type === 'editions' && supply <= 1) return false;
     const mature   = String(m.contentRating || '').toLowerCase().includes('mature');
     const flashing = String(m.accessibility || '').toLowerCase().includes('flash');
     if (filters.mature === 'exclude' && mature)   return false;
     if (filters.mature === 'only'    && !mature)  return false;
     if (filters.flash  === 'exclude' && flashing) return false;
-    if (filters.flash  === 'only'    && !flashing) return false;
+    if (filters.flash  === 'only'    && !flashing)return false;
     return true;
   }), [filters, getAuthors]);
 
-  const [list, cards] = useMemo(() => {
+  const list = useMemo(() => {
     let out = [...tokens];
-    if (tokSel) out = out.filter((t) => String(t.tokenId) === String(tokSel));
+    if (tokSel) return out.filter((t) => String(t.tokenId) === String(tokSel));
     out = applyFilters(out);
-
     const q = search.trim().toLowerCase();
     if (q) {
       out = out.filter((t) => {
@@ -313,40 +346,59 @@ export default function ContractPage() {
         const hay = [
           m.name, m.description,
           ...(m.tags || []),
-          ...(Array.isArray(m.attributes) ? m.attributes.map((a) => `${a.name}:${a.value}`) : []),
+          ...(Array.isArray(m.attributes)
+            ? m.attributes.map((a) => `${a.name}:${a.value}`)
+            : []),
         ].join(' ').toLowerCase();
         return hay.includes(q);
       });
     }
-
     switch (sort) {
-      case 'oldest':         out.sort((a,b)=>a.tokenId-b.tokenId); break;
-      case 'recentlyListed': out.sort((a,b)=>(b.listedAt||0)-(a.listedAt||0)); break;
-      case 'priceHigh':      out.sort((a,b)=>(b.price||0)-(a.price||0)); break;
-      case 'priceLow':       out.sort((a,b)=>(a.price||0)-(b.price||0)); break;
-      case 'offerHigh':      out.sort((a,b)=>(b.topOffer||0)-(a.topOffer||0)); break;
-      case 'offerLow':       out.sort((a,b)=>(a.topOffer||0)-(b.topOffer||0)); break;
-      default: /* newest */  out.sort((a,b)=>b.tokenId-a.tokenId);
+      case 'oldest':                out.sort((a,b)=>a.tokenId-b.tokenId); break;
+      case 'recentlyListed':        out.sort((a,b)=>(b.listedAt||0)-(a.listedAt||0)); break;
+      case 'priceHigh':             out.sort((a,b)=>(b.price||0)-(a.price||0)); break;
+      case 'priceLow':              out.sort((a,b)=>(a.price||0)-(b.price||0)); break;
+      case 'offerHigh':             out.sort((a,b)=>(b.topOffer||0)-(a.topOffer||0)); break;
+      case 'offerLow':              out.sort((a,b)=>(a.topOffer||0)-(b.topOffer||0)); break;
+      default: /* newest */         out.sort((a,b)=>b.tokenId-a.tokenId);
     }
+    return out;
+  }, [tokens, search, sort, tokSel, applyFilters]);
 
-    return [out,
-      out.map((t) => (
-        <TokenCard
-          key={t.tokenId}
-          token={t}
-          contractAddress={addr}
-          contractName={meta?.name}
-        />
-      )),
-    ];
-  }, [tokens, search, sort, tokSel, applyFilters, addr, meta]);
+  const cards = useMemo(() =>
+    list.map((t) => (
+      <TokenCard
+        key={t.tokenId}
+        token={t}
+        contractAddress={addr}
+        contractName={meta?.name}
+      />
+    )),
+  [list, addr, meta]);
 
   /* stats */
-  const saleCount = useMemo(() =>
-    (Array.isArray(saleListings) ? saleListings.length : 0),
-  [saleListings]);
+  const saleCount = useMemo(() => {
+    if (Array.isArray(saleListings) && saleListings.length) {
+      const ids = new Set(saleListings.map((r) => Number(r.tokenId)));
+      return ids.size;
+    }
+    return Number(saleFallbackCount || 0);
+  }, [saleListings, saleFallbackCount]);
 
-  const stats = { tokens: tokCount, owners, sales: loading ? '…' : saleCount };
+  const stats = {
+    tokens : tokCount,
+    owners : owners,
+    sales  : loading ? '…' : saleCount,
+  };
+
+  /* Clicking a For‑Sale token‑id should filter the grid and scroll to it. */
+  const handlePickTokenId = useCallback((id) => {
+    setTokSel(String(id));
+    if (typeof window !== 'undefined') {
+      const el = document.getElementById('token-grid');
+      if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, []);
 
   /*──────── render ─────────────────────────────────────────*/
   return (
@@ -361,12 +413,16 @@ export default function ContractPage() {
         />
 
         <div>
-          {meta && <ContractMetaPanelContracts
-            meta={meta}
-            contractAddress={addr}
-            stats={stats}
-            saleListings={saleListings}
-          />}
+          {meta && (
+            <ContractMetaPanelContracts
+              meta={meta}
+              contractAddress={addr}
+              stats={stats}
+              saleListings={saleListings}
+              saleFallbackCount={saleFallbackCount}
+              onPickTokenId={handlePickTokenId}
+            />
+          )}
 
           <ControlsRow>
             <PixelInput
@@ -387,25 +443,32 @@ export default function ContractPage() {
               <option value="offerLow">Offer: low → high</option>
               <option value="oldest">Oldest</option>
             </select>
-            <TokenIdSelect options={tokOpts} value={tokSel} onChange={setTokSel} />
+            <TokenIdSelect
+              options={tokOpts}
+              value={tokSel}
+              onChange={setTokSel}
+            />
             {tokSel && (
-              <PixelButton size="sm" onClick={() => setTokSel('')}>CLEAR</PixelButton>
+              <PixelButton size="sm" onClick={() => setTokSel('')}>
+                CLEAR
+              </PixelButton>
             )}
           </ControlsRow>
 
           {loading
             ? <p style={{ textAlign:'center', marginTop:'2rem' }}>Loading…</p>
-            : <Grid>{cards}</Grid>}
+            : <Grid id="token-grid">{cards}</Grid>}
         </div>
       </Wrap>
     </>
   );
 }
 
-/* What changed & why (r8):
-   • Wire in `fetchOnchainListingsForCollection` (TZIP‑16) to
-     compute **saleListings**; dedupe by tokenId (lowest price).
-   • “For Sale” stat derives from real view data and is passed to
-     the header component, which renders a clickable list.
-   • Keep full preview validation and SSR‑safe behaviour intact. */
+/* What changed & why (r9):
+   • Restored click‑through UX: the header now passes an onPickTokenId
+     callback so the “For Sale” pill can show clickable token‑ids and
+     filter the grid.  Added #token-grid anchor for smooth scroll.
+   • Kept all robust ingestion logic and the TZIP‑16 + TzKT for‑sale
+     count from the previous revision intact.  Base behaviour remains
+     consistent with r5 baseline.  (Ref: prior variants)  :contentReference[oaicite:2]{index=2} */
 // EOF

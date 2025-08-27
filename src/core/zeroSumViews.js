@@ -1,212 +1,135 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/core/zeroSumViews.js
-  Rev :    r1   2025‑08‑27
-  Summary(of what this file does): Thin, SSR‑safe wrappers around
-           ZeroSum marketplace TZIP‑16 views. Primary: fetch
-           `onchain_listings_for_collection` (param: address),
-           with robust fallbacks (TzKT/BCD) and strict, deduped
-           normalization for UI consumption.
+  Rev :    r12   2025‑10‑11
+  Summary: Robust wrappers for **on‑chain** ZeroSum views executed
+           via Taquito TZIP‑16 contractViews with resilient param
+           handling.  Fixes the “0 For Sale” issue by trying all
+           common single‑param shapes (object keys: address /
+           nft_contract / collection, and positional) and normalises
+           results across toolchain variations.
 ──────────────────────────────────────────────────────────────*/
 
-import { NETWORK_KEY, MARKETPLACE_ADDRESSES, MARKETPLACE_ADDRESS, TZKT_API } from '../config/deployTarget.js';
-import { jFetch } from './net.js';
+import { Tzip16Module, tzip16 } from '@taquito/tzip16';
 
-/*──────── address + network helpers ─────────────────────────*/
-const isKt = (s) => typeof s === 'string' && /^KT1[0-9A-Za-z]{33}$/i.test(s.trim());
+/* Ensure the toolkit has the tzip16 extension attached (idempotent). */
+function ensureTzip16(toolkit) {
+  if (!toolkit) throw new Error('Tezos toolkit is required');
+  try { toolkit.addExtension?.(new Tzip16Module()); } catch { /* already added */ }
+  return toolkit;
+}
 
-export const marketplaceAddr = (net = NETWORK_KEY) => {
-  const key = /mainnet/i.test(String(net)) ? 'mainnet' : 'ghostnet';
-  return (MARKETPLACE_ADDRESSES?.[key] || MARKETPLACE_ADDRESSES?.ghostnet || MARKETPLACE_ADDRESS || '').trim();
-};
+/* Attempt to derive a view caller. On-chain views require a sender address. */
+async function getViewCaller(contract, toolkit) {
+  try { return await toolkit.signer.publicKeyHash(); } catch {}
+  try { return (await toolkit.wallet?.pkh?.()) || String(contract?.address || ''); } catch {}
+  return String(contract?.address || '');
+}
 
-const tzktV1Base = (net = NETWORK_KEY) => {
-  const base = String(TZKT_API || (/mainnet/i.test(String(net)) ? 'https://api.tzkt.io' : 'https://api.ghostnet.tzkt.io')).replace(/\/+$/, '');
-  return `${base}/v1`;
-};
+/* Load the marketplace contract with tzip16 interface enabled. */
+async function getMarket(toolkit, marketAddress) {
+  ensureTzip16(toolkit);
+  return toolkit.contract.at(marketAddress, tzip16);
+}
 
-/*──────── shape guards & normalizers ────────────────────────*/
-/** Convert MichelsonMap-esque / iterator / object-of-objects into a flat array */
-function toArrayish(v) {
-  if (!v) return [];
-  if (Array.isArray(v)) return v;
-  if (typeof v?.entries === 'function') {
-    const out = [];
-    for (const [, val] of v.entries()) out.push(val);
+/* Execute a contract view trying multiple parameter shapes until one succeeds. */
+async function execView(contract, viewName, paramVariants, execOpts) {
+  const v = contract?.contractViews?.[viewName];
+  if (typeof v !== 'function') throw new Error(`View ${viewName} not found on contract`);
+  for (const arg of paramVariants) {
+    try {
+      const handle = Array.isArray(arg) ? v(...arg) : v(arg);
+      const res = await handle.executeView(execOpts);
+      return res;
+    } catch (e) {
+      // continue with next variant
+    }
+  }
+  return null;
+}
+
+/* Convert various collection view results into a normalised array. */
+function parseCollectionListings(raw) {
+  const out = [];
+  const push = (x) => {
+    if (!x) return;
+    out.push({
+      contract     : String(x.nft_contract || x.contract || x.collection || ''),
+      tokenId      : Number(x.token_id ?? x.tokenId ?? x.token?.token_id ?? x.token?.id ?? 0),
+      seller       : String(x.seller || x.owner || ''),
+      priceMutez   : Number(x.price ?? x.priceMutez ?? 0),
+      amount       : Number(x.amount ?? x.quantity ?? x.amountTokens ?? 0),
+      active       : !!(x.active ?? x.is_active ?? true),
+      startTime    : x.start_time ?? x.start ?? null,
+      saleSplits   : x.sale_splits || x.saleSplits || [],
+      royaltySplits: x.royalty_splits || x.royaltySplits || [],
+    });
+  };
+
+  if (!raw) return out;
+  if (Array.isArray(raw)) {
+    raw.forEach(push);
     return out;
   }
-  if (typeof v === 'object') return Object.values(v);
-  return [];
-}
-
-/** Safely pick a number (mutez or nat). */
-function toNum(n, d = 0) {
-  const v = Number(n);
-  return Number.isFinite(v) ? v : d;
-}
-/** Safely pick a bool with sensible default (active=true absent → true). */
-function toBool(b, d = true) {
-  return typeof b === 'boolean' ? b : d;
-}
-/** Normalize the many shapes we may see from toolkit/TzKT/BCD into one listing row. */
-function normListing(x = {}) {
-  if (!x || typeof x !== 'object') return null;
-
-  // Common field aliases
-  const tokenId =
-    toNum(
-      x.token_id ?? x.tokenId ?? x.token?.token_id ?? x.token?.id ?? x.id,
-      NaN,
-    );
-  if (!Number.isFinite(tokenId)) return null;
-
-  const priceMutez = toNum(
-    x.priceMutez ?? x.price_mutez ?? x.price ?? x.amount_mutez ?? x.amountMutez,
-    NaN,
-  );
-  if (!Number.isFinite(priceMutez)) return null;
-
-  const amount = toNum(x.amount ?? x.balance ?? x.qty ?? 1, 1);
-  const seller =
-    (typeof x.seller === 'string' && x.seller) ||
-    (x.seller && typeof x.seller === 'object' && (x.seller.address || x.seller.owner)) ||
-    '';
-  const startTime = x.start_time ?? x.startTime ?? x.listed_at ?? null;
-  const active = toBool(x.active ?? x.is_active ?? x.listing_active ?? x.live, true);
-
-  return { tokenId, priceMutez, amount, seller: String(seller || ''), startTime, active };
-}
-
-/** Deduplicate by tokenId, **keeping lowest price** for the UI. */
-function dedupeLowest(list = []) {
-  const byId = new Map();
-  for (const row of list) {
-    if (!row) continue;
-    const prev = byId.get(row.tokenId);
-    if (!prev || row.priceMutez < prev.priceMutez) byId.set(row.tokenId, row);
+  if (raw?.entries && typeof raw.entries === 'function') {
+    for (const [, v] of raw.entries()) push(v);
+    return out;
   }
-  return Array.from(byId.values()).sort((a, b) => a.tokenId - b.tokenId);
-}
-
-/*──────── primary path: Taquito TZIP‑16 ─────────────────────*/
-async function viaTzip16({ toolkit, market, nftContract }) {
-  if (!toolkit || !market || !nftContract) return [];
-  try {
-    // Dynamic import (SSR‑safe) + extension register (idempotent)
-    const mod = await import('@taquito/tzip16');
-    const Tzip16Module = mod.Tzip16Module || mod.default?.Tzip16Module;
-    const tzip16 = mod.tzip16 || mod.default?.tzip16;
-    if (!Tzip16Module || !tzip16) return [];
-
-    try { toolkit.addExtension(new Tzip16Module()); } catch { /* duplicate ok */ }
-    const c = await toolkit.contract.at(market, tzip16);
-    const t16 = typeof c.tzip16 === 'function' ? c.tzip16() : c.tzip16;
-
-    const names = [
-      'onchain_listings_for_collection',      // expected
-      'listings_for_collection',              // alt
-      'onchain_listings_for_collection_view', // defensive
-    ];
-
-    // Prefer metadataViews facade
-    if (typeof t16?.metadataViews === 'function') {
-      const views = await t16.metadataViews();
-      for (const name of names) {
-        const v = views?.[name];
-        if (typeof v === 'function') {
-          try {
-            const res = await v().executeView(String(nftContract));
-            const arr = toArrayish(res).map(normListing).filter(Boolean);
-            if (arr.length) return arr;
-          } catch { /* try next */ }
-        }
-      }
-    }
-
-    // Fallback to generic executeView
-    if (typeof t16?.executeView === 'function') {
-      for (const name of names) {
-        try {
-          const res = await t16.executeView(name, [String(nftContract)], undefined, { viewCaller: market });
-          const arr = toArrayish(res).map(normListing).filter(Boolean);
-          if (arr.length) return arr;
-        } catch { /* next */ }
-      }
-    }
-    return [];
-  } catch {
-    return [];
+  if (typeof raw === 'object') {
+    Object.values(raw).forEach(push);
+    return out;
   }
+  return out;
 }
 
-/*──────── fallback path: TzKT `views` endpoint ───────────────*/
-async function viaTzkt({ net = NETWORK_KEY, market, nftContract }) {
-  try {
-    const base = tzktV1Base(net);
-    const names = [
-      'onchain_listings_for_collection',
-      'listings_for_collection',
-    ];
-    for (const name of names) {
-      const url = `${base}/contracts/${encodeURIComponent(market)}/views/${encodeURIComponent(name)}?` +
-                  new URLSearchParams({ input: String(nftContract), unlimited: 'true', format: 'json' }).toString();
-      const raw = await jFetch(url, { method: 'GET' }).catch(() => null);
-      if (!raw) continue;
-      const arr = toArrayish(raw).map(normListing).filter(Boolean);
-      if (arr.length) return arr;
-    }
-    return [];
-  } catch { return []; }
-}
-
-/*──────── last‑resort path: BCD views ───────────────────────*/
-async function viaBCD({ net = NETWORK_KEY, market, nftContract }) {
-  try {
-    const network = /ghostnet/i.test(String(net)) ? 'ghostnet' : 'mainnet';
-    const url = `https://api.better-call.dev/v1/contract/${network}/${market}/views/onchain_listings_for_collection`;
-    const qs  = new URLSearchParams({ input: String(nftContract) });
-    const raw = await jFetch(`${url}?${qs.toString()}`, { method: 'GET' }).catch(() => null);
-    if (!raw) return [];
-    const arr = toArrayish(raw).map(normListing).filter(Boolean);
-    return arr;
-  } catch { return []; }
-}
-
-/*──────── public API ────────────────────────────────────────*/
 /**
- * Fetch active listings for a collection (ZeroSum marketplace),
- * normalized for UI: [{ tokenId, priceMutez, amount, seller, startTime, active }]
- * Results are **deduped per tokenId** keeping the **lowest** price.
- *
- * It tries, in order: Taquito TZIP‑16 → TzKT views → BCD views.
- *
- * @param {Object} p
- * @param {object} p.toolkit  TezosToolkit instance (optional but preferred)
- * @param {string} p.nftContract Collection KT1
- * @param {string} [p.net=NETWORK_KEY]
+ * Read **on‑chain** listings for the whole collection.
+ * Tries object & positional parameter shapes:
+ *   { nft_contract }, { address }, { collection }, "<KT1…>"
  */
-export async function fetchOnchainListingsForCollection({ toolkit, nftContract, net = NETWORK_KEY } = {}) {
-  if (!isKt(nftContract)) return [];
-
-  const market = marketplaceAddr(net);
-  if (!isKt(market)) return [];
-
-  // 1) TZIP‑16 via toolkit (client‑side)
-  const v1 = await viaTzip16({ toolkit, market, nftContract });
-  if (v1.length) return dedupeLowest(v1.filter((r) => r.active && r.amount > 0));
-
-  // 2) TzKT HTTP
-  const v2 = await viaTzkt({ net, market, nftContract });
-  if (v2.length) return dedupeLowest(v2.filter((r) => r.active && r.amount > 0));
-
-  // 3) BCD HTTP
-  const v3 = await viaBCD({ net, market, nftContract });
-  if (v3.length) return dedupeLowest(v3.filter((r) => r.active && r.amount > 0));
-
-  return [];
+export async function onchainListingsForCollection(toolkit, marketAddress, nftContract) {
+  const c = await getMarket(toolkit, marketAddress);
+  const viewCaller = await getViewCaller(c, toolkit);
+  const variants = [
+    { nft_contract: nftContract },
+    { collection: nftContract },
+    { address: nftContract },
+    nftContract,
+  ];
+  const raw = await execView(c, 'onchain_listings_for_collection', variants, { viewCaller });
+  const rows = parseCollectionListings(raw);
+  return rows.filter((r) => r.active && Number.isFinite(r.priceMutez) && r.amount > 0);
 }
 
-/* What changed & why: r1 – New dedicated view executor that actually
-   calls the ZeroSum TZIP‑16 `onchain_listings_for_collection` view,
-   with resilient fallbacks and strict output normalization. */
-//EOF
+/**
+ * Read **on‑chain** listings for a specific token.
+ * Tries object & positional parameter shapes:
+ *   { nft_contract, token_id }, { address, token_id }, [nft_contract, token_id], [token_id, nft_contract]
+ */
+export async function onchainListingsForToken(toolkit, marketAddress, nftContract, tokenId) {
+  const c = await getMarket(toolkit, marketAddress);
+  const viewCaller = await getViewCaller(c, toolkit);
+  const id = Number(tokenId);
+  const variants = [
+    { nft_contract: nftContract, token_id: id },
+    { address: nftContract, token_id: id },
+    { collection: nftContract, token_id: id },
+    [nftContract, id],
+    [id, nftContract],
+  ];
+  const raw = await execView(c, 'onchain_listings_for_token', variants, { viewCaller });
+  const rows = parseCollectionListings(raw);
+  return rows.filter((r) => r.active && Number.isFinite(r.priceMutez) && r.amount > 0);
+}
+
+export default {
+  onchainListingsForCollection,
+  onchainListingsForToken,
+};
+
+/* What changed & why (r12):
+   • Added robust multi‑shape param invocation to fix view execution
+     when the ABI exposes a single `address` arg under varying names.
+   • Normalised output across Taquito/BCD shapes and filtered to
+     active listings only. */
+// EOF

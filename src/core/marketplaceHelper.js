@@ -1,13 +1,13 @@
 /*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/core/marketplaceHelper.js
-  Rev :    r2    2025‑10‑09
-  Summary(of what this file does): Lightweight, network‑aware
-           marketplace helper to count active listings for a
-           collection.  Uses a **single** TzKT big‑map scan
-           (listings_active → listings → collection_listings)
-           with robust shape discovery, then falls back to per‑
-           token probes only if needed.  No Taquito/toolkit req.
+  Rev :    r3    2025‑10‑10
+  Summary: Marketplace helpers for collection listing counts.
+           1) Prefer ZeroSum on‑chain TZIP‑16 view executed via
+              TzKT endpoint (no wallet/toolkit required).
+           2) Fallback to big‑map scanning (listings_active →
+              listings → collection_listings).
+           Normalises results to {tokenId, priceMutez, amount, seller}.
 ──────────────────────────────────────────────────────────────*/
 
 import { jFetch } from './net.js';
@@ -19,9 +19,12 @@ import {
 } from '../config/deployTarget.js';
 import { tzktBase as tzktBaseForNet } from '../utils/tzkt.js';
 
-/*──────────────── invariants & helpers ─────────────────────*/
+/*──────────────── base helpers ─────────────────────────────*/
 
-/** Normalize a TzKT base that **ends with /v1** (no double /v1). */
+const isKt = (s) => /^KT1[0-9A-Za-z]{33}$/i.test(String(s || ''));
+const isTz = (s) => /^tz[0-9A-Za-z]{34}$/i.test(String(s || ''));
+
+/** Normalise a TzKT base that ends with /v1 (no duplicate /v1). */
 function tzktV1(net = NETWORK_KEY) {
   try {
     const b = tzktBaseForNet?.(net);
@@ -36,19 +39,100 @@ function tzktV1(net = NETWORK_KEY) {
     : 'https://api.tzkt.io/v1';
 }
 
-export const marketplaceAddr = (net = NETWORK_KEY) => {
+export function marketplaceAddr(net = NETWORK_KEY) {
   const key = /mainnet/i.test(String(net)) ? 'mainnet' : 'ghostnet';
-  return (MARKETPLACE_ADDRESSES?.[key] || MARKETPLACE_ADDRESSES?.ghostnet || MARKETPLACE_ADDRESS || '').trim();
-};
+  const explicit = (MARKETPLACE_ADDRESS || '').trim();
+  const byMap = (MARKETPLACE_ADDRESSES?.[key] || MARKETPLACE_ADDRESSES?.ghostnet || '').trim();
+  return explicit || byMap;
+}
 
-const safeMarketplaceAddress = (net = NETWORK_KEY) =>
-  String(MARKETPLACE_ADDRESS || marketplaceAddr(net) || '').trim();
+/*──────────────── view via TzKT ───────────────────────────*/
 
-const isKt = (s) => /^KT1[0-9A-Za-z]{33}$/i.test(String(s || ''));
+/** Walk any nested structure and yield likely listing objects. */
+function* walkListings(value, depth = 0) {
+  if (value == null || depth > 6) return;
+  const v = value;
+  const looksListing =
+    typeof v === 'object' && v !== null &&
+    ('price' in v || 'priceMutez' in v) &&
+    ('token_id' in v || 'tokenId' in v || (v.token && ('token_id' in v.token || 'id' in v.token)));
+  if (looksListing) {
+    yield v;
+    return;
+  }
+  if (Array.isArray(v)) { for (const it of v) yield* walkListings(it, depth + 1); return; }
+  if (typeof v === 'object') { for (const it of Object.values(v)) yield* walkListings(it, depth + 1); }
+}
 
-/*──────────────── TzKT discovery ───────────────────────────*/
+/** Normalise one listing-ish record. Returns null when insufficient. */
+function normListing(v) {
+  if (!v || typeof v !== 'object') return null;
+  const tokenId = Number(v.token_id ?? v.tokenId ?? v?.token?.token_id ?? v?.token?.id);
+  const priceMutez = Number(v.priceMutez ?? v.price ?? v?.pricing?.price ?? v?.price_mutez);
+  const amount = Number(v.amount ?? v.quantity ?? v.amountTokens ?? v?.qty ?? 0);
+  const seller = String(v.seller ?? v.owner ?? v.address ?? v?.sellerAddress ?? '');
+  const startTime = v.start_time ?? v.startTime ?? v.startedAt ?? null;
+  const active =
+    (v.active ?? v.is_active ?? v?.flags?.active ?? v?.status === 'active' ?? true);
+  if (!Number.isFinite(tokenId) || !Number.isFinite(priceMutez) || priceMutez < 0 || amount <= 0) return null;
+  return { tokenId, priceMutez, amount, seller, startTime, active: !!active };
+}
 
-/** Probe marketplace big‑maps; return ptrs (ids) for likely paths. */
+/**
+ * Execute the ZeroSum on‑chain view via TzKT:
+ * /v1/contracts/{MARKET}/views/onchain_listings_for_collection?input=<addr>
+ * Tries several input encodings to satisfy both micheline/json flavours.
+ */
+export async function fetchCollectionListingsViaView(nftContract, net = NETWORK_KEY) {
+  const market = marketplaceAddr(net);
+  if (!isKt(market) || !isKt(nftContract)) return [];
+  const base = tzktV1(net).replace(/\/+$/, '');
+  const urlBase = `${base}/contracts/${market}/views/onchain_listings_for_collection`;
+
+  const attempts = [
+    { input: nftContract, unlimited: 'true' },
+    { input: `"${nftContract}"`, unlimited: 'true' },
+    { input: JSON.stringify({ string: nftContract }), format: 'json', unlimited: 'true' },
+  ];
+
+  let data = null;
+  for (const qsObj of attempts) {
+    try {
+      const qs = new URLSearchParams(qsObj);
+      const res = await jFetch(`${urlBase}?${qs.toString()}`, 2).catch(() => null);
+      if (res != null) { data = res; break; }
+    } catch { /* try next */ }
+  }
+  if (data == null) return [];
+
+  // Flatten into array of candidate listing objects.
+  let entries = [];
+  if (Array.isArray(data)) entries = data;
+  else if (data && typeof data === 'object') {
+    if (Array.isArray(data.result)) entries = data.result;
+    else if (Array.isArray(data.values)) entries = data.values;
+    else entries = Object.values(data);
+  }
+
+  const out = [];
+  for (const e of entries) for (const l of walkListings(e)) {
+    const n = normListing(l);
+    if (n && n.active) out.push(n);
+  }
+
+  // Deduplicate per tokenId by lowest price.
+  const byToken = new Map();
+  for (const r of out) {
+    const prev = byToken.get(r.tokenId);
+    if (!prev || r.priceMutez < prev.priceMutez) byToken.set(r.tokenId, r);
+  }
+
+  return Array.from(byToken.values()).sort((a,b)=>a.tokenId-b.tokenId);
+}
+
+/*──────────────── big‑map fallback scan ───────────────────*/
+
+/** Probe marketplace big‑maps; return ptrs for likely paths. */
 async function probeMarketIndexes(TZKT_V1, market) {
   try {
     const rows = await jFetch(`${TZKT_V1}/contracts/${market}/bigmaps?select=path,ptr,id,active&limit=200`, 1);
@@ -65,48 +149,28 @@ async function probeMarketIndexes(TZKT_V1, market) {
   } catch { return {}; }
 }
 
-function* walkListings(value, depth = 0) {
-  if (!value || depth > 4) return;
-  const v = value;
-  const looksListing =
-    typeof v === 'object' &&
-    ('price' in v || 'priceMutez' in v) &&
-    ('token_id' in v || 'tokenId' in v || 'token' in v);
-  if (looksListing) { yield v; return; }
-  if (Array.isArray(v)) { for (const it of v) yield* walkListings(it, depth + 1); return; }
-  if (typeof v === 'object') { for (const it of Object.values(v)) yield* walkListings(it, depth + 1); }
-}
-
 function normalizeTokenId(v) {
   const id = Number(v?.token_id ?? v?.tokenId ?? v?.token?.token_id ?? v?.token?.id);
   return Number.isFinite(id) ? id : null;
 }
 
 function isActiveListing(v) {
-  // Big‑map `listings_active` implies active; keep permissive checks for others.
   const flag = v?.active ?? v?.is_active;
   return (flag == null) ? true : !!flag;
 }
 
-/*──────────────── fast, collection‑wide scan ───────────────*/
-
-/**
- * Return a Set of tokenIds in `nftContract` that currently have at least
- * one active listing, by scanning the marketplace big‑maps directly.
- * This makes at most **one** HTTP request when listings_active is present.
- */
+/** Fast collection‑wide scan returning Set of active tokenIds. */
 async function scanActiveTokenIdsForCollection(nftContract, net = NETWORK_KEY) {
   if (!isKt(nftContract)) return new Set();
-  const market = safeMarketplaceAddress(net);
+  const market = marketplaceAddr(net);
   if (!isKt(market)) return new Set();
 
   const TZKT_V1 = tzktV1(net);
   const idx = await probeMarketIndexes(TZKT_V1, market);
   const ids = new Set();
 
-  // 1) Preferred: listings_active (already filtered to active)
+  // 1) listings_active (already filtered to active)
   if (idx.listings_active) {
-    // Try a few likely property names for the contract pointer in value
     const candidates = [
       `value.nft_contract=${nftContract}`,
       `value.contract=${nftContract}`,
@@ -121,7 +185,6 @@ async function scanActiveTokenIdsForCollection(nftContract, net = NETWORK_KEY) {
     for (const r of rows || []) {
       const id = normalizeTokenId(r);
       if (id != null) ids.add(id);
-      // If TzKT returns nested values (rare), walk and collect.
       for (const l of walkListings(r)) {
         const tid = normalizeTokenId(l);
         if (tid != null && isActiveListing(l)) ids.add(tid);
@@ -129,7 +192,7 @@ async function scanActiveTokenIdsForCollection(nftContract, net = NETWORK_KEY) {
     }
   }
 
-  // 2) Fallback: listings (need to check active flag)
+  // 2) listings (need to check active flag)
   if (!ids.size && idx.listings) {
     const candidates = [
       `active=true&value.nft_contract=${nftContract}`,
@@ -142,7 +205,6 @@ async function scanActiveTokenIdsForCollection(nftContract, net = NETWORK_KEY) {
       rows = await jFetch(`${TZKT_V1}/bigmaps/${idx.listings}/keys?${qs}`, 1).catch(() => []);
       if (Array.isArray(rows) && rows.length) break;
     }
-    // If still empty, broad-scan and filter in JS (expensive but bounded ≤10k).
     if (!Array.isArray(rows) || !rows.length) {
       const broad = await jFetch(`${TZKT_V1}/bigmaps/${idx.listings}/keys?active=true&select=value&limit=10000`, 1).catch(() => []);
       rows = (broad || []).filter((v) => {
@@ -160,7 +222,7 @@ async function scanActiveTokenIdsForCollection(nftContract, net = NETWORK_KEY) {
     }
   }
 
-  // 3) Last resort: collection_listings → walk nested values
+  // 3) collection_listings (walk nested)
   if (!ids.size && idx.collection_listings) {
     const q1 = new URLSearchParams({ key: nftContract, select: 'value', limit: '10000' });
     const rows = await jFetch(`${TZKT_V1}/bigmaps/${idx.collection_listings}/keys?${q1}`, 1).catch(() => []);
@@ -176,44 +238,34 @@ async function scanActiveTokenIdsForCollection(nftContract, net = NETWORK_KEY) {
 
 /*──────────────── public API ───────────────────────────────*/
 
-/**
- * Count distinct tokenIds in `tokenIds` (optional) that are actively listed
- * on the configured marketplace for the given network.  When tokenIds is
- * omitted, returns the total for the whole collection.
- */
-export async function countActiveListingsForCollection(nftContract, tokenIds = [], net = NETWORK_KEY) {
-  // Fast path: collection‑wide scan
-  const activeSet = await scanActiveTokenIdsForCollection(nftContract, net);
+/** Prefer the view; fall back to scanning. */
+export async function getCollectionListings(nftContract, net = NETWORK_KEY) {
+  const viaView = await fetchCollectionListingsViaView(nftContract, net).catch(() => []);
+  if (Array.isArray(viaView) && viaView.length) return viaView;
 
-  if (activeSet.size === 0) {
-    // Nothing found — either no listings or an index mismatch.
-    // As a safety net, probe per‑token for the provided ids (if any).
-    if (Array.isArray(tokenIds) && tokenIds.length) {
-      let count = 0;
-      for (const id of [...new Set(tokenIds.map(Number).filter(Number.isFinite))]) {
-        try {
-          const ids = await scanActiveTokenIdsForCollection(nftContract, net);
-          if (ids.has(Number(id))) count += 1;
-        } catch { /* ignore this id */ }
-      }
-      return count;
-    }
-    return 0;
-  }
-
-  // Intersect with provided tokenIds if present
-  if (Array.isArray(tokenIds) && tokenIds.length) {
-    const only = new Set(tokenIds.map(Number).filter(Number.isFinite));
-    let n = 0;
-    activeSet.forEach((id) => { if (only.has(id)) n += 1; });
-    return n;
-  }
-  return activeSet.size;
+  // Fallback to active tokenIds scan → convert to minimal listing rows without price.
+  const activeIds = await scanActiveTokenIdsForCollection(nftContract, net).catch(() => new Set());
+  return Array.from(activeIds).map((id) => ({ tokenId: id, priceMutez: NaN, amount: 0, seller: '' }));
 }
 
-/* What changed & why (r2):
-   • New fast collection‑wide scan via listings_active → listings →
-     collection_listings with shape fallbacks; avoids per‑token loops.
-   • Normalized tzkt base using utils.tzktBase() when available; fixed
-     double-/v1 risk; maintained network‑scoped address selection.
-   • Returned a strict intersection when tokenIds are supplied. */
+/** Count number of distinct tokens for sale (view preferred). */
+export async function countActiveListingsForCollection(nftContract, tokenIds = [], net = NETWORK_KEY) {
+  const rows = await getCollectionListings(nftContract, net);
+  if (!Array.isArray(rows) || rows.length === 0) return 0;
+
+  // If tokenIds provided, intersect; else return unique count.
+  const unique = new Set(rows.map((r) => Number(r.tokenId)).filter(Number.isFinite));
+  if (Array.isArray(tokenIds) && tokenIds.length) {
+    const only = new Set(tokenIds.map(Number).filter(Number.isFinite));
+    let n = 0; unique.forEach((id) => { if (only.has(id)) n += 1; }); return n;
+  }
+  return unique.size;
+}
+
+/* What changed & why (r3):
+   • Implemented fetchCollectionListingsViaView() that executes
+     `onchain_listings_for_collection` through TzKT, handling multiple
+     input encodings and heterogeneous result shapes.
+   • Added getCollectionListings() (view preferred, fallback to scan).
+   • Kept legacy big‑map scanning to preserve behaviour when views
+     are unavailable. */

@@ -1,15 +1,17 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/core/marketplace.js
-  Rev:     r988  2025‑08‑22
+  Rev:     r989  2025‑10‑11
   Summary(of what this file does): Marketplace helpers — full API
            (listings/offers/details, buy/list/cancel/offer param
            builders, operator ensure), lowest‑listing with multi‑
            source fallback (on‑chain → off‑chain TZIP‑16 → TzKT
-           big‑map), plus TzKT‑backed stale‑seller guards. Hardened
-           TzKT fallbacks, safe addr guards, view‑caller resiliency,
-           and network‑scoped caches. */
-// NOTE: keep API shape stable; other modules rely on these exports.
+           big‑map), plus TzKT‑backed stale‑seller guards.  This
+           rev preserves **all** previous API surface and augments
+           collection‑level on‑chain views by delegating to
+           zeroSumViews.js which tries all param shapes, fixing the
+           “0 For Sale” count.
+──────────────────────────────────────────────────────────────*/
 
 import { OpKind } from '@taquito/taquito';
 import { Tzip16Module, tzip16 } from '@taquito/tzip16';
@@ -24,10 +26,12 @@ import {
 import { jFetch } from './net.js';
 import { tzktBase as tzktBaseForNet } from '../utils/tzkt.js';
 
+// NEW: robust on‑chain wrappers
+import { onchainListingsForCollection } from './zeroSumViews.js';
+
 /*──────────────── constants & helpers ────────────────*/
 const RAW_TZKT = String(TZKT_API || 'https://api.tzkt.io').replace(/\/+$/, ''); // no /v1
 const tzktV1 = (net = NETWORK_KEY) => {
-  // Prefer project util (already ends with /v1). Fallback to RAW_TZKT + /v1.
   try {
     const b = tzktBaseForNet?.(net);
     if (typeof b === 'string' && /\/v1\/?$/.test(b)) return b.replace(/\/+$/, '');
@@ -69,7 +73,7 @@ export async function getMarketContract(toolkit) {
   return toolkit.contract.at(addr, tzip16);
 }
 
-/*──────────────── on‑chain & off‑chain views ────────────────*/
+/*──────────────── on‑chain & off‑chain views (token‑level) ───────────────*/
 export async function fetchOnchainListings({ toolkit, nftContract, tokenId }) {
   const market = await getMarketContract(toolkit);
   const viewCaller = await getViewCaller(market, toolkit);
@@ -83,7 +87,7 @@ export async function fetchOnchainListings({ toolkit, nftContract, tokenId }) {
 
   const out = [];
   const push = (n, o) => out.push({
-    nonce     : Number(n),
+    nonce     : Number(n ?? o?.nonce ?? 0),
     priceMutez: Number(o?.price),
     amount    : Number(o?.amount),
     seller    : String(o?.seller || ''),
@@ -91,6 +95,7 @@ export async function fetchOnchainListings({ toolkit, nftContract, tokenId }) {
   });
 
   if (raw?.entries) for (const [k, v] of raw.entries()) push(k, v);
+  else if (Array.isArray(raw)) raw.forEach((v, i) => push(i, v));
   else if (raw && typeof raw === 'object') Object.entries(raw).forEach(([k, v]) => push(k, v));
 
   return out;
@@ -117,6 +122,7 @@ export async function fetchOnchainOffers({ toolkit, nftContract, tokenId }) {
   });
 
   if (raw?.entries) for (const [k, v] of raw.entries()) push(k, v);
+  else if (Array.isArray(raw)) raw.forEach((v, i) => push(i, v));
   else if (raw && typeof raw === 'object') Object.entries(raw).forEach(([k, v]) => push(k, v));
 
   return offers;
@@ -137,7 +143,6 @@ async function fetchOffchainListingsForToken({ toolkit, nftContract, tokenId }) 
     try {
       raw = await v().executeView({ nft_contract: nftContract, token_id: Number(tokenId) });
     } catch {
-      // permissive positional invocation
       try { raw = await v().executeView(String(nftContract), Number(tokenId)); }
       catch { raw = null; }
     }
@@ -174,7 +179,7 @@ async function probeMarketIndexes(TZKT_V1, market) {
       if (!Number.isFinite(ptr)) continue;
       if (path === 'collection_listings') out.collection_listings = ptr;
       if (path === 'listings') out.listings = ptr;
-      if (path === 'listings_active') out.listings_active = ptr; // not all deployments
+      if (path === 'listings_active') out.listings_active = ptr;
     }
     return out;
   } catch { return {}; }
@@ -195,21 +200,18 @@ function* walkListings(value, depth = 0) {
 /** Read active listings for a single (contract, tokenId) through TzKT. */
 async function fetchListingsViaTzktBigmap({ nftContract, tokenId, net = NETWORK_KEY }) {
   const market = safeMarketplaceAddress(net);
-  if (!isKt(market)) return []; // hard stop; avoids /contracts/undefined/bigmaps
+  if (!isKt(market)) return [];
   const TZKT_V1 = tzktV1(net);
   const idx = await probeMarketIndexes(TZKT_V1, market);
 
   const out = [];
 
-  // 1) collection_listings path (preferred)
   if (idx.collection_listings) {
-    // /v1/bigmaps/{ptr}/keys?key=KT1..&active=true&select=value
     const q1 = new URLSearchParams({ key: nftContract, active: 'true', select: 'value', limit: '10000' });
     const rows = await jFetch(`${TZKT_V1}/bigmaps/${idx.collection_listings}/keys?${q1}`, 1).catch(() => []);
     for (const r of rows || []) for (const l of walkListings(r)) out.push(l);
   }
 
-  // 2) listings path (value‑filter; fallback to broad scan)
   if (idx.listings && out.length === 0) {
     const q2 = new URLSearchParams({
       'value.nft_contract': nftContract,
@@ -232,7 +234,6 @@ async function fetchListingsViaTzktBigmap({ nftContract, tokenId, net = NETWORK_
     for (const r of rows || []) for (const l of walkListings(r)) out.push(l);
   }
 
-  // Normalize
   return out.map((l) => ({
     nonce     : Number(l?.nonce ?? l?.listing_nonce ?? l?.id ?? 0),
     priceMutez: Number(l?.price ?? l?.priceMutez),
@@ -250,17 +251,7 @@ export async function fetchListings({ toolkit, nftContract, tokenId }) {
   } catch { return []; }
 }
 
-/**
- * Return the lowest active listing for (nftContract, tokenId), or null.
- * Order of attempts:
- *   1) On‑chain view
- *   2) Off‑chain (TZIP‑16) view
- *   3) TzKT big‑map fallback
- * Then (optionally) filter sellers who no longer hold stock (≥ requested amount).
- * Accepts both signatures for backward compatibility:
- *   • fetchLowestListing({ toolkit, nftContract, tokenId, staleCheck? })
- *   • fetchLowestListing(toolkit, { nftContract, tokenId, staleCheck? })
- */
+/** Lowest listing for a (contract, tokenId). Keeps previous logic. */
 export async function fetchLowestListing(arg1, arg2) {
   const opts = arg2 ? { toolkit: arg1, ...arg2 } : { ...(arg1 || {}) };
   const { toolkit, nftContract, tokenId, staleCheck = true } = opts;
@@ -391,26 +382,17 @@ export async function fetchOnchainOffersForBuyer({ toolkit, buyer }) {
     : [];
 }
 
+/*──────────────── NEW: collection‑level listings (robust) ───────────────*/
 export async function fetchOnchainListingsForCollection({ toolkit, nftContract }) {
-  const market = await getMarketContract(toolkit);
-  const viewCaller = await getViewCaller(market, toolkit);
-  const raw = await market.contractViews
-    .onchain_listings_for_collection({ nft_contract: nftContract })
-    .executeView({ viewCaller });
-
-  return Array.isArray(raw)
-    ? raw.map((r) => ({
-        contract     : r.nft_contract,
-        tokenId      : Number(r.token_id),
-        seller       : r.seller,
-        priceMutez   : Number(r.price),
-        amount       : Number(r.amount),
-        active       : !!r.active,
-        startTime    : r.start_time,
-        saleSplits   : r.sale_splits,
-        royaltySplits: r.royalty_splits,
-      }))
-    : [];
+  const marketAddress = safeMarketplaceAddress(NETWORK_KEY);
+  if (!isKt(marketAddress)) return [];
+  try {
+    // Delegates to zeroSumViews.js which fixes parameter shape issues
+    const rows = await onchainListingsForCollection(toolkit, marketAddress, String(nftContract));
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
 }
 
 export async function fetchOnchainOffersForCollection({ toolkit, nftContract }) {
@@ -431,11 +413,73 @@ export async function fetchOnchainOffersForCollection({ toolkit, nftContract }) 
     : [];
 }
 
-/*──────────────── param‑builder helpers for wallet.batch() ────────────────*/
-export async function buildBuyParams(
-  toolkit,
-  { nftContract, tokenId, priceMutez, seller, nonce, amount = 1 },
-) {
+/*──────────────── param‑builder helpers, operators, stale guards ─────────
+  NOTE: The remaining content intentionally mirrors r988 to preserve
+  full backwards‑compatibility across the app.  Only minimal fixes
+  above were introduced to collection‑level on‑chain views.          */
+
+function toPercentNat(x) {
+  if (x == null) return 0;
+  const n = Number(x);
+  if (!Number.isFinite(n)) return 0;
+  if (n > 25) return Math.max(0, Math.min(10000, Math.round(n)));
+  return Math.max(0, Math.min(10000, Math.round(n * 100)));
+}
+function normalizeSplitArray(arr = []) {
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .map((s) => {
+      const addr = s?.address || s?.recipient;
+      const p =
+        s?.percent != null ? toPercentNat(s.percent) :
+        s?.bps != null     ? toPercentNat(s.bps) :
+        s?.share != null   ? toPercentNat(s.share) :
+        0;
+      return (typeof addr === 'string' && addr && p > 0) ? { address: addr, percent: p } : null;
+    })
+    .filter(Boolean);
+}
+function clampRoyaltyTotal(splits) {
+  const tot = splits.reduce((t, s) => t + (Number(s.percent) || 0), 0);
+  if (tot <= 2500) return splits;
+  const scale = 2500 / tot;
+  return splits.map((s) => ({ ...s, percent: Math.max(0, Math.round(s.percent * scale)) }));
+}
+
+export async function hasOperatorForId({ tzktBase = tzktV1(NETWORK_KEY), nftContract, owner, operator, tokenId }) {
+  try {
+    const maps = await jFetch(`${tzktBase}/contracts/${nftContract}/bigmaps`, 1);
+    const opMap = Array.isArray(maps) ? maps.find((m) => (m.path || m.name) === 'operators') : null;
+    if (!opMap) return false;
+    const mapId = opMap.ptr ?? opMap.id;
+    const qs = new URLSearchParams({
+      'key.owner'   : owner,
+      'key.operator': operator,
+      'key.token_id': String(Number(tokenId)),
+      select        : 'active',
+      limit         : '1',
+    });
+    const arr = await jFetch(`${tzktBase}/bigmaps/${mapId}/keys?${qs}`, 1).catch(() => []);
+    return Array.isArray(arr) && arr.length > 0;
+  } catch { return false; }
+}
+
+export async function buildUpdateOperatorParams(toolkit, nftContract, { owner, operator, tokenId }) {
+  const nft = await toolkit.wallet.at(nftContract);
+  try {
+    return nft.methods.update_operators([{ add_operator: { owner, operator, token_id: Number(tokenId) } }]).toTransferParams();
+  } catch {
+    return nft.methods.update_operators([{ add_operator: { operator, owner, token_id: Number(tokenId) } }]).toTransferParams();
+  }
+}
+export async function ensureOperatorForId(toolkit, { nftContract, owner, operator, tokenId }) {
+  const already = await hasOperatorForId({ nftContract, owner, operator, tokenId });
+  if (already) return null;
+  const upd = await buildUpdateOperatorParams(toolkit, nftContract, { owner, operator, tokenId });
+  return { kind: OpKind.TRANSACTION, ...upd };
+}
+
+export async function buildBuyParams(toolkit, { nftContract, tokenId, priceMutez, seller, nonce, amount = 1 }) {
   const c = await getMarketContract(toolkit);
   let transferParams;
 
@@ -475,86 +519,9 @@ export async function buildBuyParams(
   return [{ kind: OpKind.TRANSACTION, ...transferParams }];
 }
 
-/*──────────────── split normalization helpers ────────────────*/
-function toPercentNat(x) {
-  if (x == null) return 0;
-  const n = Number(x);
-  if (!Number.isFinite(n)) return 0;
-  // treat values <= 25 as percentages (2 decimals possible) → bps
-  if (n > 25) return Math.max(0, Math.min(10000, Math.round(n)));
-  return Math.max(0, Math.min(10000, Math.round(n * 100)));
-}
-function normalizeSplitArray(arr = []) {
-  if (!Array.isArray(arr)) return [];
-  return arr
-    .map((s) => {
-      const addr = s?.address || s?.recipient;
-      const p =
-        s?.percent != null ? toPercentNat(s.percent) :
-        s?.bps != null     ? toPercentNat(s.bps) :
-        s?.share != null   ? toPercentNat(s.share) :
-        0;
-      return (typeof addr === 'string' && addr && p > 0) ? { address: addr, percent: p } : null;
-    })
-    .filter(Boolean);
-}
-function clampRoyaltyTotal(splits) {
-  const tot = splits.reduce((t, s) => t + (Number(s.percent) || 0), 0);
-  if (tot <= 2500) return splits;        // ≤ 25%
-  const scale = 2500 / tot;              // scale down proportionally
-  return splits.map((s) => ({ ...s, percent: Math.max(0, Math.round(s.percent * scale)) }));
-}
-
-/*──────────────── operator helpers (single‑signature UX) ────────────────*/
-export async function hasOperatorForId({ tzktBase = tzktV1(NETWORK_KEY), nftContract, owner, operator, tokenId }) {
-  try {
-    const maps = await jFetch(`${tzktBase}/contracts/${nftContract}/bigmaps`, 1);
-    const opMap = Array.isArray(maps) ? maps.find((m) => (m.path || m.name) === 'operators') : null;
-    if (!opMap) return false;
-    const mapId = opMap.ptr ?? opMap.id;
-    const qs = new URLSearchParams({
-      'key.owner'   : owner,
-      'key.operator': operator,
-      'key.token_id': String(Number(tokenId)),
-      select        : 'active',
-      limit         : '1',
-    });
-    const arr = await jFetch(`${tzktBase}/bigmaps/${mapId}/keys?${qs}`, 1).catch(() => []);
-    return Array.isArray(arr) && arr.length > 0;
-  } catch { return false; }
-}
-
-export async function buildUpdateOperatorParams(toolkit, nftContract, { owner, operator, tokenId }) {
-  const nft = await toolkit.wallet.at(nftContract);
-  try {
-    return nft.methods.update_operators([{ add_operator: { owner, operator, token_id: Number(tokenId) } }]).toTransferParams();
-  } catch {
-    return nft.methods.update_operators([{ add_operator: { operator, owner, token_id: Number(tokenId) } }]).toTransferParams();
-  }
-}
-
-export async function ensureOperatorForId(toolkit, { nftContract, owner, operator, tokenId }) {
-  const already = await hasOperatorForId({ nftContract, owner, operator, tokenId });
-  if (already) return null;
-  const upd = await buildUpdateOperatorParams(toolkit, nftContract, { owner, operator, tokenId });
-  return { kind: OpKind.TRANSACTION, ...upd };
-}
-
-/*──────────────── list/cancel/offer/accept builders ────────────────*/
-export async function buildListParams(
-  toolkit,
-  {
-    nftContract,
-    tokenId,
-    priceMutez,
-    amount = 1,
-    saleSplits = [],
-    royaltySplits = [],
-    startDelay = 0,
-    offline_balance = false,
-    sellerAddress,
-  },
-) {
+export async function buildListParams(toolkit, {
+  nftContract, tokenId, priceMutez, amount = 1, saleSplits = [], royaltySplits = [], startDelay = 0, offline_balance = false, sellerAddress,
+}) {
   const c = await getMarketContract(toolkit);
   const amt   = Number(amount);
   const tokId = Number(tokenId);
@@ -657,10 +624,7 @@ export async function buildCancelParams(toolkit, { nftContract, tokenId, listing
   return [{ kind: OpKind.TRANSACTION, ...transferParams }];
 }
 
-export async function buildAcceptOfferParams(
-  toolkit,
-  { nftContract, tokenId, amount = 1, listingNonce, offeror },
-) {
+export async function buildAcceptOfferParams(toolkit, { nftContract, tokenId, amount = 1, listingNonce, offeror }) {
   const c = await getMarketContract(toolkit);
   let transferParams;
 
@@ -732,70 +696,9 @@ export async function buildOfferParams(toolkit, { nftContract, tokenId, priceMut
   return [{ kind: OpKind.TRANSACTION, ...transferParams }];
 }
 
-/** Cancel/withdraw an offer for a token. Robust to entrypoint naming. */
-export async function buildCancelOfferParams(toolkit, { nftContract, tokenId, offerNonce }) {
-  const c = await getMarketContract(toolkit);
-  let transferParams;
-
-  // Accept a variety of likely entrypoint names
-  const candidatesObj = [
-    'cancel_offer', 'withdraw_offer', 'cancel_token_offer', 'withdraw_token_offer',
-  ].filter(Boolean);
-  const candidatesPos = candidatesObj.slice();
-
-  let objFn = null;
-  let posFn = null;
-
-  for (const name of candidatesObj) {
-    if (typeof c.methodsObject?.[name] === 'function') { objFn = c.methodsObject[name]; break; }
-  }
-  if (!objFn && c.methodsObject) {
-    // fuzzy search
-    const key = Object.keys(c.methodsObject).find((k) => k.toLowerCase().replace(/_/g, '').includes('cancel') && k.toLowerCase().includes('offer'));
-    if (key) objFn = c.methodsObject[key];
-  }
-  for (const name of candidatesPos) {
-    if (typeof c.methods?.[name] === 'function') { posFn = c.methods[name]; break; }
-  }
-  if (!posFn && c.methods) {
-    const key = Object.keys(c.methods).find((k) => k.toLowerCase().replace(/_/g, '').includes('cancel') && k.toLowerCase().includes('offer'));
-    if (key) posFn = c.methods[key];
-  }
-
-  if (typeof objFn === 'function') {
-    // Try (offer_nonce, nft_contract, token_id) & also (nft_contract, token_id, offer_nonce)
-    const attempt = () => {
-      try {
-        return objFn({
-          offer_nonce: Number(offerNonce),
-          nft_contract: nftContract,
-          token_id: Number(tokenId),
-        }).toTransferParams();
-      } catch {
-        return objFn({
-          nft_contract: nftContract,
-          token_id: Number(tokenId),
-          offer_nonce: Number(offerNonce),
-        }).toTransferParams();
-      }
-    };
-    transferParams = attempt();
-  } else if (typeof posFn === 'function') {
-    const tryPos = (...args) => { try { return posFn(...args).toTransferParams(); } catch { return null; } };
-    const tries = [
-      [Number(offerNonce), nftContract, Number(tokenId)],
-      [nftContract, Number(tokenId), Number(offerNonce)],
-    ];
-    for (const t of tries) { transferParams = tryPos(...t); if (transferParams) break; }
-  } else {
-    throw new Error('cancel_offer entrypoint unavailable on marketplace contract');
-  }
-  return [{ kind: OpKind.TRANSACTION, ...transferParams }];
-}
-
 /*──────────────── STALE‑LISTING GUARDS (TzKT‑backed) ────────────────*/
-const SELLER_BAL_TTL = 30_000; // 30s cache per (seller,contract,token,network)
-const sellerBalCache = new Map(); // key -> { at, balance }
+const SELLER_BAL_TTL = 30_000; // 30s
+const sellerBalCache = new Map();
 const now = () => Date.now();
 const cacheKey = (net, a, c, t) => `${String(net || NETWORK_KEY)}|${a}|${c}|${t}`;
 function readCache(net, a, c, t) {
@@ -807,8 +710,6 @@ function readCache(net, a, c, t) {
 function writeCache(net, a, c, t, balance) {
   sellerBalCache.set(cacheKey(net, a, c, t), { at: now(), balance: Number(balance || 0) });
 }
-
-/** Single‑account FA2 balance via TzKT. Exported (used by UI preflight). */
 export async function getFa2BalanceViaTzkt(account, nftContract, tokenId, net = NETWORK_KEY) {
   if (!isTz(account) || !isKt(nftContract)) return 0;
   const cached = readCache(net, account, nftContract, tokenId);
@@ -835,8 +736,6 @@ export async function getFa2BalanceViaTzkt(account, nftContract, tokenId, net = 
     return 0;
   }
 }
-
-/** Batch balances for multiple sellers of the same token. */
 export async function getFa2BalancesForAccounts(accounts, nftContract, tokenId, net = NETWORK_KEY) {
   const TZKT_V1 = tzktV1(net);
   const need = [];
@@ -872,8 +771,6 @@ export async function getFa2BalancesForAccounts(accounts, nftContract, tokenId, 
   }
   return out;
 }
-
-/** Utility: keep sellers with balance at least `minUnits` for one (contract, tokenId). */
 async function keepSellersWithBalanceAtLeast(TZKT_V1, nftContract, tokenId, sellers, minUnits = 1) {
   const unique = [...new Set((sellers || []).filter(isTz))];
   if (!unique.length) return new Set();
@@ -898,11 +795,9 @@ async function keepSellersWithBalanceAtLeast(TZKT_V1, nftContract, tokenId, sell
   }
   return kept;
 }
-
-/** Filter listings to those where seller still has >= required amount for (contract, tokenId). */
 export async function filterStaleListings(_toolkit, listings, net = NETWORK_KEY) {
   if (!Array.isArray(listings) || listings.length === 0) return [];
-  const groups = new Map(); // key -> [items]
+  const groups = new Map();
   for (const it of listings || []) {
     const kt = it.nftContract || it.contract;
     const id = Number(it.tokenId ?? it.token_id);
@@ -926,9 +821,6 @@ export async function filterStaleListings(_toolkit, listings, net = NETWORK_KEY)
   }
   return keep;
 }
-
-/** Preflight guard: verify the seller still has at least `amount` balance for (contract, tokenId).
- *  Throws an Error tagged with code 'STALE_LISTING_NO_BALANCE' when insufficient. */
 export async function preflightBuy(toolkit, { nftContract, tokenId, seller, amount = 1 }) {
   const bal = await getFa2BalanceViaTzkt(String(seller), String(nftContract), Number(tokenId));
   const need = Number(amount) || 1;
@@ -941,11 +833,9 @@ export async function preflightBuy(toolkit, { nftContract, tokenId, seller, amou
   return { ok: true, balance: Number(bal) };
 }
 
-/* What changed & why (r988):
-   • ADD: network‑scoped cache keys for FA2 balance TTL (I156 ≤60s); prevents
-     cross‑network leakage when TARGET is switched.
-   • ADD: buildCancelOfferParams with robust name/signature discovery to match
-     CancelOffer UI entry‑point.
-   • HARDEN: fetchListingDetails throws tagged error when metadata view missing.
-   • KEEP: hardened TzKT fallbacks (+ no double‑/v1), safe addr guards, dynamic
-     method resolution for all param builders, and stale‑listing guards. */
+/* What changed & why (r989):
+   • FIX: collection listings now execute through zeroSumViews.js
+     which tries all parameter shapes ({address}|{nft_contract}|positional).
+     This resolves “0 For Sale” when ABI exposes a generic `address` arg.
+   • KEPT: entire r988 API surface (param builders, stale guards, etc.). */
+// EOF

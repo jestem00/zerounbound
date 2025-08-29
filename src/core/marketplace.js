@@ -13,7 +13,7 @@
            “0 For Sale” count.
 ──────────────────────────────────────────────────────────────*/
 
-import { OpKind } from '@taquito/taquito';
+import { OpKind, TezosToolkit } from '@taquito/taquito';
 import { Tzip16Module, tzip16 } from '@taquito/tzip16';
 
 import {
@@ -25,6 +25,7 @@ import {
 
 import { jFetch } from './net.js';
 import { tzktBase as tzktBaseForNet } from '../utils/tzkt.js';
+import { RPC_URLS } from '../config/deployTarget.js';
 import { ENABLE_ONCHAIN_VIEWS as CFG_ENABLE_ONCHAIN_VIEWS, ENABLE_OFFCHAIN_MARKET_VIEWS as CFG_ENABLE_OFFCHAIN_MARKET_VIEWS } from '../config/deployTarget.js';
 
 // NEW: robust on‑chain wrappers
@@ -38,6 +39,23 @@ const RPC_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
 const nowTs = () => Date.now();
 const isRpcDegraded = () => nowTs() < RPC_DEGRADED_UNTIL;
 const markRpcDegraded = () => { RPC_DEGRADED_UNTIL = nowTs() + RPC_COOLDOWN_MS; };
+
+async function withRpcFallback(toolkit, fn) {
+  const tried = new Set();
+  const cand = [];
+  try { const u = toolkit?.rpc?.url; if (u) cand.push(u); } catch {}
+  for (const u of (RPC_URLS || [])) if (!cand.includes(u)) cand.push(u);
+  let lastErr;
+  for (const url of cand) {
+    try {
+      const tk = (!url || toolkit?.rpc?.url === url)
+        ? toolkit
+        : (() => { const t = new TezosToolkit(url); ensureTzip16(t); return t; })();
+      return await fn(tk);
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr || new Error('All RPC endpoints failed');
+}
 
 /*──────────────── constants & helpers ────────────────*/
 const RAW_TZKT = String(TZKT_API || 'https://api.tzkt.io').replace(/\/+$/, ''); // no /v1
@@ -86,14 +104,15 @@ export async function getMarketContract(toolkit) {
 /*──────────────── on‑chain & off‑chain views (token‑level) ───────────────*/
 export async function fetchOnchainListings({ toolkit, nftContract, tokenId }) {
   if (!ENABLE_ONCHAIN_VIEWS || isRpcDegraded()) return [];
-  const market = await getMarketContract(toolkit);
-  const viewCaller = await getViewCaller(market, toolkit);
-
   let raw;
   try {
-    raw = await market.contractViews
-      .onchain_listings_for_token({ nft_contract: nftContract, token_id: Number(tokenId) })
-      .executeView({ viewCaller });
+    raw = await withRpcFallback(toolkit, async (tk) => {
+      const market = await getMarketContract(tk);
+      const viewCaller = await getViewCaller(market, tk);
+      return market.contractViews
+        .onchain_listings_for_token({ nft_contract: nftContract, token_id: Number(tokenId) })
+        .executeView({ viewCaller });
+    });
   } catch {
     markRpcDegraded();
     raw = null;
@@ -117,14 +136,15 @@ export async function fetchOnchainListings({ toolkit, nftContract, tokenId }) {
 
 export async function fetchOnchainOffers({ toolkit, nftContract, tokenId }) {
   if (!ENABLE_ONCHAIN_VIEWS || isRpcDegraded()) return [];
-  const market = await getMarketContract(toolkit);
-  const viewCaller = await getViewCaller(market, toolkit);
-
   let raw;
   try {
-    raw = await market.contractViews
-      .onchain_offers_for_token({ nft_contract: nftContract, token_id: Number(tokenId) })
-      .executeView({ viewCaller });
+    raw = await withRpcFallback(toolkit, async (tk) => {
+      const market = await getMarketContract(tk);
+      const viewCaller = await getViewCaller(market, tk);
+      return market.contractViews
+        .onchain_offers_for_token({ nft_contract: nftContract, token_id: Number(tokenId) })
+        .executeView({ viewCaller });
+    });
   } catch {
     markRpcDegraded();
     raw = null;
@@ -161,26 +181,17 @@ async function fetchOffchainListingsForToken({ toolkit, nftContract, tokenId }) 
   if (!ENABLE_ONCHAIN_VIEWS || !ENABLE_OFFCHAIN_MARKET_VIEWS || isRpcDegraded()) return [];
   if (Date.now() < OFFCHAIN_LISTINGS_RETRY_AFTER) return [];
   try {
-    const market = await getMarketContract(toolkit);
-    const views  = await market.tzip16().metadataViews();
-    const v =
-      views?.offchain_listings_for_token ||
-      views?.offchain_listings_for_nft ||
-      views?.get_listings_for_token;
-    if (!v) return [];
-
-    let raw;
-    try {
-      raw = await v().executeView({ nft_contract: nftContract, token_id: Number(tokenId) });
-    } catch {
-      try { raw = await v().executeView(String(nftContract), Number(tokenId)); }
-      catch {
-        // Mark failure window and stop retrying for a while.
-        OFFCHAIN_LISTINGS_RETRY_AFTER = Date.now() + OFFCHAIN_LISTINGS_COOLDOWN_MS;
-        markRpcDegraded();
-        raw = null;
-      }
-    }
+    const raw = await withRpcFallback(toolkit, async (tk) => {
+      const market = await getMarketContract(tk);
+      const views  = await market.tzip16().metadataViews();
+      const v =
+        views?.offchain_listings_for_token ||
+        views?.offchain_listings_for_nft ||
+        views?.get_listings_for_token;
+      if (!v) return null;
+      try { return await v().executeView({ nft_contract: nftContract, token_id: Number(tokenId) }); }
+      catch { return await v().executeView(String(nftContract), Number(tokenId)); }
+    });
 
     const out = [];
     const push = (n, o) => out.push({

@@ -126,6 +126,8 @@ const ThumbMedia = styled(RenderMedia)`
   width: 100%;
   height: 100%;
   object-fit: contain;
+  /* ensure crisp scaling for tiny raster thumbs */
+  image-rendering: pixelated;
 `;
 
 /* obfuscation overlay for NSFW/flash hazards */

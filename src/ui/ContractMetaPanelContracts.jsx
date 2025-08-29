@@ -65,6 +65,8 @@ const ThumbBox = styled.div`
   background:var(--zu-bg-dim);display:flex;align-items:center;justify-content:center;
   position:relative;
   img,video,model-viewer,object{width:100%;height:100%;object-fit:contain;}
+  /* crisp upscaling for raster */
+  img,canvas{ image-rendering: pixelated; }
 `;
 const Body = styled.div`
   flex:1 1 auto;display:flex;flex-direction:column;gap:6px;min-width:0;

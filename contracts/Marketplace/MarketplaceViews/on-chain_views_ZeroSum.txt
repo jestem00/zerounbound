@@ -1,0 +1,108 @@
+onchain_listings_for_token:
+parameter pair
+nft_contract address
+token_id nat
+
+view result:
+@map_1: 1 items
+
+🔻 37: 9 items
+nft_contract: KT1VbovY9UyjL8qwg3XUrcNBSbvfbZ4tdzcQ
+token_id: 0
+seller: tz2RDjqC2bpUPvy43C7DNFNUuV6Ma5R9fcab
+price: 100 t
+amount: 1
+active: true
+start_time: 19 August 2025 11:59
+sale_splits: 1 items
+🔻 0: 2 items
+address: tz2RDjqC2bpUPvy43C7DNFNUuV6Ma5R9fcab
+percent: 10,000
+royalty_splits: 0 items
+
+onchain_offers_for_token:
+parameter pair
+nft_contract address
+token_id nat
+
+onchain_listing_details:
+parameter pair
+listing_nonce nat
+nft_contract address
+token_id nat
+
+VIEW RESULT:
+
+nft_contract: tz1burnburnburnburnburnburnburjAYj
+token_id: 0
+seller: tz1burnburnburnburnburnburnburjAYjjx
+price: 0 3
+amount: 0
+active: false
+start_time: 31 December 1969 18:00
+sale_splits: 0 items
+royalty_splits: 0 items
+
+onchain_listings_for_seller:
+parameter address
+CUTE
+
+VIEW RESULT
+
+X
+
+🔻 0: 9 items
+nft_contract: KT1JFbuyKULdgHi8KjbPAx5Ys8znyXe1
+token_id: 15
+seller: tz2RDjqC2bpUPvy43C7DNFNUuV6Ma5R9fcab
+price: 5 3
+amount: 15
+active: true
+start_time: 18 August 2025 21:51
+sale_splits: 1 items
+0: 2 items
+address: tz2RDjqC2bpUPvy43C7DNFNUuV6Ma5R
+percent: 10,000
+🔻 royalty_splits: 1 items
+0: 2 items
+address: tz2RDjqC2bpUPvy43C7DNFNUuV6Ma5F
+percent: 1,000
+🔻1: 9 items
+🔻2: 9 items
+🔻3: 9 items
+🔻4: 9 items
+🔻5: 9 items
+🔻6: 9 items
+🔻7: 9 items
+🔻8: 9 items
+🔻9: 9 items
+🔻10: 9 items
+🔻11: 9 items
+🔻12: 9 items
+onchain_offers_for_buyer:
+parameter address
+
+onchain_listings_for_collection:
+parameter address
+VIEW RESULT
+
+0: 9 items
+nft_contract: KT1VbovY9UyjL8qwg3XUrcNBSbvfbZ4tdzcQ
+token_id: 0
+seller: tz2RDjqC2bpUPvy43C7DNFNUuV6Ma5R9fcab
+price: 100 t
+amount: 1
+active: true
+start_time: 19 August 2025 11:59
+sale_splits: 1 items
+
+0: 2 items
+address: tz2RDjqC2bpUPvy43C7DNFNUuV6Ma5R9fcab
+percent: 10,000
+royalty_splits: 0 items
+🔻1: 9 items
+onchain_offers_for_collection:
+parameter address
+
+
+

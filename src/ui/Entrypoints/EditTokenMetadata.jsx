@@ -161,6 +161,14 @@ const BUILTIN_KEYS = new Set([
 ]);
 const RESERVED_KEYS = new Set(['decimals']); // view‑only
 
+// Keys managed via dedicated Replace/Append entrypoints — not editable here.
+const APPEND_KEYS = {
+  isAppendKey: (k = '') => {
+    const key = String(k || '').trim();
+    return key.toLowerCase() === 'artifacturi' || /^extrauri_/i.test(key);
+  },
+};
+
 const COMMON_PRESETS = [
   { key: 'artifactUri', type: 'data-uri', value: '' },
   { key: 'displayUri', type: 'data-uri', value: '' },
@@ -409,6 +417,7 @@ export default function EditTokenMetadata({
       if (!key) { customErrors.push('Custom row: key is required'); continue; }
       if (RESERVED_KEYS.has(key)) { customErrors.push(`Key "${key}" is reserved`); continue; }
       if (BUILTIN_KEYS.has(key)) { customErrors.push(`Key "${key}" is managed above`); continue; }
+      if (APPEND_KEYS.isAppendKey(key)) { customWarnings.push(`Key "${key}" is managed via Replace/Append tools and is ignored here.`); continue; }
       if (seen.has(key)) { customErrors.push(`Duplicate custom key "${key}"`); continue; }
       seen.add(key);
 
@@ -884,6 +893,7 @@ export default function EditTokenMetadata({
                         rows={r.type === 'json' || r.type === 'array' ? 3 : undefined}
                         value={r.value}
                         onChange={(e) => onRowValue(i, e.target.value)}
+                        disabled={APPEND_KEYS.isAppendKey(r.key)}
                       />
 
                       {/* tiny preview – only for data: images/videos */}
@@ -900,7 +910,7 @@ export default function EditTokenMetadata({
                       </TinyPreview>
 
                       <ActionBar>
-                        {r.type === 'data-uri' && (
+                        {r.type === 'data-uri' && !APPEND_KEYS.isAppendKey(r.key) && (
                           <MintUpload
                             size="xs"
                             btnText="Upload"
@@ -911,6 +921,20 @@ export default function EditTokenMetadata({
                             accept={undefined}
                           />
                         )}
+                        {APPEND_KEYS.isAppendKey(r.key) && (
+                          <>
+                            <PixelButton
+                              as="a"
+                              href={`/manage?addr=${contractAddress}`}
+                              target="_blank"
+                              rel="noopener"
+                              size="xs"
+                            >
+                              {String(r.key).toLowerCase() === 'artifacturi' ? 'REPLACE ARTIFACT' : 'REPLACE EXTRAURI'}
+                            </PixelButton>
+                            <span style={{ fontSize: 10, opacity: .8 }}>Managed via Replace/Append</span>
+                          </>
+                        )}
                         <PixelButton size="xs" onClick={() => removeRow(i)}>－</PixelButton>
                         <PixelButton size="xs" onClick={addEmptyRow}>＋</PixelButton>
                       </ActionBar>
@@ -919,6 +943,12 @@ export default function EditTokenMetadata({
                     {/* per-row hints/warnings */}
                     {(MEDIA_URI_KEYS.has((r.key || '').trim()) && !looksLikeDataUri(r.value) && r.value) && (
                       <Warn>➖ Soft: media key not using data: URI (allowed; off‑chain links will show an integrity hint).</Warn>
+                    )}
+                    {MEDIA_URI_KEYS.has((r.key || '').trim()) && looksLikeDataUri(r.value) && (
+                      <CHelp>
+                        Large data URIs are better handled via{' '}
+                        <a href={`/manage?addr=${contractAddress}`} target="_blank" rel="noopener noreferrer">Replace/Append</a>.
+                      </CHelp>
                     )}
                     {unchanged && (
                       <CHelp>Unchanged; this key will <b>not</b> be sent in the update.</CHelp>
@@ -984,6 +1014,19 @@ export default function EditTokenMetadata({
                   ))}
                 </ul>
               )}
+              {errors.some((m) => /Metadata\s*>\s*32768/i.test(m)) && (
+                <div style={{ display: 'flex', gap: '.4rem', flexWrap: 'wrap' }}>
+                  <PixelButton as="a" href={`/manage?addr=${contractAddress}`} target="_blank" rel="noopener" size="xs">
+                    REPLACE ARTIFACT
+                  </PixelButton>
+                  <PixelButton as="a" href={`/manage?addr=${contractAddress}`} target="_blank" rel="noopener" size="xs">
+                    REPLACE EXTRAURI
+                  </PixelButton>
+                  <span style={{ fontSize: '.72rem', opacity: .9 }}>
+                    Large media should use Replace/Append flows. Edit is for small text tweaks.
+                  </span>
+                </div>
+              )}
               {/* Transparent bytes info (not gating): */}
               <CHelp>
                 Byte report — assembled:{' '}
@@ -1047,3 +1090,5 @@ export default function EditTokenMetadata({
    - media keys optional (soft ➖); unchanged large URIs don’t block.
    - Per‑row “unchanged; not sent” hint; clearer soft integrity notes.
 */
+
+

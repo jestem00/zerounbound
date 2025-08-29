@@ -1,7 +1,8 @@
 /*Developed by @jams2blues
   File: src/styles/preview-1x1.css
-  Rev:  r46
-  Summary: Enforce perfect 1:1 media fit, zero rounding, and no bleed. */
+  Rev:  r47
+  Summary: Enforce perfect 1:1 media fit, zero rounding, and no bleed.
+           Add robust pixelated upscaling (utility + tile-scoped). */
 
 .preview-1x1 {
   position: relative;
@@ -12,7 +13,7 @@
   border-radius: 0 !important; /* absolutely no rounding */
 }
 
-/* Make all media inside the 1×1 tile snap by the longest edge.
+/* Make all media inside the 1x1 tile snap by the longest edge.
    One dimension will equal the tile edge; the other will letterbox. */
 .preview-1x1 img,
 .preview-1x1 video,
@@ -30,6 +31,18 @@
   background: transparent;
 }
 
+/* Pixel-perfect upscaling for raster media inside tiles */
+.preview-1x1 img,
+.preview-1x1 canvas {
+  /* Modern and fallbacks for widest browser coverage */
+  image-rendering: optimizeSpeed;             /* legacy */
+  image-rendering: -moz-crisp-edges;          /* FF */
+  image-rendering: -o-crisp-edges;            /* Opera */
+  image-rendering: -webkit-optimize-contrast; /* Safari-ish */
+  image-rendering: crisp-edges;               /* CSS4 */
+  image-rendering: pixelated;                 /* modern */
+}
+
 /* RenderMedia wraps <video> in a div; force the wrapper to fill the tile. */
 .preview-1x1 > div[data-zu-media="video"] {
   position: absolute !important;
@@ -44,5 +57,20 @@
   border-radius: 0 !important;
 }
 
-/* What changed & why: Lock 1×1 tiles to true 'contain', fill wrappers, and
-   hard‑zero any rounding so media edges snap cleanly to the square. */
+/* Global utility to force crisp nearest-neighbour raster upscaling anywhere. */
+.zu-pixelated,
+img.zu-pixelated,
+canvas.zu-pixelated {
+  image-rendering: optimizeSpeed;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: -o-crisp-edges;
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
+}
+
+/* What changed & why: Lock 1x1 tiles to true 'contain', fill wrappers, and
+   hard-zero any rounding so media edges snap cleanly to the square. Also add
+   robust pixelated upscaling for raster media across browsers, via both scoped
+   tile rules and a reusable .zu-pixelated utility class. */
+

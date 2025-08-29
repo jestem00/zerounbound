@@ -278,19 +278,20 @@ function RenderMediaRaw({
 
   // SVG (scriptless <img> or opt-in <object>)
   if (type === 'image/svg+xml') {
-    const svgStyle = { imageRendering: 'pixelated', width: '100%', height: '100%', ...style };
+    const svgStyle = { width: '100%', height: '100%', ...style };
     if (allowScripts) {
       return (
-        <object data={safeUri} type="image/svg+xml" style={svgStyle} className={className} onLoad={onLoad}>
-          <img src={safeUri} alt={alt} loading="lazy" decoding="async" {...commonImgProps} />
+        <object data={safeUri} type="image/svg+xml" style={svgStyle} className={className} onLoad={onLoad} data-zu-media="svg">
+          <img src={safeUri} alt={alt} loading="lazy" decoding="async" {...commonImgProps} data-zu-media="svg" />
         </object>
       );
     }
-    return <img src={safeUri} alt={alt} loading="lazy" decoding="async" {...commonImgProps} />;
+    return <img src={safeUri} alt={alt} loading="lazy" decoding="async" {...commonImgProps} data-zu-media="svg" />;
   }
 
   // Images
   if (type && type.startsWith('image/')) {
+    const imgClass = [className, 'zu-pixelated'].filter(Boolean).join(' ');
     return (
       <img
         src={safeUri}
@@ -298,7 +299,11 @@ function RenderMediaRaw({
         loading="lazy"
         decoding="async"
         style={{ imageRendering: 'pixelated', ...style }}
-        {...commonImgProps}
+        className={imgClass}
+        data-zu-media="image"
+        ref={ref}
+        onLoad={onLoad}
+        onError={handleErrorOnce}
       />
     );
   }

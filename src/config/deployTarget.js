@@ -36,7 +36,7 @@
 // 'mainnet' or 'ghostnet' as appropriate; deployTarget.js is the sole
 // diverging file between network branches.  During development, the
 // scripts/setTarget.js helper rewrites this line to toggle networks.
-export const TARGET = 'mainnet';
+export const TARGET = 'ghostnet';
 
 // ---------------------------------------------------------------------------
 // Per‑network configuration
@@ -88,7 +88,9 @@ const nets = {
     ogImage:      'https://zerounbound.art/sprites/Banner.png',
     startUrl:     '/?source=pwa-mainnet',
     rpc: [
-      // Prefer ECAD Infra mainnet RPC for robust run_code/view support
+      // Prefer SmartPy mainnet RPC first to avoid CORS on views
+      'https://mainnet.smartpy.io',
+      // ECAD Infra mainnet RPC (fast, but may CORS-block some POST view calls)
       'https://mainnet.tezos.ecadinfra.com',
       // Fallback: Tezos Commons node-switcher
       'https://prod.tcinfra.net/rpc/mainnet',

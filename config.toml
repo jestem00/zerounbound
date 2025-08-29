@@ -1,0 +1,31 @@
+# Developed by @jams2blues – ZeroContract Studio
+# File: config.toml
+# Rev : r1 2025‑09‑07 UTC
+# Summary: baseline Codex CLI configuration for the ZeroUnbound project.
+
+# This configuration defines reasonable defaults for working with
+# OpenAI Codex. Copy this file to your own `~/.codex/config.toml` or
+# supply it via the `--config-file` flag when launching Codex.  It is
+# referenced by AGENTS.md and kept up to date as Codex evolves.
+
+model = "gpt-5"
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+model_reasoning_effort = "high"
+model_reasoning_summary = "detailed"
+model_verbosity = "high"
+hide_agent_reasoning = false
+
+[shell_environment_policy]
+inherit = "core"
+ignore_default_excludes = false
+exclude = ["AWS_*", "AZURE_*"]
+include_only = ["PATH", "HOME", "USER"]
+
+[sandbox_workspace_write]
+network_access = false
+exclude_tmpdir_env_var = false
+exclude_slash_tmp = false
+writable_roots = []
+
+# What changed & why: initial creation of root-level Codex configuration with recommended defaults for model, sandbox and environment settings.

@@ -139,14 +139,17 @@ const NavBtn = styled(PixelButton)`
   z-index: ${TOPMOST_Z + 3};
   opacity: .9;
   &:hover { opacity: 1; }
+  /* Ensure clicks are never delayed/suppressed on touch devices */
+  touch-action: manipulation;
+  pointer-events: auto;
 `;
 const NavPrev = styled(NavBtn)` left: 8px; `;
 const NavNext = styled(NavBtn)` right: 8px; `;
 
-const CloseBtn = styled(PixelButton)`
-  position: fixed;
-  top: 8px; right: 8px;
-  z-index: ${TOPMOST_Z + 4};
+/* Right side of the top bar: mime + close */
+const TopBarRight = styled.div`
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: 8px;
 `;
 
 const HudNub = styled.button`
@@ -537,8 +540,12 @@ export default function FullscreenModal({
       {hudVisible && (
         <TopBar ref={topRef}>
           <Muted style={{ fontWeight: 700 }}>{label}</Muted>
-          <span style={{ flex: 1 }} />
-          <Muted title={trimDataUri(uri)}>{mimeShort || 'unknown/unknown'}</Muted>
+          <TopBarRight>
+            <Muted title={trimDataUri(uri)} style={{ whiteSpace: 'nowrap' }}>
+              {mimeShort || 'unknown/unknown'}
+            </Muted>
+            <PixelButton $noActiveFx onClick={onClose} title="Close (Esc)">CLOSE</PixelButton>
+          </TopBarRight>
         </TopBar>
       )}
 
@@ -640,9 +647,22 @@ export default function FullscreenModal({
       {/* Close and arrows — hidden when HUD is hidden */}
       {hudVisible && (
         <>
-          <CloseBtn $noActiveFx aria-label="Close viewer" onClick={onClose}>✕</CloseBtn>
-          {hasPrev && <NavPrev $noActiveFx aria-label="Previous media" onClick={onPrev}>◀</NavPrev>}
-          {hasNext && <NavNext $noActiveFx aria-label="Next media" onClick={onNext}>▶</NavNext>}
+          {hasPrev && (
+            <NavPrev
+              $noActiveFx
+              aria-label="Previous media"
+              onMouseDown={(e) => { e.preventDefault(); setDragging(false); }}
+              onClick={(e) => { e.preventDefault(); onPrev?.(); }}
+            >◀</NavPrev>
+          )}
+          {hasNext && (
+            <NavNext
+              $noActiveFx
+              aria-label="Next media"
+              onMouseDown={(e) => { e.preventDefault(); setDragging(false); }}
+              onClick={(e) => { e.preventDefault(); onNext?.(); }}
+            >▶</NavNext>
+          )}
         </>
       )}
 

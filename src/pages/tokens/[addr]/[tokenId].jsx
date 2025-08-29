@@ -11,6 +11,7 @@ import React, {
   useMemo,
 } from 'react';
 import { useRouter } from 'next/router';
+import Head from 'next/head';
 import styledPkg from 'styled-components';
 
 import ExploreNav from '../../../ui/ExploreNav.jsx';
@@ -23,7 +24,7 @@ import detectHazards from '../../../utils/hazards.js';
 import useConsent from '../../../hooks/useConsent.js';
 import { useWalletContext } from '../../../contexts/WalletContext.js';
 import { jFetch } from '../../../core/net.js';
-import { TZKT_API } from '../../../config/deployTarget.js';
+import { TZKT_API, SITE_URL } from '../../../config/deployTarget.js';
 import decodeHexFields, { decodeHexJson } from '../../../utils/decodeHexFields.js';
 import { mimeFromDataUri } from '../../../utils/uriHelpers.js';
 
@@ -308,6 +309,18 @@ export default function TokenDetailPage() {
 
   return (
     <Page>
+      <Head>
+        <title>{meta.name ? `${meta.name} — Zero Unbound` : `Token ${tokenId} — Zero Unbound`}</title>
+        <meta property="og:title" content={meta.name || `Token #${tokenId}`} />
+        <meta name="twitter:title" content={meta.name || `Token #${tokenId}`} />
+        <meta property="og:description" content={meta.description || 'On-chain artwork on ZeroUnbound.art'} />
+        <meta name="twitter:description" content={meta.description || 'On-chain artwork on ZeroUnbound.art'} />
+        <meta property="og:url" content={`${SITE_URL}/tokens/${addr}/${tokenId}`} />
+        <meta property="og:image" content={`${SITE_URL}/api/snapshot/${addr}/${tokenId}`} />
+        <meta name="twitter:image" content={`${SITE_URL}/api/snapshot/${addr}/${tokenId}`} />
+        <meta name="twitter:card" content="summary_large_image" />
+        <link rel="canonical" href={`${SITE_URL}/tokens/${addr}/${tokenId}`} />
+      </Head>
       {/* Explore header (keeps hazard toggles; search hidden on detail) */}
       <ExploreNav hideSearch />
 

@@ -88,9 +88,10 @@ const nets = {
     ogImage:      'https://zerounbound.art/sprites/Banner.png',
     startUrl:     '/?source=pwa-mainnet',
     rpc: [
-      // Primary mainnet RPC (recommended by ECAD Infra) – supports views
-      'https://prod.tcinfra.net/rpc/mainnet', //tezos commons recommended RPC node switcher, selects best node
-      //'https://mainnet.tezos.ecadinfra.com', // ECAD Infra mainnet RPC fallback
+      // Prefer ECAD Infra mainnet RPC for robust run_code/view support
+      'https://mainnet.tezos.ecadinfra.com',
+      // Fallback: Tezos Commons node-switcher
+      'https://prod.tcinfra.net/rpc/mainnet',
     ],
     tzkt:         'https://api.tzkt.io',
     redirects:    [],
@@ -125,6 +126,20 @@ export const REDIRECTS     = NET.redirects;
 export const PACKAGE_NAME  = NET.pkgName;
 export const DEV_PORT      = NET.devPort;
 export const SITE_LOGO     = NET.siteLogo;
+
+// ---------------------------------------------------------------------------
+// View execution feature flags (compile-time config)
+//
+// Some public RPCs intermittently fail run_code/run_script_view requests, and
+// some providers enforce strict CORS. We centralize these toggles here so they
+// are controlled alongside network settings rather than environment variables.
+//
+// ENABLE_ONCHAIN_VIEWS: enables Taquito metadata views (on-chain_listings,
+// on-chain_offers, etc). Default true for parity with previous behavior.
+// ENABLE_OFFCHAIN_MARKET_VIEWS: enables TZIP-16 off-chain listings view
+// (offchain_listings_for_token). Default false to avoid RPC/CORS issues.
+export const ENABLE_ONCHAIN_VIEWS = true;
+export const ENABLE_OFFCHAIN_MARKET_VIEWS = false;
 
 // External site URL prefixes.  These base URLs change by network.
 export const URL_BCD_BASE = TARGET === 'ghostnet'

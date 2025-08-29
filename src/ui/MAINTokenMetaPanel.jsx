@@ -21,6 +21,7 @@ import PixelButton                  from './PixelButton.jsx';
 import RenderMedia                  from '../utils/RenderMedia.jsx';
 import IntegrityBadge               from './IntegrityBadge.jsx';
 import MarketplaceBar               from './MarketplaceBar.jsx';
+import ShareDialog                  from './ShareDialog.jsx';
 
 import { checkOnChainIntegrity }    from '../utils/onChainValidator.js';
 import { getIntegrityInfo }         from '../constants/integrityBadges.js';
@@ -247,6 +248,8 @@ export default function MAINTokenMetaPanel({
 }) {
   const [copied, setCopied] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareAlias, setShareAlias] = useState('');
 
   // Decode collection metadata for display + hazards.
   const collObj = useMemo(() => toMetaObject(collection.metadata), [collection.metadata]);
@@ -322,6 +325,30 @@ export default function MAINTokenMetaPanel({
     if (!Array.isArray(list)) list = typeof list === 'string' ? list.split(/[,;]\s*/) : [];
     return list;
   }, [token.metadata]);
+
+  // Resolve @handle for primary creator when opening Share.
+  useEffect(() => {
+    if (!shareOpen) return;
+    let cancelled = false;
+    const firstAddr = (() => {
+      const all = [...creatorsList, ...authorsList];
+      for (const v of all) {
+        if (typeof v !== 'string') continue;
+        const s = v.trim();
+        if (/^tz[1-3][0-9A-Za-z]{33}$/i.test(s)) return s;
+      }
+      return '';
+    })();
+    if (!firstAddr) { setShareAlias(''); return; }
+    (async () => {
+      try {
+        const res = await fetch(`/api/handle/${firstAddr}`);
+        const j = await res.json();
+        if (!cancelled) setShareAlias(j?.alias || '');
+      } catch { if (!cancelled) setShareAlias(''); }
+    })();
+    return () => { cancelled = true; };
+  }, [shareOpen, creatorsList, authorsList]);
 
   useEffect(() => {
     const addrs = new Set();
@@ -528,6 +555,16 @@ export default function MAINTokenMetaPanel({
             </PixelButton>
           )}
 
+          {/* Share */}
+          <PixelButton
+            size="xs"
+            onClick={() => setShareOpen(true)}
+            title="Share this token"
+            style={{ marginTop: '4px' }}
+          >
+            Share
+          </PixelButton>
+
           {/* small entry point for Extra URIs (only if any exist) */}
           {Array.isArray(extraUris) && extraUris.length > 1 && (
             <PixelButton
@@ -699,6 +736,23 @@ export default function MAINTokenMetaPanel({
             if (!val) onToggleScript(false);
             else onRequestScriptReveal?.('scripts');
           }}
+        />
+      )}
+
+      {shareOpen && (
+        <ShareDialog
+          open={shareOpen}
+          onClose={() => setShareOpen(false)}
+          name={token?.metadata?.name}
+          creators={Array.isArray(token?.metadata?.creators) ? token.metadata.creators : []}
+          addr={collection?.address}
+          tokenId={token?.tokenId}
+          previewUri={currentUri?.value}
+          artistAlias={shareAlias}
+          variant="view"
+          downloadUri={currentUri?.value}
+          downloadMime={currentUri?.mime}
+          downloadName={currentUri?.name || token?.metadata?.name}
         />
       )}
     </>

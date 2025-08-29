@@ -25,9 +25,19 @@ import {
 
 import { jFetch } from './net.js';
 import { tzktBase as tzktBaseForNet } from '../utils/tzkt.js';
+import { ENABLE_ONCHAIN_VIEWS as CFG_ENABLE_ONCHAIN_VIEWS, ENABLE_OFFCHAIN_MARKET_VIEWS as CFG_ENABLE_OFFCHAIN_MARKET_VIEWS } from '../config/deployTarget.js';
 
 // NEW: robust on‑chain wrappers
 import { onchainListingsForCollection } from './zeroSumViews.js';
+
+// View toggles come from deployTarget.js (project invariant)
+const ENABLE_ONCHAIN_VIEWS = CFG_ENABLE_ONCHAIN_VIEWS !== false;
+const ENABLE_OFFCHAIN_MARKET_VIEWS = !!CFG_ENABLE_OFFCHAIN_MARKET_VIEWS;
+let RPC_DEGRADED_UNTIL = 0; // epoch ms; when > now, skip RPC views
+const RPC_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+const nowTs = () => Date.now();
+const isRpcDegraded = () => nowTs() < RPC_DEGRADED_UNTIL;
+const markRpcDegraded = () => { RPC_DEGRADED_UNTIL = nowTs() + RPC_COOLDOWN_MS; };
 
 /*──────────────── constants & helpers ────────────────*/
 const RAW_TZKT = String(TZKT_API || 'https://api.tzkt.io').replace(/\/+$/, ''); // no /v1
@@ -75,6 +85,7 @@ export async function getMarketContract(toolkit) {
 
 /*──────────────── on‑chain & off‑chain views (token‑level) ───────────────*/
 export async function fetchOnchainListings({ toolkit, nftContract, tokenId }) {
+  if (!ENABLE_ONCHAIN_VIEWS || isRpcDegraded()) return [];
   const market = await getMarketContract(toolkit);
   const viewCaller = await getViewCaller(market, toolkit);
 
@@ -83,7 +94,10 @@ export async function fetchOnchainListings({ toolkit, nftContract, tokenId }) {
     raw = await market.contractViews
       .onchain_listings_for_token({ nft_contract: nftContract, token_id: Number(tokenId) })
       .executeView({ viewCaller });
-  } catch { raw = null; }
+  } catch {
+    markRpcDegraded();
+    raw = null;
+  }
 
   const out = [];
   const push = (n, o) => out.push({
@@ -102,6 +116,7 @@ export async function fetchOnchainListings({ toolkit, nftContract, tokenId }) {
 }
 
 export async function fetchOnchainOffers({ toolkit, nftContract, tokenId }) {
+  if (!ENABLE_ONCHAIN_VIEWS || isRpcDegraded()) return [];
   const market = await getMarketContract(toolkit);
   const viewCaller = await getViewCaller(market, toolkit);
 
@@ -110,7 +125,10 @@ export async function fetchOnchainOffers({ toolkit, nftContract, tokenId }) {
     raw = await market.contractViews
       .onchain_offers_for_token({ nft_contract: nftContract, token_id: Number(tokenId) })
       .executeView({ viewCaller });
-  } catch { raw = null; }
+  } catch {
+    markRpcDegraded();
+    raw = null;
+  }
 
   const offers = [];
   const push = (k, o) => offers.push({
@@ -128,8 +146,20 @@ export async function fetchOnchainOffers({ toolkit, nftContract, tokenId }) {
   return offers;
 }
 
-/** TZIP‑16 Metadata view: per‑token off‑chain listings (when present). Robust across names. */
+/**
+ * TZIP‑16 Metadata view: per‑token off‑chain listings (when present).
+ *
+ * Some RPC providers intermittently 500 on run_code for metadata views. To
+ * avoid spamming failing POSTs and noisy console output, we apply a simple
+ * circuit‑breaker: after a failure we skip attempting this call for a short
+ * cooldown window.
+ */
+let OFFCHAIN_LISTINGS_RETRY_AFTER = 0; // epoch ms
+const OFFCHAIN_LISTINGS_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+
 async function fetchOffchainListingsForToken({ toolkit, nftContract, tokenId }) {
+  if (!ENABLE_ONCHAIN_VIEWS || !ENABLE_OFFCHAIN_MARKET_VIEWS || isRpcDegraded()) return [];
+  if (Date.now() < OFFCHAIN_LISTINGS_RETRY_AFTER) return [];
   try {
     const market = await getMarketContract(toolkit);
     const views  = await market.tzip16().metadataViews();
@@ -144,7 +174,12 @@ async function fetchOffchainListingsForToken({ toolkit, nftContract, tokenId }) 
       raw = await v().executeView({ nft_contract: nftContract, token_id: Number(tokenId) });
     } catch {
       try { raw = await v().executeView(String(nftContract), Number(tokenId)); }
-      catch { raw = null; }
+      catch {
+        // Mark failure window and stop retrying for a while.
+        OFFCHAIN_LISTINGS_RETRY_AFTER = Date.now() + OFFCHAIN_LISTINGS_COOLDOWN_MS;
+        markRpcDegraded();
+        raw = null;
+      }
     }
 
     const out = [];
@@ -164,7 +199,12 @@ async function fetchOffchainListingsForToken({ toolkit, nftContract, tokenId }) 
       Object.entries(raw).forEach(([k, v2]) => push(k, v2));
     }
     return out;
-  } catch { return []; }
+  } catch {
+    // Failure: set cooldown to reduce repeated POST /run_code errors.
+    OFFCHAIN_LISTINGS_RETRY_AFTER = Date.now() + OFFCHAIN_LISTINGS_COOLDOWN_MS;
+    markRpcDegraded();
+    return [];
+  }
 }
 
 /*──────────────── TzKT big‑map fallback (hardened) ────────────────*/
@@ -234,6 +274,20 @@ async function fetchListingsViaTzktBigmap({ nftContract, tokenId, net = NETWORK_
     for (const r of rows || []) for (const l of walkListings(r)) out.push(l);
   }
 
+  // Some marketplace deployments keep an explicit active bigmap; consult it as
+  // a final TzKT-only source before giving up.
+  if (idx.listings_active && out.length === 0) {
+    const q3 = new URLSearchParams({
+      'value.nft_contract': nftContract,
+      'value.token_id'   : String(tokenId),
+      select             : 'value',
+      active             : 'true',
+      limit              : '10000',
+    });
+    const rows = await jFetch(`${TZKT_V1}/bigmaps/${idx.listings_active}/keys?${q3}`, 1).catch(() => []);
+    for (const r of rows || []) for (const l of walkListings(r)) out.push(l);
+  }
+
   return out.map((l) => ({
     nonce     : Number(l?.nonce ?? l?.listing_nonce ?? l?.id ?? 0),
     priceMutez: Number(l?.price ?? l?.priceMutez),
@@ -245,8 +299,12 @@ async function fetchListingsViaTzktBigmap({ nftContract, tokenId, net = NETWORK_
 
 /*──────────────── high‑level: stable API & fallbacks ────────────────*/
 export async function fetchListings({ toolkit, nftContract, tokenId }) {
+  // Prefer TzKT for stability; on-chain only if enabled & healthy
   try {
-    const results = await fetchOnchainListings({ toolkit, nftContract, tokenId });
+    let results = await fetchListingsViaTzktBigmap({ nftContract, tokenId });
+    if (!results?.length && ENABLE_ONCHAIN_VIEWS && !isRpcDegraded()) {
+      results = await fetchOnchainListings({ toolkit, nftContract, tokenId });
+    }
     return Array.isArray(results) ? results : [];
   } catch { return []; }
 }
@@ -257,8 +315,8 @@ export async function fetchLowestListing(arg1, arg2) {
   const { toolkit, nftContract, tokenId, staleCheck = true } = opts;
 
   let list = [];
-  try { list = await fetchOnchainListings({ toolkit, nftContract, tokenId }); } catch {}
-  if (!list?.length) { try { list = await fetchOffchainListingsForToken({ toolkit, nftContract, tokenId }); } catch {} }
+    try { list = await fetchOnchainListings({ toolkit, nftContract, tokenId }); } catch {}
+  if (!list?.length && ENABLE_OFFCHAIN_MARKET_VIEWS && !isRpcDegraded()) { try { list = await fetchOffchainListingsForToken({ toolkit, nftContract, tokenId }); } catch {} }
   if (!list?.length) { try { list = await fetchListingsViaTzktBigmap({ nftContract, tokenId }); } catch {} }
 
   list = (list || [])
@@ -320,6 +378,11 @@ export async function fetchListingDetails({ toolkit, nftContract, tokenId, nonce
 
 /*──────────────── additional on‑chain convenience ────────────────*/
 export async function fetchOnchainListingDetails({ toolkit, nftContract, tokenId, nonce }) {
+  if (!ENABLE_ONCHAIN_VIEWS || isRpcDegraded()) {
+    const err = new Error('ONCHAIN_VIEWS_DISABLED');
+    err.code = 'ONCHAIN_VIEWS_DISABLED';
+    throw err;
+  }
   const market = await getMarketContract(toolkit);
   const viewCaller = await getViewCaller(market, toolkit);
   const raw = await market.contractViews
@@ -839,3 +902,11 @@ export async function preflightBuy(toolkit, { nftContract, tokenId, seller, amou
      This resolves “0 For Sale” when ABI exposes a generic `address` arg.
    • KEPT: entire r988 API surface (param builders, stale guards, etc.). */
 // EOF
+
+
+
+
+
+
+
+

@@ -1,7 +1,7 @@
 /* Developed by @jams2blues
    File: src/ui/MAINTokenMetaPanel.jsx
-   Rev : r20
-   Summary: Clean, compile-safe meta panel with script toggle,
+   Rev : r21
+   Summary: add rarity rank and trait chips; keep script toggle,
             fullscreen, share, and extra-URIs entry. */
 
 import React, { useMemo, useState } from 'react';
@@ -46,6 +46,15 @@ const Tag = styled.span`
   background: var(--zu-bg-alt); font-size: .7rem; border-radius: 4px; white-space: nowrap;
 `;
 
+const TraitGrid = styled.div`
+  display: flex; flex-wrap: wrap; gap: 6px;`;
+
+const Trait = styled.div`
+  border: 1px solid var(--zu-fg); padding: 4px 6px; background: var(--zu-bg-alt);
+  font-size: .7rem; border-radius: 4px; display: flex; flex-direction: column; align-items: flex-start;`;
+
+const TraitPct = styled.span`font-size: .65rem; opacity: .7;`;
+
 const MetaGrid = styled.dl`
   display: grid; grid-template-columns: max-content 1fr; gap: 4px 8px;
   dt { font-weight: 700; opacity: .8; }
@@ -55,7 +64,7 @@ const MetaGrid = styled.dl`
 export default function MAINTokenMetaPanel({
   token,
   collection,
-  walletAddress,
+  walletAddress: _walletAddress,
   tokenScripts,
   tokenAllowJs,
   onToggleScript,
@@ -65,6 +74,7 @@ export default function MAINTokenMetaPanel({
   extraUris = [],
   onOpenExtras,
   fsDisabled,
+  rarity,
 }) {
   const meta = token?.metadata || {};
   const integrity = useMemo(() => checkOnChainIntegrity(meta), [meta]);
@@ -168,6 +178,29 @@ export default function MAINTokenMetaPanel({
         </Section>
       )}
 
+      {/* Rarity rank */}
+      {rarity && typeof rarity.rank === 'number' && (
+        <Section>
+          <span style={{ fontSize: '.8rem' }}>Rank {rarity.rank} / {rarity.total}</span>
+        </Section>
+      )}
+
+      {/* Attributes with rarity percentages */}
+      {rarity?.traits && rarity.traits.length > 0 && (
+        <Section>
+          <span style={{ fontWeight: 700 }}>Attributes:</span>
+          <TraitGrid>
+            {rarity.traits.map((t) => (
+              <Trait key={`${t.name}:${t.value}`}>
+                <strong>{t.value}</strong>
+                <span style={{ opacity: .8 }}>{t.name}</span>
+                <TraitPct>{t.pct.toFixed(2).replace(/\.00$/, '')}%</TraitPct>
+              </Trait>
+            ))}
+          </TraitGrid>
+        </Section>
+      )}
+
       {/* Tags */}
       {Array.isArray(meta?.tags) && meta.tags.length > 0 && (
         <Section>
@@ -223,5 +256,14 @@ MAINTokenMetaPanel.propTypes = {
     mime       : PropTypes.string,
   })),
   onOpenExtras: PropTypes.func,
+  rarity      : PropTypes.shape({
+    rank  : PropTypes.number,
+    total : PropTypes.number,
+    traits: PropTypes.arrayOf(PropTypes.shape({
+      name : PropTypes.string,
+      value: PropTypes.string,
+      pct  : PropTypes.number,
+    })),
+  }),
 };
 

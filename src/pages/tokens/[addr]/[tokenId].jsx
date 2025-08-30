@@ -1,8 +1,8 @@
 /*─────────────────────────────────────────────────────────────
       Developed by @jams2blues – ZeroContract Studio
       File:    src/pages/tokens/[addr]/[tokenId].jsx
-      Rev :    r882    2025‑08‑25
-      Summary: Flex‑grouped preview and navigation; clamp group height (min(70vh,calc(var(--vh)-var(--hdr)-160px))) to keep nav clear and resolution agnostic
+      Rev :    r883    2025‑09‑07
+      Summary: add rarity computation and prop wiring; keep flex‑grouped preview and nav
 ──────────────────────────────────────────────────────────────*/
 import React, {
   useEffect,
@@ -30,6 +30,7 @@ import { mimeFromDataUri } from '../../../utils/uriHelpers.js';
 
 /* centralized extra‑URI fetching */
 import { fetchExtraUris } from '../../../utils/extraUris.js';
+import { getCollectionRarity, buildTokenRarity } from '../../../utils/rarity.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -146,6 +147,9 @@ export default function TokenDetailPage() {
   const [uris, setUris]             = useState([]);
   const [uriIdx, setUriIdx]         = useState(0);
 
+  /* rarity data */
+  const [rarity, setRarity]         = useState(null);
+
   /* consents */
   const [allowNSFW,  setAllowNSFW]  = useConsent('nsfw',  false);
   const [allowFlash, setAllowFlash] = useConsent('flash', false);
@@ -236,6 +240,23 @@ export default function TokenDetailPage() {
 
     return () => { cancelled = true; };
   }, [addr, tokenId, toolkit]);
+
+  /* fetch rarity info once token and collection are known */
+  useEffect(() => {
+    let cancelled = false;
+    if (!collection?.address || token?.tokenId == null) return undefined;
+    (async () => {
+      try {
+        const collData = await getCollectionRarity(apiBase, collection.address);
+        if (cancelled || !collData) return;
+        const info = buildTokenRarity(collData, token.tokenId);
+        setRarity(info);
+      } catch {
+        /* ignore rarity failures */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [collection?.address, token?.tokenId]);
 
   /* derived current media + hazards */
   const cur  = uris[uriIdx] || { value: '', mime: '' };
@@ -402,6 +423,7 @@ export default function TokenDetailPage() {
           /* current index (optional, for 2/2 indicators in panel) */
           currentIndex={uriIdx}
           totalUris={uris.length}
+          rarity={rarity}
         />
       </Grid>
 

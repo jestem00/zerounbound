@@ -607,6 +607,9 @@ export default function TokenCard({
           addr={contractAddress}
           tokenId={token?.tokenId}
           previewUri={`/api/snapshot/${contractAddress}/${token?.tokenId}`}
+          downloadUri={meta?.artifactUri}
+          downloadMime={meta?.mimeType}
+          downloadName={meta?.name}
         />
       )}
     </>

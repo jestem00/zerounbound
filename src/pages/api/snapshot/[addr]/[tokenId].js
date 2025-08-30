@@ -15,6 +15,7 @@ import path from 'path';
 import { promises as fs } from 'fs';
 
 import { TZKT_API } from '../../../../config/deployTarget.js';
+import decodeHexFields, { decodeHexJson } from '../../../../utils/decodeHexFields.js';
 
 // Determine the best candidate URI from the token metadata; prefer data: URIs.
 function pickBestUri(meta = {}) {
@@ -46,14 +47,21 @@ function normaliseUri(uri) {
 // Fetch token metadata from TzKT. Returns null on error.
 async function fetchTokenMeta(addr, tokenId) {
   try {
-    const url = `${TZKT_API.replace(/\/+$/, '')}/v1/tokens?contract=${encodeURIComponent(addr)}&tokenId=${encodeURIComponent(tokenId)}&select=metadata`;
+    const url = `${TZKT_API.replace(/\/+$/, '')}/v1/tokens?contract=${encodeURIComponent(addr)}&tokenId=${encodeURIComponent(tokenId)}&select=metadata&limit=1`;
     const res = await fetch(url, { headers: { Accept: 'application/json' } });
     if (!res.ok) return null;
     const arr = await res.json();
-    if (Array.isArray(arr) && arr.length > 0) {
-      return arr[0]?.metadata || null;
+    if (!Array.isArray(arr) || arr.length === 0) return null;
+    // When select=metadata is used, TzKT returns the metadata value directly.
+    let metaCandidate = arr[0];
+    if (metaCandidate && typeof metaCandidate === 'object' && 'metadata' in metaCandidate) {
+      metaCandidate = metaCandidate.metadata;
     }
-    return null;
+    if (typeof metaCandidate === 'string') {
+      try { metaCandidate = JSON.parse(metaCandidate); }
+      catch { metaCandidate = decodeHexJson(metaCandidate) || {}; }
+    }
+    return decodeHexFields(metaCandidate || {});
   } catch {
     return null;
   }
@@ -148,4 +156,3 @@ function createEtag(buf) {
    - Prefer on-chain data URIs; avoid Sharp for common raster types to keep
      cold starts fast and cost low. Strong CDN caching via ETag + immutable.
    - Still falls back to the site banner when content cannot be decoded. */
-

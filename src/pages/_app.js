@@ -55,6 +55,7 @@ export default function ZeroUnboundApp({ Component, pageProps }) {
       let creators = Array.isArray(creatorsIn) ? creatorsIn : (creatorsIn ? [creatorsIn] : []);
       let preview = previewUri || (collection && tokenId != null ? `/api/snapshot/${collection}/${tokenId}` : '');
       let scope = scopeIn || 'token';
+      let meta = null;
 
       const base = `${String(TZKT_API || '').replace(/\/+$/, '')}/v1`;
       const ipfsToHttp = (u = '') => (typeof u === 'string' && u.startsWith('ipfs://') ? u.replace(/^ipfs:\/\//i, 'https://ipfs.io/ipfs/') : u);
@@ -76,7 +77,7 @@ export default function ZeroUnboundApp({ Component, pageProps }) {
           // Token share: fetch token metadata for name + creators
           const rows = await fetchJson(`${base}/tokens?contract=${encodeURIComponent(collection)}&tokenId=${encodeURIComponent(tokenId)}&select=metadata&limit=1`);
           const metaRaw = Array.isArray(rows) ? (rows[0] || {}) : (rows || {});
-          let meta = metaRaw;
+          meta = metaRaw;
           if (typeof metaRaw === 'string') {
             try { meta = JSON.parse(metaRaw); } catch { meta = decodeHexJson(metaRaw) || {}; }
           }
@@ -146,7 +147,33 @@ export default function ZeroUnboundApp({ Component, pageProps }) {
         }
       } catch { /* ignore */ }
 
-      setShareDlg({ open: true, variant, scope, addr: collection, tokenId, name, creators, preview, alias, url: absUrl });
+      // Download info (tokens only)
+      let downloadUri = '';
+      let downloadMime = '';
+      let downloadName = '';
+      try {
+        if (scope === 'token' && meta && typeof meta === 'object') {
+          downloadUri = meta.artifactUri || '';
+          downloadMime = meta.mimeType || (Array.isArray(meta.formats) ? meta.formats[0]?.mimeType : '') || '';
+          downloadName = meta.name || name || '';
+        }
+      } catch { /* ignore */ }
+
+      setShareDlg({
+        open: true,
+        variant,
+        scope,
+        addr: collection,
+        tokenId,
+        name,
+        creators,
+        preview,
+        alias,
+        url: absUrl,
+        downloadUri,
+        downloadMime,
+        downloadName,
+      });
     };
     window.addEventListener('zu:openShare', onShare);
     return () => window.removeEventListener('zu:openShare', onShare);
@@ -244,6 +271,9 @@ export default function ZeroUnboundApp({ Component, pageProps }) {
             previewUri={shareDlg.preview}
             artistAlias={shareDlg.alias}
             url={shareDlg.url}
+            downloadUri={shareDlg.downloadUri}
+            downloadMime={shareDlg.downloadMime}
+            downloadName={shareDlg.downloadName}
           />
         )}
       </WalletProvider>

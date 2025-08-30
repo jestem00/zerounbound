@@ -1,51 +1,43 @@
 Developed by @jams2blues — ZeroContract Studio
 File: docs/share_nft_feature.md
-Rev : r3 2025-08-27
-Summary: Share feature shipped on token detail page with two
-variants (view and purchase), per-token Open Graph/Twitter
-meta tags, artist handle resolution, and a Download Original
-action. Docs updated to reflect the shipped behavior and APIs.
+Rev : r4 2025-08-29
+Summary: Share feature with view/purchase variants, per-token social cards,
+artist handle resolution, and a download action. Cards integrate a share
+button using a global bus.
 
 NFT Sharing — Design and Implementation
 
-- Scope: Token detail page share modal; purchase share variant supported
-  (hook available from buy flow). Listing/collection card buttons land in
-  the next increment.
-- Reliability: Per-token social cards via <Head> ensure proper previews on
+- Scope: Token detail page share modal with purchase variant supported
+  (hooked from buy flow). Listing/collection card buttons included.
+- Reliability: Per-token social cards via <Head> ensure correct previews on
   X/Twitter and Discord. PNG snapshots are generated on demand by a
   serverless endpoint.
 
 User Experience
 
-- Share Button: Appears in the right meta panel under Fullscreen on the
-  token detail page.
+- Share Button: Appears on token detail meta panel and on cards.
 - ShareDialog content:
-  - Preview: Displays the current media with pixelated scaling.
+  - Preview: Displays the artwork with pixelated scaling.
   - Prewritten text: Includes the token name, optional “by @handle” and the
     canonical token URL.
-  - Buttons:
-    - Share (system share sheet via navigator.share)
-    - X (twitter.com/intent/tweet with the prewritten text)
-    - Copy Link
-    - Download (downloads the decoded original file; filename uses the
-      correct extension derived from MIME)
+  - Buttons: Share (system share), X (tweet intent), Copy Link, Download.
 
 Message Variants
 
-- View (default): “I am sharing "<Name>" by @<handle> on @ZeroUnboundArt <URL>”
-- Purchase (variant="purchase"): “I have just collected "<Name>" by @<handle>
-  on @ZeroUnboundArt <URL>”
+- View (default): I am sharing "<Name>" by @<handle> on @ZeroUnboundArt <URL>
+- Purchase (variant="purchase"): I have just collected "<Name>" by @<handle>
+  on @ZeroUnboundArt <URL>
 
 Artist Handle Resolution
 
-- On opening ShareDialog, when the token metadata includes a tz address in
-  creators/authors, the client fetches /api/handle/<tz> and uses the returned
-  alias (e.g., “@artist” or a shortened tz) in the prewritten message.
+- On opening, when metadata includes a tz address in creators/authors, the
+  client fetches /api/handle/<tz> and uses the returned alias (e.g., @artist
+  or a shortened tz) in the prewritten message.
 - API: src/pages/api/handle/[address].js
-  - Queries Objkt GraphQL for the address and returns `{ handle, alias }`.
+  - Queries Objkt GraphQL for the address and returns { handle, alias }.
   - 10-minute in-memory cache, resilient to upstream errors.
 
-Per‑Token Social Cards
+Per-Token Social Cards
 
 - The token detail page injects per-token <Head> tags:
   - og:title / twitter:title — token name or “Token #ID”
@@ -53,30 +45,43 @@ Per‑Token Social Cards
   - og:url — canonical token URL (SITE_URL/tokens/<addr>/<tokenId>)
   - og:image / twitter:image — SITE_URL/api/snapshot/<addr>/<tokenId>
   - twitter:card — summary_large_image
-- This overrides the site-wide defaults from _document.js so previews show
-  the token snapshot rather than the generic banner.
+- This overrides site-wide defaults so previews show the token snapshot.
 
 Snapshot API
 
 - Endpoint: /api/snapshot/[addr]/[tokenId]
 - Behavior:
-  - Selects best URI from metadata (display/image/thumbnail/artifact).
+  - Picks best URI from metadata (display/image/thumbnail/artifact).
   - Normalizes ipfs:// to https://ipfs.io/ipfs/.
-  - Decodes data: URIs or fetches remote bytes; converts to PNG via sharp.
+  - Decodes data: URIs or fetches remote bytes; converts to PNG.
   - Cache headers: s-maxage=86400, stale-while-revalidate=43200.
-  - Fallback: public/sprites/Banner.png when errors occur.
+  - Fallback: public/sprites/Banner.png on errors.
 
 Network Awareness
 
 - SITE_URL, OG_IMAGE, TZKT_API and RPC ordering are network-specific via
-  src/config/deployTarget.js. Mainnet prefers the Tezos Commons
-  node-switcher; Ghostnet uses ecadinfra + teztnets. Share/meta logic uses
-  SITE_URL so links and snapshots always target the active network.
+  src/config/deployTarget.js. Share/meta logic uses SITE_URL so links and
+  snapshots always target the active network.
 
-Next Steps (optional)
+Global Share Bus
 
-- Add share buttons to listing cards and collection cards.
-- Open ShareDialog with variant="purchase" automatically after a successful
-  BUY (BuyDialog) using the token’s snapshot URL as preview.
-- Additional networks (Mastodon, Bluesky) and custom templates.
+- Dispatch: window.dispatchEvent(new CustomEvent('zu:openShare', { detail: { contract, tokenId, variant, url?, previewUri? } }))
+- Handler: lives in src/pages/_app.js; fetches name and primary @handle; falls back gracefully.
+- Collections: pass url and optional previewUri (no tokenId).
 
+Post-purchase Overlay
+
+- BuyDialog dispatches zu:openShare with variant="purchase" when the
+  operation confirms. The global handler opens ShareDialog with the token
+  name and snapshot preview.
+
+Accessibility & UX
+
+- Share buttons are keyboard focusable; the dialog closes via its primary
+  action. Preview uses pixelated scaling to keep pixel art crisp.
+
+Release guardrails
+
+- Network-aware SITE_URL and TzKT base via deployTarget.js
+- Resilient to missing metadata: names/creators/aliases are optional.
+- No script execution in ShareDialog; previews are images only.

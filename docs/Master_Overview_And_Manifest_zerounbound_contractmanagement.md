@@ -686,3 +686,104 @@ r1180 — Add ZeroSum stale‑listing guard based on TzKT balances,
 enforce /v1 base normalization, codify transient‑prop rule, reaffirm no‑sentinel.
 
 /* What changed & why: Token page now calls get_extrauris via RPC (tzip16) with TzKT fallback, removing BCD dependency; appended changelog. */
+
+
+— — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — —
+Appendix: Share System Overhaul (r1186)
+— — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — —
+
+Context
+- This addendum documents the sitewide Share feature and its integration across Token, Listing, and Collection cards. It preserves all prior sections verbatim and appends new, production rules and paths for a reproducible rebuild.
+
+Scope & UX
+- ShareDialog (src/ui/ShareDialog.jsx) composes the share text and presents actions: Share (navigator.share), X (twitter intent), Copy Link, Download.
+- Global Share Bus in _app.js listens for window events: `zu:openShare` to open ShareDialog from anywhere (cards, post‑purchase flows).
+- TokenListingCard places SHARE on its own row under BUY (keeps price flush‑right).
+- CollectionCard provides SHARE with collection URL and preview; TokenCard continues to use a local ShareDialog invocation.
+
+Event Contract (zu:openShare)
+- Event name: `zu:openShare`
+- Shape (detail):
+  - `contract` (string) or `addr` (string): KT1 collection address
+  - `tokenId` (string|number, optional): token identifier; omitted for collection shares
+  - `url` (string, optional): explicit absolute or relative URL to share
+  - `previewUri` (string, optional): image URL for ShareDialog preview (no scripts)
+  - `variant` ('view'|'purchase'): template selector for the message
+  - `scope` ('token'|'collection', optional): content type; defaults to 'token'
+  - `name` (string, optional): known title/name to avoid refetch
+  - `creators` (string[]|string, optional): known authors/creators; first tz used for alias resolution
+
+Global Handler (src/pages/_app.js)
+- Computes canonical URL using `SITE_URL` for tokens; normalizes relative URLs to absolute.
+- Token scope: fetches token metadata from TzKT /v1 when `name`/`creators` are absent; uses `/tokens?contract=<KT1>&tokenId=<id>&select=metadata`.
+- Collection scope: best‑effort metadata via big‑map `metadata/content`; falls back to contract `metadata,alias,creator` fields. Title from `name|collectionName|title|alias`. Preview from `imageUri|displayUri|thumbnailUri` (IPFS -> https).
+- Resolves primary alias via `/api/handle/[tz]` if a tz is present in creators. IMPORTANT: Only prefix `@` when a real handle exists; otherwise use the full tz address unshortened.
+- Passes computed `scope|name|creators|preview|url` into ShareDialog.
+
+ShareDialog (src/ui/ShareDialog.jsx)
+- Props: `open, onClose, name, creators, addr, tokenId, previewUri, artistAlias, variant ('view'|'purchase'), scope ('token'|'collection'), downloadUri, downloadMime, downloadName, url`.
+- Title: `Share <name>` for tokens, or `Share <name>` where `<name>` comes from collection metadata when `scope='collection'` (fallback label “Collection” when no name is known).
+- Message format:
+  - Token: `I am sharing "<Title>" by <aliasOrAddress> on @ZeroUnboundArt <URL>`
+  - Collection: `I am sharing "<Title>" NFT collection by <aliasOrAddress> on @ZeroUnboundArt <URL>`
+- Alias rules:
+  - If `artistAlias` starts with `@` => use as handle
+  - If it matches a full tz/KT1 => use full address as-is (no `@`)
+  - If it looks like a tz/KT1 (even abbreviated) => use as-is (no `@`)
+  - Otherwise prefix `@` for display names
+- Preview is image‑only; no scripts execute inside ShareDialog.
+
+UI Integration
+- TokenListingCard (src/ui/TokenListingCard.jsx):
+  - Grid areas: title, creators, collection, buy, actions, scripts.
+  - BUY + price remain in `BuyRow` (price flush‑right). SHARE moved into a dedicated `ActionsRow` below.
+  - SHARE dispatches `zu:openShare` with `{ contract, tokenId, previewUri, variant:'view' }`.
+
+- CollectionCard (src/ui/CollectionCard.jsx):
+  - Rebuilt clean; removed mojibake and undefined variables.
+  - SHARE dispatches `zu:openShare` with `{ scope:'collection', url:'/contracts/<KT1>', name:<collectionName>, creators:<authors>, previewUri }` so dialog opens with correct title and preview without refetching.
+  - Keeps overlays for NSFW/Flashing and script‑toggle behavior.
+
+API: Handle Resolution
+- File: `src/pages/api/handle/[address].js`
+- Resolves a tz address to an X/Twitter handle via Objkt GraphQL; returns `{ handle, alias }` and caches for 10 minutes.
+- Consumers MUST only add `@` when `handle` is present; when absent, use the full tz address (no shortening) as the display alias.
+
+Utilities & Formatting
+- `src/utils/formatAddress.js` provides `shortAddr` and `shortKt` with ASCII ellipsis; not used for share alias fallback to avoid shortening in messages.
+
+Docs
+- `docs/share_nft_feature.md` updated (r4) and now reflects the global bus, collection scope, and safety constraints.
+
+Invariants Addendum (Share System) — I157–I170
+- I157: `zu:openShare` event contract is stable (fields above). Unrecognized fields are ignored; missing optional fields trigger best‑effort fetches.
+- I158: ShareDialog never executes scripts; previews are images only. HTML/SVG with script capabilities are not mounted in the dialog.
+- I159: `@` is prefixed only for real X handles. Addresses (full or abbreviated) are never prefixed with `@`.
+- I160: When resolving creators, use the first tz in `creators` for `/api/handle/` lookup. Failure does not block dialog open.
+- I161: Fallbacks: token names from token metadata; collection names from big‑map `content` or contract `metadata|alias`.
+- I162: URL normalization: relative URLs are expanded to absolute using `window.location.origin`; token URLs use `SITE_URL`.
+- I163: IPFS normalization: any `ipfs://` preview URI is converted to `https://ipfs.io/ipfs/`.
+- I164: Listing card SHARE resides in `ActionsRow` below `BuyRow`. Layout MUST not push price off‑grid.
+- I165: Collection card SHARE MUST include `scope:'collection'` and SHOULD pass `name` and `creators` when known to avoid refetch.
+- I166: API `/api/handle/[address]` returns `{ handle, alias }`; clients must use `handle` for `@`, otherwise fall back to the full tz.
+- I167: Variant 'purchase' updates the verb only; no changes to alias rules or preview policy.
+- I168: ShareDialog download links MUST sanitize filenames and derive extension from MIME (if provided).
+- I169: No shortening of addresses in share messages; full tz addresses appear verbatim.
+- I170: All network‑aware behavior depends on `deployTarget.js` (`SITE_URL`, `TZKT_API`, `NETWORK_KEY`).
+
+Source Tree Map — Additions/Changes (Share)
+- `src/pages/_app.js`: global share bus (listener, fetch helpers, alias resolve, scope handling).
+- `src/ui/ShareDialog.jsx`: scope‑aware share dialog.
+- `src/ui/TokenListingCard.jsx`: `ActionsRow`, SHARE button moved under BUY, bus dispatch.
+- `src/ui/CollectionCard.jsx`: clean rebuild; SHARE dispatches collection context; preview from metadata.
+- `src/pages/api/handle/[address].js`: X handle resolver with 10‑minute cache.
+- `src/utils/formatAddress.js`: ASCII‑safe address shortener (not used in share alias fallback).
+- `docs/share_nft_feature.md`: share docs (r4) aligned with implementation.
+
+Progress Ledger — r1186 (2025‑08‑29)
+- Implement global share bus with collection scope support in `_app.js`.
+- Rebuild `CollectionCard.jsx` (bugfix: removed undefined var; artifact cleanup; share support).
+- Add `ActionsRow` to `TokenListingCard.jsx` and move SHARE below BUY.
+- Update `ShareDialog.jsx` to be scope aware and to avoid `@` on addresses.
+- Hardening of `/api/handle/[address].js` alias logic (only `@` on real handles; full tz fallback).
+- Update `docs/share_nft_feature.md` and append this manifest addendum.

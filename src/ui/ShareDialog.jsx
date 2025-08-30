@@ -56,22 +56,41 @@ export default function ShareDialog({
   previewUri,
   artistAlias,
   variant = 'view', // 'view' | 'purchase'
+  scope = 'token',   // 'token' | 'collection'
   downloadUri,
   downloadMime,
   downloadName,
+  url, // optional explicit link override (e.g., collections)
 }) {
   const shareUrl = useMemo(() => {
+    if (url) return url;
     if (!addr || tokenId === undefined) return SITE_URL;
     return `${SITE_URL}/tokens/${addr}/${tokenId}`;
-  }, [addr, tokenId]);
-  const handle = artistAlias && artistAlias.startsWith('@') ? artistAlias : artistAlias ? `@${artistAlias}` : '';
-  const title = name || `Token #${tokenId}`;
+  }, [addr, tokenId, url]);
+  const isAddress = (s) => /^(tz[1-3][0-9A-Za-z]{33}|KT1[0-9A-Za-z]{33})$/i.test(String(s || '').trim());
+  const handle = useMemo(() => {
+    const a = String(artistAlias || '').trim();
+    if (!a) return '';
+    if (a.startsWith('@')) return a;            // already a handle
+    if (isAddress(a)) return a;                 // full address
+    if (/^(tz|kt)/i.test(a) || a.includes('...')) return a; // short/abbrev tz/KT1 retains form without '@'
+    return `@${a}`;                             // plain alias -> prefix '@'
+  }, [artistAlias]);
+  const isCollection = scope === 'collection' || (tokenId == null && !!url);
+  const title = name || (isCollection ? 'Collection' : `Token #${tokenId}`);
   const text = useMemo(() => {
-    const by = handle || (creators && creators[0] ? creators[0] : '');
+    const firstCreator = (() => {
+      const c = Array.isArray(creators) ? creators.find((v) => typeof v === 'string' && v.trim()) : '';
+      if (!c) return '';
+      // if it's an address, use full address; otherwise use as-is
+      return isAddress(c) ? c : c;
+    })();
+    const by = handle || firstCreator;
     const byStr = by ? ` by ${by}` : '';
     const verb = variant === 'purchase' ? 'have just collected' : 'am sharing';
-    return `I ${verb} \"${title}\"${byStr} on @ZeroUnboundArt ${shareUrl}`;
-  }, [title, handle, creators, shareUrl, variant]);
+    const base = isCollection ? `I ${verb} "${title}" NFT collection` : `I ${verb} "${title}"`;
+    return `${base}${byStr} on @ZeroUnboundArt ${shareUrl}`;
+  }, [title, handle, creators, shareUrl, variant, isCollection]);
   const twitterHref = useMemo(() => `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`, [text]);
   const copyToClipboard = () => {
     if (typeof window === 'undefined' || !window.navigator?.clipboard) return;
@@ -159,6 +178,7 @@ ShareDialog.propTypes = {
   previewUri: PropTypes.string,
   artistAlias: PropTypes.string,
   variant: PropTypes.oneOf(['view', 'purchase']),
+  scope: PropTypes.oneOf(['token', 'collection']),
   downloadUri: PropTypes.string,
   downloadMime: PropTypes.string,
   downloadName: PropTypes.string,

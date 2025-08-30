@@ -95,7 +95,13 @@ export default function BuyDialog(props) {
       setOv({ open: false, label: '' });
       snack('Token purchased ✔');
       onClose();
-    } catch (err) {
+      // Post-purchase share overlay (global handler will fetch details)
+      try {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('zu:openShare', { detail: { contract: CONTRACT, tokenId: Number(tokenId), variant: 'purchase' } }));
+        }
+      } catch { /* ignore */ }
+} catch (err) {
       console.error('Purchase failed:', err);
       setOv({ open: false, label: '' });
 

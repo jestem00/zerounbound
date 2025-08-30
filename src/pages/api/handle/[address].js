@@ -1,22 +1,21 @@
-/*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+/*
+  Developed by @jams2blues — ZeroContract Studio
   File:    src/pages/api/handle/[address].js
-  Rev :    r1    2025‑08‑27
+  Rev :    r2    2025-08-29
   Summary: API route that resolves a Tezos wallet address to an X/Twitter
-           handle.  Queries the objkt.com GraphQL API for holders and
-           returns the `twitter` field when available.  Results are
-           cached in memory for 10 minutes to avoid excessive
-           external requests.  If no handle is found the route
-           returns the short Tezos address instead.
-────────────────────────────────────────────────────────────*/
+           handle. Queries the objkt.com GraphQL API for holders and
+           returns the `twitter` field when available. Results are
+           cached in memory for 10 minutes to reduce external requests.
+           If no handle is found, returns a shortened Tezos address.
+*/
 
 import fetch from 'node-fetch';
 
-/*──────────────── in‑memory cache ───────────────────────────*/
-const CACHE = new Map(); // address → { handle, exp }
+// In-memory cache
+const CACHE = new Map(); // address -> { handle, alias, exp }
 const TTL = 10 * 60 * 1000; // 10 minutes
 
-/*──────────────── GraphQL query ──────────────────────────────*/
+// GraphQL query
 const HOLDER_QUERY = `
   query HolderByAddress($address: String!) {
     holder(where: {address: {_eq: $address}}) {
@@ -59,13 +58,11 @@ async function queryObjktHandle(address) {
   }
 }
 
-/*──────────────── helper ─────────────────────────────────────*/
 function shortAddress(addr = '') {
   const s = String(addr);
-  return s.length > 12 ? `${s.slice(0, 6)}…${s.slice(-4)}` : s;
+  return s.length > 12 ? `${s.slice(0, 6)}...${s.slice(-4)}` : s;
 }
 
-/*──────────────── API handler ───────────────────────────────*/
 export default async function handler(req, res) {
   const { address } = req.query;
   const tz = String(address || '').trim();
@@ -88,7 +85,8 @@ export default async function handler(req, res) {
 }
 
 /* What changed & why:
-   • Added a serverless API route for resolving Tezos wallets to X/Twitter
-     handles using the objkt.com GraphQL API.  Results are cached
-     locally to reduce latency and external queries.  When no handle
-     exists the route returns a shortened address. */
+   - Added a serverless API route for resolving Tezos wallets to X/Twitter
+     handles using the objkt.com GraphQL API. Results are cached locally
+     to reduce latency and external queries. When no handle exists the
+     route returns a shortened address.
+*/

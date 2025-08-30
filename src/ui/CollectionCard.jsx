@@ -1,38 +1,31 @@
-/*Developed by @jams2blues
-  File: src/ui/CollectionCard.jsx
-  Rev : r29
-  Summary: Attach .preview-1x1; enforce down‑scale contain; keep overlays. */
+/* Developed by @jams2blues
+   File: src/ui/CollectionCard.jsx
+   Rev : r30
+   Summary: Clean, ASCII-safe collection card with square preview,
+            overlays, stats, and a global-bus SHARE button. */
 
-import {
-  useEffect,
-  useState,
-  useMemo,
-  useCallback,
-} from 'react';
-import PropTypes                  from 'prop-types';
-import styledPkg                  from 'styled-components';
+import { useEffect, useState, useMemo, useCallback } from 'react';
+import PropTypes from 'prop-types';
+import styledPkg from 'styled-components';
 
-import useConsent                 from '../hooks/useConsent.js';
-import detectHazards              from '../utils/hazards.js';
-import { checkOnChainIntegrity }  from '../utils/onChainValidator.js';
-import { getIntegrityInfo }       from '../constants/integrityBadges.js';
-import countOwners                from '../utils/countOwners.js';
-import countTokens                from '../utils/countTokens.js';
+import useConsent from '../hooks/useConsent.js';
+import detectHazards from '../utils/hazards.js';
+import { checkOnChainIntegrity } from '../utils/onChainValidator.js';
+import { getIntegrityInfo } from '../constants/integrityBadges.js';
+import countOwners from '../utils/countOwners.js';
+import countTokens from '../utils/countTokens.js';
 import { shortKt, copyToClipboard, shortAddr } from '../utils/formatAddress.js';
-import RenderMedia                from '../utils/RenderMedia.jsx';
-import PixelButton                from './PixelButton.jsx';
-import { jFetch }                 from '../core/net.js';
-import decodeHexFields            from '../utils/decodeHexFields.js';
-import {
-  EnableScriptsToggle,
-  EnableScriptsOverlay,
-} from './EnableScripts.jsx';
-import { NETWORK_KEY, TZKT_API }  from '../config/deployTarget.js';
-import { resolveTezosDomain }     from '../utils/resolveTezosDomain.js';
+import RenderMedia from '../utils/RenderMedia.jsx';
+import PixelButton from './PixelButton.jsx';
+import { jFetch } from '../core/net.js';
+import decodeHexFields from '../utils/decodeHexFields.js';
+import { EnableScriptsToggle, EnableScriptsOverlay } from './EnableScripts.jsx';
+import { NETWORK_KEY, TZKT_API } from '../config/deployTarget.js';
+import { resolveTezosDomain } from '../utils/resolveTezosDomain.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
-/*──────── styled shells ─────────────────────────────────────*/
+/* styled shells */
 const Card = styled.div`
   width : var(--col);
   display: flex; flex-direction: column;
@@ -51,7 +44,7 @@ const ThumbWrap = styled.div`
 `;
 
 const ThumbMedia = styled(RenderMedia)`
-  /* Down‑scale only; center. */
+  /* Down-scale only; center. */
   width: auto; height: auto;
   max-width: 100%; max-height: 100%;
   object-fit: contain; object-position: center;
@@ -70,7 +63,7 @@ const Obf = styled.div`
 `;
 
 const Meta = styled.div`
-  padding:6px 6px 4px;display:flex;flex-direction:column;gap:2px;
+  padding:6px 6px 4px;display:flex;flex-direction:column;gap:6px;
   h3{margin:0;font-size:.9rem;line-height:1.15;font-family:'Pixeloid Sans',monospace;}
   p {margin:0;font-size:.75rem;opacity:.8;}
 `;
@@ -80,11 +73,11 @@ const StatRow = styled.div`
 `;
 
 const AddrRow = styled.div`
-  display:flex;align-items:center;gap:4px;font-size:.68rem;opacity:.6;
+  display:flex;align-items:center;gap:6px;font-size:.68rem;opacity:.75;
   button{line-height:1;padding:0 .3rem;font-size:.65rem;}
 `;
 
-/*──────── helpers ─────────────────────────────────────────*/
+/* helpers */
 const ipfsToHttp = (u='') => u.replace(/^ipfs:\/\//,'https://ipfs.io/ipfs/');
 const PLACEHOLDER = '/sprites/cover_default.svg';
 
@@ -100,7 +93,7 @@ function decodeHexMetadata(val='') {
   }catch{return null;}
 }
 
-/*──────── component ─────────────────────────────────────────*/
+/* component */
 export default function CollectionCard({ contract, initialTokensCount, hideIfEmpty = false }) {
   const [meta, setMeta]     = useState({});
   const [owners,setOwners]  = useState(null);
@@ -116,7 +109,7 @@ export default function CollectionCard({ contract, initialTokensCount, hideIfEmp
   const net = NETWORK_KEY;
   const api = `${TZKT_API}/v1`;
 
-  /*── metadata – big‑map “content” key query ───────────────*/
+  /* metadata – big-map “content” key query */
   useEffect(()=>{let cancelled=false;
     (async ()=>{
       let m = {};
@@ -216,14 +209,14 @@ export default function CollectionCard({ contract, initialTokensCount, hideIfEmp
     if (authors.length > 3 && !showAllAuthors) {
       elems.push(
         <span key="authors-more">
-          …&nbsp;
+          ...&nbsp;
           <button
             type="button"
             aria-label="Show all authors"
             onClick={(e) => { e.preventDefault(); setShowAllAuthors(true); }}
             style={{ background: 'none', border: 'none', color: 'inherit', font: 'inherit', cursor: 'pointer', padding: 0 }}
           >
-            🔻More
+            More
           </button>
         </span>,
       );
@@ -242,7 +235,7 @@ export default function CollectionCard({ contract, initialTokensCount, hideIfEmp
   };
 
   return (
-    <a href={`/contracts/${contract.address}`} style={{textDecoration:'none'}}>
+    <a href={`/contracts/${contract.address}`} style={{ textDecoration:'none' }}>
       <Card>
         <ThumbWrap className="preview-1x1">
           <Badge title={label}>{badge}</Badge>
@@ -283,21 +276,45 @@ export default function CollectionCard({ contract, initialTokensCount, hideIfEmp
 
         <Meta>
           <h3 title={nameSafe}>{nameSafe}</h3>
+          <div>
+            <PixelButton
+              size="xs"
+              onClick={(e) => {
+                e.preventDefault();
+                try {
+                  window.dispatchEvent(new CustomEvent('zu:openShare', {
+                    detail: {
+                      scope: 'collection',
+                      url: `/contracts/${contract.address}`,
+                      name: nameSafe,
+                      creators: authors,
+                      variant: 'view',
+                      previewUri: preview !== PLACEHOLDER ? preview : undefined,
+                    },
+                  }));
+                } catch { /* ignore */ }
+              }}
+              title="Share this collection"
+            >
+              <img src="/sprites/share.png" alt="" aria-hidden="true" style={{ width: 12, height: 12, marginRight: 6, verticalAlign: '-2px' }} />
+              SHARE
+            </PixelButton>
+          </div>
           {authors.length > 0 && (
             <p style={{ wordBreak: 'break-all' }}>
-              Author(s) {renderAuthors()}
+              Author(s) {renderAuthors()}
             </p>
           )}
 
           <StatRow>
-            <span>{live ?? '…'} Tokens</span>
-            {Number.isFinite(owners) && <span>{owners} Owners</span>}
+            <span>{(live ?? '...')} Tokens</span>
+            {Number.isFinite(owners) && <span>{owners} Owners</span>}
           </StatRow>
 
           <AddrRow>
             <span>{shortKt(contract.address)}</span>
             <PixelButton size="xs" title="Copy address" onClick={e=>{e.preventDefault();copyToClipboard(contract.address);}}>
-              📋
+              COPY
             </PixelButton>
           </AddrRow>
         </Meta>
@@ -313,6 +330,9 @@ CollectionCard.propTypes = {
   initialTokensCount: PropTypes.number,
   hideIfEmpty: PropTypes.bool,
 };
-/* What changed & why (r29):
-   • Use .preview-1x1 square container; down‑scale contain; no crop.
-   • Keep overlays/toggles layered; no behavior change. */ /* EOF */
+
+/* What changed & why (r30):
+   - Removed mojibake artifacts; normalized labels to ASCII.
+   - Fixed SHARE button: uses global share bus with collection URL and preview.
+   - Preserved square preview, overlays, and stats with safe fallbacks.
+*/

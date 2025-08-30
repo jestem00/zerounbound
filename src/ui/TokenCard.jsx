@@ -14,6 +14,7 @@ import styledPkg        from 'styled-components';
 import useConsent                from '../hooks/useConsent.js';
 import detectHazards             from '../utils/hazards.js';
 import RenderMedia               from '../utils/RenderMedia.jsx';
+import ShareDialog               from './ShareDialog.jsx';
 import { getIntegrityInfo }      from '../constants/integrityBadges.js';
 import { checkOnChainIntegrity } from '../utils/onChainValidator.js';
 import PixelButton               from './PixelButton.jsx';
@@ -249,6 +250,7 @@ export default function TokenCard({
 
   const [thumbOk, setThumbOk]   = useState(true);
   const [fs,      setFs]        = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
 
   /* reveal dialog */
   const [revealType, setRevealType] = useState(null);   // 'nsfw' | 'flash' | null
@@ -518,6 +520,17 @@ export default function TokenCard({
             <MakeOfferBtn contract={contractAddress} tokenId={token.tokenId} label="OFFER" />
           </div>
 
+          {/* Share CTA */}
+          <div style={{ marginTop: '4px' }}>
+            <PixelButton
+              size="xs"
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); setFs(false); setShareOpen(true); }}
+              title="Share this token"
+            >
+              <img src="/sprites/share.png" alt="" aria-hidden="true" style={{ width: 12, height: 12, marginRight: 6, verticalAlign: '-2px' }} />
+              SHARE
+            </PixelButton>
+          </div>
           {/* Collection (clickable; KT1 fallback) */}
           <p style={{ marginTop:'4px', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
             <strong>Collection</strong>:&nbsp;
@@ -581,6 +594,19 @@ export default function TokenCard({
           confirmDisabled={!termsOk}
           onConfirm={() => { if (revealType==='nsfw') setAllowNSFW(true); if (revealType==='flash') setAllowFlash(true); setRevealType(null); setTermsOk(false); }}
           onCancel={() => { setRevealType(null); setTermsOk(false); }}
+        />
+      )}
+
+      {/* share dialog */}
+      {shareOpen && (
+        <ShareDialog
+          open
+          onClose={() => setShareOpen(false)}
+          name={meta?.name}
+          creators={creatorArray(meta)}
+          addr={contractAddress}
+          tokenId={token?.tokenId}
+          previewUri={`/api/snapshot/${contractAddress}/${token?.tokenId}`}
         />
       )}
     </>

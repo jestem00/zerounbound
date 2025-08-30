@@ -97,6 +97,7 @@ const Meta = styled.section`
     "creators"
     "collection"
     "buy"
+    "actions"
     "scripts";
   gap: 6px 8px;
 
@@ -146,6 +147,12 @@ const Price = styled.span`
 `;
 
 const ScriptsRow = styled.div` grid-area: scripts; `;
+
+const ActionsRow = styled.div`
+  grid-area: actions;
+  display: flex;
+  align-items: center;
+`;
 
 /*──────────────── utilities ────────────────────────────────────────────────*/
 const PLACEHOLDER = '/sprites/cover_default.svg';
@@ -825,6 +832,33 @@ export default function TokenListingCard({
             {priceXTZ ? `${priceXTZ} ꜩ` : (busy ? '…' : '—')}
           </Price>
         </BuyRow>
+
+        <ActionsRow>
+          <PixelButton
+            size="xs"
+            noActiveFx
+            data-no-nav="true"
+            onMouseDown={(e) => { e.stopPropagation(); }}
+            onClick={(e) => {
+              e.preventDefault(); e.stopPropagation();
+              try {
+                window.dispatchEvent(new CustomEvent('zu:openShare', {
+                  detail: {
+                    contract,
+                    tokenId,
+                    previewUri: `/api/snapshot/${contract}/${tokenId}`,
+                    variant: 'view',
+                  },
+                }));
+              } catch { /* ignore */ }
+            }}
+            title="Share this token"
+            aria-label="Share this token"
+          >
+            <img src="/sprites/share.png" alt="" aria-hidden="true" style={{ width: 12, height: 12, marginRight: 6, verticalAlign: '-2px' }} />
+            SHARE
+          </PixelButton>
+        </ActionsRow>
 
         <ScriptsRow>
           {hazards.scripts && (

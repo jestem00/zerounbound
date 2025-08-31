@@ -1,10 +1,10 @@
 ﻿/*
-  Developed by @jams2blues â€” ZeroContract Studio
+  Developed by @jams2blues ZeroContract Studio
   File:    src/ui/MarketplaceBar.jsx
   Rev:     r932  2025-08-29
   Summary: Prefer TzKT-first listings, gate RPC offers by env, and
            enable BUY while freshness check runs. Reduces noisy RPC
-           view calls on listing grids and speeds up â€œBUYâ€ enabling.
+           view calls on listing grids and speeds up BUY enabling.
 */
 
 import React, { useEffect, useMemo, useState } from 'react';

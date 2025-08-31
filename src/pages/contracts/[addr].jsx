@@ -432,6 +432,7 @@ export default function ContractPage() {
               stats={stats}
               saleListings={saleListings}
               saleFallbackCount={saleFallbackCount}
+              tokens={tokens}
               onPickTokenId={handlePickTokenId}
             />
           )}

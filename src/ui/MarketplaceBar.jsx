@@ -1,10 +1,10 @@
-/*
-  Developed by @jams2blues — ZeroContract Studio
+﻿/*
+  Developed by @jams2blues â€” ZeroContract Studio
   File:    src/ui/MarketplaceBar.jsx
   Rev:     r932  2025-08-29
   Summary: Prefer TzKT-first listings, gate RPC offers by env, and
            enable BUY while freshness check runs. Reduces noisy RPC
-           view calls on listing grids and speeds up “BUY” enabling.
+           view calls on listing grids and speeds up â€œBUYâ€ enabling.
 */
 
 import React, { useEffect, useMemo, useState } from 'react';
@@ -24,11 +24,12 @@ import {
   getFa2BalanceViaTzkt,
 } from '../core/marketplace.js';
 import { ENABLE_ONCHAIN_VIEWS } from '../config/deployTarget.js';
+import { formatMutez } from '../utils/formatTez.js';
 
 
 function toNumberOrNull(v) {
   if (v == null) return null;
-  const n = typeof v === 'string' ? Number(v) : v;
+  const n = (typeof v === 'string') ? Number(v) : v;
   return Number.isFinite(n) ? n : null;
 }
 
@@ -103,9 +104,7 @@ export default function MarketplaceBar({ contractAddress, tokenId, marketplace }
     const _seller     = typeof lowest?.seller === 'string' ? lowest.seller : null;
     const _hasListingRaw = _priceMutez != null && _amount > 0 && !!_seller;
 
-    const _priceXTZ = _hasListingRaw
-      ? (_priceMutez / 1_000_000).toLocaleString(undefined, { minimumFractionDigits: 6, maximumFractionDigits: 8 })
-      : null;
+    const _priceXTZ = _hasListingRaw ? formatMutez(_priceMutez) : null;
 
     const _isSeller = _hasListingRaw && !!walletAddr && walletAddr.toLowerCase() === String(_seller).toLowerCase();
 
@@ -121,7 +120,7 @@ export default function MarketplaceBar({ contractAddress, tokenId, marketplace }
     <>
       {hasListing && priceXTZ && (
         <span
-          aria-label={`Listing price ${priceXTZ} tez`}
+          aria-label={`Listing price ${priceXTZ} ꜩ`}
           style={{ marginRight: '4px', color: 'var(--zu-accent-sec,#6ff)', fontSize: '.75rem', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center' }}
           data-testid="marketbar-price"
         >
@@ -212,3 +211,14 @@ MarketplaceBar.propTypes = {
    - BUY is enabled while freshness is CHECKING, blocked only when proven
      STALE; BuyDialog preflight still guards against stale listings. */
 // EOF
+
+
+
+
+
+
+
+
+
+
+

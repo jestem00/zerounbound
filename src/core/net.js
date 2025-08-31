@@ -198,21 +198,24 @@ async function jFetch(url, retries = 2, options = {}) {
   while (attempt <= Math.max(0, retries ?? MAX_RETRIES)) {
     try {
       const res = await execWithBucket(url, opts);
+      // Allow multiple concurrent consumers (due to in‑flight dedupe) to
+      // read the response body without triggering "body stream already read".
+      const resForParse = typeof res?.clone === 'function' ? res.clone() : res;
 
       // For non‑OK responses (other than 429 handled earlier)
       if (!res.ok) {
         // Retry on 5xx
         if (res.status >= 500 && attempt < retries) throw new Error(`HTTP ${res.status}`);
         // parse error body with best effort
-        const txt = await res.text();
+        const txt = await resForParse.text();
         throw new Error(`HTTP ${res.status}: ${txt?.slice(0, 180)}`);
       }
 
       const ctype = (res.headers.get('content-type') || '').toLowerCase();
       let data;
-      if (opts.parse === 'text') data = await res.text();
-      else if (opts.parse === 'json' || ctype.includes('application/json')) data = await res.json();
-      else data = await res.text();
+      if (opts.parse === 'text') data = await resForParse.text();
+      else if (opts.parse === 'json' || ctype.includes('application/json')) data = await resForParse.json();
+      else data = await resForParse.text();
 
       if (isGet && ttl > 0) {
         cacheSet(key, data, ttl);

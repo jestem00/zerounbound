@@ -8,7 +8,7 @@
 import React, { useEffect, useState } from 'react';
 import styledPkg                     from 'styled-components';
 import { useWalletContext }          from '../../contexts/WalletContext.js';
-import { TZKT_API, NETWORK_KEY }     from '../../config/deployTarget.js';
+import { TZKT_API, NETWORK_KEY, MARKETPLACE_ADDRESS } from '../../config/deployTarget.js';
 import ExploreNav                    from '../../ui/ExploreNav.jsx';
 import PixelHeading                  from '../../ui/PixelHeading.jsx';
 import PixelButton                   from '../../ui/PixelButton.jsx';
@@ -25,11 +25,7 @@ import detectHazards                    from '../../utils/hazards.js';
 // Tezos Domains resolver helper
 import { resolveTezosDomain } from '../../utils/resolveTezosDomain.js';
 
-/* ─── Marketplace contract addresses by network ───────────── */
-const MARKET_CONTRACT = {
-  ghostnet: 'KT1R1PzLhBXEd98ei72mFuz4FrUYEcuV7t1p',
-  mainnet : 'KT1Pg8KjHptWXJgN79vCnuWnYUZF3gz9hUhu',
-};
+/* Marketplace address is sourced from deployTarget.js (I10/I123) */
 
 /* ─── Styled‑components helpers ────────────────────────────── */
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
@@ -199,7 +195,7 @@ export default function MyOffers() {
     setLoading(true);
 
     try {
-      const marketAddr = MARKET_CONTRACT[NETWORK_KEY] || MARKET_CONTRACT.ghostnet;
+      const marketAddr = MARKETPLACE_ADDRESS;
 
       /* Big‑map pointers */
       const maps      = await (await fetch(`${TZKT_API}/v1/bigmaps?contract=${marketAddr}`)).json();

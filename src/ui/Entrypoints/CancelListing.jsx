@@ -1,17 +1,17 @@
-/*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+﻿/*â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  Developed byÂ @jams2bluesÂ â€“Â ZeroContract Studio
   File:    src/ui/Entrypoints/CancelListing.jsx
-  Rev :    r6    2025‑07‑31 UTC
-  Summary: pop‑out UI for cancelling marketplace listings. Now
-           prioritises on‑chain views over off‑chain views to
+  Rev :    r6    2025â€‘07â€‘31â€¯UTC
+  Summary: popâ€‘out UI for cancelling marketplace listings. Now
+           prioritises onâ€‘chain views over offâ€‘chain views to
            detect new listings immediately, filters by seller
            address and amount>0 instead of relying on the
-           sometimes‑stale `active` flag, and resets state when
+           sometimesâ€‘stale `active` flag, and resets state when
            wallet changes.  Presents listings in a paginated
            table with checkboxes and batches cancel calls in a
-           single operation.  Uses OperationOverlay’s `status`
+           single operation.  Uses OperationOverlayâ€™s `status`
            prop for progress feedback.
-────────────────────────────────────────────────────────────*/
+â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€*/
 
 import React, { useEffect, useState, useMemo } from 'react';
 import PropTypes                                from 'prop-types';
@@ -27,11 +27,12 @@ import {
   marketplaceAddr,
   buildCancelParams,
 } from '../../core/marketplace.js';
+import { formatMutez } from '../../utils/formatTez.js';
 
 // styled-components helper
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
-// Modal overlay and box for pop‑out behaviour
+// Modal overlay and box for popâ€‘out behaviour
 const ModalOverlay = styled.div`
   position: fixed;
   top: 0;
@@ -94,10 +95,10 @@ export default function CancelListing({ open, contract, tokenId, onClose = () =>
     window.dispatchEvent(new CustomEvent('zu:snackbar', { detail: { message: msg, severity: sev } }));
   };
 
-  // Fetch listings when dialog opens. Prefer on‑chain views for
-  // freshness and fall back to off‑chain views only when on‑chain
+  // Fetch listings when dialog opens. Prefer onâ€‘chain views for
+  // freshness and fall back to offâ€‘chain views only when onâ€‘chain
   // returns nothing or fails. Results are filtered by seller
-  // address and non‑zero amount instead of the sometimes‑stale
+  // address and nonâ€‘zero amount instead of the sometimesâ€‘stale
   // `active` flag.
   useEffect(() => {
     let cancel = false;
@@ -105,7 +106,7 @@ export default function CancelListing({ open, contract, tokenId, onClose = () =>
       if (!open || !toolkit || !contract || tokenId == null) return;
       try {
         let all;
-        // Prefer on‑chain view for accuracy; fallback to off‑chain if it fails or is empty
+        // Prefer onâ€‘chain view for accuracy; fallback to offâ€‘chain if it fails or is empty
         try {
           all = await fetchOnchainListings({ toolkit, nftContract: contract, tokenId });
         } catch {
@@ -118,7 +119,7 @@ export default function CancelListing({ open, contract, tokenId, onClose = () =>
             all = [];
           }
         }
-        // Filter listings owned by this wallet with non‑zero amount
+        // Filter listings owned by this wallet with nonâ€‘zero amount
         let filtered = (all || []).filter((l) => {
           if (!l || !l.seller || !walletAddr) return false;
           const sameSeller = l.seller.toLowerCase() === walletAddr.toLowerCase();
@@ -126,15 +127,15 @@ export default function CancelListing({ open, contract, tokenId, onClose = () =>
           return sameSeller && amount > 0;
         });
 
-        // Fallback: if no listings were found via on/off‑chain views but a wallet address exists,
-        // query TzKT’s seller_listings big‑map directly.  This uses the network from the toolkit
+        // Fallback: if no listings were found via on/offâ€‘chain views but a wallet address exists,
+        // query TzKTâ€™s seller_listings bigâ€‘map directly.  This uses the network from the toolkit
         // to construct the base API URL and resolves the marketplace address via marketplaceAddr().
         if (filtered.length === 0 && walletAddr) {
           try {
             const netType = toolkit?._network?.type ?? 'mainnet';
             const marketAddr = marketplaceAddr(netType);
             const base = /mainnet/i.test(netType) ? 'https://api.tzkt.io' : 'https://api.ghostnet.tzkt.io';
-            // Resolve the seller_listings big‑map pointer
+            // Resolve the seller_listings bigâ€‘map pointer
             const mapsRes = await fetch(`${base}/v1/contracts/${marketAddr}/bigmaps?path=seller_listings`);
             const maps = await mapsRes.json();
             let ptr;
@@ -240,7 +241,7 @@ export default function CancelListing({ open, contract, tokenId, onClose = () =>
       return;
     }
     try {
-      setOv({ open: true, label: 'Cancelling listing(s)…' });
+      setOv({ open: true, label: 'Cancelling listing(s)â€¦' });
       const calls = [];
       for (const nStr of nonces) {
         const params = await buildCancelParams(toolkit, {
@@ -253,7 +254,7 @@ export default function CancelListing({ open, contract, tokenId, onClose = () =>
       const op = await toolkit.wallet.batch(calls).send();
       await op.confirmation();
       setOv({ open: false, label: '' });
-      snack('Listings cancelled ✔');
+      snack('Listings cancelled âœ”');
       onClose();
     } catch (e) {
       console.error('Cancel failed:', e);
@@ -288,7 +289,7 @@ export default function CancelListing({ open, contract, tokenId, onClose = () =>
                     <td><input type="checkbox" checked={!!selected[l.nonce]} onChange={() => toggle(l.nonce)} /></td>
                     <td>{l.nonce}</td>
                     <td>{l.amount}</td>
-                    <td>{(l.priceMutez / 1_000_000).toLocaleString()}</td>
+                    <td>{formatMutez(l.priceMutez)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -324,13 +325,14 @@ CancelListing.propTypes = {
   onClose : PropTypes.func,
 };
 
-/* What changed & why: Switched to prioritising on‑chain views over
-   off‑chain views to pick up newly created listings.  Added a TzKT
-   fallback: when both off‑chain and on‑chain views return no
+/* What changed & why: Switched to prioritising onâ€‘chain views over
+   offâ€‘chain views to pick up newly created listings.  Added a TzKT
+   fallback: when both offâ€‘chain and onâ€‘chain views return no
    listings for a token, the component queries the marketplace
-   seller_listings big‑map via the TzKT API and extracts any
+   seller_listings bigâ€‘map via the TzKT API and extracts any
    matching listings for the connected wallet.  Filtering now
-   relies on matching the seller address and a non‑zero amount
-   rather than the sometimes‑stale `active` flag.  Updated revision
+   relies on matching the seller address and a nonâ€‘zero amount
+   rather than the sometimesâ€‘stale `active` flag.  Updated revision
    and summary accordingly and retained OperationOverlay status
    support. */
+

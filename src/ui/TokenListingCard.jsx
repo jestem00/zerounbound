@@ -1,8 +1,8 @@
-/* Developed by @jams2blues
+﻿/* Developed by @jams2blues
    File: src/ui/TokenListingCard.jsx
    Rev:  r1245
    Summary: Preserve preview interactivity and guarantee navigation; add
-            optional initialListing to pre‑seed BUY (seller/nonce/price/amount)
+            optional initialListing to preâ€‘seed BUY (seller/nonce/price/amount)
             so the dialog is ready immediately; polling still updates. */
 
 import React, {
@@ -29,14 +29,15 @@ import { useWalletContext } from '../contexts/WalletContext.js';
 import { fetchLowestListing } from '../core/marketplace.js';
 import decodeHexFields from '../utils/decodeHexFields.js';
 import { NETWORK_KEY } from '../config/deployTarget.js';
+import { formatMutez } from '../utils/formatTez.js';
 import { tzktBase as tzktV1Base } from '../utils/tzkt.js';
 import { resolveTezosDomain } from '../utils/resolveTezosDomain.js';
 import { jFetch } from '../core/net.js'; // I40: centralized HTTP
 
-// styled-components import may be ESM/CJS — normalize reference:
-const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
+// styled-components import may be ESM/CJS â€” normalize reference:
+const styled = typeof styledPkg === 'function' ꜩ styledPkg : styledPkg.default;
 
-/*──────────────── styled shells ────────────────────────────────────────────*/
+/*â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ styled shells â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€*/
 const Card = styled.article`
   position: relative;
   width: 100%;
@@ -48,7 +49,7 @@ const Card = styled.article`
   flex-direction: column;
   transition: box-shadow .15s;
   &:hover { box-shadow: 0 0 6px var(--zu-accent-sec, #ff0); }
-  /* NOTE: no &:active translate to avoid inner CTA “jump” */
+  /* NOTE: no &:active translate to avoid inner CTA â€œjumpâ€ */
 `;
 
 const Thumb = styled.div`
@@ -71,7 +72,7 @@ const NavOverlay = styled.a`
   position: absolute;
   inset: 0;
   z-index: 6; /* below FSBtn (7), above media content */
-  pointer-events: ${p => (p.$active ? 'auto' : 'none')};
+  pointer-events: ${p => (p.$active ꜩ 'auto' : 'none')};
   background: transparent;
   text-indent: -9999px;
 `;
@@ -93,12 +94,12 @@ const Meta = styled.section`
   display: grid;
   grid-template-columns: 1fr;
   grid-template-areas:
-    "title"
-    "creators"
-    "collection"
-    "buy"
-    "actions"
-    "scripts";
+    —title—
+    —creators—
+    —collection—
+    —buy—
+    —actions—
+    —scripts—;
   gap: 6px 8px;
 
   h4 {
@@ -141,7 +142,7 @@ const BuyRow = styled.div`
 const Price = styled.span`
   margin-left: auto;
   font-family: 'Pixeloid Sans', monospace;
-  font-size: 1rem;
+  font-size: .82rem;
   line-height: 1;
   white-space: nowrap;
 `;
@@ -154,7 +155,7 @@ const ActionsRow = styled.div`
   align-items: center;
 `;
 
-/*──────────────── utilities ────────────────────────────────────────────────*/
+/*â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ utilities â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€*/
 const PLACEHOLDER = '/sprites/cover_default.svg';
 
 const toArray = (src) => {
@@ -162,7 +163,7 @@ const toArray = (src) => {
   if (typeof src === 'string') {
     try {
       const j = JSON.parse(src);
-      return Array.isArray(j) ? j : [src];
+      return Array.isArray(j) ꜩ j : [src];
     } catch {
       return [src];
     }
@@ -171,7 +172,7 @@ const toArray = (src) => {
   return [];
 };
 
-const normalizeStr = (v) => (typeof v === 'string' ? v.trim() : '');
+const normalizeStr = (v) => (typeof v === 'string' ꜩ v.trim() : '');
 
 /** Select a data: URI if present, prioritizing common media fields for cards. */
 const pickDataUri = (m = {}) => {
@@ -192,7 +193,7 @@ const pickDataUri = (m = {}) => {
   }
   if (Array.isArray(m.formats)) {
     for (const f of m.formats) {
-      const cand = normalizeStr(f?.uri || f?.url);
+      const cand = normalizeStr(fꜩ.uri || fꜩ.url);
       if (cand && dataRegex.test(cand)) return cand;
     }
   }
@@ -213,24 +214,24 @@ const pickPreviewUri = (m = {}) => {
     'mediaUri', 'media_uri',
     'animation_url', 'animationUrl',
   ];
-  const allowedScheme = /^(data:|ipfs:|https?:|ar:|arweave:)/i;
+  const allowedScheme = /^(data:|ipfs:|httpsꜩ:|ar:|arweave:)/i;
 
   // 1) metadata fields (skip obvious HTML for preview safety)
   for (const k of keys) {
     const v = normalizeStr(m[k]);
     if (!v || !allowedScheme.test(v)) continue;
-    if (/\.html?(\?|#|$)/i.test(v)) continue;
+    if (/\.htmlꜩ(\ꜩ|#|$)/i.test(v)) continue;
     return v;
   }
 
   // 2) formats array (skip text/html)
   if (Array.isArray(m.formats)) {
     for (const f of m.formats) {
-      const uri = normalizeStr(f?.uri || f?.url);
-      const mime = normalizeStr(f?.mime || f?.mimeType);
+      const uri = normalizeStr(fꜩ.uri || fꜩ.url);
+      const mime = normalizeStr(fꜩ.mime || fꜩ.mimeType);
       if (!uri || !allowedScheme.test(uri)) continue;
       if (mime && /^text\/html\b/i.test(mime)) continue;
-      if (!mime && /\.html?(\?|#|$)/i.test(uri)) continue;
+      if (!mime && /\.htmlꜩ(\ꜩ|#|$)/i.test(uri)) continue;
       return uri;
     }
   }
@@ -252,7 +253,7 @@ const pickArtifactUri = (m = {}) => {
     'imageUri', 'image_uri', 'image',
     'thumbnailUri', 'thumbnail_uri',
   ];
-  const allowedScheme = /^(data:|ipfs:|https?:|ar:|arweave:)/i;
+  const allowedScheme = /^(data:|ipfs:|httpsꜩ:|ar:|arweave:)/i;
 
   // Prefer explicit artifact/media/animation fields first (HTML allowed here).
   for (const k of keys) {
@@ -265,14 +266,14 @@ const pickArtifactUri = (m = {}) => {
   let firstCandidate = '';
   if (Array.isArray(m.formats)) {
     for (const f of m.formats) {
-      const uri = normalizeStr(f?.uri || f?.url);
-      const mime = normalizeStr(f?.mime || f?.mimeType || f?.type);
+      const uri = normalizeStr(fꜩ.uri || fꜩ.url);
+      const mime = normalizeStr(fꜩ.mime || fꜩ.mimeType || fꜩ.type);
       if (!uri || !allowedScheme.test(uri)) continue;
 
       const isHtmlLike =
         /^text\/html\b/i.test(mime) ||
         /^application\/x-directory\b/i.test(mime) ||
-        /\.html?(\?|#|$)/i.test(uri);
+        /\.htmlꜩ(\ꜩ|#|$)/i.test(uri);
 
       if (isHtmlLike && !htmlCandidate) htmlCandidate = uri;
       if (!firstCandidate) firstCandidate = uri;
@@ -281,23 +282,23 @@ const pickArtifactUri = (m = {}) => {
   return htmlCandidate || firstCandidate || '';
 };
 
-/*──────────────── name‑resolver (no 404s; deduped; TTL) ────────────────────*/
-/** In‑memory cache & inflight deduper for contract names. */
+/*â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ nameâ€‘resolver (no 404s; deduped; TTL) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€*/
+/** Inâ€‘memory cache & inflight deduper for contract names. */
 const NAME_TTL_MS = 10 * 60 * 1000; // 10 minutes
-const _nameCache = new Map();       // key → { value: string, exp: number }
-const _inflight = new Map();        // key → Promise<string>
+const _nameCache = new Map();       // key â†’ { value: string, exp: number }
+const _inflight = new Map();        // key â†’ Promise<string>
 
 async function _fetchJson(url, opts) {
   try {
     const r = await jFetch(url, opts);
-    if (!r || !r.ok) return null;      // 4xx/5xx → null (silent)
+    if (!r || !r.ok) return null;      // 4xx/5xx â†’ null (silent)
     try { return await r.json(); } catch { return null; }
   } catch {
     return null;
   }
 }
 
-/** Best‑effort TZIP‑16/alias resolver without hitting 404 endpoints. */
+/** Bestâ€‘effort TZIPâ€‘16/alias resolver without hitting 404 endpoints. */
 async function resolveContractName(tzktV1, kt1, signal) {
   const addr = String(kt1 || '').trim();
   if (!/^KT1[0-9A-Za-z]{33}$/i.test(addr)) return '';
@@ -312,7 +313,7 @@ async function resolveContractName(tzktV1, kt1, signal) {
 
   const p = (async () => {
     // 1) metadata (safe; no 404)
-    const md = await _fetchJson(`${tzktV1}/contracts/${addr}?select=metadata`, { signal });
+    const md = await _fetchJson(`${tzktV1}/contracts/${addr}ꜩselect=metadata`, { signal });
     const mdName = (md && (md.name || md.title || md.symbol) || '').toString().trim();
     if (mdName) {
       const value = mdName;
@@ -321,8 +322,8 @@ async function resolveContractName(tzktV1, kt1, signal) {
     }
 
     // 2) alias fallback (safe; no 404)
-    const alias = await _fetchJson(`${tzktV1}/contracts/${addr}?select=alias`, { signal });
-    const aliasName = (typeof alias === 'string' ? alias : alias?.alias) || '';
+    const alias = await _fetchJson(`${tzktV1}/contracts/${addr}ꜩselect=alias`, { signal });
+    const aliasName = (typeof alias === 'string' ꜩ alias : aliasꜩ.alias) || '';
     if (aliasName && aliasName.trim()) {
       const value = aliasName.trim();
       _nameCache.set(key, { value, exp: now + NAME_TTL_MS });
@@ -338,7 +339,7 @@ async function resolveContractName(tzktV1, kt1, signal) {
   return p;
 }
 
-/*──────────────── component ────────────────────────────────────────────────*/
+/*â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€*/
 export default function TokenListingCard({
   contract,
   tokenId,
@@ -350,8 +351,8 @@ export default function TokenListingCard({
   /* wallet / network context */
   const { address: walletAddr, toolkit } = useWalletContext() || {};
   const tzktV1 = useMemo(() => {
-    const net = (toolkit && toolkit._network?.type && /mainnet/i.test(toolkit._network.type))
-      ? 'mainnet'
+    const net = (toolkit && toolkit._networkꜩ.type && /mainnet/i.test(toolkit._network.type))
+      ꜩ 'mainnet'
       : (NETWORK_KEY || 'ghostnet');
     return tzktV1Base(net); // includes /v1; do not append again
   }, [toolkit]);
@@ -359,7 +360,7 @@ export default function TokenListingCard({
   /* local metadata state (if not provided via props) */
   const [meta, setMeta] = useState(metadataProp || null);
 
-  /* resolved collection name (best‑effort) */
+  /* resolved collection name (bestâ€‘effort) */
   const [collName, setCollName] = useState(contractName || '');
 
   // Single authoritative effect handles both prop-provided names + fetch on contract change.
@@ -400,8 +401,8 @@ export default function TokenListingCard({
     setLowest((prev) => {
       if (!prev) return initialListing;
       // prefer the lower price; if equal price but missing nonce/seller, adopt the richer one
-      const prevPrice = Number(prev.priceMutez ?? Infinity);
-      const nextPrice = Number(initialListing.priceMutez ?? Infinity);
+      const prevPrice = Number(prev.priceMutez ꜩꜩ Infinity);
+      const nextPrice = Number(initialListing.priceMutez ꜩꜩ Infinity);
       if (nextPrice < prevPrice) return initialListing;
       if ((!prev.nonce || !prev.seller) && (initialListing.nonce || initialListing.seller)) return initialListing;
       return prev;
@@ -418,7 +419,7 @@ export default function TokenListingCard({
   const [revealType, setRevealType] = useState(null); // 'nsfw' | 'flash' | null
   const [termsOk, setTermsOk] = useState(false);
 
-  /* consent — per-feature and per-token (no global toggle for scripts) */
+  /* consent â€” per-feature and per-token (no global toggle for scripts) */
   const [allowNSFW, setAllowNSFW] = useConsent('nsfw', false);
   const [allowFlash, setAllowFlash] = useConsent('flash', false);
   const scriptKey = useMemo(() => `scripts:${contract}:${tokenId}`, [contract, tokenId]);
@@ -436,19 +437,19 @@ export default function TokenListingCard({
     (async () => {
       try {
         // Request both name + metadata; name is used as a fallback title
-        const url = `${tzktV1}/tokens?contract=${encodeURIComponent(contract)}&tokenId=${encodeURIComponent(String(tokenId))}&select=metadata,name`;
+        const url = `${tzktV1}/tokensꜩcontract=${encodeURIComponent(contract)}&tokenId=${encodeURIComponent(String(tokenId))}&select=metadata,name`;
         const res = await jFetch(url, { signal: ac.signal });
         if (res && res.ok) {
           const data = await res.json();
           if (!cancelled && Array.isArray(data) && data.length > 0) {
-            let md = data[0]?.metadata || {};
+            let md = data[0]ꜩ.metadata || {};
             try { md = decodeHexFields(md); } catch { /* best effort */ }
-            if (data[0]?.name && !md.name) md.name = data[0].name;
+            if (data[0]ꜩ.name && !md.name) md.name = data[0].name;
             setMeta(md);
           }
         }
       } catch {
-        /* ignore — card remains functional with fallbacks; jFetch handles backoff */
+        /* ignore â€” card remains functional with fallbacks; jFetch handles backoff */
       }
     })();
 
@@ -460,7 +461,7 @@ export default function TokenListingCard({
 
   /* derived hazards + URIs (done after meta is known) */
   const hazards = useMemo(
-    () => (meta ? detectHazards(meta) : { nsfw: false, flashing: false, scripts: false }),
+    () => (meta ꜩ detectHazards(meta) : { nsfw: false, flashing: false, scripts: false }),
     [meta],
   );
   const needsNSFW = hazards.nsfw && !allowNSFW;
@@ -501,11 +502,11 @@ export default function TokenListingCard({
         if (!stop && res) {
           setLowest((prev) => {
             // adopt a better price or a richer listing record
-            const prevPrice = Number(prev?.priceMutez ?? Infinity);
-            const nextPrice = Number(res.priceMutez ?? Infinity);
+            const prevPrice = Number(prevꜩ.priceMutez ꜩꜩ Infinity);
+            const nextPrice = Number(res.priceMutez ꜩꜩ Infinity);
             if (nextPrice < prevPrice) return res;
-            if ((!prev?.nonce || !prev?.seller) && (res.nonce || res.seller)) return res;
-            return prev ?? res;
+            if ((!prevꜩ.nonce || !prevꜩ.seller) && (res.nonce || res.seller)) return res;
+            return prev ꜩꜩ res;
           });
         }
       } finally {
@@ -519,32 +520,29 @@ export default function TokenListingCard({
 
   /* seller + price */
   const isSeller = useMemo(() => {
-    if (!walletAddr || !lowest?.seller) return false;
+    if (!walletAddr || !lowestꜩ.seller) return false;
     return String(walletAddr).toLowerCase() === String(lowest.seller).toLowerCase();
   }, [walletAddr, lowest]);
 
-  const effectiveMutez = (typeof priceMutez === 'number' ? priceMutez : lowest?.priceMutez);
+  const effectiveMutez = (typeof priceMutez === 'number' ꜩ priceMutez : lowestꜩ.priceMutez);
   const priceXTZ = useMemo(() => {
     if (effectiveMutez == null) return null;
-    // Always show 6 fractional digits per spec
-    return (effectiveMutez / 1_000_000).toLocaleString(undefined, {
-      minimumFractionDigits: 6, maximumFractionDigits: 6,
-    });
+    return formatMutez(effectiveMutez);
   }, [effectiveMutez]);
 
   const cardBuyDisabled = !toolkit || !lowest || lowest.priceMutez == null || isSeller;
 
   /* title + routing */
-  const title = meta?.name || `Token #${tokenId}`;
+  const title = metaꜩ.name || `Token #${tokenId}`;
   const tokenHref = useMemo(
     () => `/tokens/${encodeURIComponent(contract)}/${encodeURIComponent(String(tokenId))}`,
     [contract, tokenId],
   );
 
-  /* creators/authors (domain‑aware) */
+  /* creators/authors (domainâ€‘aware) */
   const creators = useMemo(() => {
-    const raw = toArray(meta?.creators);
-    return raw.length ? raw : toArray(meta?.authors || meta?.artists);
+    const raw = toArray(metaꜩ.creators);
+    return raw.length ꜩ raw : toArray(metaꜩ.authors || metaꜩ.artists);
   }, [meta]);
 
   // Cache for domains we've looked up to prevent redundant network calls.
@@ -554,7 +552,7 @@ export default function TokenListingCard({
     const toLookup = [];
     const seen = new Set();
     creators.forEach((v) => {
-      const s = typeof v === 'string' ? v : (v?.address || v?.wallet || '');
+      const s = typeof v === 'string' ꜩ v : (vꜩ.address || vꜩ.wallet || '');
       const addr = String(s || '').trim();
       if (!/^tz/i.test(addr)) return;
       const key = addr.toLowerCase();
@@ -567,7 +565,7 @@ export default function TokenListingCard({
 
     toLookup.forEach((addr) => {
       const key = addr.toLowerCase();
-      domainsRef.current[key] = domainsRef.current[key] ?? null;
+      domainsRef.current[key] = domainsRef.current[key] ꜩꜩ null;
       resolveTezosDomain(addr, NETWORK_KEY).then((name) => {
         if (domainsRef.current[key] === null) {
           domainsRef.current[key] = name || '';
@@ -581,9 +579,9 @@ export default function TokenListingCard({
   }, [creators]);
 
   const fmtCreator = useCallback((v) => {
-    const s = typeof v === 'string' ? v : (v?.address || v?.wallet || '');
+    const s = typeof v === 'string' ꜩ v : (vꜩ.address || vꜩ.wallet || '');
     const key = String(s || '').toLowerCase();
-    const dom = domainsRef.current[key] ?? domainsState[key];
+    const dom = domainsRef.current[key] ꜩꜩ domainsState[key];
     if (dom) return dom;
     if (!/^(tz|kt)/i.test(String(s))) return String(v);
     return _shortAddr(String(s));
@@ -597,7 +595,7 @@ export default function TokenListingCard({
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       if (blocked) {
-        setRevealType(needsNSFW ? 'nsfw' : 'flash');
+        setRevealType(needsNSFW ꜩ 'nsfw' : 'flash');
       } else {
         goDetail();
       }
@@ -605,32 +603,32 @@ export default function TokenListingCard({
   }, [blocked, needsNSFW, goDetail]);
 
   const isMediaControlsHit = useCallback((e) => {
-    const v = e.target?.closest?.('video, audio');
+    const v = e.targetꜩ.closestꜩ.('video, audio');
     if (!v) return false;
-    const r = v.getBoundingClientRect?.(); if (!r) return true;
+    const r = v.getBoundingClientRectꜩ.(); if (!r) return true;
     const band = Math.max(34, Math.min(64, r.height * 0.22));   // heuristic control band
-    const yFromBottom = r.bottom - (e.clientY ?? 0);
+    const yFromBottom = r.bottom - (e.clientY ꜩꜩ 0);
     return yFromBottom <= band;
   }, []);
 
   const onThumbClick = useCallback((e) => {
     if (blocked) {
       e.preventDefault();
-      setRevealType(needsNSFW ? 'nsfw' : 'flash');
+      setRevealType(needsNSFW ꜩ 'nsfw' : 'flash');
       return;
     }
     if (!isMediaControlsHit(e)) goDetail();
   }, [blocked, needsNSFW, goDetail, isMediaControlsHit]);
 
-  /* Capture‑phase guard for nested elements that stop propagation (non-embed cases). */
+  /* Captureâ€‘phase guard for nested elements that stop propagation (non-embed cases). */
   const onThumbClickCapture = useCallback((e) => {
-    // Don’t interfere with explicit interactive targets inside the tile
-    if (e.target?.closest?.('[data-no-nav="true"],button,[role="button"],a,input,select,textarea,label')) return;
+    // Donâ€™t interfere with explicit interactive targets inside the tile
+    if (e.targetꜩ.closestꜩ.('[data-no-nav=—true—],button,[role=—button—],a,input,select,textarea,label')) return;
 
     if (blocked) {
       e.preventDefault();
       e.stopPropagation();
-      setRevealType(needsNSFW ? 'nsfw' : 'flash');
+      setRevealType(needsNSFW ꜩ 'nsfw' : 'flash');
       return;
     }
     if (!isMediaControlsHit(e)) {
@@ -639,9 +637,9 @@ export default function TokenListingCard({
     }
   }, [blocked, needsNSFW, isMediaControlsHit, goDetail]);
 
-  /*──────── embedded‑document detection for overlay activation ────────*/
+  /*â”€â”€â”€â”€â”€â”€â”€â”€ embeddedâ€‘document detection for overlay activation â”€â”€â”€â”€â”€â”€â”€â”€*/
   const previewMime = useMemo(() => {
-    const m = String(meta?.mimeType || meta?.mime || '').toLowerCase().trim();
+    const m = String(metaꜩ.mimeType || metaꜩ.mime || '').toLowerCase().trim();
     if (m) return m;
     const u = String(previewUri || '').toLowerCase();
     if (!u) return '';
@@ -652,12 +650,12 @@ export default function TokenListingCard({
       );
       return head.slice(0, at);
     }
-    if (/\.svg(\?|#|$)/i.test(u)) return 'image/svg+xml';
-    if (/\.html?(\?|#|$)/i.test(u)) return 'text/html';
+    if (/\.svg(\ꜩ|#|$)/i.test(u)) return 'image/svg+xml';
+    if (/\.htmlꜩ(\ꜩ|#|$)/i.test(u)) return 'text/html';
     return '';
   }, [meta, previewUri]);
 
-  // Overlay should be active only when click events won’t bubble: script-enabled SVG/HTML previews.
+  // Overlay should be active only when click events wonâ€™t bubble: script-enabled SVG/HTML previews.
   const overlayActive = useMemo(
     () =>
       !blocked &&
@@ -667,24 +665,24 @@ export default function TokenListingCard({
     [blocked, hazards.scripts, allowScr, previewMime],
   );
 
-  /*────────────────────── render ───────────────────────────────────────────*/
+  /*â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€*/
   return (
     <Card aria-label={`Token listing card for ${title}`}>
       {/* clickable 1:1 tile; media fits without cropping and with 0 radius */}
       <Thumb
-        className="preview-1x1"
-        role="link"
+        className=—preview-1x1—
+        role=—link—
         tabIndex={0}
         aria-label={`View ${title}`}
         onClickCapture={onThumbClickCapture}
         onClick={onThumbClick}
         onKeyDown={onKey}
       >
-        {!blocked ? (
-          previewUri && previewUri !== PLACEHOLDER ? (
+        {!blocked ꜩ (
+          previewUri && previewUri !== PLACEHOLDER ꜩ (
             <RenderMedia
               uri={previewUri}
-              mime={meta?.mimeType || meta?.mime || undefined}
+              mime={metaꜩ.mimeType || metaꜩ.mime || undefined}
               allowScripts={hazards.scripts && allowScr /* only if both flagged and enabled */}
               onInvalid={() => { /* keep placeholder under */ }}
               /* Longest edge snaps to tile edges; no rounding. */
@@ -700,7 +698,7 @@ export default function TokenListingCard({
           ) : (
             <img
               src={PLACEHOLDER}
-              alt="" /* decorative placeholder */
+              alt=—— /* decorative placeholder */
               style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: 0, display: 'block' }}
             />
           )
@@ -711,32 +709,32 @@ export default function TokenListingCard({
           }}>
             {needsNSFW && (
               <PixelButton
-                size="xs"
+                size=—xs—
                 warning
                 noActiveFx
                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); setRevealType('nsfw'); }}
-                aria-label="Reveal NSFW content (confirmation required)"
-                title="Reveal NSFW content"
+                aria-label=—Reveal NSFW content (confirmation required)—
+                title=—Reveal NSFW content—
               >
-                NSFW&nbsp;🔞
+                NSFW&nbsp;ðŸ”ž
               </PixelButton>
             )}
             {needsFlash && (
               <PixelButton
-                size="xs"
+                size=—xs—
                 warning
                 noActiveFx
                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); setRevealType('flash'); }}
-                aria-label="Reveal flashing content (confirmation required)"
-                title="Reveal flashing content"
+                aria-label=—Reveal flashing content (confirmation required)—
+                title=—Reveal flashing content—
               >
-                Flashing&nbsp;🚨
+                Flashing&nbsp;ðŸš¨
               </PixelButton>
             )}
           </div>
         )}
 
-        {/* NEW: navigation overlay – only active when embedded documents swallow clicks */}
+        {/* NEW: navigation overlay â€“ only active when embedded documents swallow clicks */}
         <NavOverlay
           href={tokenHref}
           $active={overlayActive}
@@ -750,27 +748,27 @@ export default function TokenListingCard({
         </NavOverlay>
 
         <FSBtn
-          data-no-nav="true"                 /* exclude from tile navigation */
-          size="xs"
+          data-no-nav=—true—                 /* exclude from tile navigation */
+          size=—xs—
           aria-label={
             blocked
-              ? (needsNSFW ? 'NSFW locked — confirm to view' : 'Flashing locked — confirm to view')
-              : (!hazards.scripts || allowScr ? 'Open fullscreen' : 'Enable scripts first')
+              ꜩ (needsNSFW ꜩ 'NSFW locked â€” confirm to view' : 'Flashing locked â€” confirm to view')
+              : (!hazards.scripts || allowScr ꜩ 'Open fullscreen' : 'Enable scripts first')
           }
           title={
             blocked
-              ? (needsNSFW ? 'NSFW locked — confirm to view' : 'Flashing locked — confirm to view')
-              : (!hazards.scripts || allowScr ? 'Fullscreen' : 'Enable scripts first')
+              ꜩ (needsNSFW ꜩ 'NSFW locked â€” confirm to view' : 'Flashing locked â€” confirm to view')
+              : (!hazards.scripts || allowScr ꜩ 'Fullscreen' : 'Enable scripts first')
           }
           disabled={blocked || (hazards.scripts && !allowScr)}
           onMouseDown={(e) => { e.stopPropagation(); }} // prevent tile click on press
           onClick={(e) => {
             e.preventDefault(); e.stopPropagation();
-            if (blocked) { setRevealType(needsNSFW ? 'nsfw' : 'flash'); return; }
-            (!hazards.scripts || allowScr) ? setFsOpen(true) : askEnableScripts();
+            if (blocked) { setRevealType(needsNSFW ꜩ 'nsfw' : 'flash'); return; }
+            (!hazards.scripts || allowScr) ꜩ setFsOpen(true) : askEnableScripts();
           }}
         >
-          ⛶
+          â›¶
         </FSBtn>
       </Thumb>
 
@@ -781,15 +779,15 @@ export default function TokenListingCard({
           <Creators>
             Creator(s):{' '}
             {creators.map((c, i) => {
-              const s = typeof c === 'string' ? c : (c?.address || c?.wallet || '');
+              const s = typeof c === 'string' ꜩ c : (cꜩ.address || cꜩ.wallet || '');
               const content = fmtCreator(c);
-              const pref = i ? ', ' : '';
+              const pref = i ꜩ ', ' : '';
               return /^(tz|kt)/i.test(String(s))
-                ? (
+                ꜩ (
                   <span key={`${String(s)}_${i}`}>
                     {pref}
                     <a
-                      href={`/explore?cmd=tokens&admin=${encodeURIComponent(s)}`}
+                      href={`/exploreꜩcmd=tokens&admin=${encodeURIComponent(s)}`}
                       style={{ color: 'var(--zu-accent-sec,#6ff)', textDecoration: 'none' }}
                     >
                       {content}
@@ -811,33 +809,33 @@ export default function TokenListingCard({
         {/* BUY row with price flush-right */}
         <BuyRow>
           <PixelButton
-            size="xs"                 /* small as requested */
-            noActiveFx                /* do not “shrink” on press */
+            size=—xs—                 /* small as requested */
+            noActiveFx                /* do not â€œshrinkâ€ on press */
             disabled={cardBuyDisabled}
             onMouseDown={(e) => { e.stopPropagation(); }}  /* prevent tile click */
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); setBuyOpen(true); }}
             title={
               isSeller
-                ? 'You cannot buy your own listing'
+                ꜩ 'You cannot buy your own listing'
                 : lowest && lowest.priceMutez != null
-                  ? `Buy for ${(lowest.priceMutez / 1_000_000).toLocaleString(undefined, { minimumFractionDigits: 6, maximumFractionDigits: 6 })} ꜩ`
-                  : (busy ? '…' : 'No active listing')
+                  ꜩ `Buy for ${formatMutez(lowest.priceMutez)} ꜩ`
+                  : (busy ꜩ 'â€¦' : 'No active listing')
             }
-            aria-label="Open buy dialog"
+            aria-label=—Open buy dialog—
           >
             BUY
           </PixelButton>
 
-          <Price aria-live="polite">
-            {priceXTZ ? `${priceXTZ} ꜩ` : (busy ? '…' : '—')}
+          <Price aria-live=—polite—>
+            {priceXTZ ꜩ `${priceXTZ} ꜩ` : (busy ꜩ 'â€¦' : 'â€”')}
           </Price>
         </BuyRow>
 
         <ActionsRow>
           <PixelButton
-            size="xs"
+            size=—xs—
             noActiveFx
-            data-no-nav="true"
+            data-no-nav=—true—
             onMouseDown={(e) => { e.stopPropagation(); }}
             onClick={(e) => {
               e.preventDefault(); e.stopPropagation();
@@ -852,10 +850,10 @@ export default function TokenListingCard({
                 }));
               } catch { /* ignore */ }
             }}
-            title="Share this token"
-            aria-label="Share this token"
+            title=—Share this token—
+            aria-label=—Share this token—
           >
-            <img src="/sprites/share.png" alt="" aria-hidden="true" style={{ width: 12, height: 12, marginRight: 6, verticalAlign: '-2px' }} />
+            <img src=—/sprites/share.png— alt=—— aria-hidden=—true— style={{ width: 12, height: 12, marginRight: 6, verticalAlign: '-2px' }} />
             SHARE
           </PixelButton>
         </ActionsRow>
@@ -864,7 +862,7 @@ export default function TokenListingCard({
           {hazards.scripts && (
             <EnableScriptsToggle
               enabled={allowScr}
-              onToggle={allowScr ? () => setAllowScr(false) : askEnableScripts}
+              onToggle={allowScr ꜩ () => setAllowScr(false) : askEnableScripts}
             />
           )}
         </ScriptsRow>
@@ -893,7 +891,7 @@ export default function TokenListingCard({
         open={fsOpen}
         onClose={() => setFsOpen(false)}
         uri={fsUri}
-        mime={meta?.mimeType || meta?.mime || undefined}
+        mime={metaꜩ.mimeType || metaꜩ.mime || undefined}
         allowScripts={hazards.scripts && allowScr}
         scriptHazard={hazards.scripts}
       />
@@ -902,22 +900,22 @@ export default function TokenListingCard({
       {cfrmScr && (
         <PixelConfirmDialog
           open
-          title="Enable scripts?"
+          title=—Enable scriptsꜩ—
           message={(
             <>
               <label style={{ display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '8px' }}>
                 <input
-                  type="checkbox"
+                  type=—checkbox—
                   checked={scrTerms}
                   onChange={(e) => setScrTerms(e.target.checked)}
                 />
-                I&nbsp;agree&nbsp;to&nbsp;<a href="/terms" target="_blank" rel="noopener noreferrer">Terms</a>
+                I&nbsp;agree&nbsp;to&nbsp;<a href=—/terms— target=—_blank— rel=—noopener noreferrer—>Terms</a>
               </label>
               Executable HTML / JS can be harmful. Proceed only if you trust the author.
             </>
           )}
-          confirmLabel="OK"
-          cancelLabel="Cancel"
+          confirmLabel=—OK—
+          cancelLabel=—Cancel—
           confirmDisabled={!scrTerms}
           onConfirm={confirmScripts}
           onCancel={() => setCfrmScr(false)}
@@ -928,24 +926,24 @@ export default function TokenListingCard({
       {revealType && (
         <PixelConfirmDialog
           open
-          title={`Reveal ${revealType === 'nsfw' ? 'NSFW' : 'flashing‑hazard'} content?`}
+          title={`Reveal ${revealType === 'nsfw' ꜩ 'NSFW' : 'flashingâ€‘hazard'} contentꜩ`}
           message={(
             <>
               {revealType === 'nsfw'
-                ? <p style={{ margin: '0 0 8px' }}>This asset is flagged as <strong>Not‑Safe‑For‑Work (NSFW)</strong>. Viewer discretion is advised.</p>
+                ꜩ <p style={{ margin: '0 0 8px' }}>This asset is flagged as <strong>Notâ€‘Safeâ€‘Forâ€‘Work (NSFW)</strong>. Viewer discretion is advised.</p>
                 : <p style={{ margin: '0 0 8px' }}>This asset contains <strong>rapid flashing or strobing effects</strong>.</p>}
               <label style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
                 <input
-                  type="checkbox"
+                  type=—checkbox—
                   checked={termsOk}
                   onChange={(e) => setTermsOk(e.target.checked)}
                 />
-                I&nbsp;confirm&nbsp;I&nbsp;am&nbsp;18 + and&nbsp;agree&nbsp;to&nbsp;<a href="/terms" target="_blank" rel="noopener noreferrer">Terms</a>
+                I&nbsp;confirm&nbsp;I&nbsp;am&nbsp;18â€¯+Â and&nbsp;agree&nbsp;to&nbsp;<a href=—/terms— target=—_blank— rel=—noopener noreferrer—>Terms</a>
               </label>
             </>
           )}
-          confirmLabel="REVEAL"
-          cancelLabel="Cancel"
+          confirmLabel=—REVEAL—
+          cancelLabel=—Cancel—
           confirmDisabled={!termsOk}
           onConfirm={() => {
             if (revealType === 'nsfw') setAllowNSFW(true);
@@ -982,8 +980,13 @@ TokenListingCard.defaultProps = {
 };
 
 /* What changed & why (r1245):
-   • NEW prop `initialListing` to seed the lowest listing (seller/nonce/price/amount)
+   â€¢ NEW prop `initialListing` to seed the lowest listing (seller/nonce/price/amount)
      from the parent page; BUY is immediately enabled when wallet is connected.
-   • Kept existing 15s polling via fetchLowestListing() to stay current.
-   • No behavioural regression: other pages can ignore the new prop. */
+   â€¢ Kept existing 15s polling via fetchLowestListing() to stay current.
+   â€¢ No behavioural regression: other pages can ignore the new prop. */
 // EOF
+
+
+
+
+

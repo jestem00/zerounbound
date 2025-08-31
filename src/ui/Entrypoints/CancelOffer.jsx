@@ -1,13 +1,42 @@
-﻿/*â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  Developed byÂ @jams2bluesÂ â€“Â ZeroContractÂ Studio
+﻿/*─────────────────────────────────────────────────────────────
+  Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/Entrypoints/CancelOffer.jsx
-  Rev :    r2    2025â€‘10â€‘26â€¯UTC
+  Rev :    r2    2025‑10‑26 UTC
   Summary: Modal UI for withdrawing (canceling) offers made by the
            connected buyer on a given NFT token.  Lists the
-           buyer's current offers (fetched via the marketplaceâ€™s
-           offâ€‘chain view) and allows canceling individually or
-           all at once via the marketplaceâ€™s withdraw_offer
-           entrypoint.  This revision updates the Price (ꜩ)0, 0, 0, 0.65);
+           buyer's current offers (fetched via the marketplace’s
+           off‑chain view) and allows canceling individually or
+           all at once via the marketplace’s withdraw_offer
+           entrypoint.  This revision updates the price column to
+           display full XTZ values with six fractional digits to
+           avoid rounding/truncation seen in earlier versions.
+────────────────────────────────────────────────────────────*/
+
+import React, { useEffect, useState, useMemo } from 'react';
+import PropTypes                                from 'prop-types';
+import styledPkg                                from 'styled-components';
+
+import PixelHeading       from '../PixelHeading.jsx';
+import PixelButton        from '../PixelButton.jsx';
+import OperationOverlay   from '../OperationOverlay.jsx';
+import { useWalletContext } from '../../contexts/WalletContext.js';
+import { getMarketContract } from '../../core/marketplace.js';
+import { Tzip16Module }     from '@taquito/tzip16';
+
+// styled-components helper
+const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
+
+// Modal overlay covering the viewport
+const ModalOverlay = styled.div`
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.65);
   z-index: 9999;
 `;
 
@@ -72,7 +101,8 @@ export default function CancelOffer({ open = false, contract = '', tokenId = '',
         const push   = (offeror, obj) => {
           list.push({
             offeror: offeror,
-            Price (ꜩ)obj.Price (ꜩ)obj.amount),
+            priceMutez: Number(obj.price),
+            amount: Number(obj.amount),
             nonce: Number(obj.nonce),
             accepted: obj.accepted,
           });
@@ -107,7 +137,7 @@ export default function CancelOffer({ open = false, contract = '', tokenId = '',
   async function cancelSingle() {
     if (!toolkit) return;
     try {
-      setOv({ open: true, label: 'Cancelling offerâ€¦' });
+      setOv({ open: true, label: 'Cancelling offer…' });
       const market = await getMarketContract(toolkit);
       const call = market.methodsObject.withdraw_offer({
         nft_contract: contract,
@@ -116,7 +146,7 @@ export default function CancelOffer({ open = false, contract = '', tokenId = '',
       const op = await toolkit.wallet.batch().withContractCall(call).send();
       await op.confirmation();
       setOv({ open: false, label: '' });
-      snack('Offer cancelled âœ”');
+      snack('Offer cancelled ✔');
       // Remove all offers from list (withdraw cancels all offers by the buyer on this token)
       setOffers([]);
       // Close the modal via onClose
@@ -153,16 +183,22 @@ export default function CancelOffer({ open = false, contract = '', tokenId = '',
                 <tr>
                   <th>Offeror</th>
                   <th>Amount</th>
-                  <th>Price (ꜩ)êœ©)</th>
+                  <th>Price&nbsp;(ꜩ)</th>
                   <th>Nonce</th>
                 </tr>
               </thead>
               <tbody>
                 {pageOffers.map((offer) => (
                   <tr key={`${offer.offeror}-${offer.nonce}`}>
-                    <td>{offer.offeror.substring(0, 6)}â€¦{offer.offeror.substring(offer.offeror.length - 4)}</td>
+                    <td>{offer.offeror.substring(0, 6)}…{offer.offeror.substring(offer.offeror.length - 4)}</td>
                     <td>{offer.amount}</td>
-                    <td>{formatMutez(offer.Price (ꜩ)
+                    <td>{(offer.priceMutez / 1_000_000).toLocaleString(undefined, { minimumFractionDigits: 6, maximumFractionDigits: 8 })}</td>
+                    <td>{offer.nonce}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+            {pages > 1 && (
               <Pagination>
                 {Array.from({ length: pages }, (_, idx) => (
                   <PixelButton key={idx} onClick={() => setPage(idx)} disabled={idx === page} $size="sm">
@@ -204,11 +240,10 @@ CancelOffer.propTypes = {
 };
 
 /* What changed & why:
-   r2 â€“ Updated the price column to use toLocaleString with six
+   r2 – Updated the price column to use toLocaleString with six
    minimum and eight maximum fractional digits, allowing prices
-   like 1.23456789 êœ© to display every decimal digit without
+   like 1.23456789 ꜩ to display every decimal digit without
    rounding while still showing at least six decimals for whole
-   numbers.  Added smâ€‘sized buttons and improved spacing for
+   numbers.  Added sm‑sized buttons and improved spacing for
    consistency with the rest of the UI. */
 //EOF
-

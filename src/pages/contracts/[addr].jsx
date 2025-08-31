@@ -1,10 +1,12 @@
 /*Developed by @jams2blues – ZeroContract Studio
   File: src/pages/contracts/[addr].jsx
-  Rev : r9    2025‑10‑12
+  Rev : r10   2025‑10‑12
   Summary(of what this file does): Contract detail page with live
            token grid, filtering, sorting, stats, and accurate
-           For‑Sale count+filter.  Wires header “For Sale” pill to a
-           popover of clickable token‑ids that filters the grid. */
+           For‑Sale count+filter.  Adds dropdown tag selector and
+           attribute‑based rarity filters.  Wires header “For Sale”
+           pill to a popover of clickable token‑ids that filters
+           the grid. */
 
 import React, {
   useEffect, useMemo, useState, useCallback,
@@ -91,12 +93,13 @@ export default function ContractPage() {
 
   /* filters */
   const [filters, setFilters] = useState({
-    authors: new Set(),
-    mime   : new Set(),
-    tags   : new Set(),
-    type   : '',              /* '', 1of1, editions */
-    mature : 'include',        /* include | exclude | only */
-    flash  : 'include',
+    authors    : new Set(),
+    mime       : new Set(),
+    tag        : '',           /* single tag dropdown */
+    type       : '',           /* '', 1of1, editions */
+    mature     : 'include',    /* include | exclude | only */
+    flash      : 'include',
+    attributes : {},           /* { name:Set(values) } */
   });
 
   /*── fetch meta + tokens ──────────────────────────────────*/
@@ -319,9 +322,18 @@ export default function ContractPage() {
       if (!aArr.some((a) => filters.authors.has(a))) return false;
     }
     if (filters.mime.size && !filters.mime.has(m.mimeType)) return false;
-    if (filters.tags.size) {
-      const tagArr = m.tags || [];
-      if (!tagArr.some((tg) => filters.tags.has(tg))) return false;
+    if (filters.tag) {
+      let tagArr = m.tags || [];
+      if (!Array.isArray(tagArr)) tagArr = tagArr ? [tagArr] : [];
+      if (!tagArr.includes(filters.tag)) return false;
+    }
+    if (filters.attributes && Object.keys(filters.attributes).length) {
+      const attrArr = Array.isArray(m.attributes) ? m.attributes : [];
+      for (const [name, set] of Object.entries(filters.attributes)) {
+        if (set.size && !attrArr.some((a) => a && a.name === name && set.has(String(a.value)))) {
+          return false;
+        }
+      }
     }
     const supply = Number(t.totalSupply || m.totalSupply || m.amount || 0);
     if (filters.type === '1of1'   && supply !== 1) return false;
@@ -345,7 +357,7 @@ export default function ContractPage() {
         const m = t.metadata || {};
         const hay = [
           m.name, m.description,
-          ...(m.tags || []),
+          ...(Array.isArray(m.tags) ? m.tags : (m.tags ? [m.tags] : [])),
           ...(Array.isArray(m.attributes)
             ? m.attributes.map((a) => `${a.name}:${a.value}`)
             : []),
@@ -471,4 +483,10 @@ export default function ContractPage() {
    • Kept all robust ingestion logic and the TZIP‑16 + TzKT for‑sale
      count from the previous revision intact.  Base behaviour remains
      consistent with r5 baseline.  (Ref: prior variants)  :contentReference[oaicite:2]{index=2} */
+/* What changed & why (r10):
+   • Fixed tag filter crash by normalizing tag arrays and switching to a
+     single-select dropdown.
+   • Added attribute rarity filters (with counts and percentages) to
+     match objkt-style trait filtering.
+*/
 // EOF

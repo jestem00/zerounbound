@@ -1,18 +1,13 @@
 /*─────────────────────────────────────────────────────────────
   Developed by @jams2blues – ZeroContract Studio
   File:    src/ui/FiltersPanel.jsx
-  Rev :    r4    2025‑07‑27 UTC
-  Summary: Responsive filters panel for the explore pages.  This
-           component renders a sidebar on desktop and a modal on
-           mobile, allowing users to filter tokens by authors,
-           MIME type, tags, edition type, mature content and
-           flashing content.  Author entries now resolve Tezos
-           domains when reverse records exist and truncate
-           addresses via shortAddr() when unresolved, with
-           word‑wrapping to prevent clipping.  Domain names are
-           displayed in full.  This revision introduces a
-           domains cache and asynchronous lookups via
-           resolveTezosDomain().
+  Rev :    r5    2025‑10‑12 UTC
+  Summary: Responsive filters panel for the explore pages. Adds a
+           dropdown tag selector and attribute‑based rarity
+           filters with counts and percentages alongside the
+           existing author, MIME, edition and safety filters.  It
+           still resolves Tezos domains and word‑wraps long
+           labels, using a domains cache with async lookups.
 ──────────────────────────────────────────────────────────────*/
 
 import PropTypes from 'prop-types';
@@ -96,23 +91,36 @@ export default function FiltersPanel({ tokens = [], filters, setFilters, renderT
 
   /* derive quick filter lists */
   const authSet = new Set();
-  const tagSet = new Set();
   const mimeSet = new Set();
+  const tagCounts = new Map();
+  const attrMap = new Map(); // name -> Map(value -> count)
   tokens.forEach((t) => {
     const m = t.metadata || {};
-    // Safely derive authors/creators/artists array.  Metadata fields may
-    // be a string or array; normalize to an array before iteration.
+    // authors/creators/artists normalize to array
     let authors = m.authors || m.artists || m.creators || [];
-    if (!Array.isArray(authors)) {
-      authors = authors ? [authors] : [];
-    }
+    if (!Array.isArray(authors)) authors = authors ? [authors] : [];
     authors.forEach((a) => { if (a) authSet.add(String(a)); });
-    // Normalize tags to an array as well
+
+    // tags
     let tags = m.tags || [];
-    if (!Array.isArray(tags)) {
-      tags = tags ? [tags] : [];
-    }
-    tags.forEach((tg) => { if (tg) tagSet.add(String(tg)); });
+    if (!Array.isArray(tags)) tags = tags ? [tags] : [];
+    tags.forEach((tg) => {
+      if (!tg) return;
+      const key = String(tg);
+      tagCounts.set(key, (tagCounts.get(key) || 0) + 1);
+    });
+
+    // attributes
+    const attrs = Array.isArray(m.attributes) ? m.attributes : [];
+    attrs.forEach(({ name, value }) => {
+      if (!name) return;
+      const n = String(name);
+      const v = String(value);
+      if (!attrMap.has(n)) attrMap.set(n, new Map());
+      const valMap = attrMap.get(n);
+      valMap.set(v, (valMap.get(v) || 0) + 1);
+    });
+
     if (m.mimeType) mimeSet.add(m.mimeType);
   });
 
@@ -159,6 +167,18 @@ export default function FiltersPanel({ tokens = [], filters, setFilters, renderT
     setFilters((f) => ({ ...f, [key]: val }));
     closeIfMobile();
   };
+  const onTag = (val) => {
+    setFilters((f) => ({ ...f, tag: val }));
+    closeIfMobile();
+  };
+  const toggleAttr = (name, val) =>
+    setFilters((f) => {
+      const attrs = { ...f.attributes };
+      const set = new Set(attrs[name] || []);
+      set.has(val) ? set.delete(val) : set.add(val);
+      if (set.size) attrs[name] = set; else delete attrs[name];
+      return { ...f, attributes: attrs };
+    });
 
   /*──── UI body ───────────────────────────────────────────*/
   const body = (
@@ -203,22 +223,46 @@ export default function FiltersPanel({ tokens = [], filters, setFilters, renderT
 
       <Section>
         <legend>Tags</legend>
-        {[...tagSet]
-          .sort((a, b) => a.localeCompare(b))
-          .map((tg) => (
-            <label key={tg}>
-              <input
-                type="checkbox"
-                checked={filters.tags.has(tg)}
-                onChange={() => {
-                  toggleSetVal('tags', tg);
-                  closeIfMobile();
-                }}
-              />
-              {tg}
-            </label>
-          ))}
+        <select
+          value={filters.tag}
+          onChange={(e) => onTag(e.target.value)}
+          style={{ fontFamily: 'inherit', width: '100%', padding: '4px 6px' }}
+        >
+          <option value="">All Tags</option>
+          {[...tagCounts.entries()]
+            .sort((a, b) => b[1] - a[1])
+            .map(([tg, count]) => (
+              <option key={tg} value={tg}>
+                {tg} ({count})
+              </option>
+            ))}
+        </select>
       </Section>
+
+      {[...attrMap.entries()].map(([name, map]) => (
+        <Section key={name}>
+          <legend>{name}</legend>
+          {[...map.entries()]
+            .sort((a, b) => b[1] - a[1])
+            .map(([val, count]) => {
+              const pct = ((count / tokens.length) * 100).toFixed(1);
+              const set = filters.attributes[name] || new Set();
+              return (
+                <label key={val}>
+                  <input
+                    type="checkbox"
+                    checked={set.has(val)}
+                    onChange={() => {
+                      toggleAttr(name, val);
+                      closeIfMobile();
+                    }}
+                  />
+                  {val} ({count} • {pct}%)
+                </label>
+              );
+            })}
+        </Section>
+      ))}
 
       <Section>
         <legend>Edition Type</legend>
@@ -288,14 +332,21 @@ export default function FiltersPanel({ tokens = [], filters, setFilters, renderT
       )}
 
       {/* mobile modal overlay */}
-      {!isDesktop && show && (
-        <ModalWrap onClick={() => setShow(false)}>
-          {/* stop propagation to prevent closing when clicking inside */}
-          <div onClick={(e) => e.stopPropagation()}>
-            {body}
-          </div>
-        </ModalWrap>
-      )}
+        {!isDesktop && show && (
+          <ModalWrap onClick={() => setShow(false)}>
+            {/* stop propagation to prevent closing when clicking inside */}
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+              }}
+            >
+              {body}
+            </div>
+          </ModalWrap>
+        )}
     </>
   );
 }
@@ -305,12 +356,18 @@ FiltersPanel.propTypes = {
   filters    : PropTypes.shape({
     authors: PropTypes.instanceOf(Set),
     mime   : PropTypes.instanceOf(Set),
-    tags   : PropTypes.instanceOf(Set),
+    tag    : PropTypes.string,
     type   : PropTypes.string,
     mature : PropTypes.string,
     flash  : PropTypes.string,
+    attributes: PropTypes.objectOf(PropTypes.instanceOf(Set)),
   }).isRequired,
   setFilters: PropTypes.func.isRequired,
   renderToggle: PropTypes.func,
   buttonStyle: PropTypes.object,
 };
+
+/* What changed & why (r5):
+   • Replaced tag checkboxes with a dropdown selector.
+   • Added attribute rarity filters with counts and percentages.
+*/

@@ -12,7 +12,7 @@
 
 import PropTypes from 'prop-types';
 import styledPkg from 'styled-components';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import PixelButton from './PixelButton.jsx';
 
 // Import domain resolver, network selection and address formatter.
@@ -72,10 +72,26 @@ const Section = styled.fieldset`
   }
   input[type='checkbox'] { margin-right: 4px; }
 `;
+ 
+// Simple drawer header used to collapse/expand attributes list
+const DrawerHead = styled.button`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 4px 6px;
+  margin: 4px 0 2px;
+  background: transparent;
+  border: 1px dashed var(--zu-fg);
+  color: inherit;
+  cursor: pointer;
+  font-family: 'Pixeloid Sans', monospace;
+`;
 
 export default function FiltersPanel({ tokens = [], filters, setFilters, renderToggle, buttonStyle }) {
   const [show, setShow] = useState(false);
   const [isDesktop, setDesktop] = useState(false);
+  const [attrsOpen, setAttrsOpen] = useState(false);
 
   // Cache for reverse domain lookups.  Keys are lower-cased addresses;
   // values are the resolved domain or null.
@@ -123,6 +139,37 @@ export default function FiltersPanel({ tokens = [], filters, setFilters, renderT
 
     if (m.mimeType) mimeSet.add(m.mimeType);
   });
+
+  // Track how many attribute values are currently selected
+  const selectedAttrCount = useMemo(() => {
+    const obj = filters?.attributes || {};
+    let n = 0;
+    for (const k of Object.keys(obj)) {
+      const s = obj[k];
+      if (s && typeof s.size === 'number') n += s.size;
+    }
+    return n;
+  }, [filters]);
+
+  // Restore drawer state from localStorage and auto-open when filters active
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const saved = window.localStorage.getItem('zu:filters:attrsOpen');
+        if (saved === '1') setAttrsOpen(true);
+      }
+    } catch {}
+  }, []);
+  useEffect(() => {
+    if (selectedAttrCount > 0) setAttrsOpen(true);
+  }, [selectedAttrCount]);
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('zu:filters:attrsOpen', attrsOpen ? '1' : '0');
+      }
+    } catch {}
+  }, [attrsOpen]);
 
   // Resolve domains for Tezos addresses in the authors set.
   useEffect(() => {
@@ -239,30 +286,43 @@ export default function FiltersPanel({ tokens = [], filters, setFilters, renderT
         </select>
       </Section>
 
-      {[...attrMap.entries()].map(([name, map]) => (
-        <Section key={name}>
-          <legend>{name}</legend>
-          {[...map.entries()]
-            .sort((a, b) => b[1] - a[1])
-            .map(([val, count]) => {
-              const pct = ((count / tokens.length) * 100).toFixed(1);
-              const set = filters.attributes[name] || new Set();
-              return (
-                <label key={val}>
-                  <input
-                    type="checkbox"
-                    checked={set.has(val)}
-                    onChange={() => {
-                      toggleAttr(name, val);
-                      closeIfMobile();
-                    }}
-                  />
-                  {val} ({count} • {pct}%)
-                </label>
-              );
-            })}
-        </Section>
-      ))}
+      <Section>
+        <legend>Attributes</legend>
+        <DrawerHead type="button" onClick={() => setAttrsOpen((v) => !v)} aria-expanded={attrsOpen}>
+          <span>
+            Attributes{selectedAttrCount ? ` (${selectedAttrCount})` : ''}
+          </span>
+          <span>{attrsOpen ? '▴' : '▾'}</span>
+        </DrawerHead>
+        {attrsOpen && (
+          <div>
+            {[...attrMap.entries()].map(([name, map]) => (
+              <Section key={name}>
+                <legend>{name}</legend>
+                {[...map.entries()]
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([val, count]) => {
+                    const pct = ((count / tokens.length) * 100).toFixed(1);
+                    const set = filters.attributes[name] || new Set();
+                    return (
+                      <label key={val}>
+                        <input
+                          type="checkbox"
+                          checked={set.has(val)}
+                          onChange={() => {
+                            toggleAttr(name, val);
+                            closeIfMobile();
+                          }}
+                        />
+                        {val} ({count} • {pct}%)
+                      </label>
+                    );
+                  })}
+              </Section>
+            ))}
+          </div>
+        )}
+      </Section>
 
       <Section>
         <legend>Edition Type</legend>

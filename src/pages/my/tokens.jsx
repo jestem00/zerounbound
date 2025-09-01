@@ -66,13 +66,24 @@ function useTzktV1Base(toolkit) {
     return (NETWORK_KEY || 'mainnet').toLowerCase();
   }, [toolkit]);
 
-  if (typeof TZKT_API === 'string' && TZKT_API) {
-    const base = TZKT_API.replace(/\/+$/, '');
-    return base.endsWith('/v1') ? base : `${base}/v1`;
-  }
-  return net === 'mainnet'
+  // Prefer the connected wallet network when available to avoid
+  // cross-network mismatches (e.g., viewing MAINNET with a build
+  // that carries a ghostnet TZKT_API constant). Fallback to the
+  // configured constant only when we cannot infer the wallet net.
+  const byNet = net === 'mainnet'
     ? 'https://api.tzkt.io/v1'
     : 'https://api.ghostnet.tzkt.io/v1';
+
+  if (typeof TZKT_API === 'string' && TZKT_API) {
+    const base = TZKT_API.replace(/\/+$/, '');
+    const constIsMain = /api\.tzkt\.io$/i.test(base) || /api\.tzkt\.io\/v1$/i.test(base);
+    const constIsGhost = /ghostnet\.tzkt\.io$/i.test(base) || /ghostnet\.tzkt\.io\/v1$/i.test(base);
+    // If constant matches wallet net, use it; else prefer byNet.
+    if ((net === 'mainnet' && constIsMain) || (net === 'ghostnet' && constIsGhost)) {
+      return base.endsWith('/v1') ? base : `${base}/v1`;
+    }
+  }
+  return byNet;
 }
 
 /** Tight tz‑address check (tz1|tz2|tz3, 36‑char Base58) */

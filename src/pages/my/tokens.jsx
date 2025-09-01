@@ -179,6 +179,13 @@ function isValidPreview(m = {}) {
     const header = uri.slice(5, comma);
     const semi = header.indexOf(';');
     const mime = (semi >= 0 ? header.slice(0, semi) : header).toLowerCase();
+    const isBase64 = /;base64/i.test(header);
+
+    // Accept non-base64 data URIs (e.g., image/svg+xml;utf8,...) without
+    // deep signature checks. These are common for SVG/HTML and are safe in
+    // our renderer which sanitizes/script-gates separately.
+    if (!isBase64) return true;
+
     const b64  = uri.slice(comma + 1);
     let binary;
     if (typeof atob === 'function') {
@@ -253,6 +260,8 @@ export default function MyTokens() {
     setPhase('idle'); setError(null); setVisible(24);
   }, []);
 
+  
+
   /** Fetch contracts’ typeHash in chunks and build a map */
   const fetchTypeHashes = useCallback(async (addrs) => {
     if (!addrs || addrs.length === 0) return new Map();
@@ -290,7 +299,7 @@ export default function MyTokens() {
 
     const contractAddr = row?.contract?.address || row?.contract;
     const creatorTop   = (row?.creator?.address || row?.creator || '').toString().toLowerCase();
-    const firstMinter  = (row?.firstMinter || '').toString().toLowerCase();
+    const firstMinter  = (row?.firstMinter?.address || row?.firstMinter || '').toString().toLowerCase();
 
     return {
       contract: contractAddr,

@@ -19,7 +19,7 @@ import PixelButton from '../../ui/PixelButton.jsx';
 import TokenCard from '../../ui/TokenCard.jsx';
 
 import { jFetch } from '../../core/net.js';
-import decodeHexFields from '../../utils/decodeHexFields.js';
+import decodeHexFields, { decodeHexJson } from '../../utils/decodeHexFields.js';
 import hashMatrix from '../../data/hashMatrix.json';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
@@ -285,6 +285,12 @@ export default function MyTokens() {
   const prepareToken = useCallback((row) => {
     let meta = row?.metadata || {};
     try {
+      // TzKT sometimes returns metadata as a hex JSON string. Decode that
+      // first, then deep-decode any hex fields inside the resulting object.
+      if (typeof meta === 'string') {
+        const parsed = decodeHexJson(meta);
+        if (parsed && typeof parsed === 'object') meta = parsed;
+      }
       meta = decodeHexFields(meta || {});
     } catch { /* keep original */ }
 

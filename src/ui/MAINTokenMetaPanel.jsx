@@ -1,12 +1,15 @@
 /* Developed by @jams2blues
    File: src/ui/MAINTokenMetaPanel.jsx
-   Rev : r21
-   Summary: add rarity rank and trait chips; keep script toggle,
-            fullscreen, share, and extra-URIs entry. */
+   Rev : r26
+   Summary: Restore collection header (thumb + link), address row with
+            version tag and copy, minted date + editions, downloadable
+            MIME with rights — while keeping rarity rank/traits, script
+            toggle, fullscreen, share sprite and Extra URIs entry. */
 
 import React, { useMemo, useState } from 'react';
 import PropTypes from 'prop-types';
 import styledPkg from 'styled-components';
+import { format } from 'date-fns';
 
 import PixelHeading   from './PixelHeading.jsx';
 import PixelButton    from './PixelButton.jsx';
@@ -17,6 +20,11 @@ import ShareDialog    from './ShareDialog.jsx';
 
 import { checkOnChainIntegrity } from '../utils/onChainValidator.js';
 import { EnableScriptsToggle }   from './EnableScripts.jsx';
+import countAmount               from '../utils/countAmount.js';
+import hashMatrix                from '../data/hashMatrix.json';
+import { shortKt, copyToClipboard } from '../utils/formatAddress.js';
+import { mimeFromDataUri } from '../utils/uriHelpers.js';
+import { preferredExt }    from '../constants/mimeTypes.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -61,6 +69,42 @@ const MetaGrid = styled.dl`
   dd { margin: 0; word-break: break-word; }
 `;
 
+/* Restored: compact collection header with thumb + link */
+const CollectionLink = styled.a`
+  display: flex; align-items: center; gap: 8px; text-decoration: none; color: inherit;
+  &:hover { text-decoration: underline; }
+`;
+const ThumbWrap = styled.div`
+  position: relative; width: 32px; height: 32px; flex: 0 0 32px;
+  border: 1px solid var(--zu-fg); display: flex; align-items: center; justify-content: center;
+`;
+const ThumbMedia = styled(RenderMedia)`
+  width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated;
+`;
+const AddrRow = styled.div`
+  font-size: .75rem; opacity: .8; display: flex; align-items: center; gap: 6px;
+  code { word-break: break-all; }
+  button { line-height: 1; padding: 0 4px; font-size: .65rem; }
+`;
+const Description = styled.p`
+  font-size: .85rem; line-height: 1.4; white-space: pre-wrap; margin: 0;
+`;
+
+/* util: downloadable filename from token name + mime */
+function cleanFilename(s = '') {
+  return String(s).replace(/[\\/:*?"<>|]+/g, '').replace(/\s+/g, ' ').trim().slice(0, 96) || 'download';
+}
+function suggestedFilename(meta = {}, tokenId) {
+  const base = cleanFilename(meta?.name || `token-${tokenId ?? ''}`) || 'download';
+  const ext  = preferredExt(meta?.mime || '') || '';
+  return ext ? `${base}.${ext}` : base;
+}
+
+function pickThumb(m = {}) {
+  const uri = m.imageUri || m.thumbnailUri || m.displayUri || m.artifactUri || '';
+  return typeof uri === 'string' && uri.startsWith('data:') ? uri : '';
+}
+
 export default function MAINTokenMetaPanel({
   token,
   collection,
@@ -78,6 +122,7 @@ export default function MAINTokenMetaPanel({
 }) {
   const meta = token?.metadata || {};
   const integrity = useMemo(() => checkOnChainIntegrity(meta), [meta]);
+  const editions  = useMemo(() => countAmount(token), [token]);
 
   // Share dialog
   const [shareOpen, setShareOpen] = useState(false);
@@ -89,20 +134,51 @@ export default function MAINTokenMetaPanel({
       name: meta?.name || '',
       description: meta?.description || '',
       value: meta?.artifactUri || '',
-      mime: meta?.mimeType || '',
+      mime: meta?.mimeType || mimeFromDataUri(meta?.artifactUri || ''),
     };
   }, [currentUri, meta]);
 
   const hasExtras = Array.isArray(extraUris) && extraUris.length > 1;
 
+  // Collection header bits
+  const collMeta   = collection?.metadata || {};
+  const collThumb  = pickThumb(collMeta) || '/sprites/cover_default.svg';
+  const collName   = collMeta.name || collMeta.symbol || collMeta.title || collMeta.collectionName || shortKt(collection?.address || '');
+  const HASH2VER   = useMemo(() => (Object.entries(hashMatrix)
+    .reduce((o, [h, v]) => { o[+h] = String(v).toUpperCase(); return o; }, {})), []);
+  const verLabel   = HASH2VER?.[collection?.typeHash] || '?';
+
   return (
     <Panel>
+      {/* Collection head: thumb + name + address/version */}
+      {collection?.address && (
+        <Section>
+          <CollectionLink href={`/contracts/${collection.address}`}>
+            <ThumbWrap>
+              <ThumbMedia uri={collThumb} />
+            </ThumbWrap>
+            <span style={{ fontWeight: 'bold', fontSize: '.95rem' }}>
+              Collection: {collName}
+            </span>
+          </CollectionLink>
+          <AddrRow>
+            <code>{shortKt(collection.address)}</code>
+            <button type="button" onClick={() => copyToClipboard(collection.address)} title="Copy contract address">📋</button>
+            <Tag>({verLabel})</Tag>
+          </AddrRow>
+        </Section>
+      )}
       {/* Title + integrity */}
       <Section>
         <BadgeWrap>
           <PixelHeading level={4}>{meta?.name || `Token #${token?.tokenId}`}</PixelHeading>
           <IntegrityBadge status={integrity.status} />
         </BadgeWrap>
+        {(token?.firstTime != null) && (
+          <span style={{ fontSize: '.75rem', opacity: .85 }}>
+            Minted {format(new Date(token.firstTime), 'MMM dd, yyyy')} • {editions} edition{editions !== 1 ? 's' : ''}
+          </span>
+        )}
       </Section>
 
       {/* Controls: scripts toggle, fullscreen, share, extras */}
@@ -152,7 +228,7 @@ export default function MAINTokenMetaPanel({
       {/* Description */}
       {meta?.description && (
         <Section>
-          <p style={{ fontSize: '.85rem', lineHeight: 1.4, whiteSpace: 'pre-wrap', margin: 0 }}>{meta.description}</p>
+          <Description>{meta.description}</Description>
         </Section>
       )}
 
@@ -160,7 +236,23 @@ export default function MAINTokenMetaPanel({
       <Section>
         <MetaGrid>
           <dt>MIME Type</dt>
-          <dd>{cur.mime || meta?.mimeType || 'N/A'}</dd>
+          <dd>
+            {cur?.mime ? (
+              <a
+                href={cur?.value}
+                download={suggestedFilename({ name: cur?.name || meta?.name, mime: cur?.mime }, token?.tokenId)}
+                style={{ color: 'inherit' }}
+              >
+                {cur.mime}
+              </a>
+            ) : (meta?.mimeType || 'N/A')}
+          </dd>
+          {meta?.rights && (
+            <>
+              <dt>Rights</dt>
+              <dd>{meta.rights}</dd>
+            </>
+          )}
         </MetaGrid>
         {cur?.value && (
           <RenderMedia uri={cur.value} style={{ width: 96, height: 96, objectFit: 'contain' }} />
@@ -265,4 +357,6 @@ MAINTokenMetaPanel.propTypes = {
       pct  : PropTypes.number,
     })),
   }),
+  currentIndex: PropTypes.number,
+  totalUris   : PropTypes.number,
 };

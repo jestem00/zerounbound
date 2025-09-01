@@ -426,17 +426,20 @@ export default function Mint({
     [shares],
   );
 
-  /* clamp editions when oversize */
+  /* editions normalization (no auto-clamp for v3/v4) */
   const editionCount = useMemo(() => {
     const n = parseInt(f.amount, 10) || 1;
     return n < 1 ? 1 : n;
   }, [f.amount]);
+  // Older v2 contracts cannot append; if file is oversize on v2, warn and
+  // clamp to 1 to avoid invalid mints. v3/v4 support append so allow >1.
   useEffect(() => {
-    if (oversize && editionCount > 1) {
+    const unprefixed = String(contractVersion || '').replace(/^v/i, '');
+    if (oversize && unprefixed.startsWith('2') && editionCount > 1) {
       setF((p) => ({ ...p, amount: '1' }));
-      snack('Large uploads are limited to 1 edition; please use bulk transfer after mint.', 'warning');
+      snack('Legacy v2 contracts limit large uploads to 1 edition. Reduce file size or mint 1 then bulk-transfer.', 'warning');
     }
-  }, [oversize, editionCount, snack]);
+  }, [oversize, editionCount, snack, contractVersion]);
 
   /*──────── validation helpers ─────────────────────*/
   const baseChecks = useMemo(() => {
@@ -455,9 +458,10 @@ export default function Mint({
       })(),
       royalty:       royaltyUnder25(shares),
       editions:      (() => {
+        // v1 UI hides editions; accept silently. v2 has legacy shapes and
+        // the field is hidden as well.
         if (contractVersion === 'v1' || String(contractVersion).startsWith('v2')) return true;
         const n = parseInt(f.amount || '', 10);
-        if (oversize) return n === 1;
         return !Number.isNaN(n) && n >= 1 && n <= MAX_EDITIONS;
       })(),
       attrs:         validAttributes(attrs.filter((a) => a.name && a.value)),

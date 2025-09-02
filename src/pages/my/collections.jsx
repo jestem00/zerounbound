@@ -15,6 +15,7 @@ import PixelHeading from '../../ui/PixelHeading.jsx';
 import CollectionCard from '../../ui/CollectionCard.jsx';
 import PixelButton from '../../ui/PixelButton.jsx';
 import { discoverCreated } from '../../utils/contractDiscovery.js';
+import { listKey, getList, cacheList } from '../../utils/idbCache.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -78,6 +79,8 @@ export default function MyCollections() {
       error: null,
   });
   const [visibleCount, setVisibleCount] = useState(24);
+  const [showHidden, setShowHidden]   = useState(false);
+  const [hideUnused, setHideUnused]   = useState(true);
 
   const loadCollections = useCallback(async (signal) => {
     if (!address) {
@@ -88,11 +91,21 @@ export default function MyCollections() {
 
     try {
       const network = tzktV1.includes('ghostnet') ? 'ghostnet' : 'mainnet';
+      const cacheKey = listKey('myCollections', address, network);
+
+      // serve cache quickly if present
+      try {
+        const cached = await getList(cacheKey, 120_000);
+        if (Array.isArray(cached) && cached.length) {
+          setState({ phase: 'ready', list: cached, error: null });
+        }
+      } catch {}
+
       const createdContracts = await discoverCreated(address, network);
 
       if (signal.aborted) return;
-      
       setState({ phase: 'ready', list: createdContracts, error: null });
+      cacheList(cacheKey, createdContracts);
     } catch (err) {
       if (!signal.aborted) {
         const msg = (err && (err.message || String(err))) || 'Network error';
@@ -110,7 +123,16 @@ export default function MyCollections() {
     };
   }, [loadCollections]);
 
-  const visibleItems = useMemo(() => state.list.slice(0, visibleCount), [state.list, visibleCount]);
+  const visibleItems = useMemo(() => {
+    // Apply "hidden" filter based on carousel hidden set
+    let hiddenSet = new Set();
+    try {
+      const raw = typeof window !== 'undefined' ? localStorage.getItem('zu_hidden_contracts_v1') : null;
+      if (raw) hiddenSet = new Set(JSON.parse(raw).map((s) => String(s).toLowerCase()));
+    } catch {}
+    const arr = showHidden ? state.list : state.list.filter((c) => !hiddenSet.has(String(c.address).toLowerCase()));
+    return arr.slice(0, visibleCount);
+  }, [state.list, visibleCount, showHidden]);
   const hasMore = visibleCount < state.list.length;
 
   return (
@@ -126,6 +148,16 @@ export default function MyCollections() {
           ? <>Showing collections created or administered by&nbsp;<code>{address}</code> ({state.list.length} found)</>
           : 'Connect your wallet to see your collections.'}
       </Subtle>
+
+      {/* view filters: hidden contracts (shared with carousels) + unused (empty) */}
+      <div style={{ display:'flex', gap:'.5rem', marginTop:'.5rem', flexWrap:'wrap' }}>
+        <PixelButton size="xs" onClick={() => setShowHidden((v) => !v)}>
+          {showHidden ? 'Hide Hidden' : 'Show Hidden'}
+        </PixelButton>
+        <PixelButton size="xs" onClick={() => setHideUnused((v) => !v)}>
+          {hideUnused ? 'Show Unused' : 'Hide Unused'}
+        </PixelButton>
+      </div>
 
       {state.phase === 'loading' && (
         <Subtle>Fetching your collections…</Subtle>
@@ -143,7 +175,39 @@ export default function MyCollections() {
         <>
           <Grid>
             {visibleItems.map((contractData) => (
-              <CollectionCard key={contractData.address} contract={contractData} />
+              <CollectionCard
+                key={contractData.address}
+                contract={contractData}
+                hideIfEmpty={hideUnused}
+                canHide
+                isHidden={(() => {
+                  try {
+                    const raw = typeof window !== 'undefined' ? localStorage.getItem('zu_hidden_contracts_v1') : null;
+                    const set = raw ? new Set(JSON.parse(raw).map((s) => String(s).toLowerCase())) : new Set();
+                    return set.has(String(contractData.address).toLowerCase());
+                  } catch { return false; }
+                })()}
+                dimHidden={showHidden && (() => {
+                  try {
+                    const raw = typeof window !== 'undefined' ? localStorage.getItem('zu_hidden_contracts_v1') : null;
+                    const set = raw ? new Set(JSON.parse(raw).map((s) => String(s).toLowerCase())) : new Set();
+                    return set.has(String(contractData.address).toLowerCase());
+                  } catch { return false; }
+                })()}
+                onToggleHide={() => {
+                  try{
+                    const key = 'zu_hidden_contracts_v1';
+                    const raw = typeof window !== 'undefined' ? localStorage.getItem(key) : null;
+                    const arr = raw ? JSON.parse(raw) : [];
+                    const lc = String(contractData.address).toLowerCase();
+                    const idx = arr.findIndex((x) => String(x).toLowerCase() === lc);
+                    if (idx >= 0) arr.splice(idx, 1); else arr.push(contractData.address);
+                    localStorage.setItem(key, JSON.stringify(arr));
+                    // Force rerender by updating state list reference
+                    setState((s) => ({ ...s, list: [...s.list] }));
+                  }catch{}
+                }}
+              />
             ))}
           </Grid>
           {hasMore && (

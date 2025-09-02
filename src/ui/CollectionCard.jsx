@@ -32,6 +32,7 @@ const Card = styled.div`
   border: 2px solid var(--zu-accent,#00c8ff);
   background: var(--zu-bg,#000); color: var(--zu-fg,#fff);
   overflow: hidden; cursor: pointer;
+  opacity: ${(p) => (p.$dim ? 0.45 : 1)};
   &:hover { box-shadow: 0 0 6px var(--zu-accent-sec,#ff0); }
 `;
 
@@ -94,7 +95,10 @@ function decodeHexMetadata(val='') {
 }
 
 /* component */
-export default function CollectionCard({ contract, initialTokensCount, hideIfEmpty = false }) {
+export default function CollectionCard({
+  contract, initialTokensCount, hideIfEmpty = false,
+  canHide = false, onToggleHide, isHidden = false, dimHidden = false,
+}) {
   const [meta, setMeta]     = useState({});
   const [owners,setOwners]  = useState(null);
   const [live,  setLive]    = useState(
@@ -236,13 +240,21 @@ export default function CollectionCard({ contract, initialTokensCount, hideIfEmp
 
   return (
     <a href={`/contracts/${contract.address}`} style={{ textDecoration:'none' }}>
-      <Card>
+      <Card $dim={dimHidden}>
         <ThumbWrap className="preview-1x1">
           <Badge title={label}>{badge}</Badge>
 
           {scripts && (
             <span style={{ position:'absolute', top:4, left:4, zIndex:12 }}>
               <EnableScriptsToggle enabled={allowScripts} onToggle={handleToggleScripts} />
+            </span>
+          )}
+
+          {canHide && (
+            <span style={{ position:'absolute', top:4, right:4, zIndex:14 }}>
+              <PixelButton size="xs" onClick={(e)=>{ e.preventDefault(); onToggleHide?.(); }}>
+                {isHidden ? 'SHOW' : 'HIDE'}
+              </PixelButton>
             </span>
           )}
 
@@ -329,6 +341,10 @@ CollectionCard.propTypes = {
   }).isRequired,
   initialTokensCount: PropTypes.number,
   hideIfEmpty: PropTypes.bool,
+  canHide: PropTypes.bool,
+  onToggleHide: PropTypes.func,
+  isHidden: PropTypes.bool,
+  dimHidden: PropTypes.bool,
 };
 
 /* What changed & why (r30):

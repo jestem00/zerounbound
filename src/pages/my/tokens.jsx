@@ -21,6 +21,7 @@ import TokenCard from '../../ui/TokenCard.jsx';
 import { jFetch } from '../../core/net.js';
 import decodeHexFields, { decodeHexJson } from '../../utils/decodeHexFields.js';
 import hashMatrix from '../../data/hashMatrix.json';
+import { listKey, getList, cacheList } from '../../utils/idbCache.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -246,17 +247,18 @@ export default function MyTokens() {
   const tzktV1 = useTzktV1Base(toolkit);
 
   const [tab, setTab] = useState('creations'); // 'creations' | 'owned'
-  const [creations, setCreations] = useState([]);
-  const [owned, setOwned] = useState([]);
-  const [countCreations, setCountCreations] = useState(0);
-  const [countOwned, setCountOwned] = useState(0);
+  const [creations, setCreations] = useState([]); // raw minted-by-me
+  const [owned, setOwned] = useState([]);         // raw owned (not filtered)
+  // View preferences
+  const [showHidden, setShowHidden] = useState(false);     // show contracts hidden in carousels
+  const [hideDestroyed, setHideDestroyed] = useState(true); // hide destroyed tokens in "My Creations"
+  const [hiddenTokens, setHiddenTokens] = useState(new Set());
   const [phase, setPhase] = useState('idle'); // idle | loading | ready | error
   const [error, setError] = useState(null);
   const [visible, setVisible] = useState(24);
 
   const resetAll = useCallback(() => {
     setCreations([]); setOwned([]);
-    setCountCreations(0); setCountOwned(0);
     setPhase('idle'); setError(null); setVisible(24);
   }, []);
 
@@ -386,6 +388,24 @@ export default function MyTokens() {
     if (!address) { resetAll(); return; }
     setPhase('loading'); setError(null); setVisible(24);
 
+    // Network key for cache keys
+    const net = tzktV1.includes('ghostnet') ? 'ghostnet' : 'mainnet';
+    const kMinted = listKey('myTokensMinted', address, net);
+    const kOwned  = listKey('myTokensOwned',  address, net);
+
+    // Serve cached result immediately if available
+    try {
+      const cachedMinted = await getList(kMinted, 120_000);
+      const cachedOwned  = await getList(kOwned,  120_000);
+      if (Array.isArray(cachedMinted) || Array.isArray(cachedOwned)) {
+        const mArr = Array.isArray(cachedMinted) ? cachedMinted : [];
+        const oArr = Array.isArray(cachedOwned)  ? cachedOwned  : [];
+        setCreations(mArr);
+        setOwned(oArr);
+        setPhase('ready');
+      }
+    } catch {}
+
     try {
       // CREATIONS: strictly tokens minted by me (creator/firstMinter/metadata creators|authors)
       const minted = await fetchMintedBy(address);
@@ -451,10 +471,12 @@ export default function MyTokens() {
       if (!signal.aborted) {
         setCreations(minted);
         setOwned(finalOwned);
-        setCountCreations(minted.length);
-        setCountOwned(finalOwned.length);
         setPhase('ready');
       }
+
+      // Cache raw lists for fast next load
+      cacheList(kMinted, minted);
+      cacheList(kOwned,  finalOwned);
     } catch (err) {
       if (!signal.aborted) {
         setPhase('error');
@@ -463,13 +485,58 @@ export default function MyTokens() {
     }
   }, [address, tzktV1, fetchTypeHashes, prepareToken, resetAll, fetchMintedBy, mintedByUser]);
 
+  // Load hidden token set once per wallet+network
+  useEffect(() => {
+    const net = tzktV1.includes('ghostnet') ? 'ghostnet' : 'mainnet';
+    const kHidden = listKey('hiddenTokens', address || '', net);
+    let cancelled = false;
+    (async () => {
+      try {
+        const hid = await getList(kHidden, 365*24*60*60*1000);
+        if (!cancelled && Array.isArray(hid)) setHiddenTokens(new Set(hid.map(String)));
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [address, tzktV1]);
+
   useEffect(() => {
     const controller = new AbortController();
     loadAll(controller.signal);
     return () => controller.abort();
   }, [loadAll]);
 
-  const list = tab === 'creations' ? creations : owned;
+  // Derived filtering applied at render time (no refetch thrash)
+  const hiddenContractsSet = useMemo(() => {
+    try {
+      const raw = typeof window !== 'undefined' ? localStorage.getItem('zu_hidden_contracts_v1') : null;
+      return raw ? new Set(JSON.parse(raw).map((s) => String(s).toLowerCase())) : new Set();
+    } catch { return new Set(); }
+  }, [showHidden]);
+
+  const filteredCreations = useMemo(() => {
+    const arr = creations.map((t) => ({ ...t, address: t.contract }));
+    return arr.filter((r) => {
+      const c = r.address; const t = r.tokenId;
+      if (!showHidden && hiddenContractsSet.has(String(c).toLowerCase())) return false;
+      if (!showHidden && hiddenTokens.has(`${c}:${t}`)) return false;
+      if (hideDestroyed) {
+        const supply = Number(r.totalSupply ?? r.total_supply ?? 0);
+        if (supply <= 0) return false;
+      }
+      return true;
+    }).map(({ address: _a, ...rest }) => rest);
+  }, [creations, showHidden, hideDestroyed, hiddenTokens, hiddenContractsSet]);
+
+  const filteredOwned = useMemo(() => {
+    return owned.filter((r) => {
+      const c = r.contract || r.address; const t = r.tokenId;
+      if (!showHidden && hiddenContractsSet.has(String(c).toLowerCase())) return false;
+      if (!showHidden && hiddenTokens.has(`${c}:${t}`)) return false;
+      return true;
+    });
+  }, [owned, showHidden, hiddenTokens, hiddenContractsSet]);
+
+  const list = tab === 'creations' ? filteredCreations : filteredOwned;
   const visibleList = list.slice(0, visible);
   const hasMore = visible < list.length;
 
@@ -486,16 +553,26 @@ export default function MyTokens() {
           onClick={() => { setTab('creations'); setVisible(24); }}
           size="sm"
         >
-          My&nbsp;Creations&nbsp;({countCreations})
+          My&nbsp;Creations&nbsp;({filteredCreations.length})
         </PixelButton>
         <PixelButton
           warning={tab === 'owned'}
           onClick={() => { setTab('owned'); setVisible(24); }}
           size="sm"
         >
-          My&nbsp;Owned&nbsp;({countOwned})
+          My&nbsp;Owned&nbsp;({filteredOwned.length})
         </PixelButton>
       </Tabs>
+
+      {/* view filters: hidden contracts + destroyed tokens */}
+      <div style={{ display:'flex', gap:'.5rem', marginTop:'.5rem', flexWrap:'wrap' }}>
+        <PixelButton size="xs" onClick={() => setShowHidden((v) => !v)}>
+          {showHidden ? 'Hide Hidden' : 'Show Hidden'}
+        </PixelButton>
+        <PixelButton size="xs" onClick={() => setHideDestroyed((v) => !v)}>
+          {hideDestroyed ? 'Show Destroyed' : 'Hide Destroyed'}
+        </PixelButton>
+      </div>
 
       {!address && (
         <Subtle>Connect your wallet to see your tokens.</Subtle>
@@ -524,6 +601,22 @@ export default function MyTokens() {
                   tokenId: Number(t.tokenId),
                   metadata: t.metadata || {},
                   holdersCount: t.holdersCount,
+                }}
+                canHide
+                isHidden={hiddenTokens.has(`${t.contract}:${t.tokenId}`)}
+                dimHidden={showHidden && hiddenTokens.has(`${t.contract}:${t.tokenId}`)}
+                onHide={(c, id, already) => {
+                  const net = tzktV1.includes('ghostnet') ? 'ghostnet' : 'mainnet';
+                  const kHidden = listKey('hiddenTokens', address, net);
+                  const key = `${c}:${id}`;
+                  setHiddenTokens((prev) => {
+                    const next = new Set([...prev]);
+                    if (already) next.delete(key); else next.add(key);
+                    // persist to IDB
+                    const arr = Array.from(next);
+                    cacheList(kHidden, arr);
+                    return next;
+                  });
                 }}
               />
             ))}

@@ -29,6 +29,7 @@ import { shortAddr }             from '../utils/formatAddress.js';
 import { resolveTezosDomain }    from '../utils/resolveTezosDomain.js';
 import decodeHexFields, { decodeHexJson } from '../utils/decodeHexFields.js';
 import { TZKT_API, NETWORK_KEY } from '../config/deployTarget.js';
+import { jFetch } from '../core/net.js';
 
 const PLACEHOLDER = '/sprites/cover_default.svg';
 const VALID_DATA  = /^data:/i;
@@ -80,29 +81,28 @@ async function fetchCollectionName(kt1) {
   try {
     // Try big-map metadata/content first (often hex-encoded JSON).
     try {
-      const r1 = await fetch(
+      const arr = await jFetch(
         `${apiBase}/contracts/${encodeURIComponent(kt1)}/bigmaps/metadata/keys?key=content&select=value&limit=1`,
-        { cache: 'no-store' },
+        2,
+        { ttl: 600_000, priority: 'low', dedupeKey: `bm:${key}` },
       );
-      if (r1.ok) {
-        const arr = await r1.json();
-        const raw = Array.isArray(arr) ? arr[0] : null;
-        const parsed = decodeHexJson(typeof raw === 'string' ? raw : '');
-        if (parsed && typeof parsed === 'object') {
-          const m = decodeHexFields(parsed);
-          name = String(m.name || m.collectionName || m.title || '').trim();
-        }
+      const raw = Array.isArray(arr) ? arr[0] : null;
+      const parsed = decodeHexJson(typeof raw === 'string' ? raw : '');
+      if (parsed && typeof parsed === 'object') {
+        const m = decodeHexFields(parsed);
+        name = String(m.name || m.collectionName || m.title || '').trim();
       }
     } catch { /* ignore */ }
 
     // Fallback: contract metadata field.
     if (!name) {
-      const r2 = await fetch(`${apiBase}/contracts/${encodeURIComponent(kt1)}`, { cache: 'no-store' });
-      if (r2.ok) {
-        const obj = await r2.json();
-        const m = decodeHexFields(obj?.metadata || {});
-        name = String(m.name || m.collectionName || m.title || '').trim();
-      }
+      const obj = await jFetch(
+        `${apiBase}/contracts/${encodeURIComponent(kt1)}`,
+        2,
+        { ttl: 600_000, priority: 'low', dedupeKey: `ct:${key}` },
+      );
+      const m = decodeHexFields(obj?.metadata || {});
+      name = String(m.name || m.collectionName || m.title || '').trim();
     }
   } catch { /* network issues → empty */ }
 
@@ -148,6 +148,7 @@ const Card = styled.article`
   flex-direction: column;
   min-height: 330px;
   transition: box-shadow .15s;
+  opacity: ${(p) => (p.$dim ? 0.45 : 1)};
   &:hover { box-shadow: 0 0 6px var(--zu-accent-sec,#ff0); }
 `;
 
@@ -184,6 +185,11 @@ const FSBtn = styled(PixelButton)`
   z-index:7; /* above preview + LinkCover */
 `;
 
+const HideBtn = styled(PixelButton)`
+  position:absolute; top:4px; left:4px; z-index:8; font-size:.55rem; padding:0 .35rem;
+  opacity:.85;
+`;
+
 const Meta = styled.section`
   background: var(--zu-bg-alt,#171717);
   padding: 6px 8px 8px;
@@ -216,6 +222,7 @@ const StatRow = styled.div`
 /*──────── component ───────────────────────────────────────*/
 export default function TokenCard({
   token, contractAddress, contractName = '', contractAdmin = '',
+  canHide = false, onHide, isHidden = false, dimHidden = false,
 }) {
   const meta          = token.metadata || {};
   const integrity     = useMemo(() => checkOnChainIntegrity(meta), [meta]);
@@ -396,7 +403,7 @@ export default function TokenCard({
 
   return (
     <>
-      <Card>
+      <Card $dim={dimHidden}>
         {/* preview (1:1 clickable tile) */}
         <ThumbWrap
           className="preview-1x1"
@@ -406,6 +413,15 @@ export default function TokenCard({
           onClick={onThumbClick}
           onKeyDown={onKey}
         >
+          {canHide && (
+            <HideBtn
+              size="xs"
+              title={isHidden ? 'Unhide token' : 'Hide token'}
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onHide?.(contractAddress, token.tokenId, isHidden); }}
+            >
+              {isHidden ? 'SHOW' : 'HIDE'}
+            </HideBtn>
+          )}
           {!blocked && preview && !(!thumbOk || !preview) && (
             <RenderMedia
               uri={preview}

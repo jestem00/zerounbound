@@ -1,4 +1,4 @@
-/*Developed by @jams2blues
+﻿/*Developed by @jams2blues
   File: src/ui/TokenCard.jsx
   Rev:  r45
   Summary: Listing card. Separate Author(s)/Creator(s) rows, remove Owners,
@@ -190,6 +190,12 @@ const HideBtn = styled(PixelButton)`
   opacity:.85;
 `;
 
+const BurnBadge = styled(PixelButton)`
+  position:absolute; top:4px; right:32px; z-index:8; font-size:.7rem; padding:0 .35rem;
+  background:#802; color:#fff; border-color:#f55; opacity:.92;
+  &:hover{ opacity:1 }
+`;
+
 const Meta = styled.section`
   background: var(--zu-bg-alt,#171717);
   padding: 6px 8px 8px;
@@ -223,6 +229,7 @@ const StatRow = styled.div`
 export default function TokenCard({
   token, contractAddress, contractName = '', contractAdmin = '',
   canHide = false, onHide, isHidden = false, dimHidden = false,
+  burned = false,
 }) {
   const meta          = token.metadata || {};
   const integrity     = useMemo(() => checkOnChainIntegrity(meta), [meta]);
@@ -258,6 +265,7 @@ export default function TokenCard({
   const [thumbOk, setThumbOk]   = useState(true);
   const [fs,      setFs]        = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [burnInfoOpen, setBurnInfoOpen] = useState(false);
 
   /* reveal dialog */
   const [revealType, setRevealType] = useState(null);   // 'nsfw' | 'flash' | null
@@ -325,7 +333,7 @@ export default function TokenCard({
             aria-label="Show all entries"
             onClick={(e) => { e.preventDefault(); toggle(true); }}
             style={{ background:'none', border:'none', color:'inherit', font:'inherit', cursor:'pointer', padding:0 }}
-          >🔻More</button>
+          >More</button>
         </span>
       );
     }
@@ -421,6 +429,13 @@ export default function TokenCard({
             >
               {isHidden ? 'SHOW' : 'HIDE'}
             </HideBtn>
+          )}
+          {burned && (
+            <BurnBadge
+              size="xs"
+              title="Fully burned (all editions at burn address)"
+              onClick={(e)=>{ e.preventDefault(); e.stopPropagation(); setBurnInfoOpen(true); }}
+            >🔥</BurnBadge>
           )}
           {!blocked && preview && !(!thumbOk || !preview) && (
             <RenderMedia
@@ -626,6 +641,44 @@ export default function TokenCard({
           downloadUri={meta?.artifactUri}
           downloadMime={meta?.mimeType}
           downloadName={meta?.name}
+        />
+      )}
+      {burnInfoOpen && (
+        <PixelConfirmDialog
+          open
+          title="Token is burned"
+          message={(
+            <span>
+              All editions of this token are held by the Tezos burn address.
+              <br />
+              <code>tz1burnburnburnburnburnburnburjAYjjX</code>
+              <br />
+              Burn transfers are permanent and irreversible.
+              <br />
+              <br />
+              <a
+                href={`https://${(NETWORK_KEY && String(NETWORK_KEY).toLowerCase() !== 'mainnet') ? 'ghostnet.' : ''}tzkt.io/${contractAddress}_${token?.tokenId}`}
+                target="_blank"
+                rel="noreferrer"
+                style={{ color: 'var(--zu-accent,#0cf)' }}
+              >
+                View on TzKT
+              </a>
+              &nbsp;|&nbsp;
+              <a
+                href={`https://better-call.dev/${(NETWORK_KEY && String(NETWORK_KEY).toLowerCase() !== 'mainnet') ? 'ghostnet' : 'mainnet'}/${contractAddress}/${token?.tokenId}`}
+                target="_blank"
+                rel="noreferrer"
+                style={{ color: 'var(--zu-accent,#0cf)' }}
+              >
+                View on Better Call Dev
+              </a>
+            </span>
+          )}
+          confirmLabel="Close"
+          hideCancel
+          onConfirm={()=>setBurnInfoOpen(false)}
+          onCancel={()=>setBurnInfoOpen(false)}
         />
       )}
     </>

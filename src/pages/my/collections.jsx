@@ -1,4 +1,4 @@
-/* Developed by @jams2blues
+﻿/* Developed by @jams2blues
   File:    src/pages/my/collections.jsx
   Rev:     r17
   Summary: Definitive fix for My Collections. Renders a direct grid using
@@ -93,9 +93,9 @@ export default function MyCollections() {
       const network = tzktV1.includes('ghostnet') ? 'ghostnet' : 'mainnet';
       const cacheKey = listKey('myCollections', address, network);
 
-      // serve cache quickly if present
+      // serve cache quickly if present (no TTL for warm start)
       try {
-        const cached = await getList(cacheKey, 120_000);
+        const cached = await getList(cacheKey);
         if (Array.isArray(cached) && cached.length) {
           setState({ phase: 'ready', list: cached, error: null });
         }
@@ -217,7 +217,7 @@ export default function MyCollections() {
                   disabled={state.phase === 'loading'}
                   size="sm"
                 >
-                  Load More 🔻
+                  Load More
                 </PixelButton>
               </Center>
           )}

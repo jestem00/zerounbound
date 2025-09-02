@@ -1,4 +1,4 @@
-/*Developed by @jams2blues
+﻿/*Developed by @jams2blues
   File: src/pages/explore/tokens.jsx
   Rev:  r2
   Summary: Correct count UI; 10+ new cards per click; smoother scan‑ahead. */
@@ -22,6 +22,8 @@ import { jFetch }                           from '../../core/net.js';
 import { TZKT_API, NETWORK_KEY }            from '../../config/deployTarget.js';
 import decodeHexFields                      from '../../utils/decodeHexFields.js';
 import hashMatrix                           from '../../data/hashMatrix.json';
+// IDB cache intentionally not used on explore/tokens to avoid stale grids
+import listLiveTokenIds                     from '../../utils/listLiveTokenIds.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -164,6 +166,17 @@ function fmtInt(n) {
   } catch { return String(n); }
 }
 
+// Ensure unique list by `contract:tokenId` while preserving order
+function dedupeTokens(list = []) {
+  const seen = new Set();
+  const out = [];
+  for (const t of (Array.isArray(list) ? list : [])) {
+    const k = `${t.contract}:${t.tokenId}`;
+    if (!seen.has(k)) { seen.add(k); out.push(t); }
+  }
+  return out;
+}
+
 /*───────────────────────────────────────────────────────────*
  * Page
  *───────────────────────────────────────────────────────────*/
@@ -197,8 +210,10 @@ export default function ExploreTokens() {
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState('');
 
-  // de‑dupe (global to component lifetime)
+  // de-dupe (global to component lifetime)
   const seenTok = useRef(new Set());
+  // track if warm-start seeded items so we can resume without toggling loading
+  const warmSeeded = useRef(false);
 
   // reset on param change
   useEffect(() => {
@@ -206,25 +221,42 @@ export default function ExploreTokens() {
     setAdminTok([]); setAdminVisible(24);
     seenTok.current.clear();
     setError('');
+    warmSeeded.current = false;
   }, [adminFilter, contractFilter, tzktV1]);
 
   /*──────── queries ────────*/
 
   /**
    * Batch token loader (generic browse).
-   * IMPORTANT: do NOT include `contract.metadata.version.in`, `tokenId.ne`, or `supply.gt`
-   * on /v1/tokens — those shapes provoke 400 at TzKT. We query broadly and gate client‑side
-   * by allowed `contract.typeHash` + preview/hazard rules.  */
+   * Server filters by ZeroContract typeHash and totalSupply>0 to avoid scanning
+   * the entire FA2 corpus. Falls back to broad scan if the server rejects the
+   * nested filter (robust across forks).
+   */
   const fetchBatchTokens = useCallback(async (startOffset = 0, step = 48) => {
     const qs = new URLSearchParams();
     qs.set('standard', 'fa2');
     qs.set('sort.desc', 'firstTime');       // latest mints first
     qs.set('offset', String(startOffset));
     qs.set('limit',  String(step));
+    // Restrict to ZeroContract family on the server when supported
+    qs.set('contract.typeHash.in', [...ALLOWED_TYPE_HASHES].join(','));
+    qs.set('totalSupply.gt', '0');
+    qs.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply,contract.typeHash');
     if (contractFilter) qs.set('contract', contractFilter);
 
-    const url = `${tzktV1}/tokens?${qs.toString()}`;
-    const rows = await jFetch(url).catch(() => []);
+    const urlStrict = `${tzktV1}/tokens?${qs.toString()}`;
+    let rows = await jFetch(urlStrict).catch(() => null);
+    if (!Array.isArray(rows)) {
+      // Fallback: drop nested filters for maximum compatibility
+      const qb = new URLSearchParams();
+      qb.set('standard', 'fa2');
+      qb.set('sort.desc', 'firstTime');
+      qb.set('offset', String(startOffset));
+      qb.set('limit',  String(step));
+      qb.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply,contract.typeHash');
+      if (contractFilter) qb.set('contract', contractFilter);
+      rows = await jFetch(`${tzktV1}/tokens?${qb.toString()}`).catch(() => []);
+    }
     return Array.isArray(rows) ? rows : [];
   }, [tzktV1, contractFilter]);
 
@@ -267,9 +299,62 @@ export default function ExploreTokens() {
     }
 
     // sort newest first (stable on tokenId within same contract)
-    out.sort((a, b) => (b.tokenId - a.tokenId) || (a.contract > b.contract ? -1 : 1));
-    return out;
+    // Hide fully burned tokens (all supply at burn address): compare with live id sets
+    try {
+      const net = tzktV1.includes('ghostnet') ? 'ghostnet' : 'mainnet';
+      const byC = new Map();
+      for (const t of out) {
+        const kt = t.contract; const id = Number(t.tokenId);
+        if (!kt || !Number.isFinite(id)) continue;
+        if (!byC.has(kt)) byC.set(kt, new Set());
+        byC.get(kt).add(id);
+      }
+      const keep = [];
+      for (const [kt, ids] of byC.entries()) {
+        // list of live ids (not fully burned) for this contract
+        // listLiveTokenIds returns [] on failure, which will drop all for that kt; guard below
+        let live = [];
+        try { live = await listLiveTokenIds(kt, net, false); } catch { live = []; }
+        const liveSet = new Set(live.map(Number));
+        for (const t of out) {
+          if (t.contract !== kt) continue;
+          if (liveSet.size === 0) { keep.push(t); continue; }
+          if (liveSet.has(Number(t.tokenId))) keep.push(t);
+        }
+      }
+      keep.sort((a, b) => (b.tokenId - a.tokenId) || (a.contract > b.contract ? -1 : 1));
+      return keep;
+    } catch {
+      out.sort((a, b) => (b.tokenId - a.tokenId) || (a.contract > b.contract ? -1 : 1));
+      return out;
+    }
   }, [adminFilter, tzktV1, contractFilter]);
+
+  /**
+   * Fast-path helpers: discover active ZeroContract collections and page
+   * tokens per contract rather than scanning the global FA2 space.
+   */
+  const fetchAllowedContracts = useCallback(async () => {
+    const qs = new URLSearchParams();
+    qs.set('typeHash.in', [...ALLOWED_TYPE_HASHES].join(','));
+    qs.set('select', 'address');
+    qs.set('sort.desc', 'lastActivityTime');
+    qs.set('limit', '400');
+    const rows = await jFetch(`${tzktV1}/contracts?${qs.toString()}`).catch(() => []);
+    return (rows || []).map((r) => r.address).filter(Boolean);
+  }, [tzktV1]);
+
+  const fetchTokensByContract = useCallback(async (kt1, off = 0, step = 12) => {
+    const qs = new URLSearchParams();
+    qs.set('contract', kt1);
+    qs.set('sort.desc', 'tokenId');
+    qs.set('limit', String(step));
+    qs.set('offset', String(off));
+    qs.set('totalSupply.gt', '0');
+    qs.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply');
+    const rows = await jFetch(`${tzktV1}/tokens?${qs.toString()}`).catch(() => []);
+    return Array.isArray(rows) ? rows : [];
+  }, [tzktV1]);
 
   /**
    * Scan ahead until we accumulate at least `minAccept` newly accepted tokens
@@ -284,7 +369,8 @@ export default function ExploreTokens() {
     const PAGE            = 48;             // server page size
     const MIN_YIELD_INIT  = 24;             // fast first impression
     const MIN_YIELD_CLICK = 10;             // guarantee ≥10 new cards per click
-    const SOFT_SCAN_ROWS  = initial ? PAGE * 24 : PAGE * 64; // soft guardrail (rate‑limit friendly)
+    const SOFT_SCAN_ROWS  = initial ? PAGE * 24 : PAGE * 64; // soft guardrail (rate-limit friendly)
+    const WINDOW          = initial ? 3 : 2; // small concurrency window
 
     const minAccept = initial ? MIN_YIELD_INIT : MIN_YIELD_CLICK;
 
@@ -295,40 +381,53 @@ export default function ExploreTokens() {
 
     const next = [];
 
-    // sequential scan (respect jFetch limiter & TzKT rate‑limits)
-    // Stop when: enough accepts, or true end, or soft limit reached.
-    /* eslint-disable no-await-in-loop */
+    // windowed concurrency: fetch 2-3 pages per loop
     while (accepted < minAccept && !reachedEnd && scannedRows < SOFT_SCAN_ROWS) {
-      const rows = await fetchBatchTokens(localOffset, PAGE);
-      const got  = Array.isArray(rows) ? rows.length : 0;
-      scannedRows += got;
-      localOffset += got;
+      const offs = [];
+      for (let i = 0; i < WINDOW; i += 1) offs.push(localOffset + i * PAGE);
+      const batches = await Promise.all(offs.map((off) => fetchBatchTokens(off, PAGE)));
+      let windowRows = 0;
+      for (const rows of batches) {
+        const got = Array.isArray(rows) ? rows.length : 0;
+        windowRows += got;
+        scannedRows += got;
+        if (got < PAGE) reachedEnd = true;
 
-      if (!got) { reachedEnd = true; break; }
-      if (got < PAGE) reachedEnd = true;
-
-      for (const r of rows) {
-        // gate by ZeroContract family via typeHash when available
-        const typeHash = Number(r.contract?.typeHash ?? NaN);
-        if (Number.isFinite(typeHash) && !ALLOWED_TYPE_HASHES.has(typeHash)) continue;
-
-        const t = normalizeAndAcceptToken(r);
-        if (!t) continue;
-
-        const key = `${t.contract}:${t.tokenId}`;
-        if (!seenTok.current.has(key)) {
-          seenTok.current.add(key);
-          next.push(t);
-          accepted += 1;
-          if (accepted >= minAccept) break;
+        for (const r of (rows || [])) {
+          const typeHash = Number(r.contract?.typeHash ?? NaN);
+          if (Number.isFinite(typeHash) && !ALLOWED_TYPE_HASHES.has(typeHash)) continue;
+          const t = normalizeAndAcceptToken(r);
+          if (!t) continue;
+          const key = `${t.contract}:${t.tokenId}`;
+          if (!seenTok.current.has(key)) {
+            seenTok.current.add(key);
+            next.push(t);
+            accepted += 1;
+            if (accepted >= minAccept) break;
+          }
         }
       }
+      localOffset += windowRows;
+      if (windowRows === 0) { reachedEnd = true; break; }
     }
-    /* eslint-enable no-await-in-loop */
 
-    if (next.length) setTokens((prev) => prev.concat(next));
+    if (next.length) {
+      setTokens((prev) => {
+        // Guard against any duplicates by key
+        const have = new Set(prev.map((t) => `${t.contract}:${t.tokenId}`));
+        const filteredNext = next.filter((t) => {
+          const k = `${t.contract}:${t.tokenId}`;
+          if (have.has(k)) return false;
+          have.add(k);
+          return true;
+        });
+        const merged = dedupeTokens(filteredNext.length ? prev.concat(filteredNext) : prev);
+        // No cache writes on explore/tokens
+        return merged;
+      });
+    }
     setOffset(localOffset);
-    if (reachedEnd) setEnd(true);
+    if (reachedEnd && next.length === 0) setEnd(true);
 
     setFetching(false);
     if (initial) setLoading(false);
@@ -336,18 +435,21 @@ export default function ExploreTokens() {
 
   /*──────── effects ────────*/
 
-  // initial load
+  // No warm-start cache on explore/tokens
+
+  // initial load (resume if we warm-started); runs once per filter/net change
   useEffect(() => {
     let canceled = false;
     (async () => {
-      setLoading(true);
+      const resume = warmSeeded.current || tokens.length > 0 || offset > 0;
+      setLoading(!resume);
       setError('');
       try {
         if (adminFilter) {
           const arr = await fetchAdminTokens();
           if (!canceled) setAdminTok(arr);
         } else {
-          await loadPage(true);
+          await loadPage(!resume);
         }
       } catch (e) {
         if (!canceled) setError('Could not load data. Please retry.');
@@ -440,11 +542,10 @@ export default function ExploreTokens() {
           <PixelButton
             type="button"
             onClick={() => loadPage(false)}
-            disabled={loading || fetching}
+            disabled={fetching}
             size="sm"
             noActiveFx
-          >
-            {loading || fetching ? 'Loading…' : 'Load More 🔻'}
+          >            Load More
           </PixelButton>
         </Center>
       )}
@@ -457,7 +558,7 @@ export default function ExploreTokens() {
             size="sm"
             noActiveFx
           >
-            Load More 🔻
+            Load More
           </PixelButton>
         </Center>
       )}
@@ -478,3 +579,5 @@ export default function ExploreTokens() {
    • Kept initial scan snappy (≥24 accepted) for a full first impression.
    • Preserved perfect admin‑filter behaviour; left title “Tokens by … (N)”.
    • Lint‑clean: trimmed unused imports/vars; no dead code. */
+
+

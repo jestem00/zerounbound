@@ -1,4 +1,4 @@
-/*Developed by @jams2blues
+﻿/*Developed by @jams2blues
   File: src/pages/my/tokens.jsx
   Rev:  r86
   Summary: Fix reverse DNS resolution by preserving tz-address case in
@@ -22,6 +22,7 @@ import { jFetch } from '../../core/net.js';
 import decodeHexFields, { decodeHexJson } from '../../utils/decodeHexFields.js';
 import hashMatrix from '../../data/hashMatrix.json';
 import { listKey, getList, cacheList } from '../../utils/idbCache.js';
+import listLiveTokenIds from '../../utils/listLiveTokenIds.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -256,6 +257,7 @@ export default function MyTokens() {
   const [phase, setPhase] = useState('idle'); // idle | loading | ready | error
   const [error, setError] = useState(null);
   const [visible, setVisible] = useState(24);
+  const [burnScanEpoch, setBurnScanEpoch] = useState(0); // guard to avoid loops
 
   const resetAll = useCallback(() => {
     setCreations([]); setOwned([]);
@@ -372,7 +374,7 @@ export default function MyTokens() {
 
       const t = prepareToken(row);
       if (!t) continue;
-      if (String(t.totalSupply) === '0') continue;
+      // Include destroyed tokens in creations; view filter controls visibility
 
       const key = `${addr}:${String(tId)}`;
       if (seen.has(key)) continue;
@@ -393,10 +395,10 @@ export default function MyTokens() {
     const kMinted = listKey('myTokensMinted', address, net);
     const kOwned  = listKey('myTokensOwned',  address, net);
 
-    // Serve cached result immediately if available
+    // Serve cached result immediately if available (no TTL; warm start)
     try {
-      const cachedMinted = await getList(kMinted, 120_000);
-      const cachedOwned  = await getList(kOwned,  120_000);
+      const cachedMinted = await getList(kMinted);
+      const cachedOwned  = await getList(kOwned);
       if (Array.isArray(cachedMinted) || Array.isArray(cachedOwned)) {
         const mArr = Array.isArray(cachedMinted) ? cachedMinted : [];
         const oArr = Array.isArray(cachedOwned)  ? cachedOwned  : [];
@@ -468,14 +470,40 @@ export default function MyTokens() {
       }
       finalOwned.sort((a, b) => Number(b.tokenId) - Number(a.tokenId));
 
+      // Detect fully burned minted tokens (all supply at burn address)
+      const BURN_ADDR = 'tz1burnburnburnburnburnburnburjAYjjX';
+      const byContract = new Map();
+      minted.forEach((t) => {
+        const c = t.contract?.address || t.contract;
+        if (!c) return; if (!byContract.has(c)) byContract.set(c, new Set());
+        byContract.get(c).add(String(t.tokenId));
+      });
+      const burnedKeys = new Set();
+      for (const [kt1, ids] of byContract.entries()) {
+        try {
+          const qs = new URLSearchParams({ account: BURN_ADDR, limit: '10000', select: 'token.tokenId,balance' });
+          qs.set('token.contract', kt1);
+          const rows = await jFetch(`${tzktV1}/tokens/balances?${qs}`).catch(() => []);
+          (rows || []).forEach((r) => {
+            const id = String((r && (r['token.tokenId'] ?? (r.token && r.token.tokenId) ?? r.tokenId)) ?? '');
+            if (!ids.has(id)) return;
+            const m = minted.find((x) => String(x.tokenId) === id && (x.contract?.address === kt1 || x.contract === kt1));
+            const supply = Number(m?.totalSupply ?? m?.total_supply ?? 0);
+            const burnBal = Number(r?.balance ?? 0);
+            if (supply > 0 && burnBal === supply) burnedKeys.add(`${kt1}:${id}`);
+          });
+        } catch { /* ignore */ }
+      }
+      const mintedWithFlags = minted.map((t) => ({ ...t, burned: burnedKeys.has(`${t.contract?.address || t.contract}:${t.tokenId}`) }));
+
       if (!signal.aborted) {
-        setCreations(minted);
+        setCreations(mintedWithFlags);
         setOwned(finalOwned);
         setPhase('ready');
       }
 
-      // Cache raw lists for fast next load
-      cacheList(kMinted, minted);
+      // Cache lists with flags for fast next load (persist burn state)
+      cacheList(kMinted, mintedWithFlags);
       cacheList(kOwned,  finalOwned);
     } catch (err) {
       if (!signal.aborted) {
@@ -505,6 +533,74 @@ export default function MyTokens() {
     return () => controller.abort();
   }, [loadAll]);
 
+  // Live cache flush listener (burn/destroy actions emit this event elsewhere)
+  useEffect(() => {
+    if (typeof window === 'undefined') return () => {};
+    const onFlush = () => {
+      const ctl = new AbortController();
+      loadAll(ctl.signal);
+      // abort old pending requests when a new flush arrives
+      setTimeout(() => ctl.abort(), 0);
+    };
+    window.addEventListener('zu_cache_flush', onFlush);
+    return () => window.removeEventListener('zu_cache_flush', onFlush);
+  }, [loadAll]);
+
+  // Post-warm-start burn annotation: if creations loaded from cache without
+  // burned flags, annotate them using live ID scan (per contract) and persist.
+  useEffect(() => {
+    (async () => {
+      if (!address) return;
+      if (!Array.isArray(creations) || creations.length === 0) return;
+      // Run once per component life unless data shape obviously lacks flags
+      if (burnScanEpoch > 0) return;
+
+      // If any item already has a boolean burned flag, assume the loader has
+      // run and skip. Otherwise, annotate from live sets.
+      const hasFlag = creations.some((t) => typeof t?.burned === 'boolean');
+      if (hasFlag) { setBurnScanEpoch(1); return; }
+
+      try {
+        const net = tzktV1.includes('ghostnet') ? 'ghostnet' : 'mainnet';
+        const byContract = new Map(); // kt1 -> Set(ids)
+        for (const t of creations) {
+          const kt1 = t?.contract;
+          const id  = t?.tokenId;
+          if (!kt1 || id == null) continue;
+          if (!byContract.has(kt1)) byContract.set(kt1, new Set());
+          byContract.get(kt1).add(Number(id));
+        }
+
+        const burnedSet = new Set();
+        for (const [kt1, idSet] of byContract.entries()) {
+          const live = new Set(await listLiveTokenIds(kt1, net, false));
+          for (const id of idSet) {
+            // If not live but totalSupply > 0, treat as fully burned
+            const row = creations.find((x) => x.contract === kt1 && Number(x.tokenId) === Number(id));
+            const supply = Number(row?.totalSupply ?? row?.total_supply ?? 0);
+            if (supply > 0 && !live.has(Number(id))) burnedSet.add(`${kt1}:${id}`);
+          }
+        }
+
+        if (burnedSet.size > 0) {
+          const next = creations.map((t) => ({
+            ...t,
+            burned: t?.burned ?? burnedSet.has(`${t.contract}:${t.tokenId}`),
+          }));
+          setCreations(next);
+          // persist back to cache for future warm-starts
+          try {
+            const netKey = tzktV1.includes('ghostnet') ? 'ghostnet' : 'mainnet';
+            const kMinted = listKey('myTokensMinted', address, netKey);
+            cacheList(kMinted, next);
+          } catch {}
+        }
+      } finally {
+        setBurnScanEpoch(1);
+      }
+    })();
+  }, [address, tzktV1, creations, burnScanEpoch]);
+
   // Derived filtering applied at render time (no refetch thrash)
   const hiddenContractsSet = useMemo(() => {
     try {
@@ -519,6 +615,7 @@ export default function MyTokens() {
       const c = r.address; const t = r.tokenId;
       if (!showHidden && hiddenContractsSet.has(String(c).toLowerCase())) return false;
       if (!showHidden && hiddenTokens.has(`${c}:${t}`)) return false;
+      if (!showHidden && r.burned) return false;
       if (hideDestroyed) {
         const supply = Number(r.totalSupply ?? r.total_supply ?? 0);
         if (supply <= 0) return false;
@@ -604,7 +701,8 @@ export default function MyTokens() {
                 }}
                 canHide
                 isHidden={hiddenTokens.has(`${t.contract}:${t.tokenId}`)}
-                dimHidden={showHidden && hiddenTokens.has(`${t.contract}:${t.tokenId}`)}
+                dimHidden={showHidden && (hiddenTokens.has(`${t.contract}:${t.tokenId}`) || t.burned)}
+                burned={t.burned}
                 onHide={(c, id, already) => {
                   const net = tzktV1.includes('ghostnet') ? 'ghostnet' : 'mainnet';
                   const kHidden = listKey('hiddenTokens', address, net);
@@ -628,7 +726,7 @@ export default function MyTokens() {
                 onClick={() => setVisible((v) => v + 24)}
                 size="sm"
               >
-                Load More 🔻
+                Load More
               </PixelButton>
             </Center>
           )}

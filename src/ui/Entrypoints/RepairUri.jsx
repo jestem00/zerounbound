@@ -61,6 +61,26 @@ const WARN_TEXT = `Files beyond ${WARN_MB}MB are experimental, attempt at your o
  */
 const dataUriToHex = (u = '') => char2Bytes(u);
 
+/* Normalize data:URI headers to avoid false diffs (e.g., audio/mp3 vs audio/mpeg,
+   charset spacing/order differences). No decoding of base64 payload. */
+function normalizeDataUri(u = '') {
+  if (typeof u !== 'string' || !u.startsWith('data:')) return u;
+  const idx = u.indexOf(',');
+  if (idx < 0) return u;
+  const head = u.slice(0, idx);
+  const body = u.slice(idx); // include comma
+  // split like data:<mime>[;param=value]*
+  const parts = head.split(';');
+  const first = (parts.shift() || '').toLowerCase()
+    .replace('audio/mp3', 'audio/mpeg')
+    .replace(/\s+/g, '');
+  const params = parts
+    .map((p) => p.trim().toLowerCase())
+    .filter(Boolean)
+    .sort();
+  return [first, ...params].join(';') + body;
+}
+
 /* watchdog – aborts overlay hang when heads subscription drops */
 async function confirmOrTimeout(op, timeout = CONFIRM_TIMEOUT_MS) {
   return Promise.race([
@@ -359,13 +379,21 @@ export default function RepairUri({
     (async () => {
       setStatus('Computing diff...');
       setStatusError(false);
-      const uploadedHex = `0x${dataUriToHex(dataUrl)}`;
+      const uploadedHex = `0x${dataUriToHex(normalizeDataUri(dataUrl))}`;
       setFullHex(uploadedHex);
       let offset = 0;
       if (resumeInfo?.next > 0) {
         offset = resumeInfo.next;
       }
-      const { tail: t, conflict: c, origLonger: ol } = sliceTail(origHex, uploadedHex, sliceSize, offset);
+      // Normalize on-chain prefix before diff to avoid header param order causing false mismatches
+      let origHexNorm = origHex;
+      try {
+        const onChainStr = Buffer.from(origHex.slice(2), 'hex').toString('utf8');
+        const norm = normalizeDataUri(onChainStr);
+        origHexNorm = `0x${char2Bytes(norm)}`;
+      } catch {}
+
+      const { tail: t, conflict: c, origLonger: ol } = sliceTail(origHexNorm, uploadedHex, sliceSize, offset);
       if (c) {
         setStatusError(true);
         const onChainUri = Buffer.from(origHex.slice(2), 'hex').toString('utf8');

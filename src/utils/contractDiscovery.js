@@ -6,7 +6,7 @@
            admin rights via storage to ensure perfect accuracy.
 */
 
-import { getAllowedTypeHashList } from './allowedHashes.js';
+import { getAllowedTypeHashList, typeHashToVersion } from './allowedHashes.js';
 import {
   listCreatedByWallet,
   listRecentAllowedContracts,
@@ -35,6 +35,21 @@ export async function discoverCollaborating(wallet, network = 'mainnet', opts = 
   const allowed = getAllowedTypeHashList();
   const candidates = await listRecentAllowedContracts(allowed, network, limit);
 
+  // Known open-collaboration collections visible to all wallets (by network)
+  // SIFRZERO default collaborative (v4b) on mainnet: anyone can mint.
+  // Ensure it always appears in the collaborative carousel regardless of
+  // collaborator lists in storage.
+  const GLOBAL_OPEN_COLLABS = {
+    mainnet: [
+      'KT1ME5gH4gA3ZZYmJzGqN8Axu8GcaYH4yini', // SIFRZERO v4b (default collaborative)
+    ],
+    ghostnet: [],
+  };
+  const extra = (GLOBAL_OPEN_COLLABS[network] || [])
+    .filter((addr) => !candidates.some((c) => c.address === addr))
+    .map((address) => ({ address, typeHash: 617511430, timestamp: null }));
+  if (extra.length) candidates.push(...extra);
+
   const hits = [];
   const seen = new Set();
   const abort = () => signal && signal.aborted;
@@ -56,7 +71,10 @@ export async function discoverCollaborating(wallet, network = 'mainnet', opts = 
   await Promise.all(candidates.map((c) => limitRun(async () => {
     if (abort()) return;
     if (seen.has(c.address)) return;
-    const ok = await collabHasWallet(c.address, wallet, network).catch(() => false);
+    // Treat open-collaboration versions as visible to all (no storage list)
+    const ver = typeHashToVersion(c.typeHash);
+    let ok = (ver === 'V4B' || ver === 'V4C');
+    if (!ok) ok = await collabHasWallet(c.address, wallet, network).catch(() => false);
     if (ok) {
       seen.add(c.address);
       const row = { address: c.address, typeHash: c.typeHash, timestamp: c.timestamp };

@@ -13,6 +13,7 @@ export const MINIMAL_FEE_MUTEZ         = 100;     /* base per op */
 export const MINIMAL_MUTEZ_PER_MILLIGAS = 0.1;    /* per milligas */
 export const MINIMAL_MUTEZ_PER_BYTE     = 1;      /* per op byte */
 
+/* Canonical per-operation base fee (heuristic upper-bound) */
 export const μBASE_TX_FEE         = 150;      /* mutez – per op (actual avg) */
 export const MUTEZ_PER_BYTE       = 250;      /* mutez / raw byte (Paris) */
 export const GAS_PER_BYTE         = 1.8;      /* milligas per concat byte */
@@ -47,10 +48,15 @@ export function countSlices(dataUri = '') {
 export function calcStorageBurnMutez(
   metaBytes = 0, appendSlices = [], editions = 1,
 ) {
+  // Storage burn on v4/v4e is dominated by a single token_metadata entry
+  // (bytes of metadata + appended artifact slices). It does NOT scale
+  // linearly with edition count since `amount` is supply on one token_id.
+  // Keep editions multiplicative capped at 1 for a safe, realistic estimate.
+  void editions; // retained for backward compatibility
   const sliceBytes = appendSlices.reduce(
     (t, hx) => t + ((hx.length - 2) >> 1), 0,
   );
-  const totalBytes = (metaBytes + sliceBytes) * Math.max(1, editions);
+  const totalBytes = (metaBytes + sliceBytes);
   return Math.ceil((totalBytes * MUTEZ_PER_BYTE + appendSlices.length * OP_BURN_OVERHEAD) * BURN_FACTOR);
 }
 

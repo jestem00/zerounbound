@@ -600,7 +600,7 @@ export default function Mint({
 
     const out = [[mintParams]];                     /* batch‑0 = mint */
 
-    const amt = parseInt(f.amount, 10) || 1;
+    // editions count is handled in mint params; appends target single token_id
     // Determine if the contract supports the append pipeline.  Only v4
     // contracts include the append_artifact_uri entrypoint.  Strip any
     // leading “v” to handle versions like “4c” or “v4b”.
@@ -616,8 +616,8 @@ export default function Mint({
           .map((b) => b.toString(16).padStart(2, '0')).join('');
       } catch { /* hashing errors ignored */ }
 
-      for (let i = 0; i < amt; i += 1) {
-        const tokenId = baseId + i;
+      for (let i = 0; i < 1; i += 1) {
+        const tokenId = baseId;
         const cp = await loadSliceCheckpoint(contractAddress, tokenId, 'artifactUri') || {};
         const startSlice = cp.next ?? 1;                  // 1‑based index
         for (let s = startSlice; s <= appendSlices.length; s += 1) {

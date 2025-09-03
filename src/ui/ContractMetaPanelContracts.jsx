@@ -1,10 +1,10 @@
-﻿/*
-  Developed by @jams2blues â€“ ZeroContract Studio
+/*
+  Developed by @jams2blues - ZeroContract Studio
   File: src/ui/ContractMetaPanelContracts.jsx
   Rev : r7+ 2025-08-31
   Summary: Contract header card. Preserves preview/hazard/domain logic and
            adds a For Sale popover that lists token IDs with a tiny preview
-           and the cheapest price per token (êœ©), sorted cheapest-first.
+           and the cheapest price per token (XTZ), sorted cheapest-first.
 */
 
 import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
@@ -124,7 +124,7 @@ const SaleItemRow = styled.div`
 function ContractMetaPanelContracts({
   meta = {},
   contractAddress = '',
-  stats = { tokens: 'â€¦', owners: 'â€¦', sales: 'â€¦' },
+  stats = { tokens: '...', owners: '...', sales: '...' },
   saleListings = [],
   saleFallbackCount = 0,
   onPickTokenId = null,       // (id: string|number) => void
@@ -220,7 +220,7 @@ function ContractMetaPanelContracts({
             <>
               <a href={`/explore?cmd=tokens&admin=${item}`} style={{ color: 'var(--zu-accent-sec,#6ff)', textDecoration: 'none', wordBreak: 'break-all' }}>{formatted}</a>
               {allowCopy && (
-                <PixelButton size="xs" title="Copy address" onClick={(e) => { e.preventDefault(); e.stopPropagation(); copyToClipboard(item); }}>ðŸ“‹</PixelButton>
+                <PixelButton size="xs" title="Copy address" onClick={(e) => { e.preventDefault(); e.stopPropagation(); copyToClipboard(item); }}>COPY</PixelButton>
               )}
             </>
           ) : (
@@ -232,7 +232,7 @@ function ContractMetaPanelContracts({
     if (list.length > 3 && !showAll) {
       elems.push(
         <>
-          â€¦&nbsp;
+          ... 
           <button type="button" aria-label="Show all entries" onClick={(e) => { e.preventDefault(); setShowAll(true); }} style={{ background: 'none', border: 'none', color: 'inherit', font: 'inherit', cursor: 'pointer', padding: 0 }}>
             More
           </button>
@@ -444,7 +444,7 @@ function ContractMetaPanelContracts({
 
           <AddrRow>
             <code title={contractAddress}>{shortKt(contractAddress)}{verLabel ? ` (${verLabel})` : ''}</code>
-            <PixelButton size="xs" onClick={copy}>ðŸ“‹</PixelButton>
+            <PixelButton size="xs" onClick={copy} title="Copy contract address">COPY</PixelButton>
           </AddrRow>
 
           {adminArr.length > 0 && (

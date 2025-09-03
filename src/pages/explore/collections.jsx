@@ -151,11 +151,7 @@ function toContractObj(row) {
   };
 }
 
-/** Client‑side “non‑empty” check. If tokensCount unknown, allow; card will guard. */
-function nonEmpty(candidate) {
-  const tc = Number(candidate?.tokensCount ?? NaN);
-  return Number.isFinite(tc) ? tc > 0 : true;
-}
+// removed legacy nonEmpty() helper — we now pre‑filter via /tokens/count
 
 /*───────────────────────────────────────────────────────────*
  * Page
@@ -183,6 +179,7 @@ export default function ExploreCollections() {
 
   const seen = useRef(new Set());
   const fetching = useRef(false);
+  const nonEmptyCache = useRef(new Map()); // address -> boolean
 
   /** RESET when base/filter changes */
   useEffect(() => {
@@ -254,7 +251,31 @@ export default function ExploreCollections() {
     return Array.isArray(list) ? list : [];
   }, [TZKT]);
 
-  /** Admin list — discover by creator (client‑side), then let cards hide empties. */
+  /** Robust non‑empty check for contracts (any token with totalSupply>0). */
+  const filterNonEmpty = useCallback(async (list = []) => {
+    const out = [];
+    const chunk = (arr, n = 8) => { const r = []; for (let i = 0; i < arr.length; i += n) r.push(arr.slice(i, i + n)); return r; };
+    const unknown = list.filter((c) => !nonEmptyCache.current.has(c.address));
+    for (const grp of chunk(unknown, 8)) {
+      await Promise.all(grp.map(async (c) => {
+        try {
+          // Avoid TzKT /tokens/count inconsistencies by checking rows directly
+          const rows = await jFetch(`${TZKT}/tokens?contract=${encodeURIComponent(c.address)}&select=tokenId,totalSupply&limit=10000`);
+          const anyLive = Array.isArray(rows) && rows.some((r) => Number(r?.totalSupply ?? r?.total_supply ?? 0) > 0);
+          nonEmptyCache.current.set(c.address, anyLive);
+        } catch {
+          nonEmptyCache.current.set(c.address, true); // best‑effort: let card decide later
+        }
+      }));
+    }
+    for (const c of list) {
+      const ok = nonEmptyCache.current.get(c.address);
+      if (ok == null || ok === true) out.push(c);
+    }
+    return out;
+  }, [TZKT]);
+
+  /** Admin list — discover by creator (client‑side), then pre‑filter empties. */
   const fetchAdminCollections = useCallback(async () => {
     if (!adminFilter) return [];
     const list = await discoverCreated(adminFilter, NETWORK).catch(() => []);
@@ -289,9 +310,6 @@ export default function ExploreCollections() {
           const h = Number(c.typeHash ?? NaN);
           if (Number.isFinite(h) && !ALLOWED_TYPE_HASHES.has(h)) continue;
 
-          // Non‑empty: allow unknowns here (cards will hide empties)
-          if (!nonEmpty(c)) continue;
-
           const k = c.address;
           if (!k || seen.current.has(k)) continue;
           seen.current.add(k);
@@ -303,7 +321,8 @@ export default function ExploreCollections() {
       }
 
       if (next.length) {
-        setRows((prev) => [...prev, ...next]);
+        const filtered = await filterNonEmpty(next);
+        setRows((prev) => [...prev, ...filtered]);
         setOffset(localOffset);
       }
       if (reachedEnd || next.length === 0) setEnd(true);
@@ -341,9 +360,10 @@ export default function ExploreCollections() {
             uniq.push(c);
           }
 
-          setRows(uniq);
-          // Best‑effort total for admin view (cards will hide empties)
-          const adminTotal = uniq.filter(nonEmpty).length || uniq.length;
+          const filtered = await filterNonEmpty(uniq);
+          setRows(filtered);
+          // Best‑effort total for admin view
+          const adminTotal = filtered.length;
           setTotalCount(adminTotal);
           setEnd(true); // delivered all at once
           setInitialised(true);

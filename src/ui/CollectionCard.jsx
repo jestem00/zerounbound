@@ -138,13 +138,31 @@ export default function CollectionCard({
     return ()=>{cancelled=true;};
   },[contract.address,api]);
 
-  /* counts (seed from props; then refresh) */
-  useEffect(()=>{let c=false;
+  /* counts (seed from props; then refresh). Optimize: only fetch owners when live>0 */
+  useEffect(() => { let cancelled = false;
     if (Number.isFinite(initialTokensCount)) setLive(Number(initialTokensCount));
-    countOwners(contract.address,net).then(n=>{if(!c)setOwners(n);});
-    countTokens(contract.address,net).then(n=>{if(!c)setLive(n);});
-    return ()=>{c=true;};
-  },[contract.address,net,initialTokensCount]);
+    (async () => {
+      try {
+        const nLive = await countTokens(contract.address, net);
+        if (cancelled) return;
+        setLive(nLive);
+        if (nLive > 0) {
+          const nOwners = await countOwners(contract.address, net).catch(() => null);
+          if (!cancelled && Number.isFinite(nOwners)) setOwners(nOwners);
+          if (!cancelled && !Number.isFinite(nOwners)) setOwners(null);
+        } else {
+          if (!cancelled) setOwners(0);
+        }
+      } catch {
+        // Fallback: attempt owners anyway (best-effort)
+        try {
+          const nOwners = await countOwners(contract.address, net);
+          if (!cancelled) setOwners(nOwners);
+        } catch { /* ignore */ }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [contract.address, net, initialTokensCount]);
 
   const { nsfw,flashing,scripts } = detectHazards(meta);
   const hide  = (nsfw&&!allowNSFW)||(flashing&&!allowFlash);

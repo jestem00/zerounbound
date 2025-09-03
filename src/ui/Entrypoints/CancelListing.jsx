@@ -1,17 +1,17 @@
-﻿/*â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  Developed byÂ @jams2bluesÂ â€“Â ZeroContract Studio
+/*
+  Developed by @jams2blues - ZeroContract Studio
   File:    src/ui/Entrypoints/CancelListing.jsx
-  Rev :    r6    2025â€‘07â€‘31â€¯UTC
-  Summary: popâ€‘out UI for cancelling marketplace listings. Now
-           prioritises onâ€‘chain views over offâ€‘chain views to
+  Rev :    r6    2025-07-31 UTC
+  Summary: pop-out UI for cancelling marketplace listings. Now
+           prioritises on-chain views over off-chain views to
            detect new listings immediately, filters by seller
            address and amount>0 instead of relying on the
-           sometimesâ€‘stale `active` flag, and resets state when
+           sometimes-stale `active` flag, and resets state when
            wallet changes.  Presents listings in a paginated
            table with checkboxes and batches cancel calls in a
-           single operation.  Uses OperationOverlayâ€™s `status`
+           single operation.  Uses OperationOverlay's `status`
            prop for progress feedback.
-â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€*/
+*/
 
 import React, { useEffect, useState, useMemo } from 'react';
 import PropTypes                                from 'prop-types';
@@ -241,7 +241,7 @@ export default function CancelListing({ open, contract, tokenId, onClose = () =>
       return;
     }
     try {
-      setOv({ open: true, label: 'Cancelling listing(s)â€¦' });
+      setOv({ open: true, label: 'Cancelling listing(s)...' });
       const calls = [];
       for (const nStr of nonces) {
         const params = await buildCancelParams(toolkit, {
@@ -254,7 +254,7 @@ export default function CancelListing({ open, contract, tokenId, onClose = () =>
       const op = await toolkit.wallet.batch(calls).send();
       await op.confirmation();
       setOv({ open: false, label: '' });
-      snack('Listings cancelled âœ”');
+      snack('Listings cancelled');
       onClose();
     } catch (e) {
       console.error('Cancel failed:', e);

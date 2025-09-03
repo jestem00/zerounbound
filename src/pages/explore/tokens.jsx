@@ -1,7 +1,7 @@
 ﻿/*Developed by @jams2blues
   File: src/pages/explore/tokens.jsx
   Rev:  r2
-  Summary: Correct count UI; 10+ new cards per click; smoother scan‑ahead. */
+  Summary: Correct count UI; 10+ new cards per click; smoother scan-ahead. */
 
 import React, {
   useCallback,
@@ -16,6 +16,7 @@ import styledPkg from 'styled-components';
 import ExploreNav  from '../../ui/ExploreNav.jsx';
 import PixelButton from '../../ui/PixelButton.jsx';
 import TokenCard   from '../../ui/TokenCard.jsx';
+import LoadingSpinner from '../../ui/LoadingSpinner.jsx';
 
 import { useWalletContext }                 from '../../contexts/WalletContext.js';
 import { jFetch }                           from '../../core/net.js';
@@ -27,9 +28,9 @@ import listLiveTokenIds                     from '../../utils/listLiveTokenIds.j
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
-/*───────────────────────────────────────────────────────────*
+/*-----------------------------------------------------------*
  * Layout
- *───────────────────────────────────────────────────────────*/
+ *-----------------------------------------------------------*/
 const Wrap = styled.main`
   width: 100%;
   padding: 0 1rem 1.5rem;
@@ -58,9 +59,9 @@ const Subtle = styled.p`
   opacity:.85; margin:.4rem 0 0;
 `;
 
-/*───────────────────────────────────────────────────────────*
+/*-----------------------------------------------------------*
  * Helpers & Invariants
- *───────────────────────────────────────────────────────────*/
+ *-----------------------------------------------------------*/
 
 /** Normalize TZKT base to end with /v1 (I121/I139). */
 function useTzktV1Base(toolkit) {
@@ -80,7 +81,7 @@ function useTzktV1Base(toolkit) {
     : 'https://api.ghostnet.tzkt.io/v1';
 }
 
-/** tolerant data‑URI test; supports base64 & utf8 (e.g., SVG/HTML previews) */
+/** tolerant data-URI test; supports base64 & utf8 (e.g., SVG/HTML previews) */
 function isDataUri(str) {
   return typeof str === 'string'
     && /^data:(image|video|audio|text\/html|image\/svg\+xml)/i.test(str.trim());
@@ -106,7 +107,7 @@ function hasRenderablePreview(m = {}) {
   return false;
 }
 
-/** creators/authors → array (preserve case; do not lowercase). */
+/** creators/authors ? array (preserve case; do not lowercase). */
 function toArray(src) {
   if (Array.isArray(src)) return src;
   if (typeof src === 'string') {
@@ -121,7 +122,7 @@ function toArray(src) {
   return [];
 }
 
-/** Minted‑by test (creator | firstMinter | meta.creators/authors). */
+/** Minted-by test (creator | firstMinter | meta.creators/authors). */
 function mintedByUser(t = {}, addr = '') {
   if (!addr) return false;
   const A = String(addr).toLowerCase();
@@ -135,7 +136,7 @@ function mintedByUser(t = {}, addr = '') {
       || authors.some((x)  => x.toLowerCase() === A);
 }
 
-/** allowed ZeroContract type‑hash set (manifest‑gated). */
+/** allowed ZeroContract type-hash set (manifest-gated). */
 const ALLOWED_TYPE_HASHES = new Set(
   Object.keys(hashMatrix)
     .filter((k) => /^-?\d+$/.test(k))
@@ -145,7 +146,7 @@ const ALLOWED_TYPE_HASHES = new Set(
 /** decode + accept a token row into the UI shape, with hazard/preview guard. */
 function normalizeAndAcceptToken(row) {
   if (!row) return null;
-  if (Number(row.totalSupply) === 0) return null; // 0‑token exclusion (UI hygiene)
+  if (Number(row.totalSupply) === 0) return null; // 0-token exclusion (UI hygiene)
   let md = row.metadata || {};
   try { md = decodeHexFields(md); } catch { /* best effort */ }
   if (!hasRenderablePreview(md)) return null;
@@ -159,7 +160,7 @@ function normalizeAndAcceptToken(row) {
   };
 }
 
-/** simple integer formatter with thin‑space groupings */
+/** simple integer formatter with thin-space groupings */
 function fmtInt(n) {
   try {
     return Number(n).toLocaleString(undefined, { maximumFractionDigits: 0 });
@@ -177,9 +178,9 @@ function dedupeTokens(list = []) {
   return out;
 }
 
-/*───────────────────────────────────────────────────────────*
+/*-----------------------------------------------------------*
  * Page
- *───────────────────────────────────────────────────────────*/
+ *-----------------------------------------------------------*/
 export default function ExploreTokens() {
   const router = useRouter();
   const { toolkit } = useWalletContext() || {};
@@ -196,14 +197,14 @@ export default function ExploreTokens() {
     return typeof v === 'string' ? v.trim() : '';
   }, [router.query?.contract]);
 
-  /*──────── state ────────*/
+  /*-------- state --------*/
   // tokens (generic browse)
   const [tokens, setTokens]       = useState([]);
   const [offset, setOffset]       = useState(0);
   const [fetching, setFetching]   = useState(false);
   const [end, setEnd]             = useState(false);
 
-  // tokens (admin‑filtered browse)
+  // tokens (admin-filtered browse)
   const [adminTok, setAdminTok]   = useState([]);
   const [adminVisible, setAdminVisible] = useState(24);
 
@@ -214,6 +215,9 @@ export default function ExploreTokens() {
   const seenTok = useRef(new Set());
   // track if warm-start seeded items so we can resume without toggling loading
   const warmSeeded = useRef(false);
+  const queuedLoadMore = useRef(false);
+  // per-contract round-robin state for fast-path loading
+  const perContract = useRef({ list: [], offsets: new Map(), idx: 0, ready: false });
 
   // reset on param change
   useEffect(() => {
@@ -222,9 +226,10 @@ export default function ExploreTokens() {
     seenTok.current.clear();
     setError('');
     warmSeeded.current = false;
+    perContract.current = { list: [], offsets: new Map(), idx: 0, ready: false };
   }, [adminFilter, contractFilter, tzktV1]);
 
-  /*──────── queries ────────*/
+  /*-------- queries --------*/
 
   /**
    * Batch token loader (generic browse).
@@ -233,34 +238,74 @@ export default function ExploreTokens() {
    * nested filter (robust across forks).
    */
   const fetchBatchTokens = useCallback(async (startOffset = 0, step = 48) => {
+    // Try local aggregator (serverless) first for dense, burn-filtered results
+    if (!adminFilter) {
+      const aggUrl = `/api/explore/feed?offset=${encodeURIComponent(String(startOffset))}&limit=${encodeURIComponent(String(step))}`
+        + (contractFilter ? `&contract=${encodeURIComponent(contractFilter)}` : '');
+      const aggRes = await jFetch(aggUrl).catch(() => null);
+      if (aggRes && Array.isArray(aggRes.items)) {
+        const cursor = Number(aggRes.cursor || (startOffset + step));
+        const rawCount = Math.max(0, cursor - startOffset) || step;
+        return { rows: aggRes.items, rawCount, usedAgg: true, end: !!aggRes.end };
+      }
+    }
+
     const qs = new URLSearchParams();
     qs.set('standard', 'fa2');
     qs.set('sort.desc', 'firstTime');       // latest mints first
     qs.set('offset', String(startOffset));
-    qs.set('limit',  String(step));
+    qs.set('limit', '48');
     // Restrict to ZeroContract family on the server when supported
     qs.set('contract.typeHash.in', [...ALLOWED_TYPE_HASHES].join(','));
     qs.set('totalSupply.gt', '0');
     qs.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply,contract.typeHash');
     if (contractFilter) qs.set('contract', contractFilter);
 
-    const urlStrict = `${tzktV1}/tokens?${qs.toString()}`;
-    let rows = await jFetch(urlStrict).catch(() => null);
-    if (!Array.isArray(rows)) {
-      // Fallback: drop nested filters for maximum compatibility
+    // Prefer dense contract.in path first when not explicitly filtering by a single contract
+    const tryContractInFirst = !contractFilter;
+    let rows = null;
+    if (tryContractInFirst) {
       const qb = new URLSearchParams();
       qb.set('standard', 'fa2');
       qb.set('sort.desc', 'firstTime');
       qb.set('offset', String(startOffset));
-      qb.set('limit',  String(step));
+      qb.set('limit', '48');
       qb.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply,contract.typeHash');
-      if (contractFilter) qb.set('contract', contractFilter);
-      rows = await jFetch(`${tzktV1}/tokens?${qb.toString()}`).catch(() => []);
-    }
-    return Array.isArray(rows) ? rows : [];
-  }, [tzktV1, contractFilter]);
 
-  /** admin‑filtered token discovery (creator/firstMinter/meta authors/creators). */
+      // Reuse discovered contracts if available; otherwise fetch a fresh list
+      let addrs = perContract.current?.list || [];
+      if (!addrs || addrs.length === 0) {
+        try {
+          const cq = new URLSearchParams();
+          cq.set('typeHash.in', [...ALLOWED_TYPE_HASHES].join(','));
+          cq.set('select', 'address');
+          cq.set('sort.desc', 'lastActivityTime');
+          cq.set('limit', '400');
+          const contracts = await jFetch(`${tzktV1}/contracts?${cq.toString()}`, 2, { ttl: 30_000, priority: 'low' }).catch(() => []);
+          addrs = (contracts || []).map((r) => r.address).filter(Boolean);
+          if (addrs.length) {
+            perContract.current.list = addrs.slice(0, 120);
+            perContract.current.offsets = new Map(perContract.current.list.map((a) => [a, 0]));
+            perContract.current.ready = true;
+          }
+        } catch { /* best effort */ }
+      }
+      if (Array.isArray(addrs) && addrs.length) qb.set('contract.in', addrs.join(','));
+      rows = await jFetch(`${tzktV1}/tokens?${qb.toString()}`).catch(() => []);
+      if (Array.isArray(rows)) {
+        return { rows, rawCount: rows.length, usedAgg: false, end: rows.length < step };
+      }
+    }
+
+    // Strict path (nested typeHash filter) as a fallback if needed
+    if (!Array.isArray(rows) || rows.length === 0) {
+      const urlStrict = `${tzktV1}/tokens?${qs.toString()}`;
+      rows = await jFetch(urlStrict).catch(() => []);
+    }
+    return { rows: Array.isArray(rows) ? rows : [], rawCount: Array.isArray(rows) ? rows.length : 0, usedAgg: false, end: (Array.isArray(rows) ? rows.length : 0) < step };
+  }, [tzktV1, contractFilter, adminFilter]);
+
+  /** admin-filtered token discovery (creator/firstMinter/meta authors/creators). */
   const fetchAdminTokens = useCallback(async () => {
     if (!adminFilter) return [];
 
@@ -289,7 +334,7 @@ export default function ExploreTokens() {
       // narrow to one collection if requested
       if (contractFilter && t.contract !== contractFilter) continue;
 
-      // minted‑by (creator | firstMinter | metadata)
+      // minted-by (creator | firstMinter | metadata)
       if (!mintedByUser({ ...t, creator: r.creator, firstMinter: r.firstMinter }, adminFilter)) {
         continue;
       }
@@ -344,11 +389,11 @@ export default function ExploreTokens() {
     return (rows || []).map((r) => r.address).filter(Boolean);
   }, [tzktV1]);
 
-  const fetchTokensByContract = useCallback(async (kt1, off = 0, step = 12) => {
+  const fetchTokensByContract = useCallback(async (kt1, off = 0, step = 24) => {
     const qs = new URLSearchParams();
     qs.set('contract', kt1);
     qs.set('sort.desc', 'tokenId');
-    qs.set('limit', String(step));
+    qs.set('limit', '48');
     qs.set('offset', String(off));
     qs.set('totalSupply.gt', '0');
     qs.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply');
@@ -359,7 +404,7 @@ export default function ExploreTokens() {
   /**
    * Scan ahead until we accumulate at least `minAccept` newly accepted tokens
    * (or we truly hit the end). This prevents the “only 1–2 new cards per click”
-   * problem.  It guarantees ≥10 newly added cards per click in generic mode.
+   * problem.  It guarantees =10 newly added cards per click in generic mode.
    */
   const loadPage = useCallback(async (initial = false) => {
     if (fetching || end) return;
@@ -367,10 +412,11 @@ export default function ExploreTokens() {
     if (initial) setLoading(true);
 
     const PAGE            = 48;             // server page size
-    const MIN_YIELD_INIT  = 24;             // fast first impression
-    const MIN_YIELD_CLICK = 10;             // guarantee ≥10 new cards per click
-    const SOFT_SCAN_ROWS  = initial ? PAGE * 24 : PAGE * 64; // soft guardrail (rate-limit friendly)
-    const WINDOW          = initial ? 3 : 2; // small concurrency window
+    const MIN_YIELD_INIT  = 12;             // faster first paint (yield early)
+    const MIN_YIELD_CLICK = 10;             // guarantee =10 new cards per click
+    const SOFT_SCAN_ROWS  = initial ? PAGE * 16 : PAGE * 48; // keep rate-limit friendly
+    const WINDOW          = 1; // single request per loop; aggregator scans ahead // small concurrency window
+    const TIME_BUDGET_MS  = initial ? 8_000 : 6_000; // break early to avoid UI stall
 
     const minAccept = initial ? MIN_YIELD_INIT : MIN_YIELD_CLICK;
 
@@ -378,40 +424,127 @@ export default function ExploreTokens() {
     let reachedEnd   = false;
     let accepted     = 0;
     let scannedRows  = 0;
+    const tStart     = Date.now();
 
     const next = [];
 
-    // windowed concurrency: fetch 2-3 pages per loop
-    while (accepted < minAccept && !reachedEnd && scannedRows < SOFT_SCAN_ROWS) {
-      const offs = [];
-      for (let i = 0; i < WINDOW; i += 1) offs.push(localOffset + i * PAGE);
-      const batches = await Promise.all(offs.map((off) => fetchBatchTokens(off, PAGE)));
-      let windowRows = 0;
-      for (const rows of batches) {
-        const got = Array.isArray(rows) ? rows.length : 0;
-        windowRows += got;
-        scannedRows += got;
-        if (got < PAGE) reachedEnd = true;
+    const USE_RR = false; // disable round-robin now that aggregator is dense and complete
+    // Branch: prefer per-contract round-robin fast-path when not filtered
+    if (USE_RR && !adminFilter && !contractFilter) {
+      // Ensure we have a recent list of active ZeroContract collections
+      if (!perContract.current.ready || perContract.current.list.length === 0) {
+        try {
+          const addrs = await fetchAllowedContracts();
+          perContract.current.list = (addrs || []).slice(0, 120); // cap to avoid huge rounds
+          perContract.current.offsets = new Map(perContract.current.list.map((a) => [a, 0]));
+          perContract.current.idx = 0;
+          perContract.current.ready = true;
+        } catch { /* fall back below */ }
+      }
 
-        for (const r of (rows || [])) {
-          const typeHash = Number(r.contract?.typeHash ?? NaN);
-          if (Number.isFinite(typeHash) && !ALLOWED_TYPE_HASHES.has(typeHash)) continue;
-          const t = normalizeAndAcceptToken(r);
-          if (!t) continue;
-          const key = `${t.contract}:${t.tokenId}`;
-          if (!seenTok.current.has(key)) {
-            seenTok.current.add(key);
-            next.push(t);
-            accepted += 1;
-            if (accepted >= minAccept) break;
+      const PC_WINDOW = initial ? 4 : 3; // modest concurrency, bucket-friendly
+
+      let safety = perContract.current.list.length * 2 + 8; // guard against infinite loops
+      while (accepted < minAccept && safety-- > 0) {
+        const tasks = [];
+        for (let i = 0; i < PC_WINDOW; i += 1) {
+          if (!perContract.current.list.length) break;
+          const idx = perContract.current.idx % perContract.current.list.length;
+          const kt = perContract.current.list[idx];
+          perContract.current.idx += 1;
+          const off = perContract.current.offsets.get(kt) || 0;
+          tasks.push(
+            fetchTokensByContract(kt, off, 12).then((rows) => ({ kt, rows: Array.isArray(rows) ? rows : [] }))
+          );
+        }
+        const results = await Promise.all(tasks);
+        let roundRows = 0;
+        for (const { kt, rows } of results) {
+          const got = rows.length;
+          roundRows += got;
+          scannedRows += got;
+          if (got) perContract.current.offsets.set(kt, (perContract.current.offsets.get(kt) || 0) + got);
+          for (const r of rows) {
+            const t = normalizeAndAcceptToken(r);
+            if (!t) continue;
+            const key = `${t.contract}:${t.tokenId}`;
+            if (!seenTok.current.has(key)) {
+              seenTok.current.add(key);
+              next.push(t);
+              accepted += 1;
+              if (accepted >= minAccept) break;
+            }
+          }
+          if (accepted >= minAccept) break;
+        }
+        if (roundRows === 0) break; // nothing more to fetch
+        if (initial && Date.now() - tStart > TIME_BUDGET_MS && accepted >= 10) break;
+      }
+    }
+
+    // Fallback to global scan if filtered or if per-contract path yielded nothing
+    if (accepted < minAccept) {
+      // windowed concurrency: fetch 2-3 pages per loop from global feed
+      while (accepted < minAccept && !reachedEnd && scannedRows < SOFT_SCAN_ROWS) {
+        const offs = [];
+        for (let i = 0; i < WINDOW; i += 1) offs.push(localOffset + i * PAGE);
+        const batches = await Promise.all(offs.map((off) => fetchBatchTokens(off, minAccept)));
+        let windowRows = 0;
+        let windowRaw  = 0;
+        for (const res of batches) {
+          const rows = Array.isArray(res?.rows) ? res.rows : (Array.isArray(res) ? res : []);
+          const got = rows.length;
+          const raw = Number(res?.rawCount ?? got) || got;
+          const isAgg = !!res?.usedAgg;
+          const endFlag = !!res?.end;
+          windowRows += got;
+          windowRaw  += raw;
+          scannedRows += raw;
+          reachedEnd = reachedEnd || (isAgg ? endFlag : (got < PAGE));
+
+          for (const r of rows) {
+            const typeHash = Number(r.contract?.typeHash ?? NaN);
+            if (Number.isFinite(typeHash) && !ALLOWED_TYPE_HASHES.has(typeHash)) continue;
+            const t = normalizeAndAcceptToken(r);
+            if (!t) continue;
+            const key = `${t.contract}:${t.tokenId}`;
+            if (!seenTok.current.has(key)) {
+              seenTok.current.add(key);
+              next.push(t);
+              accepted += 1;
+              if (accepted >= minAccept) break;
+            }
           }
         }
+        localOffset += windowRaw;
+        if (windowRaw === 0) { reachedEnd = true; break; }
+        if (initial && Date.now() - tStart > TIME_BUDGET_MS && accepted >= 10) break;
       }
-      localOffset += windowRows;
-      if (windowRows === 0) { reachedEnd = true; break; }
     }
 
     if (next.length) {
+      // Filter out fully burned tokens using live id sets per contract
+      try {
+        const net = tzktV1.includes('ghostnet') ? 'ghostnet' : 'mainnet';
+        const groups = new Map(); // kt -> tokens[]
+        for (const t of next) {
+          const kt = t.contract;
+          if (!kt) continue;
+          if (!groups.has(kt)) groups.set(kt, []);
+          groups.get(kt).push(t);
+        }
+        const keepAll = [];
+        for (const [kt, arr] of groups.entries()) {
+          let live = [];
+          try { live = await listLiveTokenIds(kt, net, false); } catch { live = []; }
+          const liveSet = new Set(live.map(Number));
+          for (const t of arr) {
+            if (liveSet.size === 0 || liveSet.has(Number(t.tokenId))) keepAll.push(t);
+          }
+        }
+        next.length = 0; Array.prototype.push.apply(next, keepAll);
+      } catch { /* best effort */ }
+
       setTokens((prev) => {
         // Guard against any duplicates by key
         const have = new Set(prev.map((t) => `${t.contract}:${t.tokenId}`));
@@ -431,9 +564,9 @@ export default function ExploreTokens() {
 
     setFetching(false);
     if (initial) setLoading(false);
-  }, [fetching, end, offset, fetchBatchTokens]);
+  }, [fetching, end, offset, fetchBatchTokens, adminFilter, contractFilter, fetchAllowedContracts, fetchTokensByContract]);
 
-  /*──────── effects ────────*/
+  /*-------- effects --------*/
 
   // No warm-start cache on explore/tokens
 
@@ -461,7 +594,7 @@ export default function ExploreTokens() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminFilter, contractFilter, tzktV1]);
 
-  // small auto‑prefetch so the grid fills quickly on first load
+  // small auto-prefetch so the grid fills quickly on first load
   useEffect(() => {
     if (adminFilter) return;
     if (loading || fetching || end) return;
@@ -470,7 +603,15 @@ export default function ExploreTokens() {
     }
   }, [adminFilter, loading, fetching, end, tokens.length, offset, loadPage]);
 
-  /*──────── render ────────*/
+  // If user clicked while a fetch was in-progress, queue another fetch.
+  useEffect(() => {
+    if (!fetching && queuedLoadMore.current && !end && !adminFilter) {
+      queuedLoadMore.current = false;
+      loadPage(false);
+    }
+  }, [fetching, end, adminFilter, loadPage]);
+
+  /*-------- render --------*/
 
   const showTokensAdmin = !!adminFilter;
 
@@ -536,21 +677,24 @@ export default function ExploreTokens() {
       {loading && <Subtle>Loading…</Subtle>}
       {!loading && cards}
 
-      {/* Pagination controls — generic mode ensures ≥10 new cards per click */}
+      {/* Pagination controls — generic mode ensures =10 new cards per click */}
       {!showTokensAdmin && !end && (
         <Center>
           <PixelButton
             type="button"
-            onClick={() => loadPage(false)}
-            disabled={fetching}
+            onClick={() => { if (fetching) { queuedLoadMore.current = true; } else { loadPage(false); } }}
+            disabled={fetching && tokens.length === 0}
             size="sm"
             noActiveFx
-          >            Load More
+          >
+            {fetching
+              ? (<><LoadingSpinner size={16} style={{ marginRight: 6, verticalAlign: 'text-bottom' }} /> Loading…</>)
+              : 'Load More'}
           </PixelButton>
         </Center>
       )}
 
-      {/* Admin‑view pagination */}
+      {/* Admin-view pagination */}
       {showTokensAdmin && adminTok.length > adminVisible && (
         <Center>
           <PixelButton
@@ -574,10 +718,14 @@ export default function ExploreTokens() {
 }
 
 /* What changed & why:
-   • Removed misleading global “Total …” (FA2‑wide) — it counted every FA2 on TzKT.
-   • Guaranteed ≥10 newly accepted cards per click via scan‑until‑yield loop.
-   • Kept initial scan snappy (≥24 accepted) for a full first impression.
-   • Preserved perfect admin‑filter behaviour; left title “Tokens by … (N)”.
-   • Lint‑clean: trimmed unused imports/vars; no dead code. */
+   • Removed misleading global “Total …” (FA2-wide) — it counted every FA2 on TzKT.
+   • Guaranteed =10 newly accepted cards per click via scan-until-yield loop.
+   • Kept initial scan snappy (=24 accepted) for a full first impression.
+   • Preserved perfect admin-filter behaviour; left title “Tokens by … (N)”.
+   • Lint-clean: trimmed unused imports/vars; no dead code. */
+
+
+
+
 
 

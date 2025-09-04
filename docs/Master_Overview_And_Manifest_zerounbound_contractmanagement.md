@@ -1,92 +1,92 @@
-﻿/*â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  DevelopedÂ byÂ @jams2blues â€“Â ZeroContractÂ Studio
+/*─────────────────────────────────────────────────────────────────
+  Developed by @jams2blues – ZeroContract Studio
   File:    docs/Master_Overview_And_Manifest_zerounbound_contractmanagement.md
-  Rev :    r1187    2025â€‘09â€‘03Â UTC
-  Summary: canonical slicer, IDBâ€‘only slice cache, dataâ€‘URI tests, RPCâ€‘backed
-           extrauri view, consolidated Share appendix, and liveâ€‘supply semantics
-           across collections/tokens (nonâ€‘empty = any token with totalSupply>0).
-â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€*/
+  Rev :    r1187    2025‑09‑03 UTC
+  Summary: canonical slicer, IDB‑only slice cache, data‑URI tests, RPC‑backed
+           extrauri view, consolidated Share appendix, and live‑supply semantics
+           across collections/tokens (non‑empty = any token with totalSupply>0).
+──────────────────────────────────────────────────────────────────*/
 
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-ZEROÂ UNBOUNDÂ v4 â€” MASTERÂ OVERVIEW & SOURCEâ€‘FILEÂ MANIFEST
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+════════════════════════════════════════════════════════════════
+ZERO UNBOUND v4 — MASTER OVERVIEW & SOURCE‑FILE MANIFEST
+════════════════════════════════════════════════════════════════
 
-â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-WHATÂ ISÂ THISÂ FILE?Â (unabridged)
-â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-This document is the singleâ€‘sourceâ€‘ofâ€‘truth for the ZeroÂ Unbound
+───────────────────────────────────────────────────────────────
+WHAT IS THIS FILE? (unabridged)
+───────────────────────────────────────────────────────────────
+This document is the single‑source‑of‑truth for the Zero Unbound
 platform. A fresh git clone plus this manifest and the bundle
 outputs yield a reproducible build on any host. It outlines the
-architecture, invariants, sourceâ€‘tree map and CI pipeline. History
-is appendâ€‘only; revisions are never overwritten.
+architecture, invariants, source‑tree map and CI pipeline. History
+is append‑only; revisions are never overwritten.
 
-The project uses a unified singleâ€‘stage origination pipeline
+The project uses a unified single‑stage origination pipeline
 even when a factory contract is configured. When a factory
 address exists for the target network, the UI assembles the full
-metadata JSON (keys ordered per TZIPâ€‘16) and encodes it as a
+metadata JSON (keys ordered per TZIP‑16) and encodes it as a
 bytes parameter. This bytes payload contains only the metadata
-and offâ€‘chain views; storage pairs are not included. The
+and off‑chain views; storage pairs are not included. The
 factory constructs the storage internally and originates a new **v4e**
 contract via CREATE_CONTRACT. On networks without a factory,
 the UI falls back to toolkit.wallet.originate() with the full
-metadata bigâ€‘map. Marketplace integration includes listings,
+metadata big‑map. Marketplace integration includes listings,
 offers and tokens pages under /explore and /my.
 
-**New in this revision** â€” Canonical slicing & IDB checkpoints:
-â€¢ Introduced `src/core/slicing.js` used by Mint/Append/Repair and the fee
+**New in this revision** — Canonical slicing & IDB checkpoints:
+• Introduced `src/core/slicing.js` used by Mint/Append/Repair and the fee
   estimator, ensuring deterministic head/tail splits and matching signature
   counts.
-â€¢ Slice checkpoints now persist in IndexedDB only with automatic migration;
+• Slice checkpoints now persist in IndexedDB only with automatic migration;
   legacy localStorage paths were removed.
-â€¢ Added Jest coverage for resume logic and SVG dataâ€‘URI validation.
+• Added Jest coverage for resume logic and SVG data‑URI validation.
 
 See the TZIP invariants companion for standard compliance rules.
 
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-TABLEÂ OFÂ CONTENTS
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-0Â Â·Â GlobalÂ RulesÂ &Â MetaÂ Docs  
-1Â Â·Â Highâ€‘LevelÂ Architecture  
-1Â·5Â Criticalâ€‘EntryÂ Index  
-2Â Â·Â InvariantsÂ (I00Â â€“Â I156)  
-3Â Â·Â Reserved  
-4Â Â·Â Sourceâ€‘TreeÂ MapÂ (perâ€‘file descriptionÂ +Â imports/exports)  
-5Â Â·Â BundleÂ Index  
-6Â Â·Â Quickâ€‘StartÂ &Â CIÂ Pipeline  
-7Â Â·Â Appendices  
-8Â Â·Â ChangeÂ Log
+════════════════════════════════════════════════════════════════
+TABLE OF CONTENTS
+════════════════════════════════════════════════════════════════
+0 · Global Rules & Meta Docs  
+1 · High‑Level Architecture  
+1·5 Critical‑Entry Index  
+2 · Invariants (I00 – I156)  
+3 · Reserved  
+4 · Source‑Tree Map (per‑file description + imports/exports)  
+5 · Bundle Index  
+6 · Quick‑Start & CI Pipeline  
+7 · Appendices  
+8 · Change Log
 
-â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-0 Â· GLOBALÂ RULES & METAÂ DOCS
-â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-â€¢ History is appendâ€‘only; patch instead of overwrite.  
-â€¢ Binary artefacts stay out of bundles.  
-â€¢ docs/ mirrors this masterâ€”update both when changes occur.  
-â€¢ The TZIP compliance invariants live in
+───────────────────────────────────────────────────────────────
+0 · GLOBAL RULES & META DOCS
+───────────────────────────────────────────────────────────────
+• History is append‑only; patch instead of overwrite.  
+• Binary artefacts stay out of bundles.  
+• docs/ mirrors this master—update both when changes occur.  
+• The TZIP compliance invariants live in
   `docs/TZIP_Compliance_Invariants_ZeroContract_V4.md` and extend
-  this manifestâ€™s rules.
+  this manifest’s rules.
 
-â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-1 Â· HIGHâ€‘LEVEL ARCHITECTURE & DATAâ€‘FLOW
-â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-Browser (ReactÂ 18Â +Â styledâ€‘componentsÂ 6) â†’ ZeroFrontendÂ SPA
-(Next.jsÂ 15.x) â†’ ZeroEngineÂ API (NodeÂ 22Â +Â Taquito) â†’ ZeroContracts
-**v4e** + ZeroSum Marketplace (TezosÂ L1). 100Â % onâ€‘chain media via
+───────────────────────────────────────────────────────────────
+1 · HIGH‑LEVEL ARCHITECTURE & DATA‑FLOW
+───────────────────────────────────────────────────────────────
+Browser (React 18 + styled‑components 6) → ZeroFrontend SPA
+(Next.js 15.x) → ZeroEngine API (Node 22 + Taquito) → ZeroContracts
+**v4e** + ZeroSum Marketplace (Tezos L1). 100 % on‑chain media via
 data URIs. All remote HTTP traffic uses core/net.js with
-multiâ€‘RPC fallback and exponential backâ€‘off.
+multi‑RPC fallback and exponential back‑off.
 
-Singleâ€‘Stage Origination â€” The UI collects user metadata via
+Single‑Stage Origination — The UI collects user metadata via
 DeployCollectionForm, constructs a deterministic metadata object
 with ordered keys (name, symbol, description, version, license,
 authors, homepage, authoraddress, creators, type, interfaces,
-imageUri, views), encodes it to bytes and calls the factoryâ€™s
+imageUri, views), encodes it to bytes and calls the factory’s
 deploy entrypoint. The factory ignores the bytes payload when
 constructing storage but stores the metadata on chain via
-tezosâ€‘storage:content. On networks without a factory, the
-frontend still builds a metadata bigâ€‘map and uses
+tezos‑storage:content. On networks without a factory, the
+frontend still builds a metadata big‑map and uses
 wallet.originate().
 
-Marketplace Integration â€” The explore section includes
+Marketplace Integration — The explore section includes
 /explore/listings (grid of tokens with active marketplace listings)
 and the my section includes /my/offers and /my/tokens
 (offers made/received and owned/minted tokens). Listing and
@@ -95,181 +95,181 @@ offer actions use `src/core/marketplace.js` helpers and dialogs
 CancelListing, CancelOffer) with progress handled by
 OperationOverlay.
 
-Discovery, Caching & Parity â€” A unified discovery utility collects
+Discovery, Caching & Parity — A unified discovery utility collects
 candidate contract addresses from TzKT by initiator, creator, manager,
-mintedâ€‘by and ownedâ€‘by. Results are validated against an allowâ€‘list of
+minted‑by and owned‑by. Results are validated against an allow‑list of
 ZeroContract type hashes and then enriched with lightweight contract rows.
-All heavy reads are cached in IndexedDB with short TTLs. The Manageâ€‘page
-carousels and /my/collections now consume the same dataâ€‘plane and are
+All heavy reads are cached in IndexedDB with short TTLs. The Manage‑page
+carousels and /my/collections now consume the same data‑plane and are
 expected to show the same set of contracts for a wallet (ordering can
 differ by page purpose).
 
-â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-1Â·5 Â· CRITICALâ€‘ENTRY INDEX ðŸ—ï¸
-â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-â€¢ `src/pages/deploy.js` â€” singleâ€‘stage origination; factory bytes param;
+───────────────────────────────────────────────────────────────
+1·5 · CRITICAL‑ENTRY INDEX 🗝️
+───────────────────────────────────────────────────────────────
+• `src/pages/deploy.js` — single‑stage origination; factory bytes param;
   ordered metadata; factory fallback to originate on UI when needed.
-â€¢ `src/pages/explore/[[...filter]].jsx` â€” dynamic explore grid; admin/contract
+• `src/pages/explore/[[...filter]].jsx` — dynamic explore grid; admin/contract
   filters; shared discovery + idbCache for consistency.
-â€¢ `src/pages/explore/listings/index.jsx` â€” lists tokens with active
+• `src/pages/explore/listings/index.jsx` — lists tokens with active
   ZeroSum marketplace listings; responsive grid; uses
   TokenListingCard and marketplace helpers; **tzktBase already `/v1`**; do not
   append again.
-â€¢ **`src/pages/explore/tokens.jsx` â€” ZeroContract tokens grid** with:
-  **scanâ€‘ahead minâ€‘yield pagination** (avoids dead clicks), **accurate totals**
-  via fallback + endâ€‘ofâ€‘paging reconciliation, **admin filter** parity,
-  **preview & nonâ€‘zeroâ€‘supply guard**, and **`/v1` base normalization**.
-â€¢ `src/pages/explore/secondary.jsx` â€” alternate explore route auxiliary
-  page (networkâ€‘aware).
-â€¢ `src/pages/my/collections.jsx` â€” **parity with ContractCarousels**; uses
-  shared discovery + idbCache; includes v1â†’v4e; tolerates empty collections.
-â€¢ `src/pages/my/offers.jsx` â€” lists marketplace offers (accept/made),
-  uses TZIPâ€‘16 views and marketplace helpers.
-â€¢ `src/pages/my/tokens.jsx` â€” unified minted/owned discovery and
+• **`src/pages/explore/tokens.jsx` — ZeroContract tokens grid** with:
+  **scan‑ahead min‑yield pagination** (avoids dead clicks), **accurate totals**
+  via fallback + end‑of‑paging reconciliation, **admin filter** parity,
+  **preview & non‑zero‑supply guard**, and **`/v1` base normalization**.
+• `src/pages/explore/secondary.jsx` — alternate explore route auxiliary
+  page (network‑aware).
+• `src/pages/my/collections.jsx` — **parity with ContractCarousels**; uses
+  shared discovery + idbCache; includes v1→v4e; tolerates empty collections.
+• `src/pages/my/offers.jsx` — lists marketplace offers (accept/made),
+  uses TZIP‑16 views and marketplace helpers.
+• `src/pages/my/tokens.jsx` — unified minted/owned discovery and
   filtering (live balances, valid typeHash); decodes hex metadata;
-  skips burnâ€‘only tokens.
-â€¢ `src/ui/ContractCarousels.jsx` â€” creator/admin carousels on Manage page;
-  backed by shared discovery + idbCache; clickâ€‘toâ€‘load contract.
-â€¢ `src/ui/TokenListingCard.jsx` â€” listing card used on /explore/listings
+  skips burn‑only tokens.
+• `src/ui/ContractCarousels.jsx` — creator/admin carousels on Manage page;
+  backed by shared discovery + idbCache; click‑to‑load contract.
+• `src/ui/TokenListingCard.jsx` — listing card used on /explore/listings
   grid (imports MarketplaceBuyBar/MarketplaceBar).
-â€¢ `src/ui/MarketplaceBuyBar.jsx` â€” compact buyâ€‘action bar variant for
+• `src/ui/MarketplaceBuyBar.jsx` — compact buy‑action bar variant for
   listings cards.
-â€¢ `src/ui/BuyDialog.jsx` â€” buy modal with TzKT preflight and tagged stale
+• `src/ui/BuyDialog.jsx` — buy modal with TzKT preflight and tagged stale
   listings errors.
-â€¢ `src/core/marketplace.js` â€” **ZeroSum helpers + staleâ€‘listing guard**:
-  `getMarketContract`, `fetchLowestListing`, onâ€‘chain/offâ€‘chain view readers,
+• `src/core/marketplace.js` — **ZeroSum helpers + stale‑listing guard**:
+  `getMarketContract`, `fetchLowestListing`, on‑chain/off‑chain view readers,
   **`getFa2BalanceViaTzkt()`**, **`preflightBuy()`** (seller FA2 balance via
-  TzKT `/v1/tokens/balances`), and paramâ€‘builders for `buy/list/offer/cancel/
-  accept` with methodâ€‘name/positional fallbacks.
+  TzKT `/v1/tokens/balances`), and param‑builders for `buy/list/offer/cancel/
+  accept` with method‑name/positional fallbacks.
 
-â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-2 Â· INVARIANTS ðŸ”’ (scope tags: [F]rontend | [C]ontract | [E]ngine | [I]nfra)
-â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-I00 [F, C, E, I] All UI elementsâ€”styling, fonts, buttons, overlays, popups,
-containers, and moreâ€”must follow our 8â€‘bit retro arcade theme, including
+───────────────────────────────────────────────────────────────
+2 · INVARIANTS 🔒 (scope tags: [F]rontend | [C]ontract | [E]ngine | [I]nfra)
+───────────────────────────────────────────────────────────────
+I00 [F, C, E, I] All UI elements—styling, fonts, buttons, overlays, popups,
+containers, and more—must follow our 8‑bit retro arcade theme, including
 pixel fonts, sprites, palettes, layouts, and theme context. Every component and
-page should be resolutionâ€‘ and aspectâ€‘ratioâ€‘agnostic: interfaces must adapt
+page should be resolution‑ and aspect‑ratio‑agnostic: interfaces must adapt
 fluidly so text, images, and containers render and resize correctly on any
 device or viewport.
-I01 [C] One canonical onâ€‘chain record per contract instance.
-I02 [E] Engine â†” Chain parity â‰¥ 2 blocks.
-I03 [F,C] Roleâ€‘based ACL (admin/owner/collaborator).
+I01 [C] One canonical on‑chain record per contract instance.
+I02 [E] Engine ↔ Chain parity ≥ 2 blocks.
+I03 [F,C] Role‑based ACL (admin/owner/collaborator).
 I04 [C] Contract terms immutable once locked.
 I05 [E] All mutating ops emit audit row + chain event.
-I06 [F] Mobileâ€‘first UI; no sideways scroll â‰¤ 320 px.
-I07 [F] LCP â‰¤ 2 s (P95 midâ€‘range Android).
-I08 [F] WCAGÂ 2.2Â AA; theme & consent persist **per wallet via IndexedDB**.
-I09 [F] PWA offline shell (WorkboxÂ 7, â‰¤Â 5Â MiB cache).
+I06 [F] Mobile‑first UI; no sideways scroll ≤ 320 px.
+I07 [F] LCP ≤ 2 s (P95 mid‑range Android).
+I08 [F] WCAG 2.2 AA; theme & consent persist **per wallet via IndexedDB**.
+I09 [F] PWA offline shell (Workbox 7, ≤ 5 MiB cache).
 I10 [E] deployTarget.js is single network divergence point.
-I11 [I] Caseâ€‘sensitive path guard in CI.
-I12 [C] hashMatrix.json = SHAâ€‘1 â†’ version (appendâ€‘only).
-I13 [C] entrypointRegistry.json appendâ€‘only.
-I14 [I] bundle.config.json globs mirror Manifest Â§5.
+I11 [I] Case‑sensitive path guard in CI.
+I12 [C] hashMatrix.json = SHA‑1 → version (append‑only).
+I13 [C] entrypointRegistry.json append‑only.
+I14 [I] bundle.config.json globs mirror Manifest §5.
 I15 [E] Engine pods stateless.
-I16 [E] Jest coverage â‰¥Â 90Â %.
-I17 [E] (retired) legacy 3Â Mâ€‘block backâ€‘scan.
-I18 [E] RPC failâ€‘over after 5 errors.
-I19 [F] SSRâ€‘safe: hooks never touch window during render.
+I16 [E] Jest coverage ≥ 90 %.
+I17 [E] (retired) legacy 3 M‑block back‑scan.
+I18 [E] RPC fail‑over after 5 errors.
+I19 [F] SSR‑safe: hooks never touch window during render.
 I20 [F] Exactly one document.js.
-I21 [I] Corepack pins YarnÂ 4.9.1.
-I22 [F] ESLint bans emâ€‘dash.
-I23 [F] Styledâ€‘components factory import invariant.
+I21 [I] Corepack pins Yarn 4.9.1.
+I22 [F] ESLint bans em‑dash.
+I23 [F] Styled‑components factory import invariant.
 I24 [F] Media =data URIs; no IPFS.
 I25 [F] SVG canvas square & centred.
-I26 [F] JS chunk â‰¤Â 32â€‰768â€‰B; total â‰¤Â 2â€‰MiB.
+I26 [F] JS chunk ≤ 32 768 B; total ≤ 2 MiB.
 I27 [I] Monotonic Rev id ledger.
-I28 [I] No pathâ€‘case duplicates.
-I29 [I] CI tests NodeÂ 20Â LTS +Â 22.
+I28 [I] No path‑case duplicates.
+I29 [I] CI tests Node 20 LTS + 22.
 I30 [F] useWallet alias until v5.
-I31 [E] Offâ€‘chain templates carry MDâ€‘5 checksum.
+I31 [E] Off‑chain templates carry MD‑5 checksum.
 I32 [I] No .env secrets in code.
-I33 [C] Registries immutable (appendâ€‘only).
+I33 [C] Registries immutable (append‑only).
 I34 [F] All colours via CSS vars.
 I35 [F] Transient SC props filtered.
-I36 [F] ESLint noâ€‘multiâ€‘spaces passes.
-I37 [C] TZIPâ€‘04/12/16 compliance (see meta file).
-I38 [C] Metadata stored in tezosâ€‘storage:content.
-I39 [C] Interfaces array deduped preâ€‘storage.
-I40 [E,F] Single jFetch Source â€” all HTTP via core/net.js.
+I36 [F] ESLint no‑multi‑spaces passes.
+I37 [C] TZIP‑04/12/16 compliance (see meta file).
+I38 [C] Metadata stored in tezos‑storage:content.
+I39 [C] Interfaces array deduped pre‑storage.
+I40 [E,F] Single jFetch Source — all HTTP via core/net.js.
 I41 [F] Central RenderMedia Pipeline enforced.
-I42 [F] Perâ€‘EP Overlay UX â€” one modal per AdminTools action.
-I43 [E] jFetch global concurrency LIMIT =Â 4 & exponential 429 backâ€‘off.
+I42 [F] Per‑EP Overlay UX — one modal per AdminTools action.
+I43 [E] jFetch global concurrency LIMIT = 4 & exponential 429 back‑off.
 I44 [F] Header publishes real height via CSS var --hdr; Layout obeys.
-I45 [F] Single global scrollâ€‘region; inner comps never spawn scrollbars.
-I46 [F] All DOMâ€‘mutating effects use useIsoLayoutEffect when SSR possible.
-I47 [F] ZerosBackground obeys perf guard (â‰¤Â 4Â % CPU @Â 60Â fps).
-I48 [F] Animated backgrounds idle â‰¤Â 4Â % CPU on lowâ€‘end mobiles.
-I49 [F,C] Token metadata arrays/objects JSONâ€‘encode exactly once then hexâ€‘wrap.
-I50 [F] Royalty UI % cap â‰¤Â 25Â %; stored as basisâ€‘points.
+I45 [F] Single global scroll‑region; inner comps never spawn scrollbars.
+I46 [F] All DOM‑mutating effects use useIsoLayoutEffect when SSR possible.
+I47 [F] ZerosBackground obeys perf guard (≤ 4 % CPU @ 60 fps).
+I48 [F] Animated backgrounds idle ≤ 4 % CPU on low‑end mobiles.
+I49 [F,C] Token metadata arrays/objects JSON‑encode exactly once then hex‑wrap.
+I50 [F] Royalty UI % cap ≤ 25 %; stored as basis‑points.
 I51 [F,C] authoraddress key omitted when blank.
 I52 [F] Tezos address validators accept tz1|tz2|tz3|KT1.
-I53 [F,C] (dup of I49) JSONâ€‘encode once â†’ hexâ€‘wrap.
-I54 [F] Dynamic tokenâ€‘id fetch â€” Mint.jsx must query next_token_id.
-I55 [F] Operation size guard â€” sliceHex uses 1â€¯024â€¯B headâ€‘room.
+I53 [F,C] (dup of I49) JSON‑encode once → hex‑wrap.
+I54 [F] Dynamic token‑id fetch — Mint.jsx must query next_token_id.
+I55 [F] Operation size guard — sliceHex uses 1 024 B head‑room.
 I56 [F] Oversize mint triggers upfront Snackbar warning.
 I57 [F] WalletContext delayed BeaconWallet instantiation.
-I58 [F] Reveal action uses explicit 1â€¯mutez transfer.
+I58 [F] Reveal action uses explicit 1 mutez transfer.
 I59 [F] Silent session restore on mount.
-I60 [F,E] Resumable Slice Uploads â€” Mint, Append &Â Repair.
-I61 [F] Sliceâ€‘Cache Hygiene & Expiry (purge rules).
-I62 [F] Busyâ€‘Select Spinner.
-I63 [I] Singleâ€‘Repo Target Switch (scripts/setTarget.js).
-I64 [F] Wheelâ€‘Tunnel Modals.
-I65 [F] Immediate Busy Indicators â€” superseded by I76.
-I66 [F] Emptyâ€‘Collection Grace.
+I60 [F,E] Resumable Slice Uploads — Mint, Append & Repair.
+I61 [F] Slice‑Cache Hygiene & Expiry (purge rules).
+I62 [F] Busy‑Select Spinner.
+I63 [I] Single‑Repo Target Switch (scripts/setTarget.js).
+I64 [F] Wheel‑Tunnel Modals.
+I65 [F] Immediate Busy Indicators — superseded by I76.
+I66 [F] Empty‑Collection Grace.
 I67 [F,E] Filter destroyed / burn balances.
-I68 [E] listLiveTokenIds.js 30Â s TTL.
-I69 [F] ContractCarousels autoâ€‘refresh + zu_cache_flush listener.
+I68 [E] listLiveTokenIds.js 30 s TTL.
+I69 [F] ContractCarousels auto‑refresh + zu_cache_flush listener.
 I70 [I] destroy/burn dispatches zu_cache_flush.
-I71 [F] Copyâ€‘Address UX via PixelButton.
-I72 [F] RenderMedia downloadâ€‘fallback.
-I73 [F] Relationship Microâ€‘Stats â€” TokenMetaPanel.
-I74 [F,E] Chunkâ€‘Safe Estimator batches â‰¤Â 8 ops.
+I71 [F] Copy‑Address UX via PixelButton.
+I72 [F] RenderMedia download‑fallback.
+I73 [F] Relationship Micro‑Stats — TokenMetaPanel.
+I74 [F,E] Chunk‑Safe Estimator batches ≤ 8 ops.
 I75 [F] v4a Entrypoint Guards.
 I76 [F] Inline Busy Overrides.
-I77 [F] Relationshipâ€‘Aware Disable for destructive EPs.
-I78 [F] SVG Pixelâ€‘Integrity via sandbox.
-I79 [F] Header copyâ€‘clipboard reachable â‰¤â€¯320â€¯px & â‰¥â€¯8â€¯K.
+I77 [F] Relationship‑Aware Disable for destructive EPs.
+I78 [F] SVG Pixel‑Integrity via sandbox.
+I79 [F] Header copy‑clipboard reachable ≤ 320 px & ≥ 8 K.
 I80 [F] Carousel arrows live inside container.
-I81 [F] Mint tagâ€‘input autoâ€‘chips.
+I81 [F] Mint tag‑input auto‑chips.
 I82 [F] Form values persist across navigation.
 I83 [F] Modal CloseBtn anchor stays inside modal bounds.
-I84 [F] Unicode & Emoji acceptance â€” full UTFâ€‘8 except C0/C1.
-I85 [F] Single feeEstimator.js source of truth â€” duplicates banned.
-I86 [F] HelpBox Standard â€” standardized HelpBox across entryâ€‘points.
-I87 [F] Live JSON Validation â€” disable CTA until valid JSON.
-I88 [I] ESLint noâ€‘localâ€‘estimator Rule.
+I84 [F] Unicode & Emoji acceptance — full UTF‑8 except C0/C1.
+I85 [F] Single feeEstimator.js source of truth — duplicates banned.
+I86 [F] HelpBox Standard — standardized HelpBox across entry‑points.
+I87 [F] Live JSON Validation — disable CTA until valid JSON.
+I88 [I] ESLint no‑local‑estimator Rule.
 I89 [F,E] v4a slice batch storageLimit computed per payload.
 I90 [F] All wait/sleep via sleepV4a.js.
 I91 [F,E] Shared ledger wait logic in v4a flows.
-I92 [F] MintV4a.jsx invokes shared ledgerâ€‘wait only after first slice.
-I93 [F] OperationOverlay funâ€‘lines scroll spec.
+I92 [F] MintV4a.jsx invokes shared ledger‑wait only after first slice.
+I93 [F] OperationOverlay fun‑lines scroll spec.
 I94 [F] AdminTools header count rules.
 I95 [F] v4a collections warn banner.
-I96 [F] OperationOverlay funâ€‘lines color via var(--zuâ€‘accent).
+I96 [F] OperationOverlay fun‑lines color via var(--zu‑accent).
 I97 [F] OperationOverlay Close triggers window.location.reload().
-I98 [F] Origination CloseBtn topâ€‘right escape obeys I83.
+I98 [F] Origination CloseBtn top‑right escape obeys I83.
 I99 [F] Every upload runs through onChainValidator.js.
-I100 [F] SAFE_REMOTE_RE allowâ€‘list â€” C0 only / C1 allowed.
+I100 [F] SAFE_REMOTE_RE allow‑list — C0 only / C1 allowed.
 I101 [F] Mature/flashing flags irreversible once set.
-I102 [F] Responsive Entryâ€‘Point & Metaâ€‘Panel Blueprint (grid spec).
-I103 [F] Readâ€‘only legacy alias artists â†’ authors.
-I104 [F,C] Contract metadata must include symbol key (3â€‘5Â Aâ€‘Z/0â€‘9).
-I105 [F] Explore grid uniformity (autoâ€‘fill col clamp).
-I106 [F] Scriptâ€‘Hazard Consent sandboxing model.
-I107 [F] Hexâ€‘field UTFâ€‘8 repair via decodeHexFields.js.
-I108 [F] Tokenâ€‘ID filter UX on contract pages.
-I109 [F,E] Live onâ€‘chain stats from countTokens/countOwners.
+I102 [F] Responsive Entry‑Point & Meta‑Panel Blueprint (grid spec).
+I103 [F] Read‑only legacy alias artists → authors.
+I104 [F,C] Contract metadata must include symbol key (3‑5 A‑Z/0‑9).
+I105 [F] Explore grid uniformity (auto‑fill col clamp).
+I106 [F] Script‑Hazard Consent sandboxing model.
+I107 [F] Hex‑field UTF‑8 repair via decodeHexFields.js.
+I108 [F] Token‑ID filter UX on contract pages.
+I109 [F,E] Live on‑chain stats from countTokens/countOwners.
 I110 [F] Integrity badge standardisation.
-I111 [F,C,E,I] Avoid word â€œglobalâ€ in comments/summaries.
+I111 [F,C,E,I] Avoid word “global” in comments/summaries.
 I112 [F,E] Marketplace dialogs must use feeEstimator.js + OperationOverlay.
 I113 [F] Unified Consent Management via useConsent hook.
-I114 [F] Portalâ€‘based draggable preview windows (SSRâ€‘safe).
+I114 [F] Portal‑based draggable preview windows (SSR‑safe).
 I115 [F] Hazard detection & content protection (nsfw/flashing/scripts).
 I116 [F] Debounced Form State Pattern; id/index pattern.
-I117 [F] Script Security Model â€” consent & addressâ€‘scoped toggles.
-I118 [retired] Dualâ€‘Stage Origination (removed).
-I119 [F] Remote domain patterns caseâ€‘sensitive; allowâ€‘list only (I100).
+I117 [F] Script Security Model — consent & address‑scoped toggles.
+I118 [retired] Dual‑Stage Origination (removed).
+I119 [F] Remote domain patterns case‑sensitive; allow‑list only (I100).
 I120 [F] Dev scripts propagate selected network into runtime/build.
 I121 [F] **TzKT API bases must include /v1**; derived or normalized in code.
 I122 [F] Token meta panels decode collection metadata fully.
@@ -279,470 +279,470 @@ I125 [F] /explore/listings shows live ZeroSum listings with helper fns.
 I126 [F,C] Factory parameter contains only ordered metadata bytes.
 I127 [F] Deploy pages must inject full views array on origination.
 I128 [F] Listings/my pages derive TzKT bases via deployTarget.js.
-I129 [F,E] MyTokens minted/metadata discovery & liveâ€‘balance filter.
-I130 [F] MyTokens guard â€” typeHash set and burnâ€‘only exclusion.
-I131 [F] Domain resolution env â€” skip KT1; import DOMAIN_CONTRACTS/FALLBACK_RPCS.
-I132 [I] Target default/mainnet â€” TARGET='mainnet' is the default.
-I133 [C,F,E] Canonical contract version â€” v4e; full backâ€‘compat via hashMatrix.
+I129 [F,E] MyTokens minted/metadata discovery & live‑balance filter.
+I130 [F] MyTokens guard — typeHash set and burn‑only exclusion.
+I131 [F] Domain resolution env — skip KT1; import DOMAIN_CONTRACTS/FALLBACK_RPCS.
+I132 [I] Target default/mainnet — TARGET='mainnet' is the default.
+I133 [C,F,E] Canonical contract version — v4e; full back‑compat via hashMatrix.
 I134 [F,E] Listings aggregation uses marketplaceListings.js.
 I135 [F] **IndexedDB cache is the only persistence layer** for discovery/carousels; localStorage forbidden for these flows.
 I136 [F,E] **Unified contract discovery** lives in src/utils/contractDiscovery.js; Manage carousels and /my/collections must call it.
-I137 [F,C] **Allowed typeâ€‘hash set** exported via src/utils/allowedHashes.js; derived from src/data/hashMatrix.json; appendâ€‘only.
-I138 [F] **Parity** â€” ContractCarousels and /my/collections must show the same contract set for a wallet; empty collections are allowed.
-I139 [F] **/v1 guard** â€” TzKT base must be normalised to end with â€œ/v1â€.
+I137 [F,C] **Allowed type‑hash set** exported via src/utils/allowedHashes.js; derived from src/data/hashMatrix.json; append‑only.
+I138 [F] **Parity** — ContractCarousels and /my/collections must show the same contract set for a wallet; empty collections are allowed.
+I139 [F] **/v1 guard** — TzKT base must be normalised to end with “/v1”.
 I140 [F] **ExploreNav is mandatory** on explore/* and my/* pages unless explicitly hidden via prop for modals.
-I141 [F] **CollectionCard propâ€‘shape** accepts string KT1 or object {address,â€¦}; component must resolve gracefully without extra calls.
-I142 [F] **Batch resilience** â€” discovery validation proceeds perâ€‘batch; failed groups are logged and skipped, not fatal.
-I143 [F,E] **jFetch budget** â€” â‰¤ 6 concurrent total; internal limiter default =Â 4 for browser tabs.
-I144 [F] **Network awareness** â€” derive network from toolkit._network or TARGET; never hardâ€‘code.
-I145 [F] **No stray sentinels** â€” â€œEOFâ€ or similar markers are banned inside JS/JSX.
-I146 [F] **Adminâ€‘only visibility** â€” /my/collections may show empty or WIP contracts since the page is walletâ€‘scoped.
-I147 [F] **Sort order** â€” default sort by lastActivityTime desc; stable tiebreaker = address asc.
-I148 [E,F] **Staleâ€‘listing guard** â€” verify sellerâ€™s FA2 balance via TzKT `/v1/tokens/balances`; suppress listing and throw `STALE_LISTING_NO_BALANCE` when insufficient.
-I149 [E] **TzKT query shape** â€” use `account`, not `account.address`, in `/tokens/balances`; `select` = `balance`.
-I150 [F] **Listings grid hygiene** â€” require valid preview & nonâ€‘zero `totalSupply`; dedupe by `contract|tokenId`.
-I151 [F] **Transient props** â€” Nonâ€‘standard DOM props must use transient form (`$prop`) or be filtered before reaching the DOM.
-I152 [F,E] **tzktBase `/v1` guard** â€” `tzktBase(net)` returns a base already including `/v1`; callers must not append it again.
-I153 [F] **ExploreNav mandatory** â€” reaffirmed for all `explore/*` and `my/*` routes unless intentionally hidden for modals.
-I154 [F,E] **Tagged errors** â€” marketplace helpers surface actionable tags (`MISSING_LISTING_DETAILS`, `STALE_LISTING_NO_BALANCE`).
-I155 [I] **No sentinels in JS/JSX** â€” comment footers end with `*/` only.
-I156 [E] **Preflight budget & TTL** â€” balance checks observe jFetch limits; cache per `(seller,KT1,tokenId)` for â‰¤60â€¯s (networkâ€‘scoped).
-I157 [C,E,F] **EP_MINT_SIGNATURES** â€” v1,v2b â†’ mint(map,address); v2a,v3â€“v4e â†’ mint(nat,map,address); v4a â†’ mint(address,nat,map). Unit test asserts UI builds these shapes.
+I141 [F] **CollectionCard prop‑shape** accepts string KT1 or object {address,…}; component must resolve gracefully without extra calls.
+I142 [F] **Batch resilience** — discovery validation proceeds per‑batch; failed groups are logged and skipped, not fatal.
+I143 [F,E] **jFetch budget** — ≤ 6 concurrent total; internal limiter default = 4 for browser tabs.
+I144 [F] **Network awareness** — derive network from toolkit._network or TARGET; never hard‑code.
+I145 [F] **No stray sentinels** — “EOF” or similar markers are banned inside JS/JSX.
+I146 [F] **Admin‑only visibility** — /my/collections may show empty or WIP contracts since the page is wallet‑scoped.
+I147 [F] **Sort order** — default sort by lastActivityTime desc; stable tiebreaker = address asc.
+I148 [E,F] **Stale‑listing guard** — verify seller’s FA2 balance via TzKT `/v1/tokens/balances`; suppress listing and throw `STALE_LISTING_NO_BALANCE` when insufficient.
+I149 [E] **TzKT query shape** — use `account`, not `account.address`, in `/tokens/balances`; `select` = `balance`.
+I150 [F] **Listings grid hygiene** — require valid preview & non‑zero `totalSupply`; dedupe by `contract|tokenId`.
+I151 [F] **Transient props** — Non‑standard DOM props must use transient form (`$prop`) or be filtered before reaching the DOM.
+I152 [F,E] **tzktBase `/v1` guard** — `tzktBase(net)` returns a base already including `/v1`; callers must not append it again.
+I153 [F] **ExploreNav mandatory** — reaffirmed for all `explore/*` and `my/*` routes unless intentionally hidden for modals.
+I154 [F,E] **Tagged errors** — marketplace helpers surface actionable tags (`MISSING_LISTING_DETAILS`, `STALE_LISTING_NO_BALANCE`).
+I155 [I] **No sentinels in JS/JSX** — comment footers end with `*/` only.
+I156 [E] **Preflight budget & TTL** — balance checks observe jFetch limits; cache per `(seller,KT1,tokenId)` for ≤60 s (network‑scoped).
+I157 [C,E,F] **EP_MINT_SIGNATURES** — v1,v2b → mint(map,address); v2a,v3–v4e → mint(nat,map,address); v4a → mint(address,nat,map). Unit test asserts UI builds these shapes.
 I158 [F,E] Canonical slicer shared by estimator and batch; signature counts must align.
 I159 [F] Slice checkpoints persist in IndexedDB only; migrate legacy localStorage then purge.
 I160 [F,E] Append/Repair recompute on-chain prefix after each confirmation; duplicate bytes dropped; mismatch aborts.
-I161 [F] OperationOverlay surfaces â€œResumeâ€ when wallet prompts stall.
+I161 [F] OperationOverlay surfaces “Resume” when wallet prompts stall.
 I162 [F] Data URIs validated via `isValidDataUri`/`isLikelySvg` before slicing.
 
-Invariants Addendum (Consolidated Share System) â€” I200â€“I213
-- I200: `zu:openShare` event contract is stable. Unknown fields ignored; missing optional fields trigger bestâ€‘effort fetches.
+Invariants Addendum (Consolidated Share System) — I200–I213
+- I200: `zu:openShare` event contract is stable. Unknown fields ignored; missing optional fields trigger best‑effort fetches.
 - I201: ShareDialog never executes scripts; previews are images only. HTML/SVG with script capabilities are not mounted inside the dialog.
 - I202: `@` is prefixed only for real X handles. Addresses (full or abbreviated) never receive `@`.
 - I203: Handle resolution uses the first tz in `creators` for `/api/handle/[address]`. Failure does not block dialog open.
-- I204: Fallback titles â€” token from token metadata; collection from bigâ€‘map `content` or contract `metadata|alias`.
-- I205: URL normalization â€” relative â†’ absolute using `window.location.origin`; token URLs prefer `SITE_URL`.
-- I206: IPFS normalization â€” any `ipfs://` preview URI is converted to `https://ipfs.io/ipfs/`.
+- I204: Fallback titles — token from token metadata; collection from big‑map `content` or contract `metadata|alias`.
+- I205: URL normalization — relative → absolute using `window.location.origin`; token URLs prefer `SITE_URL`.
+- I206: IPFS normalization — any `ipfs://` preview URI is converted to `https://ipfs.io/ipfs/`.
 - I207: Listing card SHARE resides below BUY in `ActionsRow` and MUST not affect price alignment.
 - I208: Collection card SHARE MUST include `scope:'collection'` and SHOULD pass `name` and `creators` when known.
 - I209: API `/api/handle/[address]` returns `{ handle, alias }`; clients use `handle` for `@`, otherwise full tz.
 - I210: Variant 'purchase' changes only the verb; alias and preview rules unchanged.
 - I211: ShareDialog download links sanitize filenames; extension derives from MIME (if given).
 - I212: No shortening of addresses in share messages; full tz addresses appear verbatim.
-- I213: All networkâ€‘aware share behavior depends on `deployTarget.js` (`SITE_URL`, `TZKT_API`, `NETWORK_KEY`).
+- I213: All network‑aware share behavior depends on `deployTarget.js` (`SITE_URL`, `TZKT_API`, `NETWORK_KEY`).
 
-Invariants Addendum (Liveâ€‘Supply & Nonâ€‘Empty Semantics) â€” I214â€“I221
-- I214: Nonâ€‘empty collection = existence of any token row with `totalSupply>0` (verified via `/v1/tokens`). Do not rely solely on `/tokens/count`.
+Invariants Addendum (Live‑Supply & Non‑Empty Semantics) — I214–I221
+- I214: Non‑empty collection = existence of any token row with `totalSupply>0` (verified via `/v1/tokens`). Do not rely solely on `/tokens/count`.
 - I215: `countTokens(KT1, net)` validates server counts by reading `/tokens` rows; it returns 0 if no row has `totalSupply>0`.
-- I216: Explore Â· Collections prefilters contracts by reading token rows (chunked) and caches nonâ€‘empty per KT1.
+- I216: Explore · Collections prefilters contracts by reading token rows (chunked) and caches non‑empty per KT1.
 - I217: `CollectionCard` hides when live token count is 0 and only fetches owner counts when live>0.
-- I218: Explore Â· Tokens requires `totalSupply.gt=0` serverâ€‘side and clientâ€‘side guards drop any row with `totalSupply===0`.
-- I219: Contract page token grid uses `listLiveTokenIds()` for the allowâ€‘set and overlays meta/preview guards; header token count uses `countTokens()`.
-- I220: My Â· Tokens â€œOwnedâ€ builds from balances `balance.ne=0` (no dependency on a burn address). â€œCreationsâ€ hides destroyed by default (toggleable).
-- I221: Liveness/burn semantics are addressâ€‘agnostic; destroy/burn entrypoints and direct burns are all unified under `totalSupply>0` rules.
+- I218: Explore · Tokens requires `totalSupply.gt=0` server‑side and client‑side guards drop any row with `totalSupply===0`.
+- I219: Contract page token grid uses `listLiveTokenIds()` for the allow‑set and overlays meta/preview guards; header token count uses `countTokens()`.
+- I220: My · Tokens “Owned” builds from balances `balance.ne=0` (no dependency on a burn address). “Creations” hides destroyed by default (toggleable).
+- I221: Liveness/burn semantics are address‑agnostic; destroy/burn entrypoints and direct burns are all unified under `totalSupply>0` rules.
 
-â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-3 Â· RESERVED
-â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+───────────────────────────────────────────────────────────────
+3 · RESERVED
+───────────────────────────────────────────────────────────────
 Reserved for future research notes and protocol upgrades.
 
-â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-4 Â· COMPREHENSIVE SOURCEâ€‘TREE MAP (perâ€‘file descriptionÂ â€¢ importsÂ â€¢ exports)
-â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-/* Legend â€” one line per path, keep caseâ€‘exact  
-<relativeâ€‘path> â€” <purpose>; Imports: <commaâ€‘list>; Exports: <commaâ€‘list>  
-â€œÂ·â€ = none.  Where helpful, inline citations point to bundle dumps. */
+───────────────────────────────────────────────────────────────
+4 · COMPREHENSIVE SOURCE‑TREE MAP (per‑file description • imports • exports)
+───────────────────────────────────────────────────────────────
+/* Legend — one line per path, keep case‑exact  
+<relative‑path> — <purpose>; Imports: <comma‑list>; Exports: <comma‑list>  
+“·” = none.  Where helpful, inline citations point to bundle dumps. */
 
-zerounbound â€” repo root; Imports: Â·; Exports: Â·
-zerounbound/.eslintrc.cjs â€” ESLint ruleset; Imports: eslintâ€‘configâ€‘next; Exports: module.exports
-zerounbound/.gitignore â€” git ignore list; Imports: Â·; Exports: Â·
-zerounbound/.prettierrc â€” Prettier config; Imports: Â·; Exports: module.exports
-zerounbound/.yarnrc.yml â€” YarnÂ 4 settings; Imports: Â·; Exports: Â·
-zerounbound/.yarn/ â€” Yarn data; Imports: Â·; Exports: Â·
-zerounbound/.github/CODEOWNERS â€” repo ownership map; Imports: Â·; Exports: Â·
-zerounbound/.github/PULL_REQUEST_TEMPLATE.md â€” PR template; Imports: Â·; Exports: Â·
-zerounbound/.github/ci.yml â€” CI workflow; Imports: Â·; Exports: Â·
-zerounbound/.next/ â€” Next build output (ephemeral); Imports: Â·; Exports: Â·
-zerounbound/next-env.d.ts â€” Next.js TS globals; Imports: Â·; Exports: Â·
-zerounbound/bundle.config.json â€” bundle glob mapÂ (I14); Imports: Â·; Exports: Â·
-zerounbound/LICENSE â€” MIT licence text; Imports: Â·; Exports: Â·
-zerounbound/AGENTS.md â€” contributor & Codex guide; Imports: Â·; Exports: Â·
-zerounbound/README_contract_management.md (retired 512c275) â€” former overview; Imports: Â·; Exports: Â·
-zerounbound/docs/AI_CUSTOM_INSTRUCTIONS.md â€” collaboration instructions; Imports: Â·; Exports: Â·
-zerounbound/docs/TZIP_Compliance_Invariants_ZeroContract_V4.md â€” TZIP invariants (companion). Imports: Â·; Exports: Â·
-zerounbound/docs/AI_SYSTEM_INSTRUCTIONS.txt â€” assistant system rules; Imports: Â·; Exports: Â·
-zerounbound/docs/Master_Overview_And_Manifest_zerounbound_contractmanagement.md â€” **this file**; Imports: Â·; Exports: Â·
-zerounbound/next.config.js â€” Next.js config; Imports: nextâ€‘mdx,@next/font; Exports: module.exports
-zerounbound/jest.config.cjs â€” Jest config; Imports: Â·; Exports: module.exports
-zerounbound/jest.setup.js â€” Jest setup (polyfills, env); Imports: Â·; Exports: Â·
-zerounbound/package.json â€” NPM manifest; Imports: Â·; Exports: scripts,dependencies
-zerounbound/tsconfig.json â€” TS path hints; Imports: Â·; Exports: compilerOptions
-zerounbound/yarn.lock â€” Yarn lockfile; Imports: Â·; Exports: Â·
+zerounbound — repo root; Imports: ·; Exports: ·
+zerounbound/.eslintrc.cjs — ESLint ruleset; Imports: eslint‑config‑next; Exports: module.exports
+zerounbound/.gitignore — git ignore list; Imports: ·; Exports: ·
+zerounbound/.prettierrc — Prettier config; Imports: ·; Exports: module.exports
+zerounbound/.yarnrc.yml — Yarn 4 settings; Imports: ·; Exports: ·
+zerounbound/.yarn/ — Yarn data; Imports: ·; Exports: ·
+zerounbound/.github/CODEOWNERS — repo ownership map; Imports: ·; Exports: ·
+zerounbound/.github/PULL_REQUEST_TEMPLATE.md — PR template; Imports: ·; Exports: ·
+zerounbound/.github/ci.yml — CI workflow; Imports: ·; Exports: ·
+zerounbound/.next/ — Next build output (ephemeral); Imports: ·; Exports: ·
+zerounbound/next-env.d.ts — Next.js TS globals; Imports: ·; Exports: ·
+zerounbound/bundle.config.json — bundle glob map (I14); Imports: ·; Exports: ·
+zerounbound/LICENSE — MIT licence text; Imports: ·; Exports: ·
+zerounbound/AGENTS.md — contributor & Codex guide; Imports: ·; Exports: ·
+zerounbound/README_contract_management.md (retired 512c275) — former overview; Imports: ·; Exports: ·
+zerounbound/docs/AI_CUSTOM_INSTRUCTIONS.md — collaboration instructions; Imports: ·; Exports: ·
+zerounbound/docs/TZIP_Compliance_Invariants_ZeroContract_V4.md — TZIP invariants (companion). Imports: ·; Exports: ·
+zerounbound/docs/AI_SYSTEM_INSTRUCTIONS.txt — assistant system rules; Imports: ·; Exports: ·
+zerounbound/docs/Master_Overview_And_Manifest_zerounbound_contractmanagement.md — **this file**; Imports: ·; Exports: ·
+zerounbound/next.config.js — Next.js config; Imports: next‑mdx,@next/font; Exports: module.exports
+zerounbound/jest.config.cjs — Jest config; Imports: ·; Exports: module.exports
+zerounbound/jest.setup.js — Jest setup (polyfills, env); Imports: ·; Exports: ·
+zerounbound/package.json — NPM manifest; Imports: ·; Exports: scripts,dependencies
+zerounbound/tsconfig.json — TS path hints; Imports: ·; Exports: compilerOptions
+zerounbound/yarn.lock — Yarn lockfile; Imports: ·; Exports: ·
 
-â•­â”€â”€ __tests__ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â•®
-zerounbound/__tests__/dummy.test.js â€” placeholder test; Imports: Â·; Exports: Â·
-zerounbound/__tests__/sliceResume.test.js â€” resume-safe slicer tests; Imports: planHead,cutTail; Exports: Â·
-zerounbound/__tests__/svgDataUri.test.js â€” data-URI validation tests; Imports: isValidDataUri; Exports: Â·
-zerounbound/__tests__/v2aLedger.test.js â€” tests v2a ledger fallback; Imports: getLedgerBalanceV2a; Exports: Â·
+╭── __tests__ ───────────────────────────────────────────────────────────────╮
+zerounbound/__tests__/dummy.test.js — placeholder test; Imports: ·; Exports: ·
+zerounbound/__tests__/sliceResume.test.js — resume-safe slicer tests; Imports: planHead,cutTail; Exports: ·
+zerounbound/__tests__/svgDataUri.test.js — data-URI validation tests; Imports: isValidDataUri; Exports: ·
+zerounbound/__tests__/v2aLedger.test.js — tests v2a ledger fallback; Imports: getLedgerBalanceV2a; Exports: ·
 
-â•­â”€â”€ buildÂ / infra â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â•®
-zerounbound/scripts/ensureDevManifest.js â€” CI guard for dev manifest; Imports: fs,path; Exports: main
-zerounbound/scripts/generateBundles.js â€” dumps bundles â†’ summarized_files; Imports: globby,fs; Exports: main
-zerounbound/scripts/generateManifest.js â€” rebuilds this manifest; Imports: fs,globby; Exports: main
-zerounbound/scripts/setTarget.js â€” switches TARGET (I63/I132); Imports: fs; Exports: setTarget
-zerounbound/scripts/startDev.js â€” custom dev wrapper; Imports: child_process; Exports: main
-zerounbound/scripts/updatePkgName.js â€” rewrites package.json name; Imports: fs; Exports: main
-zerounbound/scripts/codex-setup.sh â€” Codex CI bootstrap; Imports: Â·; Exports: Â·
+╭── build / infra ───────────────────────────────────────────────────────────╮
+zerounbound/scripts/ensureDevManifest.js — CI guard for dev manifest; Imports: fs,path; Exports: main
+zerounbound/scripts/generateBundles.js — dumps bundles → summarized_files; Imports: globby,fs; Exports: main
+zerounbound/scripts/generateManifest.js — rebuilds this manifest; Imports: fs,globby; Exports: main
+zerounbound/scripts/setTarget.js — switches TARGET (I63/I132); Imports: fs; Exports: setTarget
+zerounbound/scripts/startDev.js — custom dev wrapper; Imports: child_process; Exports: main
+zerounbound/scripts/updatePkgName.js — rewrites package.json name; Imports: fs; Exports: main
+zerounbound/scripts/codex-setup.sh — Codex CI bootstrap; Imports: ·; Exports: ·
 
-â•­â”€â”€ contractsÂ (michelson & refs) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â•®
-zerounbound/contracts/Zero_Contract_V3.tz â€” legacy v3 contract; Imports: Â·; Exports: Â·
-zerounbound/contracts/Zero_Contract_V4.tz â€” legacy v4 (readâ€‘only); Imports: Â·; Exports: Â·
-zerounbound/contracts/Zero_Contract_v4e.tz â€” **canonical v4e**; Imports: Â·; Exports: Â·
-zerounbound/contracts/ZeroSum.tz â€” ZeroSum marketplace; Imports: Â·; Exports: Â·
-zerounbound/contracts/ZeroSum - Copy.txt â€” backup of ZeroSum; Imports: Â·; Exports: Â·
-zerounbound/contracts/metadata/views/Zero_Contract_v4_views.json â€” offâ€‘chain views; Imports: Â·; Exports: Â·
-zerounbound/contracts/Marketplace/MarketplaceViews/ZeroSum.views.json â€” compiled views for ZeroSum marketplace.
-zerounbound/contracts/Marketplace/ZeroSumMarketplace-KT19kipdLiWyBZvP7KWCPdRbDXuEiu3gfjBR.tz â€” deployed marketplace (mainnet); Imports: Â·; Exports: Â·
-zerounbound/contracts/Marketplace/NewZeroSumMarketplace-KT19yn9fWP6zTSLPntGyrPwc7JuMHnYxAn1z.tz â€” deployed marketplace (alt); Imports: Â·; Exports: Â·
-zerounbound/contracts/EntrypointsReference/Zero_Contract_1 entrypoints.txt â€” v1 entrypoints; Imports: Â·; Exports: Â·
-zerounbound/contracts/EntrypointsReference/Zero_Contract_3 entrypoints.txt â€” v3 entrypoints; Imports: Â·; Exports: Â·
-zerounbound/contracts/EntrypointsReference/Zero_Contract_V2a entrypoints.txt â€” v2a entrypoints; Imports: Â·; Exports: Â·
-zerounbound/contracts/EntrypointsReference/Zero_Contract_V2b entrypoints.txt â€” v2b entrypoints; Imports: Â·; Exports: Â·
-zerounbound/contracts/EntrypointsReference/Zero_Contract_V4 entrypoints.txt â€” v4 entrypoints; Imports: Â·; Exports: Â·
-zerounbound/contracts/EntrypointsReference/Zero_Contract_V4a entrypoints.txt â€” v4a entrypoints; Imports: Â·; Exports: Â·
-zerounbound/contracts/LegacyZeroContractVersions/v1-KT1R3kYYCâ€¦.tz â€” legacy v1; Imports: Â·; Exports: Â·
-zerounbound/contracts/LegacyZeroContractVersions/v2a-KT1CdzcHâ€¦.tz â€” legacy v2a; Imports: Â·; Exports: Â·
-zerounbound/contracts/LegacyZeroContractVersions/v2b-KT1SQuymâ€¦.tz â€” legacy v2b; Imports: Â·; Exports: Â·
-zerounbound/contracts/LegacyZeroContractVersions/v3-KT1VupZWHâ€¦.tz â€” legacy v3; Imports: Â·; Exports: Â·
-zerounbound/contracts/LegacyZeroContractVersions/v4a-KT1RnPq7â€¦.tz â€” legacy v4a; Imports: Â·; Exports: Â·
-zerounbound/contracts/LegacyZeroContractVersions/Zero_Contract_V4.tz â€” legacy v4 code; Imports: Â·; Exports: Â·
-zerounbound/contracts/ContractFactory/KT1H8myPr7EmVPFLmBcnSxgiYigdMKZu3ayw.tz â€” ZeroWorks factory (compiled).
-zerounbound/contracts/ContractFactory/CF deployed contract/v4e-KT1SadkkZeeLdzxh3NTGngEzkg6evvSbJn2F.tz â€” reference of deployed v4e via factory.
+╭── contracts (michelson & refs) ────────────────────────────────────────────╮
+zerounbound/contracts/Zero_Contract_V3.tz — legacy v3 contract; Imports: ·; Exports: ·
+zerounbound/contracts/Zero_Contract_V4.tz — legacy v4 (read‑only); Imports: ·; Exports: ·
+zerounbound/contracts/Zero_Contract_v4e.tz — **canonical v4e**; Imports: ·; Exports: ·
+zerounbound/contracts/ZeroSum.tz — ZeroSum marketplace; Imports: ·; Exports: ·
+zerounbound/contracts/ZeroSum - Copy.txt — backup of ZeroSum; Imports: ·; Exports: ·
+zerounbound/contracts/metadata/views/Zero_Contract_v4_views.json — off‑chain views; Imports: ·; Exports: ·
+zerounbound/contracts/Marketplace/MarketplaceViews/ZeroSum.views.json — compiled views for ZeroSum marketplace.
+zerounbound/contracts/Marketplace/ZeroSumMarketplace-KT19kipdLiWyBZvP7KWCPdRbDXuEiu3gfjBR.tz — deployed marketplace (mainnet); Imports: ·; Exports: ·
+zerounbound/contracts/Marketplace/NewZeroSumMarketplace-KT19yn9fWP6zTSLPntGyrPwc7JuMHnYxAn1z.tz — deployed marketplace (alt); Imports: ·; Exports: ·
+zerounbound/contracts/EntrypointsReference/Zero_Contract_1 entrypoints.txt — v1 entrypoints; Imports: ·; Exports: ·
+zerounbound/contracts/EntrypointsReference/Zero_Contract_3 entrypoints.txt — v3 entrypoints; Imports: ·; Exports: ·
+zerounbound/contracts/EntrypointsReference/Zero_Contract_V2a entrypoints.txt — v2a entrypoints; Imports: ·; Exports: ·
+zerounbound/contracts/EntrypointsReference/Zero_Contract_V2b entrypoints.txt — v2b entrypoints; Imports: ·; Exports: ·
+zerounbound/contracts/EntrypointsReference/Zero_Contract_V4 entrypoints.txt — v4 entrypoints; Imports: ·; Exports: ·
+zerounbound/contracts/EntrypointsReference/Zero_Contract_V4a entrypoints.txt — v4a entrypoints; Imports: ·; Exports: ·
+zerounbound/contracts/LegacyZeroContractVersions/v1-KT1R3kYYC….tz — legacy v1; Imports: ·; Exports: ·
+zerounbound/contracts/LegacyZeroContractVersions/v2a-KT1CdzcH….tz — legacy v2a; Imports: ·; Exports: ·
+zerounbound/contracts/LegacyZeroContractVersions/v2b-KT1SQuym….tz — legacy v2b; Imports: ·; Exports: ·
+zerounbound/contracts/LegacyZeroContractVersions/v3-KT1VupZWH….tz — legacy v3; Imports: ·; Exports: ·
+zerounbound/contracts/LegacyZeroContractVersions/v4a-KT1RnPq7….tz — legacy v4a; Imports: ·; Exports: ·
+zerounbound/contracts/LegacyZeroContractVersions/Zero_Contract_V4.tz — legacy v4 code; Imports: ·; Exports: ·
+zerounbound/contracts/ContractFactory/KT1H8myPr7EmVPFLmBcnSxgiYigdMKZu3ayw.tz — ZeroWorks factory (compiled).
+zerounbound/contracts/ContractFactory/CF deployed contract/v4e-KT1SadkkZeeLdzxh3NTGngEzkg6evvSbJn2F.tz — reference of deployed v4e via factory.
 
-â•­â”€â”€ publicÂ assets â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â•®
-zerounbound/public/embla-left.svg â€” carousel arrow â¬…; Imports: Â·; Exports: Â·
-zerounbound/public/embla-right.svg â€” carousel arrow âž¡; Imports: Â·; Exports: Â·
-zerounbound/public/favicon.ico â€” site favicon; Imports: Â·; Exports: Â·
-zerounbound/public/manifest.base.json â€” PWA base manifest; Imports: Â·; Exports: Â·
-zerounbound/public/manifest.json â€” PWA build manifest; Imports: manifest.base.json; Exports: Â·
-zerounbound/public/sw.js â€” WorkboxÂ 7 serviceâ€‘worker; Imports: workboxâ€‘sw; Exports: self.addEventListener
-zerounbound/public/fonts/PixeloidMono-d94EV.ttf â€” mono pixel font; Imports: Â·; Exports: Â·
-zerounbound/public/fonts/PixeloidSans-mLxMm.ttf â€” sans pixel font; Imports: Â·; Exports: Â·
-zerounbound/public/fonts/PixeloidSansBold-PKnYd.ttf â€” bold pixel font; Imports: Â·; Exports: Â·
-zerounbound/public/sprites/Banner.png â€” hero banner; Imports: Â·; Exports: Â·
-zerounbound/public/sprites/Banner.psd â€” banner PSD; Imports: Â·; Exports: Â·
-zerounbound/public/sprites/Burst.svg â€” celebration burst; Imports: Â·; Exports: Â·
-zerounbound/public/sprites/cover_default.svg â€” fallback NFT cover; Imports: Â·; Exports: Â·
-zerounbound/public/sprites/ghostnet_logo.png â€” Ghostnet logo; Imports: Â·; Exports: Â·
-zerounbound/public/sprites/ghostnet_logo.svg â€” Ghostnet logo; Imports: Â·; Exports: Â·
-zerounbound/public/sprites/ghostnetBanner.png â€” Ghostnet banner; Imports: Â·; Exports: Â·
-zerounbound/public/sprites/loading.svg â€” large loading spinner; Imports: Â·; Exports: Â·
-zerounbound/public/sprites/loading16x16.gif â€” 16â€¯px loading GIF; Imports: Â·; Exports: Â·
-zerounbound/public/sprites/loading48x48.gif â€” 48â€¯px loading GIF; Imports: Â·; Exports: Â·
-zerounbound/public/sprites/logo.png â€” logo raster; Imports: Â·; Exports: Â·
-zerounbound/public/sprites/logo.psd â€” logo PSD; Imports: Â·; Exports: Â·
-zerounbound/public/sprites/logo.svg â€” Zero logo; Imports: Â·; Exports: Â·
+╭── public assets ───────────────────────────────────────────────────────────╮
+zerounbound/public/embla-left.svg — carousel arrow ⬅; Imports: ·; Exports: ·
+zerounbound/public/embla-right.svg — carousel arrow ➡; Imports: ·; Exports: ·
+zerounbound/public/favicon.ico — site favicon; Imports: ·; Exports: ·
+zerounbound/public/manifest.base.json — PWA base manifest; Imports: ·; Exports: ·
+zerounbound/public/manifest.json — PWA build manifest; Imports: manifest.base.json; Exports: ·
+zerounbound/public/sw.js — Workbox 7 service‑worker; Imports: workbox‑sw; Exports: self.addEventListener
+zerounbound/public/fonts/PixeloidMono-d94EV.ttf — mono pixel font; Imports: ·; Exports: ·
+zerounbound/public/fonts/PixeloidSans-mLxMm.ttf — sans pixel font; Imports: ·; Exports: ·
+zerounbound/public/fonts/PixeloidSansBold-PKnYd.ttf — bold pixel font; Imports: ·; Exports: ·
+zerounbound/public/sprites/Banner.png — hero banner; Imports: ·; Exports: ·
+zerounbound/public/sprites/Banner.psd — banner PSD; Imports: ·; Exports: ·
+zerounbound/public/sprites/Burst.svg — celebration burst; Imports: ·; Exports: ·
+zerounbound/public/sprites/cover_default.svg — fallback NFT cover; Imports: ·; Exports: ·
+zerounbound/public/sprites/ghostnet_logo.png — Ghostnet logo; Imports: ·; Exports: ·
+zerounbound/public/sprites/ghostnet_logo.svg — Ghostnet logo; Imports: ·; Exports: ·
+zerounbound/public/sprites/ghostnetBanner.png — Ghostnet banner; Imports: ·; Exports: ·
+zerounbound/public/sprites/loading.svg — large loading spinner; Imports: ·; Exports: ·
+zerounbound/public/sprites/loading16x16.gif — 16 px loading GIF; Imports: ·; Exports: ·
+zerounbound/public/sprites/loading48x48.gif — 48 px loading GIF; Imports: ·; Exports: ·
+zerounbound/public/sprites/logo.png — logo raster; Imports: ·; Exports: ·
+zerounbound/public/sprites/logo.psd — logo PSD; Imports: ·; Exports: ·
+zerounbound/public/sprites/logo.svg — Zero logo; Imports: ·; Exports: ·
 
-â•­â”€â”€ src/config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â•®
-zerounbound/src/config/deployTarget.js â€” network config & single divergence
+╭── src/config ──────────────────────────────────────────────────────────────╮
+zerounbound/src/config/deployTarget.js — network config & single divergence
   point (I10/I132); defines TARGET (**mainnet** default), NET, RPC lists,
   **TzKT API base** (host without `/v1`; callers normalize or use `tzktBase()`),
   theme/site values, FACTORY_ADDRESS/ES, selectFastestRpc(),
   DOMAIN_CONTRACTS/FALLBACK_RPCS for .tez reverse lookups.
 
-â•­â”€â”€ src/constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â•®
-zerounbound/src/constants/funLines.js â€” rotating overlay quotes; Exports: FUN_LINES
-zerounbound/src/constants/integrityBadges.js â€” onâ€‘chain badge map; Exports: INTEGRITY_* helpers
-zerounbound/src/constants/mimeTypes.js â€” MIME map + preferredExt('.mp3'); Exports: MIME_TYPES,preferredExt
-zerounbound/src/constants/views.hex.js â€” hexâ€‘encoded contract views; Exports: default viewsHex
+╭── src/constants ───────────────────────────────────────────────────────────╮
+zerounbound/src/constants/funLines.js — rotating overlay quotes; Exports: FUN_LINES
+zerounbound/src/constants/integrityBadges.js — on‑chain badge map; Exports: INTEGRITY_* helpers
+zerounbound/src/constants/mimeTypes.js — MIME map + preferredExt('.mp3'); Exports: MIME_TYPES,preferredExt
+zerounbound/src/constants/views.hex.js — hex‑encoded contract views; Exports: default viewsHex
 
-â•­â”€â”€ src/contexts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â•®
-zerounbound/src/contexts/ThemeContext.js â€” dark/light palette ctx; Imports: react,styledâ€‘components; Exports: ThemeProvider,useTheme
-zerounbound/src/contexts/WalletContext.js â€” Beacon wallet context; silent session restore; toolkit init; Imports: React,@taquito/beacon-wallet,TezosToolkit,DEFAULT_NETWORK,chooseFastestRpc; Exports: WalletProvider,useWallet
+╭── src/contexts ────────────────────────────────────────────────────────────╮
+zerounbound/src/contexts/ThemeContext.js — dark/light palette ctx; Imports: react,styled‑components; Exports: ThemeProvider,useTheme
+zerounbound/src/contexts/WalletContext.js — Beacon wallet context; silent session restore; toolkit init; Imports: React,@taquito/beacon-wallet,TezosToolkit,DEFAULT_NETWORK,chooseFastestRpc; Exports: WalletProvider,useWallet
 
-â•­â”€â”€ src/core â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â•®
-zerounbound/src/core/batch.js â€” batch opsÂ (v1â€‘v4); Imports: @taquito/utils,net.js; Exports: forgeBatch,sendBatch,buildAppendTokenMetaCalls,sliceHex,splitPacked
-zerounbound/src/core/batchV4a.js â€” v4aâ€‘specific batch ops; Imports: @taquito/taquito; Exports: SLICE_SAFE_BYTES,sliceHex,buildAppendTokenMetaCalls
-zerounbound/src/core/feeEstimator.js â€” chunkâ€‘safe fee/burn estimator; Imports: @taquito/taquito; Exports: estimateChunked,calcStorageMutez,toTez
-zerounbound/src/core/marketplace.js â€” ZeroSum helpers; Imports: net.js,@taquito/taquito,@taquito/tzip16;  
+╭── src/core ────────────────────────────────────────────────────────────────╮
+zerounbound/src/core/batch.js — batch ops (v1‑v4); Imports: @taquito/utils,net.js; Exports: forgeBatch,sendBatch,buildAppendTokenMetaCalls,sliceHex,splitPacked
+zerounbound/src/core/batchV4a.js — v4a‑specific batch ops; Imports: @taquito/taquito; Exports: SLICE_SAFE_BYTES,sliceHex,buildAppendTokenMetaCalls
+zerounbound/src/core/feeEstimator.js — chunk‑safe fee/burn estimator; Imports: @taquito/taquito; Exports: estimateChunked,calcStorageMutez,toTez
+zerounbound/src/core/marketplace.js — ZeroSum helpers; Imports: net.js,@taquito/taquito,@taquito/tzip16;  
   **Exports**:  
-  â€¢ `getMarketContract`, `fetchListings`, `fetchLowestListing`, `fetchOffers`, `fetchListingDetails`,  
-  â€¢ onâ€‘chain view readers: `fetchOnchainListings`, `fetchOnchainOffers`, `fetchOnchainListingDetails`, `fetchOnchainListingsForSeller`, `fetchOnchainOffersForBuyer`, `fetchOnchainListingsForCollection`, `fetchOnchainOffersForCollection`,  
-  â€¢ param builders: `buildBuyParams`, `buildListParams`, `buildCancelParams`, `buildAcceptOfferParams`, `buildOfferParams`,  
-  â€¢ **preflight**: `getFa2BalanceViaTzkt(account, nftContract, tokenId)`, **`preflightBuy()`** (throws `STALE_LISTING_NO_BALANCE`).
-zerounbound/src/core/marketplaceHelper.js â€” collectionâ€‘level listing helpers (TzKT view + bigâ€‘map fallback); Imports: net.js,deployTarget,tzkt.js;  
-  **Exports**: `getCollectionListings(nftContract, net)`, `countActiveListingsForCollection(nftContract, tokenIds?, net)` (dedupes per tokenId; viewâ€‘preferred).
-zerounbound/src/core/net.js â€” network helpers (jFetch limiter/backâ€‘off, safe fetch), forging; Imports: Parser,@taquito/michelson-encoder,deployTarget; Exports: jFetch,forgeOrigination,injectSigned
-zerounbound/src/core/slicing.js â€” canonical head/tail slicer; Imports: @taquito/utils; Exports: planHead,computeOnChainPrefix,cutTail,buildAppendCalls,SLICE_MAX_BYTES,SLICE_MIN_BYTES,PACKED_SAFE_BYTES,HEADROOM_BYTES
-zerounbound/src/core/validator.js â€” schema & form validators; Exports: validateContract,validateToken,validateMintFields,validateDeployFields
+  • `getMarketContract`, `fetchListings`, `fetchLowestListing`, `fetchOffers`, `fetchListingDetails`,  
+  • on‑chain view readers: `fetchOnchainListings`, `fetchOnchainOffers`, `fetchOnchainListingDetails`, `fetchOnchainListingsForSeller`, `fetchOnchainOffersForBuyer`, `fetchOnchainListingsForCollection`, `fetchOnchainOffersForCollection`,  
+  • param builders: `buildBuyParams`, `buildListParams`, `buildCancelParams`, `buildAcceptOfferParams`, `buildOfferParams`,  
+  • **preflight**: `getFa2BalanceViaTzkt(account, nftContract, tokenId)`, **`preflightBuy()`** (throws `STALE_LISTING_NO_BALANCE`).
+zerounbound/src/core/marketplaceHelper.js — collection‑level listing helpers (TzKT view + big‑map fallback); Imports: net.js,deployTarget,tzkt.js;  
+  **Exports**: `getCollectionListings(nftContract, net)`, `countActiveListingsForCollection(nftContract, tokenIds?, net)` (dedupes per tokenId; view‑preferred).
+zerounbound/src/core/net.js — network helpers (jFetch limiter/back‑off, safe fetch), forging; Imports: Parser,@taquito/michelson-encoder,deployTarget; Exports: jFetch,forgeOrigination,injectSigned
+zerounbound/src/core/slicing.js — canonical head/tail slicer; Imports: @taquito/utils; Exports: planHead,computeOnChainPrefix,cutTail,buildAppendCalls,SLICE_MAX_BYTES,SLICE_MIN_BYTES,PACKED_SAFE_BYTES,HEADROOM_BYTES
+zerounbound/src/core/validator.js — schema & form validators; Exports: validateContract,validateToken,validateMintFields,validateDeployFields
 
-â•­â”€â”€ src/data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â•®
-zerounbound/src/data/entrypointRegistry.json â€” EP button matrix (v1â†’v4e).
-zerounbound/src/data/hashMatrix.json â€” SHAâ€‘1â€¯â†’â€¯version map incl. v4eÂ 2058538150.
-zerounbound/src/utils/allowedHashes.js â€” **programmatic allowâ€‘list** accessor built from hashMatrix; Imports: hashMatrix.json; Exports: isAllowed,set,keys
+╭── src/data ────────────────────────────────────────────────────────────────╮
+zerounbound/src/data/entrypointRegistry.json — EP button matrix (v1→v4e).
+zerounbound/src/data/hashMatrix.json — SHA‑1 → version map incl. v4e 2058538150.
+zerounbound/src/utils/allowedHashes.js — **programmatic allow‑list** accessor built from hashMatrix; Imports: hashMatrix.json; Exports: isAllowed,set,keys
 
-â•­â”€â”€ src/hooks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â•®
-zerounbound/src/hooks/useConsent.js â€” persistent consent flags + broadcast; Exports: useConsent.
-zerounbound/src/hooks/useHeaderHeight.js â€” setsÂ --hdr var; Exports: useHeaderHeight
-zerounbound/src/hooks/useViewportUnit.js â€” setsÂ --vh var; Exports: useViewportUnit
-zerounbound/src/hooks/useTxEstimate.js â€” gas/fee estimator hook; Exports: useTxEstimate
+╭── src/hooks ───────────────────────────────────────────────────────────────╮
+zerounbound/src/hooks/useConsent.js — persistent consent flags + broadcast; Exports: useConsent.
+zerounbound/src/hooks/useHeaderHeight.js — sets --hdr var; Exports: useHeaderHeight
+zerounbound/src/hooks/useViewportUnit.js — sets --vh var; Exports: useViewportUnit
+zerounbound/src/hooks/useTxEstimate.js — gas/fee estimator hook; Exports: useTxEstimate
 
-â•­â”€â”€ src/pagesÂ (Next.js) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â•®
-zerounbound/src/pages/_app.js â€” root providers; Imports: ThemeContext,WalletContext,GlobalStyles; Exports: MyApp
-zerounbound/src/pages/_document.js â€” custom document (I20); Imports: next/document; Exports: default
-zerounbound/src/pages/index.js â€” landing page; Imports: Layout,CRTFrame; Exports: Home
-zerounbound/src/pages/deploy.js â€” collection deployment UI; factory bytes param; full views injection; Exports: default (DeployPage)
-zerounbound/src/pages/manage.js â€” manage page; Imports: Layout,AdminTools; Exports: ManagePage
-zerounbound/src/pages/terms.js â€” ToS page; Imports: Layout; Exports: TermsPage
+╭── src/pages (Next.js) ─────────────────────────────────────────────────────╮
+zerounbound/src/pages/_app.js — root providers; Imports: ThemeContext,WalletContext,GlobalStyles; Exports: MyApp
+zerounbound/src/pages/_document.js — custom document (I20); Imports: next/document; Exports: default
+zerounbound/src/pages/index.js — landing page; Imports: Layout,CRTFrame; Exports: Home
+zerounbound/src/pages/deploy.js — collection deployment UI; factory bytes param; full views injection; Exports: default (DeployPage)
+zerounbound/src/pages/manage.js — manage page; Imports: Layout,AdminTools; Exports: ManagePage
+zerounbound/src/pages/terms.js — ToS page; Imports: Layout; Exports: TermsPage
 
-â€” explore â€”
-zerounbound/src/pages/explore/[[...filter]].jsx â€” dynamic explore grid (admin/contract search, filters); **shared discovery + idbCache**; Exports: Explore
-zerounbound/src/pages/explore/secondary.jsx â€” secondary explore route; Imports: React; Exports: SecondaryExplore.
-zerounbound/src/pages/explore/listings/index.jsx â€” marketplace listings grid; shows live ZeroSum listings; metadata prefetch; **tzktBase already `/v1`**; never doubleâ€‘append (r7).
-zerounbound/src/pages/explore/tokens.jsx â€” **ZeroContract tokens grid** with scanâ€‘ahead minâ€‘yield, accurate totals reconciliation, preview/supply guard, admin filter parity; Exports: ExploreTokens
+— explore —
+zerounbound/src/pages/explore/[[...filter]].jsx — dynamic explore grid (admin/contract search, filters); **shared discovery + idbCache**; Exports: Explore
+zerounbound/src/pages/explore/secondary.jsx — secondary explore route; Imports: React; Exports: SecondaryExplore.
+zerounbound/src/pages/explore/listings/index.jsx — marketplace listings grid; shows live ZeroSum listings; metadata prefetch; **tzktBase already `/v1`**; never double‑append (r7).
+zerounbound/src/pages/explore/tokens.jsx — **ZeroContract tokens grid** with scan‑ahead min‑yield, accurate totals reconciliation, preview/supply guard, admin filter parity; Exports: ExploreTokens
 
-â€” my â€”
-zerounbound/src/pages/my/collections.jsx â€” walletâ€‘scoped grid of all ZeroContracts the user created/admins (v1â†’v4e). Uses discovery + idbCache; allows empty collections; Exports: MyCollections
-zerounbound/src/pages/my/listings.jsx â€” user listings view; Imports: React,marketplace helpers; Exports: MyListings
-zerounbound/src/pages/my/offers.jsx â€” offers to accept / made; Imports: Tzip16Module,decodeHexFields,marketplace helpers; Exports: MyOffers.
-zerounbound/src/pages/my/tokens.jsx â€” minted/owned discovery; liveâ€‘balance filter; decodeHexFields; Exports: MyTokens.
+— my —
+zerounbound/src/pages/my/collections.jsx — wallet‑scoped grid of all ZeroContracts the user created/admins (v1→v4e). Uses discovery + idbCache; allows empty collections; Exports: MyCollections
+zerounbound/src/pages/my/listings.jsx — user listings view; Imports: React,marketplace helpers; Exports: MyListings
+zerounbound/src/pages/my/offers.jsx — offers to accept / made; Imports: Tzip16Module,decodeHexFields,marketplace helpers; Exports: MyOffers.
+zerounbound/src/pages/my/tokens.jsx — minted/owned discovery; live‑balance filter; decodeHexFields; Exports: MyTokens.
 
-â€” contracts/tokens â€”
-zerounbound/src/pages/contracts/[addr].jsx â€” collection detail; Imports: ContractMetaPanelContracts,TokenCard,hazards; Exports: ContractPage
-zerounbound/src/pages/tokens/[addr]/[tokenId].jsx â€” token detail; integrates MAINTokenMetaPanel, extrauri viewer with prev/next navigation & hazard overlays; fetches get_extrauris via RPC (tzip16) with TzKT fallback; Exports: TokenDetailPage
+— contracts/tokens —
+zerounbound/src/pages/contracts/[addr].jsx — collection detail; Imports: ContractMetaPanelContracts,TokenCard,hazards; Exports: ContractPage
+zerounbound/src/pages/tokens/[addr]/[tokenId].jsx — token detail; integrates MAINTokenMetaPanel, extrauri viewer with prev/next navigation & hazard overlays; fetches get_extrauris via RPC (tzip16) with TzKT fallback; Exports: TokenDetailPage
 
-â•­â”€â”€ src/styles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â•®
-zerounbound/src/styles/globalStyles.js â€” root CSS + scrollbar; Imports: styledâ€‘components,palettes.json; Exports: GlobalStyles
-zerounbound/src/styles/palettes.json â€” theme palettes; Imports: Â·; Exports: Â·
+╭── src/styles ──────────────────────────────────────────────────────────────╮
+zerounbound/src/styles/globalStyles.js — root CSS + scrollbar; Imports: styled‑components,palettes.json; Exports: GlobalStyles
+zerounbound/src/styles/palettes.json — theme palettes; Imports: ·; Exports: ·
 
-â•­â”€â”€ src/uiÂ (shell & components) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â•®
-zerounbound/src/ui/CollectionCard.jsx â€” responsive contract card; accepts string KT1 or object; loads via contractMeta; Imports: hazards,useConsent,RenderMedia; Exports: CollectionCard
-zerounbound/src/ui/CRTFrame.jsx â€” CRT screen border; Imports: react; Exports: CRTFrame
-zerounbound/src/ui/ExploreNav.jsx â€” sticky explore nav (search + consent toggles); **mandatory on explore/* and my/***; Exports: ExploreNav
-zerounbound/src/ui/FiltersPanel.jsx â€” explore filters sidebar; Exports: FiltersPanel
-zerounbound/src/ui/Header.jsx â€” top navÂ + network switch; Exports: Header
-zerounbound/src/ui/Layout.jsx â€” app shellÂ & scrollâ€‘lock; Exports: Layout
-zerounbound/src/ui/LoadingSpinner.jsx â€” 8â€‘bit spinner; Exports: LoadingSpinner
-zerounbound/src/ui/PixelButton.jsx â€” pixel artÂ <button>; **adopt transient props for nonâ€‘DOM attrs**; Exports: PixelButton
-zerounbound/src/ui/PixelConfirmDialog.jsx â€” confirm modal; Exports: PixelConfirmDialog
-zerounbound/src/ui/PixelHeading.jsx â€” pixel art headings; Exports: PixelHeading
-zerounbound/src/ui/PixelInput.jsx â€” pixel art inputs; Exports: PixelInput
-zerounbound/src/ui/ThemeToggle.jsx â€” palette switch button; Exports: ThemeToggle
-zerounbound/src/ui/WalletNotice.jsx â€” wallet status banner; Exports: WalletNotice
-zerounbound/src/ui/ZerosBackground.jsx â€” animated zeros field; Exports: ZerosBackground
-zerounbound/src/ui/IntegrityBadge.jsx â€” onâ€‘chain integrity badge; Exports: IntegrityBadge
-zerounbound/src/ui/MAINTokenMetaPanel.jsx â€” token detail meta panel with extrauri navigation & downloadable MIME links; Imports: RenderMedia, hazards; Exports: MAINTokenMetaPanel
+╭── src/ui (shell & components) ─────────────────────────────────────────────╮
+zerounbound/src/ui/CollectionCard.jsx — responsive contract card; accepts string KT1 or object; loads via contractMeta; Imports: hazards,useConsent,RenderMedia; Exports: CollectionCard
+zerounbound/src/ui/CRTFrame.jsx — CRT screen border; Imports: react; Exports: CRTFrame
+zerounbound/src/ui/ExploreNav.jsx — sticky explore nav (search + consent toggles); **mandatory on explore/* and my/***; Exports: ExploreNav
+zerounbound/src/ui/FiltersPanel.jsx — explore filters sidebar; Exports: FiltersPanel
+zerounbound/src/ui/Header.jsx — top nav + network switch; Exports: Header
+zerounbound/src/ui/Layout.jsx — app shell & scroll‑lock; Exports: Layout
+zerounbound/src/ui/LoadingSpinner.jsx — 8‑bit spinner; Exports: LoadingSpinner
+zerounbound/src/ui/PixelButton.jsx — pixel art <button>; **adopt transient props for non‑DOM attrs**; Exports: PixelButton
+zerounbound/src/ui/PixelConfirmDialog.jsx — confirm modal; Exports: PixelConfirmDialog
+zerounbound/src/ui/PixelHeading.jsx — pixel art headings; Exports: PixelHeading
+zerounbound/src/ui/PixelInput.jsx — pixel art inputs; Exports: PixelInput
+zerounbound/src/ui/ThemeToggle.jsx — palette switch button; Exports: ThemeToggle
+zerounbound/src/ui/WalletNotice.jsx — wallet status banner; Exports: WalletNotice
+zerounbound/src/ui/ZerosBackground.jsx — animated zeros field; Exports: ZerosBackground
+zerounbound/src/ui/IntegrityBadge.jsx — on‑chain integrity badge; Exports: IntegrityBadge
+zerounbound/src/ui/MAINTokenMetaPanel.jsx — token detail meta panel with extrauri navigation & downloadable MIME links; Imports: RenderMedia, hazards; Exports: MAINTokenMetaPanel
 
-â€” marketplace bars & dialogs â€”
-zerounbound/src/ui/BuyDialog.jsx â€” buy modal; Imports: buildBuyParams,preflightBuy; Exports: BuyDialog
-zerounbound/src/ui/ListTokenDialog.jsx â€” singleâ€‘sig listing wizard; Imports: marketplace helpers; Exports: ListTokenDialog
-zerounbound/src/ui/MakeOfferDialog.jsx â€” offer modal with dynamic method resolution; Exports: MakeOfferDialog
-zerounbound/src/ui/MarketplaceBar.jsx â€” token action bar (buy/list/offer); Imports: BuyDialog,ListTokenDialog,MakeOfferDialog; Exports: MarketplaceBar
-zerounbound/src/ui/MarketplaceBuyBar.jsx â€” compact buy/list UI for listing cards; Imports: BuyDialog; Exports: MarketplaceBuyBar
-zerounbound/src/ui/TokenListingCard.jsx â€” listing grid card; Imports: RenderMedia, MarketplaceBuyBar/MarketplaceBar; Exports: TokenListingCard
+— marketplace bars & dialogs —
+zerounbound/src/ui/BuyDialog.jsx — buy modal; Imports: buildBuyParams,preflightBuy; Exports: BuyDialog
+zerounbound/src/ui/ListTokenDialog.jsx — single‑sig listing wizard; Imports: marketplace helpers; Exports: ListTokenDialog
+zerounbound/src/ui/MakeOfferDialog.jsx — offer modal with dynamic method resolution; Exports: MakeOfferDialog
+zerounbound/src/ui/MarketplaceBar.jsx — token action bar (buy/list/offer); Imports: BuyDialog,ListTokenDialog,MakeOfferDialog; Exports: MarketplaceBar
+zerounbound/src/ui/MarketplaceBuyBar.jsx — compact buy/list UI for listing cards; Imports: BuyDialog; Exports: MarketplaceBuyBar
+zerounbound/src/ui/TokenListingCard.jsx — listing grid card; Imports: RenderMedia, MarketplaceBuyBar/MarketplaceBar; Exports: TokenListingCard
 
-â€” discovery & carousels â€”
-zerounbound/src/ui/ContractCarousels.jsx â€” creator/admin carousels on Manage page; **uses contractDiscovery + idbCache**; Exports: ContractCarousels
+— discovery & carousels —
+zerounbound/src/ui/ContractCarousels.jsx — creator/admin carousels on Manage page; **uses contractDiscovery + idbCache**; Exports: ContractCarousels
 
-â€” entrypoints & admin â€”
-zerounbound/src/ui/AdminTools.jsx â€” dynamic entryâ€‘point modal; Exports: AdminTools
-zerounbound/src/ui/OperationConfirmDialog.jsx â€” tx summary dialog; Exports: OperationConfirmDialog
-zerounbound/src/ui/OperationOverlay.jsx â€” progress overlay; Exports: OperationOverlay
-zerounbound/src/ui/ContractMetaPanel.jsx â€” contract stats; Exports: ContractMetaPanel
-zerounbound/src/ui/ContractMetaPanelContracts.jsx â€” banner panel on /contracts; Exports: ContractMetaPanelContracts
-zerounbound/src/ui/DeployCollectionForm.jsx â€” collection deploy UI; Exports: DeployCollectionForm
-zerounbound/src/ui/FullscreenModal.jsx â€” fullscreen viewer + pixel upscale; Exports: FullscreenModal
-zerounbound/src/ui/EnableScripts.jsx â€” scriptâ€‘consent components; Exports: EnableScriptsOverlay,EnableScriptsToggle
-zerounbound/src/ui/MakeOfferBtn.jsx â€” XS makeâ€‘offer button; Exports: MakeOfferBtn
+— entrypoints & admin —
+zerounbound/src/ui/AdminTools.jsx — dynamic entry‑point modal; Exports: AdminTools
+zerounbound/src/ui/OperationConfirmDialog.jsx — tx summary dialog; Exports: OperationConfirmDialog
+zerounbound/src/ui/OperationOverlay.jsx — progress overlay; Exports: OperationOverlay
+zerounbound/src/ui/ContractMetaPanel.jsx — contract stats; Exports: ContractMetaPanel
+zerounbound/src/ui/ContractMetaPanelContracts.jsx — banner panel on /contracts; Exports: ContractMetaPanelContracts
+zerounbound/src/ui/DeployCollectionForm.jsx — collection deploy UI; Exports: DeployCollectionForm
+zerounbound/src/ui/FullscreenModal.jsx — fullscreen viewer + pixel upscale; Exports: FullscreenModal
+zerounbound/src/ui/EnableScripts.jsx — script‑consent components; Exports: EnableScriptsOverlay,EnableScriptsToggle
+zerounbound/src/ui/MakeOfferBtn.jsx — XS make‑offer button; Exports: MakeOfferBtn
 
-â€” Entrypoints (v4 & v4a) â€”
-zerounbound/src/ui/Entrypoints/index.js â€” lazy EP resolver; Exports: resolveEp
-zerounbound/src/ui/Entrypoints/AcceptOffer.jsx â€” accept marketplace offers; dynamic accept_offer resolution; Exports: AcceptOffer
-zerounbound/src/ui/Entrypoints/AddRemoveCollaborator.jsx â€” collab mutator; Exports: AddRemoveCollaborator
-zerounbound/src/ui/Entrypoints/AddRemoveCollaboratorsv4a.jsx â€” v4a bulk collab; Exports: AddRemoveCollaboratorsv4a
-zerounbound/src/ui/Entrypoints/AddRemoveParentChild.jsx â€” relation manager; Exports: AddRemoveParentChild
-zerounbound/src/ui/Entrypoints/AppendArtifactUri.jsx â€” slice uploader (I60); Exports: AppendArtifactUri
-zerounbound/src/ui/Entrypoints/AppendExtraUri.jsx â€” extra media uploader; Exports: AppendExtraUri
-zerounbound/src/ui/Entrypoints/BalanceOf.jsx â€” balance viewer; Exports: BalanceOf
-zerounbound/src/ui/Entrypoints/Burn.jsx â€” burn token; Exports: Burn
-zerounbound/src/ui/Entrypoints/BurnV4.jsx â€” burn v4aâ€‘safe; Exports: BurnV4
-zerounbound/src/ui/Entrypoints/CancelListing.jsx â€” cancel marketplace listings; paginated table; Exports: CancelListing
-zerounbound/src/ui/Entrypoints/CancelOffer.jsx â€” withdraw offers; Exports: CancelOffer
-zerounbound/src/ui/Entrypoints/ClearUri.jsx â€” clear artifactUri; Exports: ClearUri
-zerounbound/src/ui/Entrypoints/Destroy.jsx â€” destroy contract; Exports: Destroy
-zerounbound/src/ui/Entrypoints/EditContractMetadata.jsx â€” contract meta editor; Exports: EditContractMetadata
-zerounbound/src/ui/Entrypoints/EditTokenMetadata.jsx â€” token meta editor; Exports: EditTokenMetadata
-zerounbound/src/ui/Entrypoints/ManageCollaborators.jsx â€” v3/v4 collab GUI; Exports: ManageCollaborators
-zerounbound/src/ui/Entrypoints/ManageCollaboratorsv4a.jsx â€” v4a collab GUI; Exports: ManageCollaboratorsv4a
-zerounbound/src/ui/Entrypoints/ManageParentChild.jsx â€” parent/child GUI; Exports: ManageParentChild
-zerounbound/src/ui/Entrypoints/Mint.jsx â€” mint NFTs; Exports: Mint
-zerounbound/src/ui/Entrypoints/MintPreview.jsx â€” preâ€‘mint gallery; Exports: MintPreview
-zerounbound/src/ui/Entrypoints/MintUpload.jsx â€” drag/upload step with onChainValidator; Exports: MintUpload
-zerounbound/src/ui/Entrypoints/MintV4a.jsx â€” v4a mint UI; Exports: MintV4a
-zerounbound/src/ui/Entrypoints/RepairUri.jsx â€” diff repair; Exports: RepairUri
-zerounbound/src/ui/Entrypoints/RepairUriV4a.jsx â€” v4a diff repair; Exports: RepairUriV4a
-zerounbound/src/ui/Entrypoints/TokenPreviewWindow.jsx â€” portalâ€‘based draggable preview; Exports: TokenPreviewWindow
-zerounbound/src/ui/Entrypoints/Transfer.jsx â€” FA2 transfer; Exports: Transfer
-zerounbound/src/ui/Entrypoints/TransferRow.jsx â€” reusable transfer row; Exports: TransferRow
-zerounbound/src/ui/Entrypoints/UpdateContractMetadatav4a.jsx â€” v4a contract meta; Exports: UpdateContractMetadatav4a
-zerounbound/src/ui/Entrypoints/UpdateOperators.jsx â€” operator set; Exports: UpdateOperators
-zerounbound/src/ui/Entrypoints/UpdateTokenMetadatav4a.jsx â€” v4a token meta editor; Exports: UpdateTokenMetadatav4a
+— Entrypoints (v4 & v4a) —
+zerounbound/src/ui/Entrypoints/index.js — lazy EP resolver; Exports: resolveEp
+zerounbound/src/ui/Entrypoints/AcceptOffer.jsx — accept marketplace offers; dynamic accept_offer resolution; Exports: AcceptOffer
+zerounbound/src/ui/Entrypoints/AddRemoveCollaborator.jsx — collab mutator; Exports: AddRemoveCollaborator
+zerounbound/src/ui/Entrypoints/AddRemoveCollaboratorsv4a.jsx — v4a bulk collab; Exports: AddRemoveCollaboratorsv4a
+zerounbound/src/ui/Entrypoints/AddRemoveParentChild.jsx — relation manager; Exports: AddRemoveParentChild
+zerounbound/src/ui/Entrypoints/AppendArtifactUri.jsx — slice uploader (I60); Exports: AppendArtifactUri
+zerounbound/src/ui/Entrypoints/AppendExtraUri.jsx — extra media uploader; Exports: AppendExtraUri
+zerounbound/src/ui/Entrypoints/BalanceOf.jsx — balance viewer; Exports: BalanceOf
+zerounbound/src/ui/Entrypoints/Burn.jsx — burn token; Exports: Burn
+zerounbound/src/ui/Entrypoints/BurnV4.jsx — burn v4a‑safe; Exports: BurnV4
+zerounbound/src/ui/Entrypoints/CancelListing.jsx — cancel marketplace listings; paginated table; Exports: CancelListing
+zerounbound/src/ui/Entrypoints/CancelOffer.jsx — withdraw offers; Exports: CancelOffer
+zerounbound/src/ui/Entrypoints/ClearUri.jsx — clear artifactUri; Exports: ClearUri
+zerounbound/src/ui/Entrypoints/Destroy.jsx — destroy contract; Exports: Destroy
+zerounbound/src/ui/Entrypoints/EditContractMetadata.jsx — contract meta editor; Exports: EditContractMetadata
+zerounbound/src/ui/Entrypoints/EditTokenMetadata.jsx — token meta editor; Exports: EditTokenMetadata
+zerounbound/src/ui/Entrypoints/ManageCollaborators.jsx — v3/v4 collab GUI; Exports: ManageCollaborators
+zerounbound/src/ui/Entrypoints/ManageCollaboratorsv4a.jsx — v4a collab GUI; Exports: ManageCollaboratorsv4a
+zerounbound/src/ui/Entrypoints/ManageParentChild.jsx — parent/child GUI; Exports: ManageParentChild
+zerounbound/src/ui/Entrypoints/Mint.jsx — mint NFTs; Exports: Mint
+zerounbound/src/ui/Entrypoints/MintPreview.jsx — pre‑mint gallery; Exports: MintPreview
+zerounbound/src/ui/Entrypoints/MintUpload.jsx — drag/upload step with onChainValidator; Exports: MintUpload
+zerounbound/src/ui/Entrypoints/MintV4a.jsx — v4a mint UI; Exports: MintV4a
+zerounbound/src/ui/Entrypoints/RepairUri.jsx — diff repair; Exports: RepairUri
+zerounbound/src/ui/Entrypoints/RepairUriV4a.jsx — v4a diff repair; Exports: RepairUriV4a
+zerounbound/src/ui/Entrypoints/TokenPreviewWindow.jsx — portal‑based draggable preview; Exports: TokenPreviewWindow
+zerounbound/src/ui/Entrypoints/Transfer.jsx — FA2 transfer; Exports: Transfer
+zerounbound/src/ui/Entrypoints/TransferRow.jsx — reusable transfer row; Exports: TransferRow
+zerounbound/src/ui/Entrypoints/UpdateContractMetadatav4a.jsx — v4a contract meta; Exports: UpdateContractMetadatav4a
+zerounbound/src/ui/Entrypoints/UpdateOperators.jsx — operator set; Exports: UpdateOperators
+zerounbound/src/ui/Entrypoints/UpdateTokenMetadatav4a.jsx — v4a token meta editor; Exports: UpdateTokenMetadatav4a
 
-â•­â”€â”€ src/utils â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â•®
-zerounbound/src/utils/chooseFastestRpc.js â€” RPC race chooser (deployTarget selectFastestRpc); Exports: chooseFastestRpc
-zerounbound/src/utils/contractDiscovery.js â€” **walletâ€‘centric discovery** (initiator/creator/manager/minted/owned â†’ validate â†’ enrich); Exports: discoverContracts
-zerounbound/src/utils/contractMeta.js â€” **contract miniâ€‘fetch** (counts, metadata digest); Exports: fetchContractMeta
-zerounbound/src/utils/countAmount.js â€” count editions excluding burns; Exports: countAmount
-zerounbound/src/utils/countOwners.js â€” distinct owner counter; Imports: net.js; Exports: countOwners
-zerounbound/src/utils/countTokens.js â€” onâ€‘chain token count; Imports: jFetch; Exports: countTokens
-zerounbound/src/utils/decodeHexFields.js â€” hexâ†’UTFâ€‘8 deep repair; Exports: default
-zerounbound/src/utils/formatAddress.js â€” tz/KT1 truncator + copy; Exports: shortKt,copyToClipboard
-zerounbound/src/utils/getLedgerBalanceV2a.cjs â€” v2a ledger fallback; Exports: getLedgerBalanceV2a
-zerounbound/src/utils/hazards.js â€” detect nsfw/flashing/script flags; Exports: detectHazards
-zerounbound/src/utils/idbCache.js â€” **IndexedDB wrapper with TTL & namespacing**; Exports: idbGet,idbSet,idbDel,idbClear,withTtl
-zerounbound/src/utils/listLiveTokenIds.js â€” TzKT id fetcher (TTLÂ 30â€¯s); Exports: listLiveTokenIds
-zerounbound/src/utils/marketplaceListings.js â€” **listings aggregator** (active collections, bigmap fetchers, onâ€‘chain view readers); Exports: listings helpers.  
+╭── src/utils ───────────────────────────────────────────────────────────────╮
+zerounbound/src/utils/chooseFastestRpc.js — RPC race chooser (deployTarget selectFastestRpc); Exports: chooseFastestRpc
+zerounbound/src/utils/contractDiscovery.js — **wallet‑centric discovery** (initiator/creator/manager/minted/owned → validate → enrich); Exports: discoverContracts
+zerounbound/src/utils/contractMeta.js — **contract mini‑fetch** (counts, metadata digest); Exports: fetchContractMeta
+zerounbound/src/utils/countAmount.js — count editions excluding burns; Exports: countAmount
+zerounbound/src/utils/countOwners.js — distinct owner counter; Imports: net.js; Exports: countOwners
+zerounbound/src/utils/countTokens.js — on‑chain token count; Imports: jFetch; Exports: countTokens
+zerounbound/src/utils/decodeHexFields.js — hex→UTF‑8 deep repair; Exports: default
+zerounbound/src/utils/formatAddress.js — tz/KT1 truncator + copy; Exports: shortKt,copyToClipboard
+zerounbound/src/utils/getLedgerBalanceV2a.cjs — v2a ledger fallback; Exports: getLedgerBalanceV2a
+zerounbound/src/utils/hazards.js — detect nsfw/flashing/script flags; Exports: detectHazards
+zerounbound/src/utils/idbCache.js — **IndexedDB wrapper with TTL & namespacing**; Exports: idbGet,idbSet,idbDel,idbClear,withTtl
+zerounbound/src/utils/listLiveTokenIds.js — TzKT id fetcher (TTL 30 s); Exports: listLiveTokenIds
+zerounbound/src/utils/marketplaceListings.js — **listings aggregator** (active collections, bigmap fetchers, on‑chain view readers); Exports: listings helpers.  
   (The listings page derives the TzKT base via `tzktBase(net)`; r7 explicitly warns to **not** append `/v1` twice.)
-zerounbound/src/utils/onChainValidator.js â€” fast FOC heuristic (I99); Exports: checkOnChainIntegrity
-zerounbound/src/utils/pixelUpscale.js â€” css helpers for pixelâ€‘art upscaling; Exports: pixelUpscaleStyle
-zerounbound/src/utils/RenderMedia.jsx â€” dataâ€‘URI media viewer; Exports: RenderMedia
-zerounbound/src/utils/resolveTezosDomain.js â€” reverse resolver; imports DOMAIN_CONTRACTS/FALLBACK_RPCS; Exports: resolveTezosDomain
-zerounbound/src/utils/sliceCache.js â€” IndexedDB-only slice checkpoint cache (migrates legacy localStorage); Exports: saveSliceCheckpoint,loadSliceCheckpoint,clearSliceCheckpoint,purgeExpiredSliceCache
-zerounbound/src/utils/sliceCacheV4a.js â€” v4a slice cache (IndexedDB); Exports: saveSliceCheckpoint,loadSliceCheckpoint,clearSliceCheckpoint,purgeExpiredSliceCache,strHash
-zerounbound/src/utils/toNat.js â€” addressâ†’nat util; Exports: toNat
-zerounbound/src/utils/uriHelpers.js â€” dataâ€‘URI helpers; Exports: URI_KEY_REGEX,listUriKeys,mimeFromDataUri,isValidDataUri,isLikelySvg,ensureDataUri
-zerounbound/src/utils/useIsoLayoutEffect.js â€” SSRâ€‘safe layout effect; Exports: useIsoLayoutEffect
-zerounbound/src/utils/useWheelTunnel.js â€” wheel event tunnel (I64); Exports: useWheelTunnel
+zerounbound/src/utils/onChainValidator.js — fast FOC heuristic (I99); Exports: checkOnChainIntegrity
+zerounbound/src/utils/pixelUpscale.js — css helpers for pixel‑art upscaling; Exports: pixelUpscaleStyle
+zerounbound/src/utils/RenderMedia.jsx — data‑URI media viewer; Exports: RenderMedia
+zerounbound/src/utils/resolveTezosDomain.js — reverse resolver; imports DOMAIN_CONTRACTS/FALLBACK_RPCS; Exports: resolveTezosDomain
+zerounbound/src/utils/sliceCache.js — IndexedDB-only slice checkpoint cache (migrates legacy localStorage); Exports: saveSliceCheckpoint,loadSliceCheckpoint,clearSliceCheckpoint,purgeExpiredSliceCache
+zerounbound/src/utils/sliceCacheV4a.js — v4a slice cache (IndexedDB); Exports: saveSliceCheckpoint,loadSliceCheckpoint,clearSliceCheckpoint,purgeExpiredSliceCache,strHash
+zerounbound/src/utils/toNat.js — address→nat util; Exports: toNat
+zerounbound/src/utils/uriHelpers.js — data‑URI helpers; Exports: URI_KEY_REGEX,listUriKeys,mimeFromDataUri,isValidDataUri,isLikelySvg,ensureDataUri
+zerounbound/src/utils/useIsoLayoutEffect.js — SSR‑safe layout effect; Exports: useIsoLayoutEffect
+zerounbound/src/utils/useWheelTunnel.js — wheel event tunnel (I64); Exports: useWheelTunnel
 
-â•­â”€â”€ src/workers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â•®
-zerounbound/src/workers/originate.worker.js â€” webâ€‘worker origination; Imports: @taquito/taquito,net.js; Exports: onmessage
+╭── src/workers ─────────────────────────────────────────────────────────────╮
+zerounbound/src/workers/originate.worker.js — web‑worker origination; Imports: @taquito/taquito,net.js; Exports: onmessage
 
-â•­â”€â”€ summarized_filesÂ (bundle drops) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â•®
-zerounbound/summarized_files/contracts_bundle.txt â€” Michelson sources + views; Imports: Â·; Exports: Â·
-zerounbound/summarized_files/assets_bundle.txt â€” fonts, sprites, sw.js; Imports: Â·; Exports: Â·
-zerounbound/summarized_files/engine_bundle.txt â€” Node/core dump; Imports: Â·; Exports: Â·
-zerounbound/summarized_files/frontend_bundle.txt â€” UI dump; Imports: Â·; Exports: Â·
-zerounbound/summarized_files/infra_bundle.txt â€” infra dump; Imports: Â·; Exports: Â·
-zerounbound/summarized_files/master_bundle.txt â€” contains everything in all the above bundles
-zerounbound/summarized_files/render_media_bundle.txt â€” mediaâ€‘centric UI modules
-zerounbound/summarized_files/explore_bundle.txt â€” explore pages, listings utils, dialogs and helpers + **discovery/idb**  
+╭── summarized_files (bundle drops) ────────────────────────────────────────╮
+zerounbound/summarized_files/contracts_bundle.txt — Michelson sources + views; Imports: ·; Exports: ·
+zerounbound/summarized_files/assets_bundle.txt — fonts, sprites, sw.js; Imports: ·; Exports: ·
+zerounbound/summarized_files/engine_bundle.txt — Node/core dump; Imports: ·; Exports: ·
+zerounbound/summarized_files/frontend_bundle.txt — UI dump; Imports: ·; Exports: ·
+zerounbound/summarized_files/infra_bundle.txt — infra dump; Imports: ·; Exports: ·
+zerounbound/summarized_files/master_bundle.txt — contains everything in all the above bundles
+zerounbound/summarized_files/render_media_bundle.txt — media‑centric UI modules
+zerounbound/summarized_files/explore_bundle.txt — explore pages, listings utils, dialogs and helpers + **discovery/idb**  
   (r7: tzktBase includes `/v1`; do not append.)
 
-â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-5 Â· BUNDLE INDEX (How to read) â€” each textâ€‘dump lives in summarized_files/
-â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-contracts_bundle.txtâ€ƒâ†’ Michelson sources + views  
-assets_bundle.txtâ€ƒâ€ƒâ†’ fonts, sprites, sw.js  
-engine_bundle.txtâ€ƒâ€ƒâ†’ scripts/, core/, data/, config/, constants/, utils/  
-frontend_bundle.txtâ€ƒâ†’ contexts/, hooks/, ui/, pages/, styles/  
-infra_bundle.txtâ€ƒâ€ƒ â†’ root configs, next.config.js, package.json, CI helpers  
-master_bundle.txtâ€ƒâ€ƒâ†’ contains everything in all the above bundles  
-render_media_bundle.txt â†’ mediaâ€‘centric UI modules  
-explore_bundle.txt â†’ explore + marketplace listings/dialogs/helpers **and discovery/idb**
+───────────────────────────────────────────────────────────────
+5 · BUNDLE INDEX (How to read) — each text‑dump lives in summarized_files/
+───────────────────────────────────────────────────────────────
+contracts_bundle.txt → Michelson sources + views  
+assets_bundle.txt  → fonts, sprites, sw.js  
+engine_bundle.txt  → scripts/, core/, data/, config/, constants/, utils/  
+frontend_bundle.txt → contexts/, hooks/, ui/, pages/, styles/  
+infra_bundle.txt   → root configs, next.config.js, package.json, CI helpers  
+master_bundle.txt  → contains everything in all the above bundles  
+render_media_bundle.txt → media‑centric UI modules  
+explore_bundle.txt → explore + marketplace listings/dialogs/helpers **and discovery/idb**
 
-â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-6 Â· QUICKâ€‘STARTÂ &Â CIÂ PIPELINE
-â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+───────────────────────────────────────────────────────────────
+6 · QUICK‑START & CI PIPELINE
+───────────────────────────────────────────────────────────────
 corepack enable && corepack prepare yarn@4.9.1 --activate  
 yarn install
 
-###Â OpenAIÂ Codex setup script
+### OpenAI Codex setup script
 Codex pulls scripts/codex-setup.sh automatically:
 
 #!/usr/bin/env bash
 corepack enable
 corepack prepare yarn@4.9.1 --activate
 yarn install --immutable --inline-builds
-###Â Vercel
+### Vercel
 
-ProjectÂ Â Â Â Â  Â BuildÂ CommandÂ Â Â Â Â Â Â Â Â Â Â Â Â Â Â Â Â Â Â Â Â Â Â Â Â  Â Domains
-ghostnetÂ Â Â Â  Â yarnÂ set:ghostnetÂ &&Â yarnÂ buildÂ Â Â Â Â Â Â ghostnet.zerounbound.art
-mainnetÂ Â Â Â Â  Â yarnÂ set:mainnetÂ Â &&Â yarnÂ buildÂ Â Â Â Â Â Â zerounbound.art,Â www.*
+Project       Build Command                           Domains
+ghostnet      yarn set:ghostnet && yarn build       ghostnet.zerounbound.art
+mainnet       yarn set:mainnet  && yarn build       zerounbound.art, www.*
 
 Local development
-â€¢ Default target: mainnet (I132). deployTarget.js must export const TARGET='mainnet'.
-â€¢ To switch network locally:
+• Default target: mainnet (I132). deployTarget.js must export const TARGET='mainnet'.
+• To switch network locally:
 
 yarn set:ghostnet   # writes TARGET='ghostnet'
 yarn dev:current    # runs on the selected target/port without resetting TARGET
 # To return to mainnet:
 yarn set:mainnet && yarn dev:current
-â€¢ Clearing the IndexedDB discovery cache may be necessary after network
+• Clearing the IndexedDB discovery cache may be necessary after network
 switches to prevent stale data (see src/utils/idbCache.js). Prefer a targeted
-cache clear (keyâ€‘space: zu:disc:<network>:<address>).
+cache clear (key‑space: zu:disc:<network>:<address>).
 
-â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-7 Â· APPENDICES (HowÂ toÂ read) â€” machineâ€‘readables live inÂ code
-â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-A.Â hashMatrix.json â€” typeHashes used to label contract versions
-and ensure backâ€‘compat across loaders and UIs; includes v4e hash
-2058538150 â†’ "v4e".
-B.Â entrypointRegistry.json â€” canonical entrypoints per version,
+───────────────────────────────────────────────────────────────
+7 · APPENDICES (How to read) — machine‑readables live in code
+───────────────────────────────────────────────────────────────
+A. hashMatrix.json — typeHashes used to label contract versions
+and ensure back‑compat across loaders and UIs; includes v4e hash
+2058538150 → "v4e".
+B. entrypointRegistry.json — canonical entrypoints per version,
 including v4e as an $extends of v4 where applicable.
-C.Â allowedHashes.js â€” programmatic accessor over A; appendâ€‘only.
+C. allowedHashes.js — programmatic accessor over A; append‑only.
 D. ZeroContract Version Map:
-v1 â€” original zerocontract
-v2 series â€” community â€œhomebrewsâ€; v2b = â€œoriginal without lock adding parent/childâ€
-v3 â€” first collaborator contract
-v4 â€” legacy append contract (our append_* and edit_* entrypoints)
-v4a â€” zeroterminal main contract (ZT entrypoints, different names/order)
-v4b â€” sifrzero (default collaborative, like HEN collection; no add/remove_collaborator, anyone can mint)
-v4c â€” zeroterminal default collaborative
-v4d â€” zeroterminal updated with add collaborators
-v4e â€” current grail, canonical deployable contract on zerounbound.art (extends v4 where applicable)
+v1 — original zerocontract
+v2 series — community “homebrews”; v2b = “original without lock adding parent/child”
+v3 — first collaborator contract
+v4 — legacy append contract (our append_* and edit_* entrypoints)
+v4a — zeroterminal main contract (ZT entrypoints, different names/order)
+v4b — sifrzero (default collaborative, like HEN collection; no add/remove_collaborator, anyone can mint)
+v4c — zeroterminal default collaborative
+v4d — zeroterminal updated with add collaborators
+v4e — current grail, canonical deployable contract on zerounbound.art (extends v4 where applicable)
 
 Entrypoint differences (canonical, from our registry):
-v1/v3/v4 mint(nat, map(string,bytes), address); v2a/v2b mint(map(string,bytes), address); v4a/v4d (ZT) mint(address, nat, map(string,bytes)). v4e extends v4. Using these signatures is required; do not mix ZTâ€™s append_token_metadata/update_token_metadata with our append_artifact_uri/edit_token_metadata.
+v1/v3/v4 mint(nat, map(string,bytes), address); v2a/v2b mint(map(string,bytes), address); v4a/v4d (ZT) mint(address, nat, map(string,bytes)). v4e extends v4. Using these signatures is required; do not mix ZT’s append_token_metadata/update_token_metadata with our append_artifact_uri/edit_token_metadata.
 
-Who can mint <32,768 bytes vs >32,768 bytes (multisig batching + diffâ€‘aware repairs/retries):
+Who can mint <32,768 bytes vs >32,768 bytes (multisig batching + diff‑aware repairs/retries):
 
-Our v4 / v4e: support chunked appends via append_artifact_uri and edit_token_metadata. These are the contracts we batch and repair automatically (multisigâ€‘safe, retryable).
+Our v4 / v4e: support chunked appends via append_artifact_uri and edit_token_metadata. These are the contracts we batch and repair automatically (multisig‑safe, retryable).
 
-ZT v4a/v4c/v4d: use different entrypoints (append_token_metadata, update_token_metadata). In our UI, v4a UX opens Zeroterminalâ€”we do not run our append/repair pipeline on ZT contracts to avoid mangling parameters.
+ZT v4a/v4c/v4d: use different entrypoints (append_token_metadata, update_token_metadata). In our UI, v4a UX opens Zeroterminal—we do not run our append/repair pipeline on ZT contracts to avoid mangling parameters.
 
-Why the delineation matters: AdminTools introspects the typeHash â†’ version to choose the correct UX component and entrypoint names/argument order. We gate discoverability and version badges using hashMatrix.json + allowedHashes.js, and we pick perâ€‘version entrypoints directly from entrypointRegistry.json. This is what prevents calling, e.g., append_artifact_uri on a ZT v4a (which would 100% â€œcodexâ€‘wreckâ€ metadata).
-â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+Why the delineation matters: AdminTools introspects the typeHash → version to choose the correct UX component and entrypoint names/argument order. We gate discoverability and version badges using hashMatrix.json + allowedHashes.js, and we pick per‑version entrypoints directly from entrypointRegistry.json. This is what prevents calling, e.g., append_artifact_uri on a ZT v4a (which would 100% “codex‑wreck” metadata).
+───────────────────────────────────────────────────────────────
 CHANGELOG
 
-â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-r1187 â€” Consolidate Share appendix; enforce liveâ€‘supply semantics across explore/collections, explore/tokens, contract page, and cards; add invariants I200â€“I221; ASCII cleanup in CancelListing.
-r1186 â€” Share system overhaul: global share bus; scopeâ€‘aware ShareDialog; collection/listing SHARE buttons; handle resolver API; docs updated.
-r1185 â€” Token detail page fetches get_extrauris via RPC (tzip16) with TzKT fallback, removing Better Call Dev dependency.
-r1184 â€” Add extrauri viewer with navigation and downloadable MIME links on token detail page.
-r1183 â€” Introduce canonical slicer, migrate slice checkpoints to IndexedDB only, add dataâ€‘URI tests.
-r1182 â€” Document marketplace dialogs (Buy/List/MakeOffer) and
+───────────────────────────────────────────────────────────────
+r1187 — Consolidate Share appendix; enforce live‑supply semantics across explore/collections, explore/tokens, contract page, and cards; add invariants I200–I221; ASCII cleanup in CancelListing.
+r1186 — Share system overhaul: global share bus; scope‑aware ShareDialog; collection/listing SHARE buttons; handle resolver API; docs updated.
+r1185 — Token detail page fetches get_extrauris via RPC (tzip16) with TzKT fallback, removing Better Call Dev dependency.
+r1184 — Add extrauri viewer with navigation and downloadable MIME links on token detail page.
+r1183 — Introduce canonical slicer, migrate slice checkpoints to IndexedDB only, add data‑URI tests.
+r1182 — Document marketplace dialogs (Buy/List/MakeOffer) and
 Accept/Cancel entrypoints; extend manifest coverage for completeness.
-r1181 â€” Add Explore/Tokens documentation (scanâ€‘ahead minâ€‘yield pagination,
+r1181 — Add Explore/Tokens documentation (scan‑ahead min‑yield pagination,
 accurate totals reconciliation, preview/supply gating), clarify TzKT `/v1`
-normalization, reaffirm listings staleâ€‘listing guard & transientâ€‘prop rule.
+normalization, reaffirm listings stale‑listing guard & transient‑prop rule.
 
-r1180 â€” Add ZeroSum staleâ€‘listing guard based on TzKT balances,
-enforce /v1 base normalization, codify transientâ€‘prop rule, reaffirm noâ€‘sentinel.
+r1180 — Add ZeroSum stale‑listing guard based on TzKT balances,
+enforce /v1 base normalization, codify transient‑prop rule, reaffirm no‑sentinel.
 
 /* What changed & why: Token page now calls get_extrauris via RPC (tzip16) with TzKT fallback, removing BCD dependency; appended changelog. */
 
 -------------------------------------------------------------------------------
-ADDENDUM r1188 — Static Explore Feed, Hybrid Loader, CI, and Invariants
+ADDENDUM r1188 � Static Explore Feed, Hybrid Loader, CI, and Invariants
 -------------------------------------------------------------------------------
 
 A. New Files & Paths
 
 - Generator:
-  - scripts/exploreFeed.mjs — builds a static Explore feed under feed-dist/<network>/ with:
+  - scripts/exploreFeed.mjs � builds a static Explore feed under feed-dist/<network>/ with:
     - meta.json: { network, pageSize, pages, total, lastUpdated }
     - page-N.json: arrays of accepted tokens (contract, tokenId, metadata, holdersCount)
 
 - GitHub Actions Workflow:
-  - .github/workflows/explore-feed.yml — Detects repo root (./ or ./zerounbound), runs generator for mainnet and ghostnet, writes to feed-dist (root), adds .nojekyll, uploads artifact, deploys to GitHub Pages.
+  - .github/workflows/explore-feed.yml � Detects repo root (./ or ./zerounbound), runs generator for mainnet and ghostnet, writes to feed-dist (root), adds .nojekyll, uploads artifact, deploys to GitHub Pages.
 
 - Serverless Proxies (CORS-safe; no env vars):
-  - src/pages/api/explore/static/[net]/[page].js → proxies FEED_STATIC_BASE/<net>/page-<page>.json
-  - src/pages/api/explore/static/[net]/meta.js → proxies FEED_STATIC_BASE/<net>/meta.json
+  - src/pages/api/explore/static/[net]/[page].js ? proxies FEED_STATIC_BASE/<net>/page-<page>.json
+  - src/pages/api/explore/static/[net]/meta.js ? proxies FEED_STATIC_BASE/<net>/meta.json
 
 - Client Integration:
-  - src/pages/explore/tokens.jsx — prefers the static feed via proxy; hybrid overlay (merge live /api/explore/feed burst + static slice) for pages 0..1; meta-aware paging to avoid 404 loops; hasRenderablePreview accepts data: and tezos-storage: URIs; always-visible pagination control; single-request bursts.
+  - src/pages/explore/tokens.jsx � prefers the static feed via proxy; hybrid overlay (merge live /api/explore/feed burst + static slice) for pages 0..1; meta-aware paging to avoid 404 loops; hasRenderablePreview accepts data: and tezos-storage: URIs; always-visible pagination control; single-request bursts.
 
 - Config (identical across branches):
-  - src/config/deployTarget.js — exports FEED_STATIC_BASE (Pages root) and FEED_PAGE_SIZE (must match generator --page-size). TARGET remains the only diverging constant across branches.
+  - src/config/deployTarget.js � exports FEED_STATIC_BASE (Pages root) and FEED_PAGE_SIZE (must match generator --page-size). TARGET remains the only diverging constant across branches.
 
 B. Generator Semantics
 
@@ -751,13 +751,13 @@ B. Generator Semantics
   - decodeHexFields() before checks
   - hasRenderablePreview accepts data: and tezos-storage: URIs
   - Burn filter (fast/correct): For tokens with holdersCount==1, query balances for tz1burnburnburnburnburnburnburjAYjjX; exclude if that is the only holder.
-- Performance knobs (CI defaults): RAW_STEP=360; HARD_TIME≈180s for dense page-0; Page size=100; Max pages=120 (mainnet)/60 (ghostnet).
+- Performance knobs (CI defaults): RAW_STEP=360; HARD_TIME�180s for dense page-0; Page size=120; Max pages=200 (mainnet)/100 (ghostnet).
 
-C. Client Loader — Rules
+C. Client Loader � Rules
 
-- Preference: static via proxy → hybrid overlay for pages 0..1 → live /api/explore/feed bursts → direct TzKT (rare fallback). One request per burst.
+- Preference: static via proxy ? hybrid overlay for pages 0..1 ? live /api/explore/feed bursts ? direct TzKT (rare fallback). One request per burst.
 - Meta awareness: fetch /api/explore/static/<net>/meta once; if next static page index is beyond coverage, use live burst and mark end when empty (no infinite spinner; no 404 loops).
-- UX: “Load More” always rendered in generic mode; spinner while fetching; “No more” only when end=true.
+- UX: �Load More� always rendered in generic mode; spinner while fetching; �No more� only when end=true.
 
 D. Invariants (Append-only)
 
@@ -775,8 +775,8 @@ I110 [E] No app env vars; FEED_STATIC_BASE comes from deployTarget.js.
 
 E. Operations
 
-- Enable Actions (repo): Settings→Actions→Allow all actions; Workflow permissions: Read & write.
-- Pages: Settings→Pages→Source=GitHub Actions.
+- Enable Actions (repo): Settings?Actions?Allow all actions; Workflow permissions: Read & write.
+- Pages: Settings?Pages?Source=GitHub Actions.
 - Run workflow; verify:
   - https://jams2blues.github.io/zerounbound/mainnet/meta.json
   - https://jams2blues.github.io/zerounbound/mainnet/page-0.json
@@ -788,5 +788,48 @@ F. Change Log (r1188)
 - Added static Explore feed generator and CI workflow publishing to GitHub Pages.
 - Implemented serverless static proxies and hybrid top-of-feed loader.
 - Broadened preview acceptance (data:+ tezos-storage:), aligned generator & client.
-- Eliminated 404 loops via meta-aware paging; “Load More” always visible.
+- Eliminated 404 loops via meta-aware paging; �Load More� always visible.
 - Preserved branch invariant: deployTarget.js is the only diverging file.
+ - Global newest?oldest ordering by `firstTime` across hybrid merges; consistent selects include `firstTime`.
+ - Burn hygiene: prune previously rendered tokens for contracts just validated if not in live balances; strict no keep-all fallback on empty live sets.
+ - Generator now derives address list from typeHash set and scans via `contract.in`; workflow cadence every 5 minutes; page-size now 120 (FEED_PAGE_SIZE=120).
+
+[Addendum � Explore Feed r1188]
+
+- Generator (scripts/exploreFeed.mjs)
+  - Address-restricted scan: `/v1/contracts?typeHash.in=<hashMatrix keys>&select=address&sort.desc=lastActivityTime&limit=800` ? tokens via `/v1/tokens?contract.in=<addresses>`.
+  - Selects include `contract,tokenId,metadata,holdersCount,totalSupply,firstTime`; page items write `firstTime`.
+  - Preview acceptance: `data:` and `tezos-storage:` (after hex decode). Singles-burn guard excludes tokens whose only holder is tz1burn�
+  - Performance knobs: RAW_STEP=360; HARD_TIME�180s; page-size=120; mainnet max-pages=200; ghostnet max-pages=100.
+
+- Live aggregator (src/pages/api/explore/feed.js)
+  - Accepts `tezos-storage:`; includes `firstTime`; prefers `contract.in` with a 2-minute address cache; falls back to `typeHash.in` only if necessary.
+
+- Client (src/pages/explore/tokens.jsx)
+  - Meta gating: fetch `/api/explore/static/<net>/meta` prior to static burst; skip static if `pageIdx >= pages`.
+  - Hybrid merge: merge live + static; dedupe by `${contract}:${tokenId}`; sort by `firstTime` desc; tie-break on contract asc, tokenId desc.
+  - Burn hygiene: only keep ids present in `listLiveTokenIds()` per contract; prune previously rendered tokens for contracts just validated if not live.
+  - Beyond coverage: one live burst; if empty, one constrained TzKT burst; then mark end.
+
+- Workflow & Config
+  - .github/workflows/explore-feed.yml: cron '*/5 * * * *'; mainnet `--page-size=120 --max-pages=200`; ghostnet `--page-size=120 --max-pages=100`.
+  - src/config/deployTarget.js: `FEED_PAGE_SIZE=120` (must equal generator `--page-size`); `FEED_STATIC_BASE=https://jams2blues.github.io/zerounbound`.
+
+[Invariants � Appendix r1188]
+
+- I111 [F] Hybrid merge sorts by `firstTime` desc with stable tie-breakers (contract asc, tokenId desc).
+- I112 [F] After each burst, prune tokens from contracts just validated that lack live balances (burn hygiene; no keep-all on empty live sets).
+- I113 [E] Aggregator selects include `firstTime`, accept `tezos-storage:`, and prefer `contract.in` scans with a 2m cache of allowed addresses.
+- I114 [E] Generator derives `contract.in` from `/v1/contracts?typeHash.in=<hashMatrix>`; no broad FA2 scans.
+- I115 [I] CI cadence every 5 minutes with coverage mainnet 120/200 and ghostnet 120/100; FEED_PAGE_SIZE=120.
+- I116 [F] Beyond static coverage: single live burst, then single constrained TzKT burst; if empty, mark end (no loops).
+
+[Addendum � Auto-Load r1189]
+
+- Client (src/pages/explore/tokens.jsx)
+  - Auto-pagination: after each settled batch and when not at end, automatically triggers the next load in generic explore mode; respects existing rate limits and gating.
+  - Manual "Load More" remains available as a fallback UI.
+
+[Invariants � Appendix r1189]
+
+- I222 [F] Auto-pagination: /explore/tokens automatically continues loading additional batches after each settled burst until end=true (generic explore mode only); manual control remains as fallback.

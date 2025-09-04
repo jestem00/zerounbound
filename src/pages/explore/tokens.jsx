@@ -31,6 +31,9 @@ const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 // Static feed proxy base (served by our own domain to avoid CORS):
 // /api/explore/static/<network>/<page>
 const FEED_BASE = '/api/explore/static';
+// Auto-pagination: when true, automatically continues loading batches
+// until the end is reached (generic explore mode only).
+const AUTO_LOAD_ALL = true;
 
 /*-----------------------------------------------------------*
  * Layout
@@ -263,7 +266,7 @@ export default function ExploreTokens() {
           // beyond static coverage: try live aggregator first
           const live = await jFetch(`/api/explore/feed?offset=${encodeURIComponent(String(startOffset))}&limit=${encodeURIComponent(String(step))}`).catch(() => null);
           if (live && Array.isArray(live.items) && live.items.length) {
-            return { rows: live.items, rawCount: step, usedAgg: true, end: !!live.end };
+            return { rows: live.items, rawCount: step, usedAgg: true, end: !!live.end, origin: 'agg' };
           }
           // live yielded nothing: perform a single direct TzKT fallback
           try {
@@ -289,9 +292,9 @@ export default function ExploreTokens() {
         if (!Array.isArray(arr) || arr.length === 0) {
           const live = await jFetch(`/api/explore/feed?offset=${encodeURIComponent(String(startOffset))}&limit=${encodeURIComponent(String(step))}`).catch(() => null);
           if (live && Array.isArray(live.items)) {
-            return { rows: live.items, rawCount: step, usedAgg: true, end: true };
+            return { rows: live.items, rawCount: step, usedAgg: true, end: true, origin: 'agg' };
           }
-          return { rows: [], rawCount: step, usedAgg: true, end: true };
+          return { rows: [], rawCount: step, usedAgg: true, end: true, origin: 'agg' };
         }
         // Optional hybrid overlay for newest pages: merge live + static for extra freshness
         const HYBRID_PAGES = 2;
@@ -341,7 +344,7 @@ export default function ExploreTokens() {
           if (out.length) {
             // end is only true if both static underflows and live indicates end
             const end = (staticSlice.length < step) && liveEnd;
-            return { rows: out, rawCount: step, usedAgg: true, end };
+            return { rows: out, rawCount: step, usedAgg: true, end, origin: 'static' };
           }
         }
       } catch { /* ignore and fall through */ }
@@ -354,7 +357,7 @@ export default function ExploreTokens() {
       if (aggRes && Array.isArray(aggRes.items)) {
         const cursor = Number(aggRes.cursor || (startOffset + step));
         const rawCount = Math.max(0, cursor - startOffset) || step;
-        return { rows: aggRes.items, rawCount, usedAgg: true, end: !!aggRes.end };
+        return { rows: aggRes.items, rawCount, usedAgg: true, end: !!aggRes.end, origin: 'agg' };
       }
     }
 
@@ -401,7 +404,7 @@ export default function ExploreTokens() {
       if (Array.isArray(addrs) && addrs.length) qb.set('contract.in', addrs.join(','));
       rows = await jFetch(`${tzktV1}/tokens?${qb.toString()}`).catch(() => []);
       if (Array.isArray(rows)) {
-        return { rows, rawCount: rows.length, usedAgg: false, end: rows.length < step };
+        return { rows, rawCount: rows.length, usedAgg: false, end: rows.length < step, origin: 'tzkt' };
       }
     }
 
@@ -410,7 +413,7 @@ export default function ExploreTokens() {
       const urlStrict = `${tzktV1}/tokens?${qs.toString()}`;
       rows = await jFetch(urlStrict).catch(() => []);
     }
-    return { rows: Array.isArray(rows) ? rows : [], rawCount: Array.isArray(rows) ? rows.length : 0, usedAgg: false, end: (Array.isArray(rows) ? rows.length : 0) < step };
+    return { rows: Array.isArray(rows) ? rows : [], rawCount: Array.isArray(rows) ? rows.length : 0, usedAgg: false, end: (Array.isArray(rows) ? rows.length : 0) < step, origin: 'tzkt' };
   }, [tzktV1, contractFilter, adminFilter]);
 
   /** admin-filtered token discovery (creator/firstMinter/meta authors/creators). */
@@ -524,8 +527,8 @@ export default function ExploreTokens() {
     if (initial) setLoading(true);
 
     const PAGE            = 48;             // server page size
-    const MIN_YIELD_INIT  = 12;             // faster first paint (yield early)
-    const MIN_YIELD_CLICK = 10;             // guarantee =10 new cards per click
+    const MIN_YIELD_INIT  = AUTO_LOAD_ALL ? 24 : 12;   // faster first paint (yield early)
+    const MIN_YIELD_CLICK = AUTO_LOAD_ALL ? 36 : 10;   // larger step when auto-loading
     const SOFT_SCAN_ROWS  = initial ? PAGE * 16 : PAGE * 48; // keep rate-limit friendly
     const WINDOW          = 1; // single request per loop; aggregator scans ahead // small concurrency window
     const TIME_BUDGET_MS  = initial ? 8_000 : 6_000; // break early to avoid UI stall
@@ -609,6 +612,7 @@ export default function ExploreTokens() {
           const raw = Number(res?.rawCount ?? got) || got;
           const isAgg = !!res?.usedAgg;
           const endFlag = !!res?.end;
+          const origin = res?.origin || (isAgg ? 'agg' : 'tzkt');
           windowRows += got;
           windowRaw  += raw;
           scannedRows += raw;
@@ -619,6 +623,7 @@ export default function ExploreTokens() {
             if (Number.isFinite(typeHash) && !ALLOWED_TYPE_HASHES.has(typeHash)) continue;
             const t = normalizeAndAcceptToken(r);
             if (!t) continue;
+            try { Object.defineProperty(t, '__origin', { value: origin, enumerable: false }); } catch { /* ignore */ }
             const key = `${t.contract}:${t.tokenId}`;
             if (!seenTok.current.has(key)) {
               seenTok.current.add(key);
@@ -638,25 +643,34 @@ export default function ExploreTokens() {
       // Filter out fully burned tokens using live id sets per contract
       try {
         const net = tzktV1.includes('ghostnet') ? 'ghostnet' : 'mainnet';
-        const groups = new Map(); // kt -> tokens[]
+        const groups = new Map(); // kt -> tokens[] (only for tokens needing verification)
         const liveByC = new Map(); // kt -> Set(liveIds)
+        let needCheck = false;
         for (const t of next) {
           const kt = t.contract;
           if (!kt) continue;
-          if (!groups.has(kt)) groups.set(kt, []);
-          groups.get(kt).push(t);
-        }
-        const keepAll = [];
-        for (const [kt, arr] of groups.entries()) {
-          let live = [];
-          try { live = await listLiveTokenIds(kt, net, false); } catch { live = []; }
-          const liveSet = new Set(live.map(Number));
-          liveByC.set(kt, liveSet);
-          for (const t of arr) {
-            if (liveSet.has(Number(t.tokenId))) keepAll.push(t);
+          const origin = (t && t.__origin) || '';
+          if (origin === 'tzkt') { // only verify fallback TzKT items
+            if (!groups.has(kt)) groups.set(kt, []);
+            groups.get(kt).push(t);
+            needCheck = true;
           }
         }
-        next.length = 0; Array.prototype.push.apply(next, keepAll);
+        if (needCheck) {
+          const keepAll = [];
+          for (const [kt, arr] of groups.entries()) {
+            let live = [];
+            try { live = await listLiveTokenIds(kt, net, false); } catch { live = []; }
+            const liveSet = new Set(live.map(Number));
+            liveByC.set(kt, liveSet);
+            for (const t of arr) {
+              if (liveSet.has(Number(t.tokenId))) keepAll.push(t);
+            }
+          }
+          // Replace only the verified subset; keep non-verified origins as-is
+          const others = next.filter((t) => ((t && t.__origin) !== 'tzkt'));
+          next.length = 0; Array.prototype.push.apply(next, others.concat(keepAll));
+        }
       } catch { /* best effort */ }
 
       setTokens((prev) => {
@@ -743,6 +757,17 @@ export default function ExploreTokens() {
       loadPage(false);
     }
   }, [fetching, end, adminFilter, loadPage]);
+
+  // Auto-pagination: after a batch commits and we are not at end, continue.
+  useEffect(() => {
+    if (!AUTO_LOAD_ALL) return;
+    if (adminFilter) return;         // Only in generic explore mode
+    if (end) return;                 // Stop at coverage end
+    if (fetching) return;            // Wait for in-flight batch
+    // tokens.length change signals a settled batch; load next shortly
+    const id = setTimeout(() => { loadPage(false); }, 120);
+    return () => clearTimeout(id);
+  }, [tokens.length, fetching, end, adminFilter, loadPage]);
 
   /*-------- render --------*/
 

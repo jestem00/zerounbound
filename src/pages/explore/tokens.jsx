@@ -250,15 +250,40 @@ export default function ExploreTokens() {
       try {
         const url = `${FEED_BASE.replace(/\/+$/,'')}/${netKey}/${pageIdx}`;
         const arr = await jFetch(url, 1, { ttl: 10_000 }).catch(() => []);
-        if (Array.isArray(arr) && arr.length) {
-          const slice = arr.slice(inPageOff, inPageOff + step).map((r) => ({
+        // Optional hybrid overlay for newest pages: merge live + static for extra freshness
+        const HYBRID_PAGES = 2;
+        let liveRows = [];
+        let liveEnd = false;
+        if (pageIdx < HYBRID_PAGES) {
+          const live = await jFetch(`/api/explore/feed?offset=${encodeURIComponent(String(startOffset))}&limit=${encodeURIComponent(String(step))}`)
+            .catch(() => null);
+          if (live && Array.isArray(live.items)) {
+            liveRows = live.items;
+            liveEnd = !!live.end;
+          }
+        }
+        if (Array.isArray(arr)) {
+          const staticSlice = arr.slice(inPageOff, inPageOff + step).map((r) => ({
             contract: r.contract,
             tokenId: Number(r.tokenId),
             metadata: r.metadata || {},
             holdersCount: r.holdersCount,
           }));
-          if (slice.length) {
-            return { rows: slice, rawCount: step, usedAgg: true, end: slice.length < step };
+          // merge: prefer live first, then fill from static; de-dupe by contract:tokenId
+          const seen = new Set();
+          const out = [];
+          const add = (rows) => {
+            for (const r of (rows || [])) {
+              const k = `${r.contract?.address || r.contract}:${Number(r.tokenId)}`;
+              if (!seen.has(k)) { seen.add(k); out.push(r); if (out.length >= step) break; }
+            }
+          };
+          add(liveRows);
+          if (out.length < step) add(staticSlice);
+          if (out.length) {
+            // end is only true if both static underflows and live indicates end
+            const end = (staticSlice.length < step) && liveEnd;
+            return { rows: out, rawCount: step, usedAgg: true, end };
           }
         }
       } catch { /* ignore and fall through */ }
@@ -748,6 +773,7 @@ export default function ExploreTokens() {
    • Kept initial scan snappy (=24 accepted) for a full first impression.
    • Preserved perfect admin-filter behaviour; left title “Tokens by … (N)”.
    • Lint-clean: trimmed unused imports/vars; no dead code. */
+
 
 
 

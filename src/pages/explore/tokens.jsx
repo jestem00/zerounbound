@@ -465,13 +465,11 @@ export default function ExploreTokens() {
       const keep = [];
       for (const [kt, ids] of byC.entries()) {
         // list of live ids (not fully burned) for this contract
-        // listLiveTokenIds returns [] on failure, which will drop all for that kt; guard below
         let live = [];
         try { live = await listLiveTokenIds(kt, net, false); } catch { live = []; }
         const liveSet = new Set(live.map(Number));
         for (const t of out) {
           if (t.contract !== kt) continue;
-          if (liveSet.size === 0) { keep.push(t); continue; }
           if (liveSet.has(Number(t.tokenId))) keep.push(t);
         }
       }
@@ -641,6 +639,7 @@ export default function ExploreTokens() {
       try {
         const net = tzktV1.includes('ghostnet') ? 'ghostnet' : 'mainnet';
         const groups = new Map(); // kt -> tokens[]
+        const liveByC = new Map(); // kt -> Set(liveIds)
         for (const t of next) {
           const kt = t.contract;
           if (!kt) continue;
@@ -652,8 +651,9 @@ export default function ExploreTokens() {
           let live = [];
           try { live = await listLiveTokenIds(kt, net, false); } catch { live = []; }
           const liveSet = new Set(live.map(Number));
+          liveByC.set(kt, liveSet);
           for (const t of arr) {
-            if (liveSet.size === 0 || liveSet.has(Number(t.tokenId))) keepAll.push(t);
+            if (liveSet.has(Number(t.tokenId))) keepAll.push(t);
           }
         }
         next.length = 0; Array.prototype.push.apply(next, keepAll);
@@ -668,7 +668,18 @@ export default function ExploreTokens() {
           have.add(k);
           return true;
         });
-        const merged = dedupeTokens(filteredNext.length ? prev.concat(filteredNext) : prev);
+        // Prune any previously shown tokens that are no longer live (for just-checked contracts)
+        let base = prev;
+        try {
+          if (typeof liveByC !== 'undefined' && liveByC && liveByC.size) {
+            base = prev.filter((t) => {
+              const set = liveByC.get(t.contract);
+              if (!set) return true; // not evaluated this round
+              return set.has(Number(t.tokenId));
+            });
+          }
+        } catch { base = prev; }
+        const merged = dedupeTokens(filteredNext.length ? base.concat(filteredNext) : base);
         // Global stable newest→oldest order by firstTime, with tie-breakers
         merged.sort((a, b) => {
           const ta = Date.parse(a.firstTime || 0) || 0;

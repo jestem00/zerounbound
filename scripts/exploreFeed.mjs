@@ -122,7 +122,8 @@ async function buildFeed(){
   }
 
   // Write pages
-  const outDir = path.join(repoRoot, 'feed-dist', NETWORK);
+  const outBase = process.env.FEED_OUT_DIR ? path.resolve(process.env.FEED_OUT_DIR) : path.join(repoRoot, 'feed-dist');
+  const outDir = path.join(outBase, NETWORK);
   fs.mkdirSync(outDir, { recursive: true });
   const pages = Math.ceil(accepted.length / PAGE_SIZE);
   for (let i=0;i<pages;i+=1){
@@ -136,4 +137,3 @@ async function buildFeed(){
 }
 
 buildFeed().catch(e=>{ console.error(e); process.exit(1); });
-

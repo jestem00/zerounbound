@@ -27,10 +27,21 @@ jobs:
           node-version: '20'
 
       - name: Generate feed (mainnet)
-        run: node zerounbound/scripts/exploreFeed.mjs --network=mainnet --page-size=100 --max-pages=120
+        run: |
+          set -e
+          if [ -f scripts/exploreFeed.mjs ]; then SCRIPT="scripts/exploreFeed.mjs"; elif [ -f zerounbound/scripts/exploreFeed.mjs ]; then SCRIPT="zerounbound/scripts/exploreFeed.mjs"; else echo "feed script not found"; exit 1; fi
+          FEED_OUT_DIR="$GITHUB_WORKSPACE/feed-dist" node "$SCRIPT" --network=mainnet --page-size=100 --max-pages=120
 
       - name: Generate feed (ghostnet)
-        run: node zerounbound/scripts/exploreFeed.mjs --network=ghostnet --page-size=100 --max-pages=60
+        run: |
+          set -e
+          if [ -f scripts/exploreFeed.mjs ]; then SCRIPT="scripts/exploreFeed.mjs"; elif [ -f zerounbound/scripts/exploreFeed.mjs ]; then SCRIPT="zerounbound/scripts/exploreFeed.mjs"; else echo "feed script not found"; exit 1; fi
+          FEED_OUT_DIR="$GITHUB_WORKSPACE/feed-dist" node "$SCRIPT" --network=ghostnet --page-size=100 --max-pages=60
+
+      - name: Add .nojekyll
+        run: |
+          mkdir -p feed-dist
+          touch feed-dist/.nojekyll
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
@@ -50,4 +61,3 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-

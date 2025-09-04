@@ -100,12 +100,12 @@ function hasRenderablePreview(m = {}) {
   ];
   for (const k of keys) {
     const v = m && typeof m === 'object' ? m[k] : null;
-    if (isDataUri(v)) return true;
+    if (isDataUri(v) || (typeof v === 'string' && /^tezos-storage:/i.test(v.trim()))) return true;
   }
   if (Array.isArray(m?.formats)) {
     for (const f of m.formats) {
       const cand = f?.uri || f?.url;
-      if (isDataUri(cand)) return true;
+      if (isDataUri(cand) || (typeof cand === 'string' && /^tezos-storage:/i.test(cand.trim()))) return true;
     }
   }
   return false;
@@ -214,6 +214,7 @@ export default function ExploreTokens() {
 
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState('');
+  const [feedPages, setFeedPages] = useState(null); // null=unknown, number=static pages count
 
   // de-dupe (global to component lifetime)
   const seenTok = useRef(new Set());
@@ -231,6 +232,7 @@ export default function ExploreTokens() {
     setError('');
     warmSeeded.current = false;
     perContract.current = { list: [], offsets: new Map(), idx: 0, ready: false };
+    setFeedPages(null);
   }, [adminFilter, contractFilter, tzktV1]);
 
   /*-------- queries --------*/
@@ -248,6 +250,22 @@ export default function ExploreTokens() {
       const pageIdx = Math.floor(startOffset / FEED_PAGE_SIZE);
       const inPageOff = startOffset % FEED_PAGE_SIZE;
       try {
+        // fetch meta once to know how many static pages exist
+        if (feedPages === null) {
+          const meta = await jFetch(`${FEED_BASE.replace(/\/+$/,'')}/${netKey}/meta`, 1, { ttl: 20_000 }).catch(() => ({}));
+          const p = Number(meta?.pages || 0);
+          if (Number.isFinite(p) && p > 0) setFeedPages(p);
+          else setFeedPages(0);
+        }
+        if (typeof feedPages === 'number' && feedPages >= 0 && pageIdx >= feedPages) {
+          // beyond static coverage: rely on live aggregator only
+          const live = await jFetch(`/api/explore/feed?offset=${encodeURIComponent(String(startOffset))}&limit=${encodeURIComponent(String(step))}`).catch(() => null);
+          if (live && Array.isArray(live.items) && live.items.length) {
+            return { rows: live.items, rawCount: step, usedAgg: true, end: !!live.end };
+          }
+          // If live also yields nothing, mark end for this path
+          return { rows: [], rawCount: step, usedAgg: true, end: true };
+        }
         const url = `${FEED_BASE.replace(/\/+$/,'')}/${netKey}/${pageIdx}`;
         const arr = await jFetch(url, 1, { ttl: 10_000 }).catch(() => []);
         // Optional hybrid overlay for newest pages: merge live + static for extra freshness

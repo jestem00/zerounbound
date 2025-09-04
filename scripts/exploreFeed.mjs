@@ -30,10 +30,16 @@ const apiBase = NETWORK === 'ghostnet' ? 'https://api.ghostnet.tzkt.io/v1' : 'ht
 function isDataUri(str) {
   return typeof str === 'string' && /^data:(image|video|audio|text\/html|image\/svg\+xml)/i.test(str.trim());
 }
+function isTezosStorage(str) {
+  return typeof str === 'string' && /^tezos-storage:/i.test(str.trim());
+}
 function hasRenderablePreview(m = {}) {
   const keys = ['displayUri','display_uri','imageUri','image_uri','image','thumbnailUri','thumbnail_uri','artifactUri','artifact_uri','mediaUri','media_uri'];
-  for (const k of keys) { const v = m && typeof m === 'object' ? m[k] : null; if (isDataUri(v)) return true; }
-  if (Array.isArray(m?.formats)) for (const f of m.formats) { const u = f?.uri || f?.url; if (isDataUri(u)) return true; }
+  for (const k of keys) {
+    const v = m && typeof m === 'object' ? m[k] : null;
+    if (isDataUri(v) || isTezosStorage(v)) return true;
+  }
+  if (Array.isArray(m?.formats)) for (const f of m.formats) { const u = f?.uri || f?.url; if (isDataUri(u) || isTezosStorage(u)) return true; }
   return false;
 }
 
@@ -87,8 +93,8 @@ async function singlesBurned(kt, ids){
 async function buildFeed(){
   const accepted = [];
   let offset = 0;
-  const RAW_STEP = 180; // raw TzKT page per scan
-  const HARD_TIME = Date.now()+ 1000*90; // 90s cap for action step
+  const RAW_STEP = 360; // raw TzKT page per scan
+  const HARD_TIME = Date.now()+ 1000*180; // 180s cap for action step
 
   while (accepted.length < MAX_ACCEPTED && Date.now() < HARD_TIME){
     const chunk = await pageTokens(offset, RAW_STEP);

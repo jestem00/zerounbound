@@ -833,3 +833,29 @@ F. Change Log (r1188)
 [Invariants — Appendix r1189]
 
 - I222 [F] Auto-pagination: /explore/tokens automatically continues loading additional batches after each settled burst until end=true (generic explore mode only); manual control remains as fallback.
+[Addendum — Final Explore Hardening r1190 — 2025-09-04 UTC]
+
+- Client (src/pages/explore/tokens.jsx)
+  - Strict live-balance verification per contract for every next-batch token, regardless of source (static | aggregator | tzkt). Keeps only tokenIds present in the live id set (via listLiveTokenIds) for that contract.
+  - Post-commit pruning: for contracts just validated, remove previously rendered tokens that are no longer live.
+  - Normalized dedupe key: uses a trimmed contract address and numeric 	okenId for ${contract}:.
+  - Auto-pagination tuned: min-accept per burst is 24 (initial and subsequent) to balance speed and verification load.
+
+- Utilities (src/utils/listLiveTokenIds.js)
+  - TTL increased to 60 seconds to reduce redundant contract scans during continuous auto-loading.
+
+- Outcome
+  - No fully burned tokens appear; duplicates eliminated; ordering remains newest?oldest by irstTime with stable tie-breakers.
+
+[Invariants — Appendix r1190]
+
+- I223 [F] Next-batch tokens are kept only if present in the live id set for their contract; this applies to static, aggregator, and fallback TzKT sources.
+- I224 [F] After validation, tokens already rendered for the evaluated contracts are pruned if they are not in the live id set (no stale/burned remnants).
+- I225 [F] Dedupe key is ${contract}: with contract normalized (trimmed) and 	okenId coerced to a number before comparison.
+- I226 [E] listLiveTokenIds caches results for 60 seconds per (network, contract) to minimize repeated scans under auto-pagination while preserving accuracy.
+- I227 [F] Auto-pagination burst size targets: initial 24, subsequent 24; honors meta gating, end-of-coverage rules, and time budgets.
+
+[Progress Ledger — r1190]
+
+- r1190 — 2025-09-04 — Final burn hygiene and dedupe normalization
+  - Client verifies liveness for all sources per-contract and prunes prior items for validated contracts; normalized dedupe keys; tuned auto-burst sizes; raised live-id TTL to 60s.

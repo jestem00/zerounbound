@@ -157,8 +157,9 @@ function normalizeAndAcceptToken(row) {
   let md = row.metadata || {};
   try { md = decodeHexFields(md); } catch { /* best effort */ }
   if (!hasRenderablePreview(md)) return null;
+  const addr = String(row.contract?.address || row.contract || '').trim();
   return {
-    contract: row.contract?.address || row.contract || '',
+    contract: addr,
     tokenId:  Number(row.tokenId),
     metadata: md,
     holdersCount: row.holdersCount,
@@ -528,7 +529,7 @@ export default function ExploreTokens() {
 
     const PAGE            = 48;             // server page size
     const MIN_YIELD_INIT  = AUTO_LOAD_ALL ? 24 : 12;   // faster first paint (yield early)
-    const MIN_YIELD_CLICK = AUTO_LOAD_ALL ? 36 : 10;   // larger step when auto-loading
+    const MIN_YIELD_CLICK = AUTO_LOAD_ALL ? 24 : 10;   // balanced step when auto-loading
     const SOFT_SCAN_ROWS  = initial ? PAGE * 16 : PAGE * 48; // keep rate-limit friendly
     const WINDOW          = 1; // single request per loop; aggregator scans ahead // small concurrency window
     const TIME_BUDGET_MS  = initial ? 8_000 : 6_000; // break early to avoid UI stall
@@ -643,34 +644,25 @@ export default function ExploreTokens() {
       // Filter out fully burned tokens using live id sets per contract
       try {
         const net = tzktV1.includes('ghostnet') ? 'ghostnet' : 'mainnet';
-        const groups = new Map(); // kt -> tokens[] (only for tokens needing verification)
+        const groups = new Map(); // kt -> tokens[]
         const liveByC = new Map(); // kt -> Set(liveIds)
-        let needCheck = false;
         for (const t of next) {
           const kt = t.contract;
           if (!kt) continue;
-          const origin = (t && t.__origin) || '';
-          if (origin === 'tzkt') { // only verify fallback TzKT items
-            if (!groups.has(kt)) groups.set(kt, []);
-            groups.get(kt).push(t);
-            needCheck = true;
+          if (!groups.has(kt)) groups.set(kt, []);
+          groups.get(kt).push(t);
+        }
+        const keepAll = [];
+        for (const [kt, arr] of groups.entries()) {
+          let live = [];
+          try { live = await listLiveTokenIds(kt, net, false); } catch { live = []; }
+          const liveSet = new Set(live.map(Number));
+          liveByC.set(kt, liveSet);
+          for (const t of arr) {
+            if (liveSet.has(Number(t.tokenId))) keepAll.push(t);
           }
         }
-        if (needCheck) {
-          const keepAll = [];
-          for (const [kt, arr] of groups.entries()) {
-            let live = [];
-            try { live = await listLiveTokenIds(kt, net, false); } catch { live = []; }
-            const liveSet = new Set(live.map(Number));
-            liveByC.set(kt, liveSet);
-            for (const t of arr) {
-              if (liveSet.has(Number(t.tokenId))) keepAll.push(t);
-            }
-          }
-          // Replace only the verified subset; keep non-verified origins as-is
-          const others = next.filter((t) => ((t && t.__origin) !== 'tzkt'));
-          next.length = 0; Array.prototype.push.apply(next, others.concat(keepAll));
-        }
+        next.length = 0; Array.prototype.push.apply(next, keepAll);
       } catch { /* best effort */ }
 
       setTokens((prev) => {

@@ -11,7 +11,7 @@ import { TZKT_API } from '../config/deployTarget.js';
 const MEM        = new Map();                       /* ids only              */
 const MEM_NAMES  = new Map();                       /* [{id,name}]           */
 const BURN_ADDR  = 'tz1burnburnburnburnburnburnburjAYjjX';
-const TTL_MS     = 30_000;
+const TTL_MS     = 60_000;
 const CHUNK      = 80;                              /* per‑metadata chunk    */
 const PAGE       = 10_000;                          /* TzKT hard‑cap         */
 

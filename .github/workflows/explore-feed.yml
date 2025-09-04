@@ -26,11 +26,37 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Detect repo root
+        id: root
+        shell: bash
+        run: |
+          set -e
+          if [ -f scripts/exploreFeed.mjs ]; then
+            echo "dir=." >> $GITHUB_OUTPUT
+          elif [ -f zerounbound/scripts/exploreFeed.mjs ]; then
+            echo "dir=zerounbound" >> $GITHUB_OUTPUT
+          else
+            echo "::error::exploreFeed.mjs not found in repo"; ls -la; exit 1
+          fi
+
       - name: Generate feed (mainnet)
-        run: node zerounbound/scripts/exploreFeed.mjs --network=mainnet --page-size=100 --max-pages=120
+        shell: bash
+        working-directory: ${{ steps.root.outputs.dir }}
+        run: |
+          set -e
+          FEED_OUT_DIR="$GITHUB_WORKSPACE/feed-dist" node scripts/exploreFeed.mjs --network=mainnet --page-size=100 --max-pages=120
 
       - name: Generate feed (ghostnet)
-        run: node zerounbound/scripts/exploreFeed.mjs --network=ghostnet --page-size=100 --max-pages=60
+        shell: bash
+        working-directory: ${{ steps.root.outputs.dir }}
+        run: |
+          set -e
+          FEED_OUT_DIR="$GITHUB_WORKSPACE/feed-dist" node scripts/exploreFeed.mjs --network=ghostnet --page-size=100 --max-pages=60
+
+      - name: Add .nojekyll
+        run: |
+          mkdir -p feed-dist
+          touch feed-dist/.nojekyll
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

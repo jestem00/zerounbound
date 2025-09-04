@@ -63,15 +63,26 @@ async function j(url){
   return ct.includes('application/json') ? res.json() : res.text().then(t => { try{return JSON.parse(t);}catch{return [];}});
 }
 
+async function listAllowedContracts(){
+  const qs = new URLSearchParams();
+  qs.set('typeHash.in', TYPE_HASHES);
+  qs.set('select', 'address');
+  qs.set('sort.desc', 'lastActivityTime');
+  qs.set('limit', '800');
+  const rows = await j(`${apiBase}/contracts?${qs.toString()}`).catch(()=>[]);
+  return (rows||[]).map(r => r.address || r).filter(Boolean);
+}
+
 async function pageTokens(offset=0, limit=120){
+  const addrs = await listAllowedContracts();
   const qs = new URLSearchParams();
   qs.set('standard','fa2');
   qs.set('sort.desc','firstTime');
   qs.set('offset', String(offset));
   qs.set('limit',  String(limit));
   qs.set('totalSupply.gt','0');
-  qs.set('select','contract,tokenId,metadata,holdersCount,totalSupply,contract.typeHash');
-  qs.set('contract.typeHash.in', TYPE_HASHES);
+  qs.set('select','contract,tokenId,metadata,holdersCount,totalSupply,firstTime');
+  if (addrs.length) qs.set('contract.in', addrs.join(','));
   return j(`${apiBase}/tokens?${qs.toString()}`).catch(()=>[]);
 }
 
@@ -123,6 +134,7 @@ async function buildFeed(){
       tokenId : Number(r.tokenId),
       metadata: r.metadata,
       holdersCount: r.holdersCount,
+      firstTime: r.firstTime,
     })));
     offset += rawLen;
   }

@@ -3,7 +3,7 @@ name: Build & Deploy Explore Feed
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/1 * * * *'  # every 1 minutes
+    - cron: '*/5 * * * *'  # every 5 minutes
 
 permissions:
   contents: read
@@ -44,14 +44,14 @@ jobs:
         working-directory: ${{ steps.root.outputs.dir }}
         run: |
           set -e
-          FEED_OUT_DIR="$GITHUB_WORKSPACE/feed-dist" node scripts/exploreFeed.mjs --network=mainnet --page-size=100 --max-pages=120
+          FEED_OUT_DIR="$GITHUB_WORKSPACE/feed-dist" node scripts/exploreFeed.mjs --network=mainnet --page-size=120 --max-pages=200
 
       - name: Generate feed (ghostnet)
         shell: bash
         working-directory: ${{ steps.root.outputs.dir }}
         run: |
           set -e
-          FEED_OUT_DIR="$GITHUB_WORKSPACE/feed-dist" node scripts/exploreFeed.mjs --network=ghostnet --page-size=100 --max-pages=60
+          FEED_OUT_DIR="$GITHUB_WORKSPACE/feed-dist" node scripts/exploreFeed.mjs --network=ghostnet --page-size=120 --max-pages=100
 
       - name: Add .nojekyll
         run: |

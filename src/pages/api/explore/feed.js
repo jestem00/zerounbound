@@ -20,6 +20,9 @@ const apiBase = `${String(TZKT_API || '').replace(/\/+$/, '')}/v1`;
 function isDataUri(str) {
   return typeof str === 'string' && /^data:(image|video|audio|text\/html|image\/svg\+xml)/i.test(str.trim());
 }
+function isTezosStorage(str) {
+  return typeof str === 'string' && /^tezos-storage:/i.test(str.trim());
+}
 function hasRenderablePreview(m = {}) {
   const keys = [
     'displayUri', 'display_uri',
@@ -30,12 +33,12 @@ function hasRenderablePreview(m = {}) {
   ];
   for (const k of keys) {
     const v = m && typeof m === 'object' ? m[k] : null;
-    if (isDataUri(v)) return true;
+    if (isDataUri(v) || isTezosStorage(v)) return true;
   }
   if (Array.isArray(m?.formats)) {
     for (const f of m.formats) {
       const cand = f?.uri || f?.url;
-      if (isDataUri(cand)) return true;
+      if (isDataUri(cand) || isTezosStorage(cand)) return true;
     }
   }
   return false;
@@ -49,45 +52,52 @@ async function j(url) {
   return res.text().then((t) => { try { return JSON.parse(t); } catch { return []; } });
 }
 
-async function listTokens(contractFilter, offset = 0, limit = 48) {
-  // Prefer nested typeHash filter for full family coverage; fall back to contract.in
-  const qs = new URLSearchParams();
-  qs.set('standard', 'fa2');
-  qs.set('sort.desc', 'firstTime');
-  qs.set('offset', String(Math.max(0, offset|0)));
-  qs.set('limit',  String(Math.max(1, Math.min(200, limit|0))));
-  qs.set('totalSupply.gt', '0');
-  qs.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply,contract.typeHash');
-  if (contractFilter && /^KT1[0-9A-Za-z]{33}$/.test(contractFilter)) {
-    qs.set('contract', contractFilter);
-  } else {
-    qs.set('contract.typeHash.in', TYPE_HASHES);
+let ALLOWED_ADDR_CACHE = { at: 0, list: [] };
+async function getAllowedContracts() {
+  const now = Date.now();
+  if (ALLOWED_ADDR_CACHE.list.length && (now - ALLOWED_ADDR_CACHE.at) < 2 * 60_000) {
+    return ALLOWED_ADDR_CACHE.list;
   }
-  let rows = await j(`${apiBase}/tokens?${qs.toString()}`).catch(() => []);
-  if (Array.isArray(rows) && rows.length) return rows;
+  const cq = new URLSearchParams();
+  cq.set('typeHash.in', TYPE_HASHES);
+  cq.set('select', 'address');
+  cq.set('sort.desc', 'lastActivityTime');
+  cq.set('limit', '800');
+  const contracts = await j(`${apiBase}/contracts?${cq.toString()}`).catch(() => []);
+  const addrs = (contracts || []).map((r) => (typeof r === 'string' ? r : r.address)).filter(Boolean);
+  ALLOWED_ADDR_CACHE = { at: now, list: addrs };
+  return addrs;
+}
 
+async function listTokens(contractFilter, offset = 0, limit = 48) {
+  const baseParams = () => {
+    const p = new URLSearchParams();
+    p.set('standard', 'fa2');
+    p.set('sort.desc', 'firstTime');
+    p.set('offset', String(Math.max(0, offset|0)));
+    p.set('limit',  String(Math.max(1, Math.min(200, limit|0))));
+    p.set('totalSupply.gt', '0');
+    p.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply,firstTime');
+    return p;
+  };
+
+  // Prefer contract.in list to avoid broad FA2 scans; fallback if empty
   if (!contractFilter) {
     try {
-      const cq = new URLSearchParams();
-      cq.set('typeHash.in', TYPE_HASHES);
-      cq.set('select', 'address');
-      cq.set('sort.desc', 'lastActivityTime');
-      cq.set('limit', '800');
-      const contracts = await j(`${apiBase}/contracts?${cq.toString()}`);
-      const addrs = (contracts || []).map((r) => (typeof r === 'string' ? r : r.address)).filter(Boolean);
+      const addrs = await getAllowedContracts();
       if (addrs.length) {
-        const qb = new URLSearchParams();
-        qb.set('standard', 'fa2');
-        qb.set('sort.desc', 'firstTime');
-        qb.set('offset', String(Math.max(0, offset|0)));
-        qb.set('limit',  String(Math.max(1, Math.min(200, limit|0))));
-        qb.set('totalSupply.gt', '0');
-        qb.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply');
+        const qb = baseParams();
         qb.set('contract.in', addrs.join(','));
-        rows = await j(`${apiBase}/tokens?${qb.toString()}`);
+        const rows = await j(`${apiBase}/tokens?${qb.toString()}`).catch(() => []);
+        if (Array.isArray(rows) && rows.length) return rows;
       }
-    } catch { rows = []; }
+    } catch { /* ignore */ }
   }
+
+  const qs = baseParams();
+  if (contractFilter && /^KT1[0-9A-Za-z]{33}$/.test(contractFilter)) qs.set('contract', contractFilter);
+  else qs.set('contract.typeHash.in', TYPE_HASHES);
+  const rows = await j(`${apiBase}/tokens?${qs.toString()}`).catch(() => []);
   return Array.isArray(rows) ? rows : [];
 }
 

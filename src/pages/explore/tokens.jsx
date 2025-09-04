@@ -161,6 +161,7 @@ function normalizeAndAcceptToken(row) {
     holdersCount: row.holdersCount,
     creator: row.creator,
     firstMinter: row.firstMinter,
+    firstTime: row.firstTime,
   };
 }
 
@@ -251,23 +252,47 @@ export default function ExploreTokens() {
       const inPageOff = startOffset % FEED_PAGE_SIZE;
       try {
         // fetch meta once to know how many static pages exist
-        if (feedPages === null) {
+        let pagesLocal = feedPages;
+        if (pagesLocal === null) {
           const meta = await jFetch(`${FEED_BASE.replace(/\/+$/,'')}/${netKey}/meta`, 1, { ttl: 20_000 }).catch(() => ({}));
           const p = Number(meta?.pages || 0);
-          if (Number.isFinite(p) && p > 0) setFeedPages(p);
-          else setFeedPages(0);
+          pagesLocal = Number.isFinite(p) && p > 0 ? p : 0;
+          setFeedPages(pagesLocal);
         }
-        if (typeof feedPages === 'number' && feedPages >= 0 && pageIdx >= feedPages) {
-          // beyond static coverage: rely on live aggregator only
+        if (typeof pagesLocal === 'number' && pagesLocal >= 0 && pageIdx >= pagesLocal) {
+          // beyond static coverage: try live aggregator first
           const live = await jFetch(`/api/explore/feed?offset=${encodeURIComponent(String(startOffset))}&limit=${encodeURIComponent(String(step))}`).catch(() => null);
           if (live && Array.isArray(live.items) && live.items.length) {
             return { rows: live.items, rawCount: step, usedAgg: true, end: !!live.end };
           }
-          // If live also yields nothing, mark end for this path
+          // live yielded nothing: perform a single direct TzKT fallback
+          try {
+            const qb = new URLSearchParams();
+            qb.set('standard', 'fa2');
+            qb.set('sort.desc', 'firstTime');
+            qb.set('offset', String(startOffset));
+            qb.set('limit', String(step));
+            qb.set('totalSupply.gt', '0');
+            qb.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply,contract.typeHash,firstTime');
+            qb.set('contract.typeHash.in', [...ALLOWED_TYPE_HASHES].join(','));
+            const rows = await jFetch(`${tzktV1}/tokens?${qb.toString()}`).catch(() => []);
+            if (Array.isArray(rows) && rows.length) {
+              return { rows, rawCount: rows.length, usedAgg: false, end: rows.length < step };
+            }
+          } catch { /* ignore */ }
+          // Nothing to show; mark end and stop.
           return { rows: [], rawCount: step, usedAgg: true, end: true };
         }
         const url = `${FEED_BASE.replace(/\/+$/,'')}/${netKey}/${pageIdx}`;
         const arr = await jFetch(url, 1, { ttl: 10_000 }).catch(() => []);
+        // If the static page yields nothing (e.g., 404 -> []), treat as beyond coverage
+        if (!Array.isArray(arr) || arr.length === 0) {
+          const live = await jFetch(`/api/explore/feed?offset=${encodeURIComponent(String(startOffset))}&limit=${encodeURIComponent(String(step))}`).catch(() => null);
+          if (live && Array.isArray(live.items)) {
+            return { rows: live.items, rawCount: step, usedAgg: true, end: true };
+          }
+          return { rows: [], rawCount: step, usedAgg: true, end: true };
+        }
         // Optional hybrid overlay for newest pages: merge live + static for extra freshness
         const HYBRID_PAGES = 2;
         let liveRows = [];
@@ -286,18 +311,33 @@ export default function ExploreTokens() {
             tokenId: Number(r.tokenId),
             metadata: r.metadata || {},
             holdersCount: r.holdersCount,
+            firstTime: r.firstTime,
           }));
-          // merge: prefer live first, then fill from static; de-dupe by contract:tokenId
+          // Merge live + static, de-dupe, then sort by firstTime desc with tie-breaker
           const seen = new Set();
-          const out = [];
+          const union = [];
           const add = (rows) => {
             for (const r of (rows || [])) {
               const k = `${r.contract?.address || r.contract}:${Number(r.tokenId)}`;
-              if (!seen.has(k)) { seen.add(k); out.push(r); if (out.length >= step) break; }
+              if (!seen.has(k)) { seen.add(k); union.push(r); }
             }
           };
           add(liveRows);
-          if (out.length < step) add(staticSlice);
+          add(staticSlice);
+          const out = union
+            .map((r) => ({
+              ...r,
+              firstTime: r.firstTime,
+            }))
+            .sort((a, b) => {
+              const ta = Date.parse(a.firstTime || 0) || 0;
+              const tb = Date.parse(b.firstTime || 0) || 0;
+              if (tb !== ta) return tb - ta;
+              // tie-breaker on contract then tokenId desc
+              if (a.contract !== b.contract) return a.contract > b.contract ? 1 : -1;
+              return Number(b.tokenId) - Number(a.tokenId);
+            })
+            .slice(0, step);
           if (out.length) {
             // end is only true if both static underflows and live indicates end
             const end = (staticSlice.length < step) && liveEnd;
@@ -326,7 +366,7 @@ export default function ExploreTokens() {
     // Restrict to ZeroContract family on the server when supported
     qs.set('contract.typeHash.in', [...ALLOWED_TYPE_HASHES].join(','));
     qs.set('totalSupply.gt', '0');
-    qs.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply,contract.typeHash');
+    qs.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply,contract.typeHash,firstTime');
     if (contractFilter) qs.set('contract', contractFilter);
 
     // Prefer dense contract.in path first when not explicitly filtering by a single contract
@@ -338,7 +378,7 @@ export default function ExploreTokens() {
       qb.set('sort.desc', 'firstTime');
       qb.set('offset', String(startOffset));
       qb.set('limit', '48');
-      qb.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply,contract.typeHash');
+      qb.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply,contract.typeHash,firstTime');
 
       // Reuse discovered contracts if available; otherwise fetch a fresh list
       let addrs = perContract.current?.list || [];
@@ -438,7 +478,13 @@ export default function ExploreTokens() {
       keep.sort((a, b) => (b.tokenId - a.tokenId) || (a.contract > b.contract ? -1 : 1));
       return keep;
     } catch {
-      out.sort((a, b) => (b.tokenId - a.tokenId) || (a.contract > b.contract ? -1 : 1));
+      out.sort((a, b) => {
+        const ta = Date.parse(a.firstTime || 0) || 0;
+        const tb = Date.parse(b.firstTime || 0) || 0;
+        if (tb !== ta) return tb - ta;
+        if (a.contract !== b.contract) return a.contract > b.contract ? 1 : -1;
+        return Number(b.tokenId) - Number(a.tokenId);
+      });
       return out;
     }
   }, [adminFilter, tzktV1, contractFilter]);
@@ -464,7 +510,7 @@ export default function ExploreTokens() {
     qs.set('limit', '48');
     qs.set('offset', String(off));
     qs.set('totalSupply.gt', '0');
-    qs.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply');
+    qs.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply,firstTime');
     const rows = await jFetch(`${tzktV1}/tokens?${qs.toString()}`).catch(() => []);
     return Array.isArray(rows) ? rows : [];
   }, [tzktV1]);
@@ -623,6 +669,14 @@ export default function ExploreTokens() {
           return true;
         });
         const merged = dedupeTokens(filteredNext.length ? prev.concat(filteredNext) : prev);
+        // Global stable newest→oldest order by firstTime, with tie-breakers
+        merged.sort((a, b) => {
+          const ta = Date.parse(a.firstTime || 0) || 0;
+          const tb = Date.parse(b.firstTime || 0) || 0;
+          if (tb !== ta) return tb - ta;
+          if (a.contract !== b.contract) return a.contract > b.contract ? 1 : -1;
+          return Number(b.tokenId) - Number(a.tokenId);
+        });
         // No cache writes on explore/tokens
         return merged;
       });

@@ -205,6 +205,14 @@ export const MARKETPLACE_ADDRESSES = {
 export const MARKETPLACE_ADDRESS = MARKETPLACE_ADDRESSES[TARGET];
 
 // ---------------------------------------------------------------------------
+// Static Explore Feed (GitHub Pages) configuration
+// These values do not diverge between branches; they point to the same Pages
+// site that publishes both mainnet and ghostnet feeds under /<network>/.
+// Clients use FEED_PAGE_SIZE to compute pagination offsets into the static feed.
+export const FEED_STATIC_BASE = 'https://jams2blues.github.io/zerounbound';
+export const FEED_PAGE_SIZE   = 100; // must match scripts/exploreFeed.mjs --page-size
+
+// ---------------------------------------------------------------------------
 // Tezos Domain registry addresses and fallback RPCs
 //
 // DOMAIN_CONTRACTS exposes the NameRegistry contract addresses used by the

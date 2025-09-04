@@ -20,13 +20,17 @@ import LoadingSpinner from '../../ui/LoadingSpinner.jsx';
 
 import { useWalletContext }                 from '../../contexts/WalletContext.js';
 import { jFetch }                           from '../../core/net.js';
-import { TZKT_API, NETWORK_KEY }            from '../../config/deployTarget.js';
+import { TZKT_API, NETWORK_KEY, FEED_PAGE_SIZE }            from '../../config/deployTarget.js';
 import decodeHexFields                      from '../../utils/decodeHexFields.js';
 import hashMatrix                           from '../../data/hashMatrix.json';
 // IDB cache intentionally not used on explore/tokens to avoid stale grids
 import listLiveTokenIds                     from '../../utils/listLiveTokenIds.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
+
+// Static feed proxy base (served by our own domain to avoid CORS):
+// /api/explore/static/<network>/<page>
+const FEED_BASE = '/api/explore/static';
 
 /*-----------------------------------------------------------*
  * Layout
@@ -238,6 +242,27 @@ export default function ExploreTokens() {
    * nested filter (robust across forks).
    */
   const fetchBatchTokens = useCallback(async (startOffset = 0, step = 48) => {
+    // Try static feed (GH Pages) when configured and not filtered
+    if (!adminFilter && !contractFilter && FEED_BASE) {
+      const netKey = (NETWORK_KEY || 'mainnet').toLowerCase().includes('ghostnet') ? 'ghostnet' : 'mainnet';
+      const pageIdx = Math.floor(startOffset / FEED_PAGE_SIZE);
+      const inPageOff = startOffset % FEED_PAGE_SIZE;
+      try {
+        const url = `${FEED_BASE.replace(/\/+$/,'')}/${netKey}/${pageIdx}`;
+        const arr = await jFetch(url, 1, { ttl: 10_000 }).catch(() => []);
+        if (Array.isArray(arr) && arr.length) {
+          const slice = arr.slice(inPageOff, inPageOff + step).map((r) => ({
+            contract: r.contract,
+            tokenId: Number(r.tokenId),
+            metadata: r.metadata || {},
+            holdersCount: r.holdersCount,
+          }));
+          if (slice.length) {
+            return { rows: slice, rawCount: step, usedAgg: true, end: slice.length < step };
+          }
+        }
+      } catch { /* ignore and fall through */ }
+    }
     // Try local aggregator (serverless) first for dense, burn-filtered results
     if (!adminFilter) {
       const aggUrl = `/api/explore/feed?offset=${encodeURIComponent(String(startOffset))}&limit=${encodeURIComponent(String(step))}`

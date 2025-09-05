@@ -232,7 +232,7 @@ export default function MAINTokenMetaPanel({
         </Section>
       )}
 
-      {/* MIME + preview of current URI */}
+      {/* MIME + details for current URI */}
       <Section>
         <MetaGrid>
           <dt>MIME Type</dt>
@@ -247,6 +247,25 @@ export default function MAINTokenMetaPanel({
               </a>
             ) : (meta?.mimeType || 'N/A')}
           </dd>
+          {/* When viewing an extra URI, surface its friendly fields */}
+          {cur?.key && cur.key !== 'artifactUri' && (
+            <>
+              <dt>Key</dt>
+              <dd><code>{cur.key}</code></dd>
+            </>
+          )}
+          {cur?.name && cur.key !== 'artifactUri' && (
+            <>
+              <dt>Name</dt>
+              <dd>{cur.name}</dd>
+            </>
+          )}
+          {cur?.description && cur.key !== 'artifactUri' && (
+            <>
+              <dt>Description</dt>
+              <dd>{cur.description}</dd>
+            </>
+          )}
           {meta?.rights && (
             <>
               <dt>Rights</dt>
@@ -254,9 +273,6 @@ export default function MAINTokenMetaPanel({
             </>
           )}
         </MetaGrid>
-        {cur?.value && (
-          <RenderMedia uri={cur.value} style={{ width: 96, height: 96, objectFit: 'contain' }} />
-        )}
       </Section>
 
       {/* Marketplace bar (guard network calls when missing identifiers) */}

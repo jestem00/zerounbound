@@ -17,6 +17,8 @@
 import { jFetch } from '../core/net.js';
 import { mimeFromDataUri } from './uriHelpers.js';
 import { mimeFromFilename } from '../constants/mimeTypes.js';
+import { RPC_URLS } from '../config/deployTarget.js';
+import { TezosToolkit } from '@taquito/taquito';
 
 /*──────────────────────────────── helpers ───────────────────────────────*/
 
@@ -377,6 +379,40 @@ async function fetchViaTzkt(apiBase, contract, tokenId, viewNames = []) {
   return [];
 }
 
+// --- Failover wrappers ------------------------------------------------------
+// Try current toolkit first; if it fails (e.g., CORS on run_code), rotate
+// through configured RPC_URLS with fresh TezosToolkit instances until one
+// succeeds or all fail.
+async function fetchViaTzip16Failover(toolkit, contract, tokenId) {
+  try {
+    const first = await fetchViaTzip16(toolkit, contract, tokenId);
+    if (Array.isArray(first) && first.length) return first;
+  } catch { /* continue */ }
+  for (const url of RPC_URLS) {
+    try {
+      const alt = new TezosToolkit(url);
+      const rows = await fetchViaTzip16(alt, contract, tokenId);
+      if (Array.isArray(rows) && rows.length) return rows;
+    } catch { /* try next */ }
+  }
+  return [];
+}
+
+async function fetchViaToolkitFailover(toolkit, contract, tokenId) {
+  try {
+    const first = await fetchViaToolkit(toolkit, contract, tokenId);
+    if (Array.isArray(first) && first.length) return first;
+  } catch { /* continue */ }
+  for (const url of RPC_URLS) {
+    try {
+      const alt = new TezosToolkit(url);
+      const rows = await fetchViaToolkit(alt, contract, tokenId);
+      if (Array.isArray(rows) && rows.length) return rows;
+    } catch { /* try next */ }
+  }
+  return [];
+}
+
 async function fetchViaToolkit(toolkit, contract, tokenId) {
   if (!toolkit || !contract || tokenId == null) return [];
   try {
@@ -713,13 +749,13 @@ export async function fetchExtraUris({ toolkit, addr, tokenId, apiBase, meta } =
       else m = {};
     } catch { m = {}; }
   }
-  // Attempt off-chain view via TZIP-16 first
+  // Attempt off-chain view via TZIP-16 first (with RPC failover)
   const fromTzip16 = (addr && tokenId != null && toolkit)
-    ? await fetchViaTzip16(toolkit, addr, tokenId)
+    ? await fetchViaTzip16Failover(toolkit, addr, tokenId)
     : [];
   // Fallback to on-chain view via toolkit (c.views) if TZIP-16 returned nothing
   const fromToolkit = (addr && tokenId != null && toolkit && !fromTzip16.length)
-    ? await fetchViaToolkit(toolkit, addr, tokenId) : [];
+    ? await fetchViaToolkitFailover(toolkit, addr, tokenId) : [];
   // Then fallback to TzKT view if both TZIP-16 and toolkit views are empty
   const fromTzkt = (addr && tokenId != null && !fromTzip16.length && !fromToolkit.length)
     ? await fetchViaTzkt(base, addr, tokenId) : [];

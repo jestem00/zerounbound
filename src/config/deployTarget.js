@@ -261,22 +261,42 @@ export const FORGE_SERVICE_URL = '';
  * @returns {Promise<string>} The URL of the fastest reachable RPC.
  */
 export async function selectFastestRpc(timeout = 2000) {
-  const promises = RPC_URLS.map(async (url) => {
-    const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), timeout);
-    const start = performance.now();
+  // Probe each RPC for a simple GET that avoids CORS preflight.
+  // Pick the fastest successful endpoint; never return a failing URL.
+  const checks = await Promise.allSettled(
+    RPC_URLS.map(async (url) => {
+      const controller = new AbortController();
+      const id = setTimeout(() => controller.abort(), timeout);
+      const start = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      let ok = false;
+      try {
+        const res = await fetch(`${url}/chains/main/chain_id`, { signal: controller.signal, mode: 'cors' });
+        ok = !!res && res.ok;
+      } catch {
+        ok = false;
+      } finally {
+        clearTimeout(id);
+      }
+      const end = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      return { url, ok, time: ok ? (end - start) : Infinity };
+    })
+  );
+  const candidates = checks
+    .map((r, i) => (r.status === 'fulfilled' ? r.value : { url: RPC_URLS[i], ok: false, time: Infinity }))
+    .filter(Boolean);
+  let best = null;
+  for (const c of candidates) {
+    if (c.ok && (best == null || c.time < best.time)) best = c;
+  }
+  if (best && best.ok) return best.url;
+  // Fallback: try endpoints sequentially until one succeeds.
+  for (const url of RPC_URLS) {
     try {
-      const res = await fetch(`${url}/chains/main/blocks/head/header`, { signal: controller.signal });
-      clearTimeout(id);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return { url, time: performance.now() - start };
-    } catch (err) {
-      return { url, time: Infinity };
-    }
-  });
-  const result = await Promise.race(promises);
-  if (!result || !result.url) throw new Error('No reachable RPC endpoints');
-  return result.url;
+      const res = await fetch(`${url}/chains/main/chain_id`, { mode: 'cors' });
+      if (res && res.ok) return url;
+    } catch { /* try next */ }
+  }
+  throw new Error('No reachable RPC endpoints');
 }
 
 // Default network key.  Many modules import this constant to determine the

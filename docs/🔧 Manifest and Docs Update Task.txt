@@ -1,0 +1,37 @@
+🔧 Manifest and Docs Update Task (for AI Assistant)
+
+Context: You are working in the jams2blues/zerounbound repository. This repo follows a strict append‑only manifest and invariants system. All new changes must be fully integrated into docs/Master_Overview_And_Manifest_zerounbound_contractmanagement.md (the “manifest”), and any addendums or patch notes must be consolidated into that file. After consolidation, the only markdown files under zerounbound/docs/ should be:
+AI_CUSTOM_INSTRUCTIONS.md
+Master_Overview_And_Manifest_zerounbound_contractmanagement.md
+TZIP_Compliance_Invariants_ZeroContract_V4.md
+🔧 Manifest and Docs Update Task.txt
+
+What to do:
+Reload all docs and invariants: At the start of your session, re‑open and re‑read the current Master_Overview_And_Manifest_zerounbound_contractmanagement.md, AI_CUSTOM_INSTRUCTIONS.md and TZIP_Compliance_Invariants_ZeroContract_V4.md to ensure you are working from the latest version and fully understand all existing rules and structure.
+Consolidate and compress:
+Move the content of any new addendums, patch notes or feature docs into the manifest.
+Do not simply append these files verbatim; instead, merge their information into the appropriate sections (e.g. new “Addendum rXXXX” section, updated invariants, new entries in the source‑tree map and change log).
+Compress repetitive or obvious material, but never omit important details – the manifest must remain exhaustive enough that a new AI could rebuild the entire repo from scratch without extra research.
+Once merged, delete the separate addendum file so that only the three docs listed above remain in docs/.
+Update manifest fields:
+Revision header: Increment the revision id (rXXXX) and update the UTC date to today’s date. Write a concise summary of what changed.
+Change Log: Append a new entry summarizing the changes for this revision.
+Progress Ledger: Create or update the ledger entry for the new revision with bullet points describing what was done (files touched, features added or fixed, new invariants, removed files, etc.).
+Source‑Tree Map: Add or remove lines for any new or deleted files. Keep the list alphabetical, preserve case, and follow the “path — description; Imports; Exports” format.
+Invariants: Append new invariant numbers for any implicit rules introduced by your changes. Do not reuse existing numbers; always start from the next available integer. Each invariant must clearly state its scope tags ([F], [C], [E], [I]), and a short but explicit description of the rule.
+Reserved, Appendices and Bundle index: If your changes affect these sections, update them accordingly.
+Section integrity: Preserve every existing section verbatim unless factual corrections are needed. Never delete or reorder existing history or invariants.
+Follow project protocols:
+Comply with all invariants, design patterns, TZIP compliance rules and AI collaboration instructions (as defined in AI_CUSTOM_INSTRUCTIONS.md and TZIP_Compliance_Invariants_ZeroContract_V4.md).
+Maintain the retro 8‑bit theme and responsive design constraints.
+If you modify any code, ensure there are no missing imports, unused variables, dead constants or stylistic violations. Run linting or formatting if necessary.
+Perform a meticulous oversight pass:
+Proof‑read every modified line.
+Verify that all references to files and paths are correct and case‑sensitive.
+Check that no important content was accidentally dropped during consolidation.
+Ensure that the invariants list, changelog and progress ledger accurately reflect the work done.
+Return a production‑ready manifest:
+Emit the fully updated Master_Overview_And_Manifest_zerounbound_contractmanagement.md without placeholders or stubs. The file has no length cap – it may grow as needed.
+Do not summarize the manifest or truncate sections; deliver the complete content in your output.
+Confirm that only the three allowed markdown files remain in the docs/ folder.
+By following this task prompt after each revision session, you will keep our single‑source‑of‑truth manifest accurate, comprehensive and easy for future AI agents to understand.

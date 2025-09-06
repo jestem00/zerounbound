@@ -27,8 +27,9 @@ import decodeHexFields from '../../utils/decodeHexFields.js';
 import detectHazards from '../../utils/hazards.js';
 import hashMatrix from '../../data/hashMatrix.json';
 import { useWalletContext } from '../../contexts/WalletContext.js';
-import { fetchOnchainListingsForSeller, filterStaleListings } from '../../core/marketplace.js';
+import { fetchOnchainListingsForSeller, filterStaleListings, marketplaceAddr } from '../../core/marketplace.js';
 import { fetchSellerListingsViaTzkt } from '../../core/marketplaceHelper.js';
+import { listActiveCollections, listListingsForCollectionViaBigmap } from '../../utils/marketplaceListings.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -217,13 +218,68 @@ export default function UserPage() {
           };
           (rawOn || []).forEach(push);
           (rawTzk || []).forEach(push);
+
+          // Fallback 1: query marketplace listings map filtered by seller
+          try {
+            const mkt = marketplaceAddr(net);
+            if (mkt && /^KT1[0-9A-Za-z]{33}$/i.test(mkt)) {
+              const idxRows = await jFetch(`${base}/contracts/${mkt}/bigmaps?select=path,ptr,id,active&limit=200`, 1).catch(() => []);
+              const listingsPtr = (idxRows || []).reduce((ptr, r) => (ptr || ((r?.path === 'listings' || r?.name === 'listings') ? (r?.ptr ?? r?.id) : null)), null);
+              if (Number.isFinite(Number(listingsPtr))) {
+                const rows = await jFetch(`${base}/bigmaps/${listingsPtr}/keys?active=true&select=key,value&value.seller=${encodeURIComponent(address)}&limit=10000`, 1).catch(() => []);
+                const addrFromKey = (key) => {
+                  if (typeof key === 'string' && /^KT1[0-9A-Za-z]{33}$/i.test(key)) return key;
+                  if (key && typeof key === 'object') {
+                    if (key.address && /^KT1[0-9A-Za-z]{33}$/i.test(key.address)) return key.address;
+                    if (key.value && /^KT1[0-9A-Za-z]{33}$/i.test(key.value)) return key.value;
+                    if (Array.isArray(key)) {
+                      for (const it of key) {
+                        const v = addrFromKey(it); if (v) return v;
+                      }
+                    } else if (key.string && /^KT1[0-9A-Za-z]{33}$/i.test(key.string)) return key.string;
+                  }
+                  return '';
+                };
+                for (const entry of (rows || [])) {
+                  const kt = addrFromKey(entry?.key);
+                  const val = entry?.value;
+                  if (!kt || !val || typeof val !== 'object') continue;
+                  for (const [nonceKey, listing] of Object.entries(val)) {
+                    if (!listing || typeof listing !== 'object') continue;
+                    const id = Number(listing.token_id ?? listing.tokenId ?? listing?.token?.id);
+                    const price = Number(listing.price ?? listing.priceMutez);
+                    const amount = Number(listing.amount ?? listing.quantity ?? listing.amountTokens ?? 0);
+                    const seller = String(listing.seller || address);
+                    const active = !!(listing.active ?? listing.is_active ?? true);
+                    const nonce = Number(listing.nonce ?? listing.listing_nonce ?? nonceKey);
+                    if (!Number.isFinite(id) || !Number.isFinite(price) || amount <= 0 || !active) continue;
+                    if (seller.toLowerCase() !== address.toLowerCase()) continue;
+                    push({ contract: kt, tokenId: id, priceMutez: price, amount, seller, nonce, active: true });
+                  }
+                }
+              }
+            }
+          } catch { /* ignore */ }
+
+          // Fallback 2: scan active collections and filter by seller (parity with Explore)
+          try {
+            // Avoid metadata-filtered discovery (causes 404 and misses). Use raw set.
+            const candidates = await listActiveCollections(net, false).catch(() => []);
+            for (const kt of candidates || []) {
+              const rows = await listListingsForCollectionViaBigmap(kt, net).catch(() => []);
+              for (const r of rows || []) {
+                if (String(r?.seller || '').toLowerCase() === address.toLowerCase()) push(r);
+              }
+            }
+          } catch { /* ignore */ }
           const raw = [...merge.values()];
           // Normalize + stale filter using marketplace helper
+          // Partial‑stock‑safe: require seller to have ≥1 in stock (match Explore listings)
           const filtered = await filterStaleListings(toolkit, (raw || []).map((l) => ({
             nftContract: l.contract || l.nftContract || l.nft_contract,
             tokenId: Number(l.tokenId ?? l.token_id),
             seller: String(l.seller || address),
-            amount: Number(l.amount ?? l.available ?? 1),
+            amount: 1,
             priceMutez: Number(l.priceMutez ?? l.price ?? 0),
             __src: l,
           }))).catch(() => raw || []);

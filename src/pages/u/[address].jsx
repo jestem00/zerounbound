@@ -88,13 +88,20 @@ function mintedByUser(t = {}, addr = '') {
 }
 
 async function fetchAlias(addr) {
-  try { const j = await jFetch(`/api/handle/${addr}`, 1); return j?.alias || null; } catch { return null; }
+  try {
+    const j = await jFetch(`/api/handle/${addr}`, 1);
+    const alias = j?.alias || null;
+    let handle = j?.handle || null;
+    if (!handle && typeof alias === 'string' && alias.startsWith('@')) handle = alias.slice(1);
+    return { alias, handle };
+  } catch { return { alias: null, handle: null }; }
 }
 
 export default function UserPage() {
   const router = useRouter();
   const address = String(router.query.address || '');
   const [alias, setAlias] = useState('');
+  const [handle, setHandle] = useState('');
   const domain = useTezosDomain(address, NETWORK_KEY);
   const base = tzktBase(NETWORK_KEY);
   // no ops list here; dashboard tabs are shown instead
@@ -113,7 +120,7 @@ export default function UserPage() {
   const [lists, setLists] = useState([]);
   const [listsLoad, setListsLoad] = useState(false);
 
-  useEffect(() => { if (address) fetchAlias(address).then((a)=>a && setAlias(a)); }, [address]);
+  useEffect(() => { if (address) fetchAlias(address).then((r)=>{ if (r?.alias) setAlias(r.alias); if (r?.handle) setHandle(r.handle); }); }, [address]);
   // lazy load tabs
   useEffect(() => {
     if (!address) return;
@@ -224,7 +231,16 @@ export default function UserPage() {
               let md = t.metadata || {}; try { md = decodeHexFields(md); } catch {}
               if (detectHazards(md).broken) continue; if (Number(t.totalSupply||0) === 0) continue;
               const k = `${kt}|${t.tokenId}`;
-              cards.push({ contract: kt, tokenId: Number(t.tokenId), priceMutez: price.get(k) || 0, metadata: md });
+              const pMutez = price.get(k) || 0;
+              cards.push({
+                contract: kt,
+                tokenId: Number(t.tokenId),
+                priceMutez: pMutez,
+                metadata: md,
+                // Seed initial listing so TokenListingCard can immediately
+                // identify the connected wallet as the lister when appropriate.
+                initialListing: { seller: address, priceMutez: pMutez, amount: 1 },
+              });
             }
           }
           cards.sort((a, b) => b.tokenId - a.tokenId);
@@ -242,7 +258,24 @@ export default function UserPage() {
           <h2 style={{ marginTop: 0 }}>Profile</h2>
           <div><strong>Address:</strong> <code>{address}</code></div>
           {domain && (<div><strong>.tez:</strong> {domain}</div>)}
-          {alias && (<div><strong>Alias:</strong> {alias}</div>)}
+          {alias && (
+            <div>
+              <strong>Alias:</strong>{' '}
+              {handle || alias.startsWith('@') ? (
+                <a
+                  href={`https://twitter.com/${encodeURIComponent(handle || alias.replace(/^@/, ''))}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: 'var(--zu-accent-sec)', textDecoration: 'none' }}
+                  title={`Open @${handle || alias.replace(/^@/, '')} on X`}
+                >
+                  {alias}
+                </a>
+              ) : (
+                alias
+              )}
+            </div>
+          )}
           <div style={{ marginTop: '.5rem' }}>
             <a href={`https://tzkt.io/${address}`} target="_blank" rel="noopener noreferrer">TzKT ↗</a>
             {' · '}
@@ -296,7 +329,14 @@ export default function UserPage() {
               {!listsLoad && lists.length > 0 && (
                 <Grid>
                   {lists.map((l) => (
-                    <TokenListingCard key={`${l.contract}:${l.tokenId}`} contract={l.contract} tokenId={l.tokenId} priceMutez={l.priceMutez} metadata={l.metadata} />
+                    <TokenListingCard
+                      key={`${l.contract}:${l.tokenId}`}
+                      contract={l.contract}
+                      tokenId={l.tokenId}
+                      priceMutez={l.priceMutez}
+                      metadata={l.metadata}
+                      initialListing={l.initialListing}
+                    />
                   ))}
                 </Grid>
               )}

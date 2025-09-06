@@ -58,6 +58,18 @@ const BrandLine = styled(Link)`
 const Note = styled.span`
   font: 0.7rem/1.2 'PixeloidMono', monospace;
 `;
+const Glow = keyframes`
+  0%   { box-shadow: 0 0 0px var(--zu-accent-sec); filter: drop-shadow(0 0 0 var(--zu-accent-sec)); }
+  50%  { box-shadow: 0 0 10px var(--zu-accent-sec); filter: drop-shadow(0 0 6px var(--zu-accent-sec)); }
+  100% { box-shadow: 0 0 0px var(--zu-accent-sec); filter: drop-shadow(0 0 0 var(--zu-accent-sec)); }
+`;
+const DashBtn = styled(PixelButton).attrs({ size: 'xs' })`
+  padding: 0 0.55rem; font-size: 0.8rem; line-height: 1.2;
+  background: var(--zu-accent-sec); color: var(--zu-btn-fg);
+  border-color: var(--zu-accent-sec-hover);
+  animation: ${Glow} 2.4s ease-in-out infinite;
+`;
+const NetRow = styled.div` display:flex; align-items:center; gap: 8px; `;
 const Links = styled.nav`
   display: flex; gap: 0.8rem; flex-wrap: wrap;
   a { font: 0.8rem/1 'PixeloidSans', monospace; color: var(--zu-fg); }
@@ -240,7 +252,14 @@ export default function Header() {
                 v.{APP_VERSION}
               </span>
             </BrandLine>
-            <Note>you are on <b>{network.toUpperCase()}</b></Note>
+            <NetRow>
+              <Note>you are on <b>{network.toUpperCase()}</b></Note>
+              {address && (
+                <Link href={`/u/${address}`} passHref>
+                  <DashBtn as="a" title="Open My Dashboard">My Dashboard</DashBtn>
+                </Link>
+              )}
+            </NetRow>
           </div>
 
           {/* desktop nav */}

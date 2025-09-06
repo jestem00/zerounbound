@@ -12,6 +12,7 @@ import React, {
   useCallback,
   useRef,
 } from 'react';
+import { useRouter } from 'next/router';
 import PropTypes from 'prop-types';
 import styledPkg from 'styled-components';
 
@@ -348,6 +349,7 @@ export default function TokenListingCard({
   contractName, // optional; we fetch if missing or stale for the current contract
   initialListing, // NEW: optional seed for lowest listing (seller/nonce/price/amount)
 }) {
+  const router = useRouter();
   /* wallet / network context */
   const { address: walletAddr, toolkit } = useWalletContext() || {};
   const tzktV1 = useMemo(() => {
@@ -532,16 +534,21 @@ export default function TokenListingCard({
     (async () => {
       try {
         setHasMyListing(false);
-        if (!walletAddr || !toolkit) return;
-        let res = await fetchLowestListing({ toolkit, nftContract: contract, tokenId }).catch(() => null);
-        let mine = !!(res && res.seller && String(res.seller).toLowerCase() === String(walletAddr).toLowerCase());
+        if (!walletAddr) return;
+        // Try lowest listing first (will fall back to TzKT when toolkit is absent)
+        let mine = false;
+        try {
+          const res = await fetchLowestListing({ toolkit, nftContract: contract, tokenId }).catch(() => null);
+          mine = !!(res && res.seller && String(res.seller).toLowerCase() === String(walletAddr).toLowerCase());
+        } catch { mine = false; }
+        // Fallback: scan all listings via big‑map/on‑chain readers
         if (!mine) {
           const all = await fetchListings({ toolkit, nftContract: contract, tokenId }).catch(() => []);
           if (Array.isArray(all) && all.length) {
             mine = all.some((l) => l && l.seller && String(l.seller).toLowerCase() === String(walletAddr).toLowerCase() && Number(l.amount || 0) > 0);
           }
         }
-        if (!stop && mine) setHasMyListing(true);
+        if (!stop) setHasMyListing(!!mine);
       } catch { /* ignore */ }
     })();
     return () => { stop = true; };
@@ -557,6 +564,9 @@ export default function TokenListingCard({
   }, [effectiveMutez]);
 
   const cardBuyDisabled = !toolkit || !lowest || lowest.priceMutez == null || isSeller;
+  const onMyListingsPage = useMemo(() => {
+    try { return (router?.asPath || '').toLowerCase().includes('/my/listings'); } catch { return false; }
+  }, [router?.asPath]);
 
   /* title + routing */
   const title = meta?.name || `Token #${tokenId}`;
@@ -882,7 +892,7 @@ export default function TokenListingCard({
             <img src="/sprites/share.png" alt="" aria-hidden="true" style={{ width: 12, height: 12, marginRight: 6, verticalAlign: '-2px' }} />
             SHARE
           </PixelButton>
-          {(isSeller || hasMyListing) && (
+          {(isSeller || hasMyListing || onMyListingsPage) && (
             <PixelButton
               size="xs"
               noActiveFx
@@ -936,7 +946,7 @@ export default function TokenListingCard({
         scriptHazard={hazards.scripts}
       />
 
-      {(walletAddr && (isSeller || hasMyListing)) && (
+      {(walletAddr && (isSeller || hasMyListing || onMyListingsPage)) && (
         <CancelListing
           open={cancelOpen}
           contract={contract}

@@ -104,7 +104,9 @@ export default function MarketplaceBar({ contractAddress, tokenId, marketplace }
         const bal = await getFa2BalanceViaTzkt(lowest.seller, contractAddress, Number(tokenId));
         if (!cancelled) setStaleStatus(bal >= 1 ? STALE.FRESH : STALE.STALE);
       } catch {
-        if (!cancelled) setStaleStatus(STALE.STALE);
+        // Non-blocking: network errors or transient API issues must not disable BUY.
+        // Keep in CHECKING state so UI remains enabled; BuyDialog preflight still guards.
+        if (!cancelled) setStaleStatus(STALE.CHECKING);
       }
     })();
     return () => { cancelled = true; };

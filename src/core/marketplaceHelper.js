@@ -143,6 +143,7 @@ async function probeMarketIndexes(TZKT_V1, market) {
       if (!Number.isFinite(ptr)) continue;
       if (path === 'listings_active') out.listings_active = ptr; // preferred
       if (path === 'listings')        out.listings = ptr;
+      if (path === 'seller_listings') out.seller_listings = ptr;
       if (path === 'collection_listings') out.collection_listings = ptr;
     }
     return out;
@@ -260,6 +261,73 @@ export async function countActiveListingsForCollection(nftContract, tokenIds = [
     let n = 0; unique.forEach((id) => { if (only.has(id)) n += 1; }); return n;
   }
   return unique.size;
+}
+
+/**
+ * Fetch active listings for a given seller via TzKT big‑maps.
+ * Uses `seller_listings` to discover (contract, tokenId, listing_nonce)
+ * then reads the corresponding entry from `listings` for full details.
+ * Returns normalised rows: { contract, tokenId, priceMutez, amount, seller, nonce, active }.
+ */
+export async function fetchSellerListingsViaTzkt(seller, net = NETWORK_KEY) {
+  const addr = String(seller || '').trim();
+  if (!isTz(addr)) return [];
+  const market = marketplaceAddr(net);
+  if (!isKt(market)) return [];
+
+  const TZKT_V1 = tzktV1(net);
+  const idx = await probeMarketIndexes(TZKT_V1, market);
+  if (!idx.seller_listings || !idx.listings) return [];
+
+  // 1) Read seller index for (kt, id, nonce)
+  let refs = [];
+  try {
+    const row = await jFetch(`${TZKT_V1}/bigmaps/${idx.seller_listings}/keys/${encodeURIComponent(addr)}?select=value`, 1);
+    if (Array.isArray(row)) refs = row;
+    else if (row && typeof row === 'object') refs = [row];
+  } catch { refs = []; }
+  if (!refs.length) return [];
+
+  // Group by (kt,id) to minimise requests
+  const want = new Map(); // key -> Set(nonices)
+  for (const r of refs) {
+    const kt = String(r?.nft_contract || r?.contract || r?.collection || '').trim();
+    const id = Number(r?.token_id ?? r?.tokenId ?? r?.token?.id);
+    const n  = Number(r?.listing_nonce ?? r?.nonce ?? r?.id);
+    if (!isKt(kt) || !Number.isFinite(id) || !Number.isFinite(n)) continue;
+    const key = `${kt}|${id}`;
+    const set = want.get(key) || new Set();
+    set.add(n);
+    want.set(key, set);
+  }
+  if (!want.size) return [];
+
+  // 2) For each (kt,id), read listing map and extract desired nonces
+  const out = [];
+  for (const [key, nonces] of want.entries()) {
+    const [kt, idStr] = key.split('|');
+    const id = Number(idStr);
+    try {
+      const qs = new URLSearchParams({ 'key.address': kt, 'key.nat': String(id), select: 'value', limit: '1', active: 'true' });
+      const rows = await jFetch(`${TZKT_V1}/bigmaps/${idx.listings}/keys?${qs}`, 1).catch(() => []);
+      const holder = Array.isArray(rows) && rows[0]?.value ? rows[0].value : null;
+      if (holder && typeof holder === 'object') {
+        for (const n of nonces) {
+          const listing = holder?.[String(n)];
+          if (listing && typeof listing === 'object') {
+            const price = Number(listing?.price ?? listing?.priceMutez);
+            const amount = Number(listing?.amount ?? listing?.quantity ?? listing?.amountTokens ?? 0);
+            const active = !!(listing?.active ?? listing?.is_active ?? true);
+            const s = String(listing?.seller || addr);
+            if (Number.isFinite(price) && amount > 0 && active) {
+              out.push({ contract: kt, tokenId: id, priceMutez: price, amount, seller: s, nonce: n, active: true });
+            }
+          }
+        }
+      }
+    } catch { /* skip this pair */ }
+  }
+  return out;
 }
 
 /* What changed & why (r3):

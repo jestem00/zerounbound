@@ -1,0 +1,30 @@
+storage pair
+active_tokens set(nat)
+admin address
+burn_address address
+children set(address)
+contract_id bytes
+destroyed_tokens set(nat)
+extrauri_counters big_map(nat, $extrauri_counters_value)
+ledger big_map($ledger_key, nat)
+lock bool
+metadata big_map(string, bytes)
+next_token_id nat
+operators big_map($operators_key, unit)
+parents set(address)
+token_metadata big_map(nat, $token_metadata_value)
+total_supply big_map(nat, nat)
+extrauri_counters_value pair
+descriptions map(nat, string)
+labels map(nat, string)
+names map(nat, string)
+ledger_key pair
+@address_35 address
+@nat_36 nat
+operators_key pair
+owner address
+operator address
+token_id nat
+token_metadata_value pair
+token_id nat
+token_info map(string, bytes)

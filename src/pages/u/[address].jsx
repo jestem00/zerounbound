@@ -28,6 +28,7 @@ import detectHazards from '../../utils/hazards.js';
 import hashMatrix from '../../data/hashMatrix.json';
 import { useWalletContext } from '../../contexts/WalletContext.js';
 import { fetchOnchainListingsForSeller, filterStaleListings } from '../../core/marketplace.js';
+import { fetchSellerListingsViaTzkt } from '../../core/marketplaceHelper.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -200,7 +201,12 @@ export default function UserPage() {
       setListsLoad(true);
       (async () => {
         try {
-          const raw = await fetchOnchainListingsForSeller({ toolkit: toolkit || { _network: { type: (base.includes('ghostnet')?'ghostnet':'mainnet') } }, seller: address }).catch(() => []);
+          let raw = await fetchOnchainListingsForSeller({ toolkit: toolkit || { _network: { type: (base.includes('ghostnet')?'ghostnet':'mainnet') } }, seller: address }).catch(() => []);
+          // Fallback: when on‑chain view is unavailable (CORS/run_code), use TzKT big‑maps
+          if (!Array.isArray(raw) || raw.length === 0) {
+            const net = base.includes('ghostnet') ? 'ghostnet' : 'mainnet';
+            raw = await fetchSellerListingsViaTzkt(address, net).catch(() => []);
+          }
           // Normalize + stale filter using marketplace helper
           const filtered = await filterStaleListings(toolkit, (raw || []).map((l) => ({
             nftContract: l.contract || l.nftContract || l.nft_contract,
@@ -212,7 +218,7 @@ export default function UserPage() {
           }))).catch(() => raw || []);
           const keep = (filtered || []).map((x) => x.__src || x);
           // group by (kt,id) pick lowest price and fetch metadata
-          const byC = new Map(); const price = new Map();
+          const byC = new Map(); const price = new Map(); const best = new Map();
           for (const r of keep) {
             const kt = r.contract || r.nftContract || r.nft_contract; const id = Number(r.tokenId ?? r.token_id);
             const p = Number(r.priceMutez ?? r.price ?? 0);
@@ -220,6 +226,8 @@ export default function UserPage() {
             const k = `${kt}|${id}`;
             const prev = price.get(k);
             if (prev == null || p < prev) price.set(k, p);
+            const prevBest = best.get(k);
+            if (!prevBest || p < prevBest.priceMutez) best.set(k, { priceMutez: p, seller: String(r.seller||address), nonce: Number(r.nonce ?? r.listing_nonce ?? r.id ?? 0), amount: Number(r.amount ?? 1) });
             const set = byC.get(kt) || new Set(); set.add(id); byC.set(kt, set);
           }
           const cards = [];
@@ -232,6 +240,7 @@ export default function UserPage() {
               if (detectHazards(md).broken) continue; if (Number(t.totalSupply||0) === 0) continue;
               const k = `${kt}|${t.tokenId}`;
               const pMutez = price.get(k) || 0;
+              const seed = best.get(k) || { seller: address, priceMutez: pMutez, amount: 1 };
               cards.push({
                 contract: kt,
                 tokenId: Number(t.tokenId),
@@ -239,7 +248,7 @@ export default function UserPage() {
                 metadata: md,
                 // Seed initial listing so TokenListingCard can immediately
                 // identify the connected wallet as the lister when appropriate.
-                initialListing: { seller: address, priceMutez: pMutez, amount: 1 },
+                initialListing: seed,
               });
             }
           }

@@ -1,0 +1,148 @@
+Contract entrypoints
+0.
+add_child(address)
+Json schema:
+"schema:address": "address"
+Michelson type:
+(address %add_child)
+1.
+add_parent(address)
+Json schema:
+"schema:address": "address"
+Michelson type:
+(address %add_parent)
+2.
+append_artifact_uri(nat token_id, bytes value)
+Json schema:
+"schema:object": {
+    "token_id:nat": "nat",
+    "value:bytes": "bytes"
+}
+Michelson type:
+(pair %append_artifact_uri (nat %token_id) (bytes %value))
+3.
+append_extrauri(string description, string label, string name, nat token_id, bytes value)
+Json schema:
+"schema:object": {
+    "description:string": "string",
+    "label:string": "string",
+    "name:string": "string",
+    "token_id:nat": "nat",
+    "value:bytes": "bytes"
+}
+Michelson type:
+(pair %append_extrauri (pair (string %description) (string %label))
+                       (pair (string %name) (pair (nat %token_id) (bytes %value))))
+4.
+balance_of(list<object> requests, contract callback)
+Json schema:
+"schema:object": {
+    "requests:list:object": [
+        {
+            "owner:address": "address",
+            "token_id:nat": "nat"
+        }
+    ],
+    "callback:contract": "contract"
+}
+Michelson type:
+(pair %balance_of (list %requests (pair (address %owner) (nat %token_id)))
+                  (contract %callback (list (pair (pair %request (address %owner) (nat %token_id))
+                                                (nat %balance)))))
+5.
+clear_uri(nat token_id, string uri_type)
+Json schema:
+"schema:object": {
+    "token_id:nat": "nat",
+    "uri_type:string": "string"
+}
+Michelson type:
+(pair %clear_uri (nat %token_id) (string %uri_type))
+6.
+destroy(nat)
+Json schema:
+"schema:nat": "nat"
+Michelson type:
+(nat %destroy)
+7.
+edit_contract_metadata(bytes)
+Json schema:
+"schema:bytes": "bytes"
+Michelson type:
+(bytes %edit_contract_metadata)
+8.
+edit_token_metadata(map<string, bytes> metadata_updates, nat token_id)
+Json schema:
+"schema:object": {
+    "metadata_updates:map_flat:string:bytes": {
+        "string": "bytes"
+    },
+    "token_id:nat": "nat"
+}
+Michelson type:
+(pair %edit_token_metadata (map %metadata_updates string bytes) (nat %token_id))
+9.
+mint(nat amount, map<string, bytes> metadata, address to_)
+Json schema:
+"schema:object": {
+    "amount:nat": "nat",
+    "metadata:map_flat:string:bytes": {
+        "string": "bytes"
+    },
+    "to_:address": "address"
+}
+Michelson type:
+(pair %mint (nat %amount) (pair (map %metadata string bytes) (address %to_)))
+10.
+remove_child(address)
+Json schema:
+"schema:address": "address"
+Michelson type:
+(address %remove_child)
+11.
+remove_parent(address)
+Json schema:
+"schema:address": "address"
+Michelson type:
+(address %remove_parent)
+12.
+transfer(list<object>)
+Json schema:
+"schema:list:object": [
+    {
+        "from_:address": "address",
+        "txs:list:object": [
+            {
+                "to_:address": "address",
+                "token_id:nat": "nat",
+                "amount:nat": "nat"
+            }
+        ]
+    }
+]
+Michelson type:
+(list %transfer (pair (address %from_)
+                     (list %txs (pair (address %to_) (pair (nat %token_id) (nat %amount))))))
+13.
+update_operators(list<or>)
+Json schema:
+"schema:list:or": [
+    {
+        "add_operator:object": {
+            "operator:address": "address",
+            "owner:address": "address",
+            "token_id:nat": "nat"
+        },
+        "remove_operator:object": {
+            "operator:address": "address",
+            "owner:address": "address",
+            "token_id:nat": "nat"
+        }
+    }
+]
+Michelson type:
+(list %update_operators (or
+                         (pair %add_operator (address %operator)
+                                             (pair (address %owner) (nat %token_id)))
+                         (pair %remove_operator (address %operator)
+                                                (pair (address %owner) (nat %token_id)))))

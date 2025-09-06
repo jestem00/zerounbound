@@ -81,4 +81,24 @@ Sections
    - Fixed OBJKT fallback 400s; hardened burn resolution; improved downloads.
    - Ensured Explore Listings search visibility and admin routing fidelity.
 
+8) Late Additions (r1188‑b)
+   - Header: Added a compact “My Dashboard” button to the left brand block,
+     adjacent to the “you are on <NETWORK>” note. Uses theme‑colored glow
+     animation; renders only when a wallet is connected; links to `/u/<tz>`.
+     File: `src/ui/Header.jsx` (DashBtn + NetRow, glow keyframes).
+   - Dashboard Profile: Alias links to X/Twitter when resolvable. The `/api/handle`
+     payload now seeds both alias and `handle`; the alias is rendered as a link
+     to `https://twitter.com/<handle>` when present (or when alias begins with
+     `@`). File: `src/pages/u/[address].jsx` (fetchAlias → { alias, handle }).
+   - TokenCards: Creator/Author tz‑addresses now route to the Dashboard instead of
+     the Explore admin filter (tz → `/u/<tz>`, KT1 still routes to
+     `/contracts/<KT1>`). File: `src/ui/TokenCard.jsx` (hrefFor()).
+   - Dashboard Listings: Seeded `initialListing` into `TokenListingCard` with
+     `{ seller: <page address>, priceMutez }` so the “Cancel” micro button is
+     immediately available for the page owner without waiting for a network
+     round‑trip. File: `src/pages/u/[address].jsx`.
+   - Listing Card dialog mount: ensured `CancelListing` mounts under the same
+     predicate used to render the button so clicking always opens the dialog in
+     all contexts (Explore, My Listings, Dashboard). File: `src/ui/TokenListingCard.jsx`.
+
 /* EOF */

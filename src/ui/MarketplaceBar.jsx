@@ -47,6 +47,7 @@ export default function MarketplaceBar({ contractAddress, tokenId, marketplace }
   const [hasOffers, setHasOffers] = useState(false);
   const [dlg, setDlg]             = useState(null);
   const [staleStatus, setStaleStatus] = useState(STALE.IDLE);
+  const [hasMine, setHasMine] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -75,9 +76,20 @@ export default function MarketplaceBar({ contractAddress, tokenId, marketplace }
           if (!cancelled) setHasOffers(Boolean(offers && offers.length > 0));
         } catch {/* non-fatal */}
       }
+
+      // Determine if the connected wallet has any listing (not just the lowest)
+      try {
+        const all = await import('../core/marketplace.js')
+          .then((m) => m.fetchListings({ toolkit, nftContract: contractAddress, tokenId }))
+          .catch(() => []);
+        if (!cancelled) {
+          const mine = (all || []).some((x) => String(x?.seller || '').toLowerCase() === String(walletAddr || '').toLowerCase());
+          setHasMine(mine);
+        }
+      } catch { if (!cancelled) setHasMine(false); }
     })();
     return () => { cancelled = true; };
-  }, [toolkit, contractAddress, tokenId]);
+  }, [toolkit, contractAddress, tokenId, walletAddr]);
 
   // Stock-safety probe via TzKT balance (non-blocking for BUY enable)
   useEffect(() => {
@@ -155,11 +167,11 @@ export default function MarketplaceBar({ contractAddress, tokenId, marketplace }
         OFFER
       </PixelButton>
 
-      {isSeller && hasListing && (
-        <PixelButton $noActiveFx $size="sm" disabled={!toolkit} aria-disabled={!toolkit} onClick={() => setDlg('cancel')} data-testid="marketbar-cancel" title="Cancel your active listing">
-          CANCEL
+      {(isSeller && hasListing) || hasMine ? (
+        <PixelButton $noActiveFx $size="sm" disabled={!toolkit} aria-disabled={!toolkit} onClick={() => setDlg('cancel')} data-testid="marketbar-cancel" title="Cancel Listing">
+          Cancel Listing
         </PixelButton>
-      )}
+      ) : null}
 
       {ENABLE_ONCHAIN_VIEWS && isSeller && hasListing && hasOffers && (
         <PixelButton $noActiveFx $size="sm" disabled={!toolkit} aria-disabled={!toolkit} onClick={() => setDlg('accept')} data-testid="marketbar-accept" title="Accept an offer for this token">
@@ -188,7 +200,7 @@ export default function MarketplaceBar({ contractAddress, tokenId, marketplace }
         <MakeOfferDialog open contract={contractAddress} tokenId={tokenId} marketContract={marketplace} onClose={() => setDlg(null)} />
       )}
 
-      {dlg === 'cancel' && isSeller && hasListing && (
+      {dlg === 'cancel' && (
         <CancelListing open contract={contractAddress} tokenId={tokenId} onClose={() => setDlg(null)} />
       )}
 

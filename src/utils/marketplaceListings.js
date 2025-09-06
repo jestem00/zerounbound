@@ -98,6 +98,35 @@ function* walkListings(value, depth = 0) {
   }
 }
 
+// Attempt to extract a numeric nonce from an arbitrary TzKT key shape
+function extractNonceFromKey(key) {
+  const tryNum = (x) => {
+    const n = Number(x);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  };
+  if (key == null) return null;
+  if (typeof key === 'number' || typeof key === 'string') return tryNum(key);
+  if (Array.isArray(key)) {
+    for (const it of key) {
+      const n = extractNonceFromKey(it);
+      if (n != null) return n;
+    }
+    return null;
+  }
+  if (typeof key === 'object') {
+    // Common field names
+    const cand = key.nonce ?? key.listing_nonce ?? key.id ?? key['2'];
+    const n1 = tryNum(cand);
+    if (n1 != null) return n1;
+    // Search nested values
+    for (const v of Object.values(key)) {
+      const n = extractNonceFromKey(v);
+      if (n != null) return n;
+    }
+  }
+  return null;
+}
+
 /*──────── Public API ─────────*/
 
 /**
@@ -248,18 +277,24 @@ export async function listListingsForCollectionViaBigmap(nftContract, net = NETW
       for (const entry of entries) {
         const keyAddr = addrFromKey(entry?.key);
         if (!isKt(keyAddr) || keyAddr.toLowerCase() !== nftContract.toLowerCase()) continue;
-        const v = entry?.value;
-        // Shape A: value is the listing object
-        const looksListing =
-          v && typeof v === 'object' && ('price' in v || 'priceMutez' in v) && ('token_id' in v || 'tokenId' in v);
-        if (looksListing) {
-          const tokenId = Number(v.token_id ?? v.tokenId);
-          push(tokenId, v);
-          continue;
+        const val = entry?.value;
+        // listings bigmap often returns: value = { [nonce]: listing }
+        if (val && typeof val === 'object' && !Array.isArray(val)) {
+          const pairs = Object.entries(val);
+          if (pairs.length) {
+            for (const [nonceKey, listing] of pairs) {
+              if (!listing || typeof listing !== 'object') continue;
+              const tokenId = Number(listing.token_id ?? listing.tokenId ?? listing?.token?.id);
+              if (!Number.isFinite(tokenId)) continue;
+              if (listing.nonce == null && listing.listing_nonce == null) listing.nonce = Number(nonceKey); // eslint-disable-line no-param-reassign
+              push(tokenId, listing);
+            }
+            continue;
+          }
         }
-        // Shape B: nested map(s) → walk them
-        for (const listing of walkListings(v)) {
-          const tokenId = Number(listing.token_id ?? listing.tokenId);
+        // Fallback: nested shapes
+        for (const listing of walkListings(val)) {
+          const tokenId = Number(listing.token_id ?? listing.tokenId ?? listing?.token?.id);
           push(tokenId, listing);
         }
       }

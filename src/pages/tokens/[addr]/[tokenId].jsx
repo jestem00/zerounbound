@@ -31,6 +31,7 @@ import { mimeFromDataUri } from '../../../utils/uriHelpers.js';
 /* centralized extra‑URI fetching */
 import { fetchExtraUris } from '../../../utils/extraUris.js';
 import { getCollectionRarity, buildTokenRarity } from '../../../utils/rarity.js';
+import TokenDetailsTabs from '../../../ui/TokenDetailsTabs.jsx';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -261,6 +262,35 @@ export default function TokenDetailPage() {
   /* derived current media + hazards */
   const cur  = uris[uriIdx] || { value: '', mime: '' };
   const meta = token?.metadata || {};
+  const [isCreator, setIsCreator] = useState(false);
+  useEffect(() => {
+    const me = String(walletAddr || '').toLowerCase();
+    if (!me) { setIsCreator(false); return; }
+    const creators = Array.isArray((token?.metadata || {}).creators) ? token.metadata.creators.map((x) => String(x).toLowerCase()) : [];
+    const collCreator = String(collection?.creator?.address || collection?.creator || '').toLowerCase();
+    if (creators.includes(me) || (collCreator && collCreator === me)) { setIsCreator(true); return; }
+    // Probe storage admin fields
+    let cancelled = false;
+    (async () => {
+      try {
+        const st = await jFetch(`${apiBase}/contracts/${addr}/storage`).catch(() => null);
+        const candidates = [];
+        if (st && typeof st === 'object') {
+          const keys = ['admin','administrator','owner','creator'];
+          for (const k of keys) if (st[k]) candidates.push(st[k]);
+          const data = st.data || st.state || {};
+          for (const k of keys) if (data && data[k]) candidates.push(data[k]);
+          // arrays: admins, maintainers, operators
+          const arrKeys = ['admins','maintainers','operators'];
+          for (const ak of arrKeys) if (Array.isArray(st[ak])) candidates.push(...st[ak]);
+          for (const ak of arrKeys) if (Array.isArray((data||{})[ak])) candidates.push(...(data||{})[ak]);
+        }
+        const flat = candidates.flatMap((v) => (typeof v === 'string' ? [v] : (Array.isArray(v) ? v : []))).map((s) => String(s).toLowerCase());
+        if (!cancelled) setIsCreator(flat.includes(me));
+      } catch { if (!cancelled) setIsCreator(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [walletAddr, addr, apiBase, token?.metadata, collection?.creator]);
   const hazards = detectHazards({ artifactUri: cur.value, mimeType: cur.mime });
 
   const needsNSFW  = hazards.nsfw     && !allowNSFW;
@@ -426,6 +456,16 @@ export default function TokenDetailPage() {
           rarity={rarity}
         />
       </Grid>
+
+      {/* Details tabs: history, listings, offers, owners, attributes */}
+      <TokenDetailsTabs
+        addr={String(addr)}
+        tokenId={Number(tokenId)}
+        tokenName={meta?.name || ''}
+        meta={meta}
+        rarity={rarity}
+        isCreator={isCreator}
+      />
 
       {/*──────── fullscreen modal (wrap‑nav across all URIs) ──────*/}
       <FullscreenModal

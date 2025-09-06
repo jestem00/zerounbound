@@ -293,21 +293,44 @@ export default function MAINTokenMetaPanel({
         </Section>
       )}
 
-      {/* Attributes with rarity percentages */}
-      {rarity?.traits && rarity.traits.length > 0 && (
-        <Section>
-          <span style={{ fontWeight: 700 }}>Attributes:</span>
-          <TraitGrid>
-            {rarity.traits.map((t) => (
-              <Trait key={`${t.name}:${t.value}`}>
-                <strong>{t.value}</strong>
-                <span style={{ opacity: .8 }}>{t.name}</span>
-                <TraitPct>{t.pct.toFixed(2).replace(/\.00$/, '')}%</TraitPct>
-              </Trait>
-            ))}
-          </TraitGrid>
-        </Section>
-      )}
+      {/* Attributes: prefer rarity.traits when available; fall back to meta.attributes */}
+      {(() => {
+        const traits = Array.isArray(rarity?.traits) ? rarity.traits : null;
+        const attrs  = Array.isArray(meta?.attributes) ? meta.attributes : null;
+        if (traits && traits.length > 0) {
+          return (
+            <Section>
+              <span style={{ fontWeight: 700 }}>Attributes:</span>
+              <TraitGrid>
+                {traits.map((t) => (
+                  <Trait key={`${t.name}:${t.value}`}>
+                    <strong>{t.value}</strong>
+                    <span style={{ opacity: .8 }}>{t.name}</span>
+                    <TraitPct>{t.pct.toFixed(2).replace(/\.00$/, '')}%</TraitPct>
+                  </Trait>
+                ))}
+              </TraitGrid>
+            </Section>
+          );
+        }
+        if (attrs && attrs.length > 0) {
+          return (
+            <Section>
+              <span style={{ fontWeight: 700 }}>Attributes:</span>
+              <TraitGrid>
+                {attrs.map((a, i) => (
+                  <Trait key={`${a.name}_${a.value}_${i}`}>
+                    <strong>{a.value}</strong>
+                    <span style={{ opacity: .8 }}>{a.name}</span>
+                    <TraitPct>—</TraitPct>
+                  </Trait>
+                ))}
+              </TraitGrid>
+            </Section>
+          );
+        }
+        return null;
+      })()}
 
       {/* Tags */}
       {Array.isArray(meta?.tags) && meta.tags.length > 0 && (

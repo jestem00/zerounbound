@@ -258,9 +258,25 @@ async function fetchListingsViaTzktBigmap({ nftContract, tokenId, net = NETWORK_
   const out = [];
 
   if (idx.collection_listings) {
-    const q1 = new URLSearchParams({ key: nftContract, active: 'true', select: 'value', limit: '10000' });
+    // Pull the entire holder object for this collection and extract
+    // tokenId → { nonce → listing } preserving the nonce key.
+    const q1 = new URLSearchParams({ key: nftContract, active: 'true', select: 'value', limit: '1' });
     const rows = await jFetch(`${TZKT_V1}/bigmaps/${idx.collection_listings}/keys?${q1}`, 1).catch(() => []);
-    for (const r of rows || []) for (const l of walkListings(r)) out.push(l);
+    for (const r of rows || []) {
+      const holder = r?.value || r;
+      if (!holder || typeof holder !== 'object') continue;
+      for (const [tid, nonceMap] of Object.entries(holder)) {
+        const tokId = Number(tid);
+        if (!Number.isFinite(tokId)) continue;
+        if (nonceMap && typeof nonceMap === 'object') {
+          for (const [nonceKey, listing] of Object.entries(nonceMap)) {
+            if (!listing || typeof listing !== 'object') continue;
+            if (listing.nonce == null && listing.listing_nonce == null) listing.nonce = Number(nonceKey);
+            out.push({ ...listing, token_id: tokId });
+          }
+        }
+      }
+    }
   }
 
   if (idx.listings && out.length === 0) {
@@ -282,7 +298,20 @@ async function fetchListingsViaTzktBigmap({ nftContract, tokenId, net = NETWORK_
         return String(c) === nftContract && id === Number(tokenId);
       });
     }
-    for (const r of rows || []) for (const l of walkListings(r)) out.push(l);
+    for (const r of rows || []) {
+      const value = r?.value ?? r;
+      if (value && typeof value === 'object') {
+        // value is a map of nonce -> listing; capture nonce from the key
+        for (const [nonceKey, listing] of Object.entries(value)) {
+          if (!listing || typeof listing !== 'object') continue;
+          const tokId = Number(listing?.token_id ?? listing?.tokenId ?? listing?.token?.id);
+          if (!Number.isFinite(tokId)) continue;
+          const withNonce = { ...listing };
+          if (withNonce.nonce == null && withNonce.listing_nonce == null) withNonce.nonce = Number(nonceKey);
+          out.push(withNonce);
+        }
+      }
+    }
   }
 
   // Some marketplace deployments keep an explicit active bigmap; consult it as

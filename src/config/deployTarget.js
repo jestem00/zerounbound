@@ -88,12 +88,11 @@ const nets = {
     ogImage:      'https://zerounbound.art/sprites/Banner.png',
     startUrl:     '/?source=pwa-mainnet',
     rpc: [
-      // Prefer SmartPy mainnet RPC first to avoid CORS on views
-      'https://mainnet.smartpy.io',
-      // ECAD Infra mainnet RPC (fast, but may CORS-block some POST view calls)
+      // Reordered to avoid SmartPy CORS intermittency in browsers
       'https://mainnet.tezos.ecadinfra.com',
-      // Fallback: Tezos Commons node-switcher
       'https://prod.tcinfra.net/rpc/mainnet',
+      // Keep SmartPy last as a fallback
+      'https://mainnet.smartpy.io',
     ],
     tzkt:         'https://api.tzkt.io',
     redirects:    [],
@@ -140,7 +139,9 @@ export const SITE_LOGO     = NET.siteLogo;
 // on-chain_offers, etc). Default true for parity with previous behavior.
 // ENABLE_OFFCHAIN_MARKET_VIEWS: enables TZIP-16 off-chain listings view
 // (offchain_listings_for_token). Default false to avoid RPC/CORS issues.
-export const ENABLE_ONCHAIN_VIEWS = true;
+// Disable on-chain views in mainnet to avoid browser CORS on run_code; keep
+// enabled on ghostnet for testing. TzKT/BCD fallbacks remain available.
+export const ENABLE_ONCHAIN_VIEWS = TARGET !== 'mainnet';
 export const ENABLE_OFFCHAIN_MARKET_VIEWS = false;
 
 // External site URL prefixes.  These base URLs change by network.
@@ -303,6 +304,15 @@ export async function selectFastestRpc(timeout = 2000) {
 // initial network.  By defining DEFAULT_NETWORK equal to TARGET we maintain
 // compatibility with components such as WalletContext that expect this export.
 export const DEFAULT_NETWORK = TARGET;
+
+// ---------------------------------------------------------------------------
+// External marketplace addresses (for attribution in history views)
+//
+// OBJKT marketplace (mainnet). Ghostnet address is not used in production;
+// leave empty to disable OBJKT correlation on test networks.
+export const OBJKT_MARKET_ADDRESS = TARGET === 'mainnet'
+  ? 'KT1SwbTqhSKF6Pdokiu1K4Fpi17ahPPzmt1X'
+  : 'KT1SegJhvGNsu9j9fPYC8PcH88Y4bFR9qi33';
 
 /* What changed & why:
    • Added DOMAIN_CONTRACTS and FALLBACK_RPCS exports.  These new constants

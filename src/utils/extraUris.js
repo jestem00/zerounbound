@@ -17,7 +17,7 @@
 import { jFetch } from '../core/net.js';
 import { mimeFromDataUri } from './uriHelpers.js';
 import { mimeFromFilename } from '../constants/mimeTypes.js';
-import { RPC_URLS } from '../config/deployTarget.js';
+import { RPC_URLS, ENABLE_ONCHAIN_VIEWS } from '../config/deployTarget.js';
 import { TezosToolkit } from '@taquito/taquito';
 
 /*──────────────────────────────── helpers ───────────────────────────────*/
@@ -749,17 +749,20 @@ export async function fetchExtraUris({ toolkit, addr, tokenId, apiBase, meta } =
       else m = {};
     } catch { m = {}; }
   }
-  // Attempt off-chain view via TZIP-16 first (with RPC failover)
-  const fromTzip16 = (addr && tokenId != null && toolkit)
-    ? await fetchViaTzip16Failover(toolkit, addr, tokenId)
-    : [];
-  // Fallback to on-chain view via toolkit (c.views) if TZIP-16 returned nothing
-  const fromToolkit = (addr && tokenId != null && toolkit && !fromTzip16.length)
-    ? await fetchViaToolkitFailover(toolkit, addr, tokenId) : [];
-  // Then fallback to TzKT view if both TZIP-16 and toolkit views are empty
-  const fromTzkt = (addr && tokenId != null && !fromTzip16.length && !fromToolkit.length)
+  // Prefer TzKT GET views first (no browser run_code CORS)
+  const fromTzkt = (addr && tokenId != null)
     ? await fetchViaTzkt(base, addr, tokenId) : [];
-  let viewRows = fromTzip16.length ? fromTzip16 : (fromToolkit.length ? fromToolkit : fromTzkt);
+  let viewRows = fromTzkt;
+
+  // Only if nothing was found and on-chain views are enabled, try RPC paths
+  if ((!viewRows || viewRows.length === 0) && ENABLE_ONCHAIN_VIEWS) {
+    const fromTzip16 = (addr && tokenId != null && toolkit)
+      ? await fetchViaTzip16Failover(toolkit, addr, tokenId)
+      : [];
+    const fromToolkit = (addr && tokenId != null && toolkit && !fromTzip16.length)
+      ? await fetchViaToolkitFailover(toolkit, addr, tokenId) : [];
+    viewRows = fromTzip16.length ? fromTzip16 : fromToolkit;
+  }
   const metaRows = (m && typeof m === 'object') ? collectExtraUrisFromMeta(m) : [];
 
   // If the view returned no rows or only rows missing friendly fields, try BetterCallDev

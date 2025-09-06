@@ -21,12 +21,9 @@ import PixelHeading       from '../PixelHeading.jsx';
 import PixelButton        from '../PixelButton.jsx';
 import OperationOverlay   from '../OperationOverlay.jsx';
 import { useWalletContext } from '../../contexts/WalletContext.js';
-import {
-  fetchListings,
-  fetchOnchainListings,
-  marketplaceAddr,
-  buildCancelParams,
-} from '../../core/marketplace.js';
+import { fetchListings, fetchOnchainListings, buildCancelParams } from '../../core/marketplace.js';
+import { listListingsForCollectionViaBigmap } from '../../utils/marketplaceListings.js';
+import { NETWORK_KEY } from '../../config/deployTarget.js';
 import { formatMutez } from '../../utils/formatTez.js';
 
 // styled-components helper
@@ -127,67 +124,14 @@ export default function CancelListing({ open, contract, tokenId, onClose = () =>
           return sameSeller && amount > 0;
         });
 
-        // Fallback: if no listings were found via on/offâ€‘chain views but a wallet address exists,
-        // query TzKTâ€™s seller_listings bigâ€‘map directly.  This uses the network from the toolkit
-        // to construct the base API URL and resolves the marketplace address via marketplaceAddr().
-        if (filtered.length === 0 && walletAddr) {
+        // Fallback: if still empty, scan collection listings via our hardened bigmap util
+        if (filtered.length === 0) {
           try {
-            const netType = toolkit?._network?.type ?? 'mainnet';
-            const marketAddr = marketplaceAddr(netType);
-            const base = /mainnet/i.test(netType) ? 'https://api.tzkt.io' : 'https://api.ghostnet.tzkt.io';
-            // Resolve the seller_listings bigâ€‘map pointer
-            const mapsRes = await fetch(`${base}/v1/contracts/${marketAddr}/bigmaps?path=seller_listings`);
-            const maps = await mapsRes.json();
-            let ptr;
-            if (Array.isArray(maps) && maps.length > 0) {
-              const match = maps.find((m) => (m.path || m.name) === 'seller_listings');
-              ptr = match ? (match.ptr ?? match.id) : undefined;
-            }
-            if (ptr != null) {
-              // Fetch all keys (sellers) and filter by our wallet address
-              const keysRes = await fetch(`${base}/v1/bigmaps/${ptr}/keys?active=true`);
-              const keys = await keysRes.json();
-              const fallbacks = [];
-              for (const entry of keys) {
-                let keyAddr;
-                const k = entry.key;
-                if (typeof k === 'string') {
-                  keyAddr = k;
-                } else if (k && typeof k.address === 'string') {
-                  keyAddr = k.address;
-                } else if (k && typeof k.value === 'string') {
-                  keyAddr = k.value;
-                }
-                if (!keyAddr || keyAddr.toLowerCase() !== walletAddr.toLowerCase()) continue;
-                const val = entry.value;
-                const items = Array.isArray(val) ? val : [];
-                for (const item of items) {
-                  // Each item may include nft_contract, token_id, nonce, price, amount, active, seller
-                    const itemContract = item.nft_contract || (item.contract && item.contract.address);
-                    const itemTokenId  = item.token_id ?? item.tokenId;
-                    const nonce        = item.nonce ?? item.listing_nonce;
-                    const price        = item.price;
-                    const amountVal    = item.amount;
-                    const isActive     = item.active;
-                    if (!itemContract || nonce == null) continue;
-                    if (itemContract === contract && Number(itemTokenId) === Number(tokenId) && Number(amountVal) > 0) {
-                      fallbacks.push({
-                        nonce      : Number(nonce),
-                        priceMutez : Number(price),
-                        amount     : Number(amountVal),
-                        seller     : walletAddr,
-                        active     : isActive,
-                      });
-                    }
-                }
-              }
-              if (fallbacks.length > 0) {
-                filtered = fallbacks;
-              }
-            }
-          } catch (fallbackErr) {
-            console.error('TzKT fallback failed:', fallbackErr);
-          }
+            const arr = await listListingsForCollectionViaBigmap(contract, NETWORK_KEY).catch(() => []);
+            const tokenRows = (arr || []).filter((x) => Number(x?.tokenId) === Number(tokenId));
+            const mine = tokenRows.filter((x) => String(x?.seller || '').toLowerCase() === String(walletAddr || '').toLowerCase());
+            if (mine.length) filtered = mine;
+          } catch (err2) { /* ignore */ }
         }
 
         if (!cancel) {

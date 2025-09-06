@@ -329,6 +329,8 @@ async function fetchListingsViaTzktBigmap({ nftContract, tokenId, net = NETWORK_
   }
 
   return out.map((l) => ({
+    // Normalize nonce; tolerate sources that expose bigmap row id as id
+    // (legacy behavior kept for broad compatibility).
     nonce     : Number(l?.nonce ?? l?.listing_nonce ?? l?.id ?? 0),
     priceMutez: Number(l?.price ?? l?.priceMutez),
     amount    : Number(l?.amount ?? l?.quantity ?? l?.amountTokens ?? 0),

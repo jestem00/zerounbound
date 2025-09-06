@@ -276,6 +276,7 @@ export default function ZeroUnboundApp({ Component, pageProps }) {
             downloadName={shareDlg.downloadName}
           />
         )}
+
       </WalletProvider>
     </ThemeProvider>
   );

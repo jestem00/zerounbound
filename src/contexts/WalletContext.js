@@ -1,7 +1,7 @@
-/*─────────────────────────────────────────────────────────────
+﻿/*â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   Developed by @jams2blues with love for the Tezos community
   File:    src/contexts/WalletContext.js
-  Rev :    r1025   2025‑07‑29
+  Rev :    r1025   2025â€‘07â€‘29
   Summary: synchronise wallet state and expose refresh() helper.  Updated
            to use DEFAULT_NETWORK from deployTarget.js and delegate
            fastest RPC selection to chooseFastestRpc().  Maintains the
@@ -11,11 +11,11 @@
   A simplified wallet context for ZeroUnbound.  We explicitly
   disable P2P transports by setting `matrixNodes: []` when
   constructing the BeaconWallet.  This forces Beacon to
-  communicate via the browser extension, fixing Temple’s
-  “Receiving end does not exist” error.  The context manages the
+  communicate via the browser extension, fixing Templeâ€™s
+  â€œReceiving end does not existâ€ error.  The context manages the
   TezosToolkit and BeaconWallet instances, restores existing
   sessions, and exposes connect/disconnect and reveal helpers.
-────────────────────────────────────────────────────────────*/
+â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€*/
 
 import React, {
   createContext,
@@ -31,16 +31,16 @@ import { BeaconWallet }  from '@taquito/beacon-wallet';
 import { DEFAULT_NETWORK } from '../config/deployTarget.js';
 import { chooseFastestRpc } from '../utils/chooseFastestRpc.js';
 
-/*──────── constants ─────────*/
+/*â”€â”€â”€â”€â”€â”€â”€â”€ constants â”€â”€â”€â”€â”€â”€â”€â”€â”€*/
 const APP_NAME      = 'ZeroUnbound.art';
-const BALANCE_FLOOR = 500_000;     /* 0.5 ꜩ mutez */
+const BALANCE_FLOOR = 500_000;     /* 0.5Â êœ© mutez */
 
-/*──────── context helpers ─────────*/
+/*â”€â”€â”€â”€â”€â”€â”€â”€ context helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€*/
 const WalletCtx = createContext(null);
 export const useWalletContext = () => useContext(WalletCtx);
 export const useWallet = useWalletContext;
 
-/*──────── provider ─────────*/
+/*â”€â”€â”€â”€â”€â”€â”€â”€ provider â”€â”€â”€â”€â”€â”€â”€â”€â”€*/
 export function WalletProvider({ children, initialNetwork = DEFAULT_NETWORK }) {
   const tkRef     = useRef(null);
   const walletRef = useRef(null);
@@ -95,8 +95,8 @@ export function WalletProvider({ children, initialNetwork = DEFAULT_NETWORK }) {
         // Disable P2P transports for Temple wallet.  When
         // matrixNodes is an empty array, Beacon attempts to
         // communicate exclusively with browser extensions via
-        // postMessage.  This prevents “Could not establish
-        // connection” errors and ensures the extension handles
+        // postMessage.  This prevents â€œCould not establish
+        // connectionâ€ errors and ensures the extension handles
         // large origination requests properly.
         matrixNodes     : [],
       });
@@ -104,10 +104,10 @@ export function WalletProvider({ children, initialNetwork = DEFAULT_NETWORK }) {
       walletRef.current.client.sendMetrics = async () => {};
       walletRef.current.client.updateMetricsStorage = async () => {};
       tkRef.current.setWalletProvider(walletRef.current);
-
-      // silent restore
+      // Silent restore
       const acc = await walletRef.current.client.getActiveAccount().catch(() => null);
       if (acc) await sync();
+
     })();
     initRef.current = p;
     await p;

@@ -62,10 +62,10 @@ const isTz = (s) => typeof s === 'string' && /^tz[1-3][1-9A-HJ-NP-Za-km-z]{33}$/
 const isKt = (s) => typeof s === 'string' && /^KT1[0-9A-Za-z]{33}$/i.test(s?.trim());
 
 const hrefFor = (addr = '') => {
-  const extra = (NETWORK_KEY && String(NETWORK_KEY).toLowerCase() !== 'mainnet')
-    ? `&net=${encodeURIComponent(NETWORK_KEY)}`
-    : '';
-  return `/explore/tokens?admin=${addr}${extra}`;
+  const s = String(addr || '').trim();
+  if (isTz(s)) return `/u/${s}`;           // dashboard for tz1/2/3…
+  if (isKt(s)) return `/contracts/${s}`;   // collection route for KT1
+  return '#';
 };
 
 /*── TzKT helpers to resolve a collection name from KT1 ──*/

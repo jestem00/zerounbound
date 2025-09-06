@@ -247,14 +247,15 @@ export default function UserPage() {
                   for (const [nonceKey, listing] of Object.entries(val)) {
                     if (!listing || typeof listing !== 'object') continue;
                     const id = Number(listing.token_id ?? listing.tokenId ?? listing?.token?.id);
-                    const price = Number(listing.price ?? listing.priceMutez);
-                    const amount = Number(listing.amount ?? listing.quantity ?? listing.amountTokens ?? 0);
-                    const seller = String(listing.seller || address);
-                    const active = !!(listing.active ?? listing.is_active ?? true);
-                    const nonce = Number(listing.nonce ?? listing.listing_nonce ?? nonceKey);
-                    if (!Number.isFinite(id) || !Number.isFinite(price) || amount <= 0 || !active) continue;
-                    if (seller.toLowerCase() !== address.toLowerCase()) continue;
-                    push({ contract: kt, tokenId: id, priceMutez: price, amount, seller, nonce, active: true });
+                  const price = Number(listing.price ?? listing.priceMutez);
+                  const amount = Number(listing.amount ?? listing.quantity ?? listing.amountTokens ?? 0);
+                  const sellerField = listing.seller || listing.owner || listing.address || '';
+                  const seller = typeof sellerField === 'string' ? sellerField : '';
+                  const active = !!(listing.active ?? listing.is_active ?? true);
+                  const nonce = Number(listing.nonce ?? listing.listing_nonce ?? nonceKey);
+                  if (!Number.isFinite(id) || !Number.isFinite(price) || amount <= 0 || !active) continue;
+                  if (!seller || seller.toLowerCase() !== address.toLowerCase()) continue;
+                  push({ contract: kt, tokenId: id, priceMutez: price, amount, seller, nonce, active: true });
                   }
                 }
               }
@@ -274,15 +275,19 @@ export default function UserPage() {
           } catch { /* ignore */ }
           const raw = [...merge.values()];
           // Normalize + stale filter using marketplace helper
-          // Partial‑stock‑safe: require seller to have ≥1 in stock (match Explore listings)
-          const filtered = await filterStaleListings(toolkit, (raw || []).map((l) => ({
-            nftContract: l.contract || l.nftContract || l.nft_contract,
-            tokenId: Number(l.tokenId ?? l.token_id),
-            seller: String(l.seller || address),
-            amount: 1,
-            priceMutez: Number(l.priceMutez ?? l.price ?? 0),
-            __src: l,
-          }))).catch(() => raw || []);
+          // Extract true seller (never substitute page address);
+          // Partial‑stock‑safe (≥1) like Explore
+          const forFilter = (raw || [])
+            .map((l) => ({
+              nftContract: l.contract || l.nftContract || l.nft_contract,
+              tokenId    : Number(l.tokenId ?? l.token_id),
+              seller     : String(l.seller || l.owner || l.address || ''),
+              amount     : 1,
+              priceMutez : Number(l.priceMutez ?? l.price ?? 0),
+              __src      : l,
+            }))
+            .filter((r) => r.seller && r.nftContract && Number.isFinite(r.tokenId) && Number.isFinite(r.priceMutez));
+          const filtered = await filterStaleListings(toolkit, forFilter).catch(() => raw || []);
           const keep = (filtered || []).map((x) => x.__src || x);
           // group by (kt,id) pick lowest price and fetch metadata
           const byC = new Map(); const price = new Map(); const best = new Map();
@@ -294,7 +299,10 @@ export default function UserPage() {
             const prev = price.get(k);
             if (prev == null || p < prev) price.set(k, p);
             const prevBest = best.get(k);
-            if (!prevBest || p < prevBest.priceMutez) best.set(k, { priceMutez: p, seller: String(r.seller||address), nonce: Number(r.nonce ?? r.listing_nonce ?? r.id ?? 0), amount: Number(r.amount ?? 1) });
+            const s = String(r.seller || r.owner || r.address || '');
+            const n = Number(r.nonce ?? r.listing_nonce ?? r.id ?? 0);
+            if (!s || !Number.isFinite(n)) continue;
+            if (!prevBest || p < prevBest.priceMutez) best.set(k, { priceMutez: p, seller: s, nonce: n, amount: Number(r.amount ?? 1) });
             const set = byC.get(kt) || new Set(); set.add(id); byC.set(kt, set);
           }
           const cards = [];
@@ -307,20 +315,35 @@ export default function UserPage() {
               if (detectHazards(md).broken) continue; if (Number(t.totalSupply||0) === 0) continue;
               const k = `${kt}|${t.tokenId}`;
               const pMutez = price.get(k) || 0;
-              const seed = best.get(k) || { seller: address, priceMutez: pMutez, amount: 1 };
+              const seed = best.get(k); // only seed when canonical pair available
               cards.push({
                 contract: kt,
                 tokenId: Number(t.tokenId),
                 priceMutez: pMutez,
                 metadata: md,
-                // Seed initial listing so TokenListingCard can immediately
-                // identify the connected wallet as the lister when appropriate.
                 initialListing: seed,
               });
             }
           }
           cards.sort((a, b) => b.tokenId - a.tokenId);
-          setLists(cards);
+          try {
+            if (typeof window !== 'undefined' && window.localStorage?.getItem('zu:debugListings') === '1') {
+              // eslint-disable-next-line no-console
+              console.info('[ListingsDbg] dashboard assembled', cards.map((c) => ({
+                contract: c.contract, tokenId: c.tokenId, price: c.priceMutez,
+                seed: c.initialListing ? { seller: c.initialListing.seller, nonce: c.initialListing.nonce, amount: c.initialListing.amount } : null,
+              })));
+            }
+          } catch {}
+          // Canonicalize seeds with resolver used by Explore
+          const canonical = await Promise.all(cards.map(async (c) => {
+            try {
+              const res = await fetchLowestListing({ toolkit, nftContract: c.contract, tokenId: c.tokenId });
+              if (res && Number(res.priceMutez) > 0) return { ...c, initialListing: { ...res } };
+            } catch {}
+            return c;
+          }));
+          setLists(canonical);
         } finally { setListsLoad(false); }
       })();
     }

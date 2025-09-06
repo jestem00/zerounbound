@@ -69,6 +69,12 @@ export default function BuyDialog(props) {
     if (!toolkit) { snack('Wallet unavailable', 'error'); return; }
 
     try {
+      try {
+        if (typeof window !== 'undefined' && window.localStorage?.getItem('zu:debugListings') === '1') {
+          // eslint-disable-next-line no-console
+          console.info('[ListingsDbg] buy preflight', { contract: CONTRACT, tokenId, seller, nonce: NONCE, amount, priceMutez });
+        }
+      } catch {}
       // Stale listing preflight (TzKT)
       await preflightBuy(toolkit, {
         nftContract: CONTRACT,
@@ -87,6 +93,12 @@ export default function BuyDialog(props) {
         nonce      : Number(NONCE),
         amount     : Number(amount) || 1,
       });
+      try {
+        if (typeof window !== 'undefined' && window.localStorage?.getItem('zu:debugListings') === '1') {
+          // eslint-disable-next-line no-console
+          console.info('[ListingsDbg] buy params', { params });
+        }
+      } catch {}
 
       const op = await toolkit.wallet.batch(params).send();
       await op.confirmation();

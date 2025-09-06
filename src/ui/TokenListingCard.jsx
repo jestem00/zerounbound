@@ -411,6 +411,16 @@ export default function TokenListingCard({
     });
   }, [initialListing]);
 
+  // Debug: observe lowest changes
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage?.getItem('zu:debugListings') === '1' && lowest) {
+        // eslint-disable-next-line no-console
+        console.info('[ListingsDbg] lowest', { contract, tokenId, lowest: { seller: lowest.seller, nonce: lowest.nonce, price: lowest.priceMutez } });
+      }
+    } catch {}
+  }, [contract, tokenId, lowest]);
+
   /* dialogs / flags */
   const [buyOpen, setBuyOpen] = useState(false);
   const [fsOpen, setFsOpen] = useState(false);
@@ -488,38 +498,44 @@ export default function TokenListingCard({
   }, [artifactUri, previewUri]);
 
   /* market polling (lowest listing every 15s) */
-  useEffect(() => {
-    let stop = false;
-    async function run() {
-      if (!toolkit) return;
-      setBusy(true);
-      try {
-        let res = null;
-        // Support both signatures (historical API shape)
-        try { res = await fetchLowestListing({ toolkit, nftContract: contract, tokenId }); }
-        catch { /* fall through */ }
-        if (!res) {
-          try { res = await fetchLowestListing(toolkit, { nftContract: contract, tokenId }); }
-          catch { /* noop */ }
-        }
-        if (!stop && res) {
-          setLowest((prev) => {
-            // adopt a better price or a richer listing record
-            const prevPrice = Number(prev?.priceMutez ?? Infinity);
-            const nextPrice = Number(res.priceMutez ?? Infinity);
-            if (nextPrice < prevPrice) return res;
-            if ((!prev?.nonce || !prev?.seller) && (res.nonce || res.seller)) return res;
-            return prev ?? res;
-          });
-        }
-      } finally {
-        if (!stop) setBusy(false);
-      }
-    }
-    run();
-    const t = setInterval(run, 15_000);
-    return () => { stop = true; clearInterval(t); };
-  }, [toolkit, contract, tokenId]);
+useEffect(() => {
+let stop = false;
+async function run() {
+if (!toolkit) return;
+setBusy(true);
+try {
+let res = null;
+// Support both signatures (historical API shape)
+try { res = await fetchLowestListing({ toolkit, nftContract: contract, tokenId }); }
+catch { /* fall through */ }
+if (!res) {
+try { res = await fetchLowestListing(toolkit, { nftContract: contract, tokenId }); }
+catch { /* noop */ }
+}
+if (!stop && res) {
+setLowest((prev) => {
+  // adopt when:
+  // 1) price is better; or
+  // 2) result is richer (has seller/nonce we lacked); or
+  // 3) the listing pair (seller|nonce) differs from current (canonicalize)
+  const prevPrice = Number(prev?.priceMutez ?? Infinity);
+  const nextPrice = Number(res.priceMutez ?? Infinity);
+  const priceBetter = nextPrice < prevPrice;
+  const richer = ((!prev?.nonce || !prev?.seller) && (res.nonce || res.seller));
+  const sellerChanged = !!(prev?.seller && res?.seller) && String(prev.seller).toLowerCase() !== String(res.seller).toLowerCase();
+  const nonceChanged = Number(prev?.nonce) !== Number(res?.nonce);
+  if (priceBetter || richer || sellerChanged || nonceChanged) return res;
+  return prev ?? res;
+});
+}
+} finally {
+if (!stop) setBusy(false);
+}
+}
+run();
+const t = setInterval(run, 15_000);
+return () => { stop = true; clearInterval(t); };
+}, [toolkit, contract, tokenId]);
 
   /* seller + price */
   const isSeller = useMemo(() => {
@@ -849,7 +865,41 @@ export default function TokenListingCard({
             noActiveFx                /* do not “shrink” on press */
             disabled={cardBuyDisabled}
             onMouseDown={(e) => { e.stopPropagation(); }}  /* prevent tile click */
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setBuyOpen(true); }}
+            onClick={async (e) => {
+              e.preventDefault(); e.stopPropagation();
+              try {
+                if (typeof window !== 'undefined' && window.localStorage?.getItem('zu:debugListings') === '1') {
+                  // eslint-disable-next-line no-console
+                  console.info('[ListingsDbg] open buy (pre)', {
+                    contract, tokenId,
+                    lowest: lowest ? { seller: lowest.seller, nonce: lowest.nonce, price: lowest.priceMutez } : null,
+                  });
+                }
+              } catch {}
+              // Just‑in‑time canonicalization before opening
+              if (toolkit) {
+                try {
+                  let res = null;
+                  try { res = await fetchLowestListing({ toolkit, nftContract: contract, tokenId }); }
+                  catch { try { res = await fetchLowestListing(toolkit, { nftContract: contract, tokenId }); } catch { res = null; } }
+                  if (res && Number(res.priceMutez) > 0) {
+                    const sellerChanged = !!(lowest?.seller && res?.seller) && String(lowest.seller).toLowerCase() !== String(res.seller).toLowerCase();
+                    const nonceChanged  = Number(lowest?.nonce) !== Number(res?.nonce);
+                    const priceChanged  = Number(lowest?.priceMutez ?? -1) !== Number(res.priceMutez);
+                    if (sellerChanged || nonceChanged || priceChanged || !lowest) {
+                      setLowest({ ...res });
+                    }
+                    try {
+                      if (typeof window !== 'undefined' && window.localStorage?.getItem('zu:debugListings') === '1') {
+                        // eslint-disable-next-line no-console
+                        console.info('[ListingsDbg] open buy (resolved)', { contract, tokenId, res: { seller: res.seller, nonce: res.nonce, price: res.priceMutez } });
+                      }
+                    } catch {}
+                  }
+                } catch {}
+              }
+              setBuyOpen(true);
+            }}
             title={
               isSeller
                 ? 'You cannot buy your own listing'

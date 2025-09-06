@@ -290,7 +290,10 @@ export default function UserPage() {
           const filtered = await filterStaleListings(toolkit, forFilter).catch(() => raw || []);
           const keep = (filtered || []).map((x) => x.__src || x);
           // group by (kt,id) pick lowest price and fetch metadata
-          const byC = new Map(); const price = new Map(); const best = new Map();
+          const byC = new Map();
+          const price = new Map();          // global lowest price per (kt|id)
+          const best  = new Map();          // global best listing row per (kt|id)
+          const bestMine = new Map();       // seller-specific best listing per (kt|id)
           for (const r of keep) {
             const kt = r.contract || r.nftContract || r.nft_contract; const id = Number(r.tokenId ?? r.token_id);
             const p = Number(r.priceMutez ?? r.price ?? 0);
@@ -303,6 +306,12 @@ export default function UserPage() {
             const n = Number(r.nonce ?? r.listing_nonce ?? r.id ?? 0);
             if (!s || !Number.isFinite(n)) continue;
             if (!prevBest || p < prevBest.priceMutez) best.set(k, { priceMutez: p, seller: s, nonce: n, amount: Number(r.amount ?? 1) });
+
+            // Track best listing for this dashboard's seller specifically
+            if (s.toLowerCase() === address.toLowerCase()) {
+              const prevMine = bestMine.get(k);
+              if (!prevMine || p < prevMine.priceMutez) bestMine.set(k, { priceMutez: p, seller: s, nonce: n, amount: Number(r.amount ?? 1) });
+            }
             const set = byC.get(kt) || new Set(); set.add(id); byC.set(kt, set);
           }
           const cards = [];
@@ -314,8 +323,11 @@ export default function UserPage() {
               let md = t.metadata || {}; try { md = decodeHexFields(md); } catch {}
               if (detectHazards(md).broken) continue; if (Number(t.totalSupply||0) === 0) continue;
               const k = `${kt}|${t.tokenId}`;
-              const pMutez = price.get(k) || 0;
-              const seed = best.get(k); // only seed when canonical pair available
+              // Display seller-specific price when present; fall back to global lowest
+              const mine = bestMine.get(k);
+              const pMutez = (mine?.priceMutez != null ? mine.priceMutez : (price.get(k) || 0));
+              // Seed only when we have a canonical pair; prefer seller-specific seed
+              const seed = (mine && mine.seller && Number.isFinite(mine.nonce)) ? mine : best.get(k);
               cards.push({
                 contract: kt,
                 tokenId: Number(t.tokenId),
@@ -337,11 +349,48 @@ export default function UserPage() {
           } catch {}
           // Canonicalize seeds with resolver used by Explore
           const canonical = await Promise.all(cards.map(async (c) => {
+            // Trust existing canonical seed for this seller
+            if (c.initialListing && c.initialListing.seller && Number.isFinite(Number(c.initialListing.nonce))) {
+              return c;
+            }
             try {
-              const res = await fetchLowestListing({ toolkit, nftContract: c.contract, tokenId: c.tokenId });
-              if (res && Number(res.priceMutez) > 0) return { ...c, initialListing: { ...res } };
+              // Prefer this seller's listings only (no cross‑seller lowest)
+              const sellerRows = await fetchSellerListingsViaTzkt(address, net).catch(() => []);
+              const mineForToken = (sellerRows || []).filter((l) => (
+                String(l.contract || l.nftContract || l.nft_contract) === String(c.contract)
+                && Number(l.tokenId ?? l.token_id) === Number(c.tokenId)
+              ));
+              if (mineForToken.length) {
+                const lowest = mineForToken.reduce((m, cur) => (Number(cur.priceMutez ?? cur.price) < Number(m.priceMutez ?? m.price) ? cur : m));
+                const seed = {
+                  seller    : String(lowest.seller || ''),
+                  nonce     : Number(lowest.nonce ?? lowest.listing_nonce ?? lowest.id ?? 0),
+                  priceMutez: Number(lowest.priceMutez ?? lowest.price ?? 0),
+                  amount    : Number(lowest.amount ?? lowest.quantity ?? 1),
+                };
+                if (seed.seller && Number.isFinite(seed.nonce) && seed.priceMutez > 0) {
+                  try {
+                    if (typeof window !== 'undefined' && window.localStorage?.getItem('zu:debugListings') === '1') {
+                      // eslint-disable-next-line no-console
+                      console.info('[ListingsDbg] canonical seed (sellerRows)', { contract: c.contract, tokenId: c.tokenId, seed });
+                    }
+                  } catch {}
+                  return { ...c, initialListing: seed };
+                }
+              }
+              // Fallback once: unlocked lowest without stale filter, but only adopt if seller matches dashboard address
+              const any = await fetchLowestListing({ toolkit, nftContract: c.contract, tokenId: c.tokenId, staleCheck: false }).catch(() => null);
+              if (any && String(any.seller || '').toLowerCase() === String(address).toLowerCase()) {
+                try {
+                  if (typeof window !== 'undefined' && window.localStorage?.getItem('zu:debugListings') === '1') {
+                    // eslint-disable-next-line no-console
+                    console.info('[ListingsDbg] canonical seed (fallback any)', { contract: c.contract, tokenId: c.tokenId, seed: any });
+                  }
+                } catch {}
+                return { ...c, initialListing: { ...any } };
+              }
             } catch {}
-            return c;
+            return c; // leave unseeded; card polling/JIT will resolve
           }));
           setLists(canonical);
         } finally { setListsLoad(false); }
@@ -435,6 +484,7 @@ export default function UserPage() {
                       priceMutez={l.priceMutez}
                       metadata={l.metadata}
                       initialListing={l.initialListing}
+                      expectedSeller={address}
                     />
                   ))}
                 </Grid>

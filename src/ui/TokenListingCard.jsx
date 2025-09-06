@@ -348,6 +348,7 @@ export default function TokenListingCard({
   metadata: metadataProp,
   contractName, // optional; we fetch if missing or stale for the current contract
   initialListing, // NEW: optional seed for lowest listing (seller/nonce/price/amount)
+  expectedSeller, // NEW (dashboard): prefer this seller’s pair during JIT canonicalization
 }) {
   const router = useRouter();
   /* wallet / network context */
@@ -877,12 +878,46 @@ return () => { stop = true; clearInterval(t); };
                 }
               } catch {}
               // Just‑in‑time canonicalization before opening
+              const haveCanonical = !!(lowest && lowest.seller && Number.isFinite(Number(lowest.nonce)));
               if (toolkit) {
                 try {
                   let res = null;
-                  try { res = await fetchLowestListing({ toolkit, nftContract: contract, tokenId }); }
-                  catch { try { res = await fetchLowestListing(toolkit, { nftContract: contract, tokenId }); } catch { res = null; } }
+                  try {
+                    res = await fetchLowestListing({
+                      toolkit,
+                      nftContract: contract,
+                      tokenId,
+                      staleCheck: false, // JIT resolve without stale filter (parity with MarketplaceBar)
+                    });
+                  } catch {
+                    try {
+                      res = await fetchLowestListing(toolkit, {
+                        nftContract: contract,
+                        tokenId,
+                        staleCheck: false,
+                      });
+                    } catch { res = null; }
+                  }
+                  const expectedSellerLc = String(expectedSeller || initialListing?.seller || lowest?.seller || '').toLowerCase();
                   if (res && Number(res.priceMutez) > 0) {
+                    // If resolver picked a different seller than the card/Dashboard seller, try seller‑scoped listings
+                    if (expectedSellerLc && String(res.seller || '').toLowerCase() !== expectedSellerLc) {
+                      try {
+                        const all = await fetchListings({ toolkit, nftContract: contract, tokenId });
+                        const onlyMine = (all || []).filter((l) => String(l.seller || '').toLowerCase() === expectedSellerLc);
+                        if (onlyMine && onlyMine.length) {
+                          const prefPrice = Number(initialListing?.priceMutez ?? lowest?.priceMutez ?? priceMutez);
+                          let chosen = Number.isFinite(prefPrice)
+                            ? onlyMine.find((l) => Number(l.priceMutez) === prefPrice)
+                            : null;
+                          if (!chosen) {
+                            // Prefer most-recent listing (highest nonce) when price match isn’t found
+                            chosen = onlyMine.reduce((m, c) => (Number(c.nonce) > Number(m.nonce) ? c : m));
+                          }
+                          if (chosen) res = chosen;
+                        }
+                      } catch { /* keep res */ }
+                    }
                     const sellerChanged = !!(lowest?.seller && res?.seller) && String(lowest.seller).toLowerCase() !== String(res.seller).toLowerCase();
                     const nonceChanged  = Number(lowest?.nonce) !== Number(res?.nonce);
                     const priceChanged  = Number(lowest?.priceMutez ?? -1) !== Number(res.priceMutez);
@@ -892,13 +927,18 @@ return () => { stop = true; clearInterval(t); };
                     try {
                       if (typeof window !== 'undefined' && window.localStorage?.getItem('zu:debugListings') === '1') {
                         // eslint-disable-next-line no-console
-                        console.info('[ListingsDbg] open buy (resolved)', { contract, tokenId, res: { seller: res.seller, nonce: res.nonce, price: res.priceMutez } });
+                        console.info('[ListingsDbg] open buy (resolved)', { contract, tokenId, res: { seller: res.seller, nonce: res.nonce, price: res.priceMutez }, expectedSeller: expectedSellerLc });
                       }
                     } catch {}
                   }
                 } catch {}
               }
-              setBuyOpen(true);
+              // Defer opening a frame to ensure lowest state is committed
+              if (typeof window !== 'undefined' && window.requestAnimationFrame) {
+                window.requestAnimationFrame(() => setBuyOpen(true));
+              } else {
+                setTimeout(() => setBuyOpen(true), 0);
+              }
             }}
             title={
               isSeller
@@ -984,6 +1024,7 @@ return () => { stop = true; clearInterval(t); };
           available={lowest.amount || 1}
           listing={{ seller: lowest.seller, priceMutez: lowest.priceMutez, nonce: lowest.nonce, amount: lowest.amount || 1 }}
           toolkit={toolkit}
+          expectedSeller={expectedSeller}
         />
       )}
 
@@ -1079,6 +1120,7 @@ TokenListingCard.propTypes = {
     nonce     : PropTypes.number,
     amount    : PropTypes.number,
   }),
+  expectedSeller : PropTypes.string,
 };
 
 TokenListingCard.defaultProps = {
@@ -1086,6 +1128,7 @@ TokenListingCard.defaultProps = {
   metadata       : null,
   contractName   : '',
   initialListing : null,
+  expectedSeller : undefined,
 };
 
 /* What changed & why (r1245):

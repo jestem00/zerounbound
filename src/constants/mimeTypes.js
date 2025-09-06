@@ -106,8 +106,9 @@ const EXT_LOOKUP = {
 };
 
 const PREFERRED_EXT = {
-  'audio/mpeg': 'mp3',
-  'audio/mp3': 'mp3',
+  'audio/mpeg'   : 'mp3',
+  'audio/mp3'    : 'mp3',
+  'image/svg+xml': 'svg',
 };
 
 /**
@@ -128,7 +129,9 @@ export function mimeFromFilename(uri = '') {
  * Falls back to subtype if no preference set.
  */
 export function preferredExt(mime = '') {
-  return PREFERRED_EXT[mime.toLowerCase()] || mime.split('/')[1] || 'bin';
+  const m = String(mime || '').toLowerCase().split(';', 1)[0].trim();
+  if (!m) return 'bin';
+  return PREFERRED_EXT[m] || m.split('/')[1] || 'bin';
 }
 
 export function isMimeWhitelisted(mime) {

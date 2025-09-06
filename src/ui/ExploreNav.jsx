@@ -87,11 +87,14 @@ export default function ExploreNav({ hideSearch = false }) {
     if (addrRe.test(v)) {
       router.push(`/contracts/${v}`);
     } else if (adminRe.test(v)) {
-      // preserve tokens context for admin filter
-      const isTokensCtx = router.asPath.toLowerCase().includes('/tokens')
-                       || String(router.query.cmd).toLowerCase() === 'tokens';
-      if (isTokensCtx) router.push(`/explore?cmd=tokens&admin=${v}`);
-      else             router.push(`/explore?admin=${v}`);
+      // preserve context for admin filter across explore pages
+      const path = router.asPath.toLowerCase();
+      const cmd  = String(router.query?.cmd || '').toLowerCase();
+      const isTokensCtx   = path.includes('/tokens')   || cmd === 'tokens';
+      const isListingsCtx = path.includes('/listings') || cmd === 'listings' || path.endsWith('/my/listings');
+      if (isTokensCtx)   router.push(`/explore?cmd=tokens&admin=${v}`);
+      else if (isListingsCtx) router.push(`/explore/listings?admin=${v}`);
+      else               router.push(`/explore?admin=${v}`);
     } else {
       // eslint-disable-next-line no-alert
       alert('Enter a valid admin (tz1…) or contract (KT1…) address.');

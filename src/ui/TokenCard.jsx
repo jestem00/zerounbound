@@ -257,7 +257,30 @@ export default function TokenCard({
   }, [scriptHaz, allowScr, walletAddress, contractAdmin, meta, setAllowScr]);
 
   /* UI states */
-  const preview      = pickDataUri(meta);
+  // Prefer data: URIs; otherwise allow safe remote schemes (ipfs/https/ar/tezos-storage)
+  const preview      = useMemo(() => {
+    // 1) prefer data URIs when present
+    const data = pickDataUri(meta);
+    if (data && !/^data:text\/html/i.test(data)) return data;
+    // 2) tolerant preview selection similar to TokenListingCard (skip explicit HTML)
+    const keys = ['displayUri','display_uri','imageUri','image_uri','image','thumbnailUri','thumbnail_uri','artifactUri','artifact_uri','mediaUri','media_uri','animation_url','animationUrl'];
+    const allowed = /^(data:|ipfs:|https?:|ar:|arweave:|tezos-storage:)/i;
+    for (const k of keys) {
+      const v = typeof meta?.[k] === 'string' ? meta[k].trim() : '';
+      if (!v || !allowed.test(v)) continue;
+      if (/\.html?(\?|#|$)/i.test(v)) continue;
+      return v;
+    }
+    if (Array.isArray(meta?.formats)) {
+      for (const f of meta.formats) {
+        const uri = typeof (f?.uri || f?.url) === 'string' ? (f.uri || f.url).trim() : '';
+        const mime = typeof (f?.mime || f?.mimeType) === 'string' ? (f.mime || f.mimeType).trim() : '';
+        if (uri && allowed.test(uri) && !(mime && /^text\/html\b/i.test(mime))) return uri;
+      }
+    }
+    // 3) snapshot fallback for robustness
+    return `/api/snapshot/${encodeURIComponent(contractAddress)}/${encodeURIComponent(String(token.tokenId))}`;
+  }, [meta, contractAddress, token.tokenId]);
   const artifactSvg  = (typeof meta.artifactUri === 'string' && VALID_DATA.test(meta.artifactUri.trim()))
     ? meta.artifactUri.trim() : '';
   const fsUri        = (scriptHaz && allowScr && artifactSvg) ? artifactSvg : preview;

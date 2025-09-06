@@ -13,6 +13,7 @@ import React, {
   useState,
   useCallback,
 } from 'react';
+import { useRouter } from 'next/router';
 import styledPkg from 'styled-components';
 
 import ExploreNav        from '../../../ui/ExploreNav.jsx';
@@ -164,6 +165,7 @@ async function discoverActiveCollectionsViaTzkt(TZKT, net, mktAddr) {
 
 /*──────────────── component ────────────────*/
 export default function ListingsPage() {
+  const router = useRouter();
   const { toolkit } = useWalletContext() || {};
 
   const net = useMemo(() => {
@@ -179,6 +181,12 @@ export default function ListingsPage() {
   const [error, setError]     = useState(null);
   const [showCount, setCount] = useState(24);
   const [items, setItems]     = useState([]);
+
+  // Optional admin filter (seller)
+  const adminFilter = useMemo(() => {
+    const v = router?.query?.admin;
+    return typeof v === 'string' ? v.trim() : '';
+  }, [router?.query?.admin]);
 
   const allowedHashes = useMemo(() => new Set(getAllowedTypeHashList()), []);
 
@@ -271,12 +279,14 @@ export default function ListingsPage() {
           const ls = await listListingsForCollectionViaBigmap(kt, net).catch(() => []);
           if (!Array.isArray(ls) || ls.length === 0) continue;
 
-          // Normalize & keep “active, amount>0, valid tokenId”
+          // Normalize & keep “active, amount>0, valid tokenId” (and optional seller filter)
           let active = ls.filter((l) => {
             const amt = Number(l?.amount ?? l?.available ?? 0);
             const isActive = (l?.active ?? true) !== false;
             const idOk = Number.isFinite(Number(l?.tokenId ?? l?.token_id));
-            return amt > 0 && isActive && idOk;
+            const seller = String(l?.seller || '').trim();
+            const sellerOk = adminFilter ? (seller.toLowerCase() === adminFilter.toLowerCase()) : true;
+            return amt > 0 && isActive && idOk && sellerOk;
           });
           if (active.length === 0) continue;
 
@@ -298,7 +308,7 @@ export default function ListingsPage() {
           }
 
           // Trim the listing set to those sellers; then compute the lowest price per tokenId
-          const byId = new Map(); // id -> { priceMutez, … }
+          const byId = new Map(); // id -> { priceMutez, … } (per seller if adminFilter set)
           for (const l of active) {
             const id       = Number(l.tokenId ?? l.token_id);
             const price    = Number(l.priceMutez ?? l.price);
@@ -306,16 +316,17 @@ export default function ListingsPage() {
             const keepSet  = keptById.get(id);
             if (!seller || !keepSet || !keepSet.has(seller)) continue; // seller has 0 in stock → hide
             if (!Number.isFinite(price) || price <= 0) continue;
-            const prev = byId.get(id);
-            if (!prev || price < prev.priceMutez) {
-              byId.set(id, { ...l, tokenId: id, priceMutez: price });
-            }
+            // If adminFilter present, do not mix sellers; pick lowest price per token for this seller only
+            const key = adminFilter ? `${id}|${seller.toLowerCase()}` : String(id);
+            const prev = byId.get(key);
+            if (!prev || price < prev.priceMutez) byId.set(key, { ...l, tokenId: id, priceMutez: price });
           }
           if (byId.size === 0) continue;
 
           // Track ids and prices for later metadata pass
           const set = byContract.get(kt) || new Set();
-          for (const [id, row] of byId.entries()) {
+          for (const [k, row] of byId.entries()) {
+            const id = Number(row.tokenId);
             set.add(id);
             prices.set(`${kt}|${id}`, Number(row.priceMutez));
           }
@@ -372,7 +383,7 @@ export default function ListingsPage() {
 
   return (
     <>
-      <ExploreNav hideSearch />
+      <ExploreNav />
       {loading && (
         <div style={{ marginTop: '2rem', textAlign: 'center' }}>
           <LoadingSpinner />

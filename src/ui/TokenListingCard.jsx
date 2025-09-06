@@ -23,10 +23,11 @@ import RenderMedia from '../utils/RenderMedia.jsx';
 import BuyDialog from './BuyDialog.jsx';
 import FullscreenModal from './FullscreenModal.jsx';
 import PixelConfirmDialog from './PixelConfirmDialog.jsx';
+import CancelListing from './Entrypoints/CancelListing.jsx';
 import { shortKt, shortAddr as _shortAddr } from '../utils/formatAddress.js';
 
 import { useWalletContext } from '../contexts/WalletContext.js';
-import { fetchLowestListing } from '../core/marketplace.js';
+import { fetchLowestListing, fetchListings } from '../core/marketplace.js';
 import decodeHexFields from '../utils/decodeHexFields.js';
 import { NETWORK_KEY } from '../config/deployTarget.js';
 import { tzktBase as tzktV1Base } from '../utils/tzkt.js';
@@ -411,6 +412,7 @@ export default function TokenListingCard({
   /* dialogs / flags */
   const [buyOpen, setBuyOpen] = useState(false);
   const [fsOpen, setFsOpen] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
   const [cfrmScr, setCfrmScr] = useState(false);
   const [scrTerms, setScrTerms] = useState(false);
 
@@ -522,6 +524,28 @@ export default function TokenListingCard({
     if (!walletAddr || !lowest?.seller) return false;
     return String(walletAddr).toLowerCase() === String(lowest.seller).toLowerCase();
   }, [walletAddr, lowest]);
+
+  // Extra guard: detect if the connected wallet has any listing for this token
+  const [hasMyListing, setHasMyListing] = useState(false);
+  useEffect(() => {
+    let stop = false;
+    (async () => {
+      try {
+        setHasMyListing(false);
+        if (!walletAddr || !toolkit) return;
+        let res = await fetchLowestListing({ toolkit, nftContract: contract, tokenId }).catch(() => null);
+        let mine = !!(res && res.seller && String(res.seller).toLowerCase() === String(walletAddr).toLowerCase());
+        if (!mine) {
+          const all = await fetchListings({ toolkit, nftContract: contract, tokenId }).catch(() => []);
+          if (Array.isArray(all) && all.length) {
+            mine = all.some((l) => l && l.seller && String(l.seller).toLowerCase() === String(walletAddr).toLowerCase() && Number(l.amount || 0) > 0);
+          }
+        }
+        if (!stop && mine) setHasMyListing(true);
+      } catch { /* ignore */ }
+    })();
+    return () => { stop = true; };
+  }, [walletAddr, toolkit, contract, tokenId]);
 
   const effectiveMutez = (typeof priceMutez === 'number' ? priceMutez : lowest?.priceMutez);
   const priceXTZ = useMemo(() => {
@@ -858,6 +882,20 @@ export default function TokenListingCard({
             <img src="/sprites/share.png" alt="" aria-hidden="true" style={{ width: 12, height: 12, marginRight: 6, verticalAlign: '-2px' }} />
             SHARE
           </PixelButton>
+          {(isSeller || hasMyListing) && (
+            <PixelButton
+              size="xs"
+              noActiveFx
+              style={{ marginLeft: 8 }}
+              data-no-nav="true"
+              onMouseDown={(e) => { e.stopPropagation(); }}
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); setCancelOpen(true); }}
+              title="Cancel your listing"
+              aria-label="Cancel your listing"
+            >
+              Cancel
+            </PixelButton>
+          )}
         </ActionsRow>
 
         <ScriptsRow>
@@ -897,6 +935,15 @@ export default function TokenListingCard({
         allowScripts={hazards.scripts && allowScr}
         scriptHazard={hazards.scripts}
       />
+
+      {(walletAddr && (isSeller || hasMyListing)) && (
+        <CancelListing
+          open={cancelOpen}
+          contract={contract}
+          tokenId={tokenId}
+          onClose={() => setCancelOpen(false)}
+        />
+      )}
 
       {/* Enable scripts confirm */}
       {cfrmScr && (

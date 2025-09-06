@@ -201,12 +201,23 @@ export default function UserPage() {
       setListsLoad(true);
       (async () => {
         try {
-          let raw = await fetchOnchainListingsForSeller({ toolkit: toolkit || { _network: { type: (base.includes('ghostnet')?'ghostnet':'mainnet') } }, seller: address }).catch(() => []);
-          // Fallback: when on‑chain view is unavailable (CORS/run_code), use TzKT big‑maps
-          if (!Array.isArray(raw) || raw.length === 0) {
-            const net = base.includes('ghostnet') ? 'ghostnet' : 'mainnet';
-            raw = await fetchSellerListingsViaTzkt(address, net).catch(() => []);
-          }
+          const net = base.includes('ghostnet') ? 'ghostnet' : 'mainnet';
+          const rawOn  = await fetchOnchainListingsForSeller({ toolkit: toolkit || { _network: { type: net } }, seller: address }).catch(() => []);
+          const rawTzk = await fetchSellerListingsViaTzkt(address, net).catch(() => []);
+          // Merge and dedupe by (contract, tokenId, seller, nonce)
+          const merge = new Map();
+          const push = (r) => {
+            const kt  = r.contract || r.nftContract || r.nft_contract;
+            const id  = Number(r.tokenId ?? r.token_id);
+            const s   = String(r.seller || '');
+            const n   = Number(r.nonce ?? r.listing_nonce ?? r.id ?? 0);
+            if (!kt || !Number.isFinite(id)) return;
+            const key = `${kt}|${id}|${s}|${n}`;
+            if (!merge.has(key)) merge.set(key, r);
+          };
+          (rawOn || []).forEach(push);
+          (rawTzk || []).forEach(push);
+          const raw = [...merge.values()];
           // Normalize + stale filter using marketplace helper
           const filtered = await filterStaleListings(toolkit, (raw || []).map((l) => ({
             nftContract: l.contract || l.nftContract || l.nft_contract,

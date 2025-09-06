@@ -171,9 +171,8 @@ export default function MakeOfferDialog({
         </PixelButton>
         {ov.open && (
           <OperationOverlay
-            open={ov.open}
             label={ov.label}
-            onClose={() => setOv({ open: false, label: '' })}
+            onCancel={() => setOv({ open: false, label: '' })}
           />
         )}
         <PixelButton onClick={onClose}>

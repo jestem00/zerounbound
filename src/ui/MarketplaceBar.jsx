@@ -23,8 +23,9 @@ import {
   fetchOffers,
   getFa2BalanceViaTzkt,
 } from '../core/marketplace.js';
-import { ENABLE_ONCHAIN_VIEWS } from '../config/deployTarget.js';
+import { ENABLE_ONCHAIN_VIEWS, NETWORK_KEY } from '../config/deployTarget.js';
 import { formatMutez } from '../utils/formatTez.js';
+import { listListingsForCollectionViaBigmap as listCollectionViaTzkt } from '../utils/marketplaceListings.js';
 
 
 function toNumberOrNull(v) {
@@ -53,12 +54,30 @@ export default function MarketplaceBar({ contractAddress, tokenId, marketplace }
     let cancelled = false;
     (async () => {
       try {
-        const l = await fetchLowestListing({
+        let l = await fetchLowestListing({
           toolkit,
           nftContract: contractAddress,
           tokenId,
           staleCheck: false,
         });
+        // Fallback: use robust collection scan via TzKT when lowest is unavailable
+        if (!l) {
+          try {
+            const rows = await listCollectionViaTzkt(contractAddress, (toolkit?._network?.type && /mainnet/i.test(toolkit._network.type)) ? 'mainnet' : (NETWORK_KEY || 'ghostnet'));
+            if (Array.isArray(rows) && rows.length) {
+              const matches = rows.filter((r) => Number(r?.tokenId ?? r?.token_id) === Number(tokenId));
+              if (matches.length) {
+                const best = matches.reduce((m, c) => (Number(c.priceMutez) < Number(m.priceMutez) ? c : m));
+                l = {
+                  priceMutez: Number(best.priceMutez),
+                  amount    : Number(best.amount ?? 1),
+                  seller    : String(best.seller || ''),
+                  nonce     : Number(best.nonce ?? best.listing_nonce ?? best.id ?? 0),
+                };
+              }
+            }
+          } catch { /* keep l as null */ }
+        }
         if (!cancelled) {
           setLowest(l || null);
           setStaleStatus(l ? STALE.CHECKING : STALE.IDLE);

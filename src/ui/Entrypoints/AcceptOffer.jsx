@@ -169,7 +169,10 @@ export default function AcceptOffer({ open = false, contract = '', tokenId = '',
           </>
         )}
         {ov.open && (
-          <OperationOverlay open={ov.open} label={ov.label} onClose={() => setOv({ open: false, label: '' })} />
+          <OperationOverlay
+            label={ov.label}
+            onCancel={() => setOv({ open: false, label: '' })}
+          />
         )}
         <PixelButton onClick={onClose}>Close</PixelButton>
       </ModalBox>

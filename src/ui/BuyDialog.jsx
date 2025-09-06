@@ -119,7 +119,11 @@ export default function BuyDialog(props) {
         </Wrap>
         <PixelButton onClick={handleBuy}>BUY</PixelButton>
         {ov.open && (
-          <OperationOverlay open={ov.open} label={ov.label} onClose={() => setOv({ open: false, label: '' })} />
+          <OperationOverlay
+            label={ov.label}
+            // Map cancel to close the overlay while in-flight
+            onCancel={() => setOv({ open: false, label: '' })}
+          />
         )}
         <PixelButton ref={closeBtnRef} onClick={onClose} data-sec>Close</PixelButton>
       </ModalBox>
@@ -140,4 +144,3 @@ BuyDialog.propTypes = {
   onClose   : PropTypes.func,
   amount    : PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
 };
-

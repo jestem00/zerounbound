@@ -219,9 +219,8 @@ export default function CancelOffer({ open = false, contract = '', tokenId = '',
         )}
         {ov.open && (
           <OperationOverlay
-            open={ov.open}
             label={ov.label}
-            onClose={() => setOv({ open: false, label: '' })}
+            onCancel={() => setOv({ open: false, label: '' })}
           />
         )}
         <PixelButton onClick={onClose} style={{ marginTop: '1rem' }} $size="sm">

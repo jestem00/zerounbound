@@ -22,9 +22,11 @@ import { checkOnChainIntegrity } from '../utils/onChainValidator.js';
 import { EnableScriptsToggle }   from './EnableScripts.jsx';
 import countAmount               from '../utils/countAmount.js';
 import hashMatrix                from '../data/hashMatrix.json';
-import { shortKt, copyToClipboard } from '../utils/formatAddress.js';
+import { shortKt, shortAddr, copyToClipboard } from '../utils/formatAddress.js';
 import { mimeFromDataUri } from '../utils/uriHelpers.js';
 import { preferredExt }    from '../constants/mimeTypes.js';
+import { resolveTezosDomain } from '../utils/resolveTezosDomain.js';
+import { NETWORK_KEY } from '../config/deployTarget.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -124,6 +126,57 @@ export default function MAINTokenMetaPanel({
   const integrity = useMemo(() => checkOnChainIntegrity(meta), [meta]);
   const editions  = useMemo(() => countAmount(token), [token]);
 
+  // Creators/authors: show beneath title. Resolve domains best-effort.
+  const creatorsRaw = useMemo(() => {
+    const v = meta?.creators ?? meta?.authors ?? meta?.artists;
+    if (Array.isArray(v)) return v;
+    if (typeof v === 'string') {
+      try { const j = JSON.parse(v); return Array.isArray(j) ? j : [v]; }
+      catch { return [v]; }
+    }
+    if (v && typeof v === 'object') return Object.values(v);
+    return [];
+  }, [meta]);
+
+  const [domainsState, setDomainsState] = useState({});
+  const domainsRef = React.useRef({});
+  React.useEffect(() => {
+    const toLookup = [];
+    const seen = new Set();
+    creatorsRaw.forEach((c) => {
+      const s = typeof c === 'string' ? c : (c?.address || c?.wallet || '');
+      const addr = String(s || '').trim();
+      if (!/^tz/i.test(addr)) return; // only tz addrs get domains
+      const key = addr.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      if (domainsRef.current[key] === undefined) toLookup.push(addr);
+    });
+    if (toLookup.length === 0) return;
+    toLookup.forEach((addr) => {
+      const key = addr.toLowerCase();
+      domainsRef.current[key] = domainsRef.current[key] ?? null;
+      resolveTezosDomain(addr, NETWORK_KEY).then((name) => {
+        if (domainsRef.current[key] === null) {
+          domainsRef.current[key] = name || '';
+          setDomainsState((prev) => ({ ...prev, [key]: domainsRef.current[key] }));
+        }
+      }).catch(() => {
+        domainsRef.current[key] = '';
+        setDomainsState((prev) => ({ ...prev, [key]: '' }));
+      });
+    });
+  }, [creatorsRaw]);
+
+  const fmtCreator = React.useCallback((v) => {
+    const s = typeof v === 'string' ? v : (v?.address || v?.wallet || '');
+    const key = String(s || '').toLowerCase();
+    const dom = domainsRef.current[key] ?? domainsState[key];
+    if (dom) return dom;
+    if (!/^(tz|kt)/i.test(String(s))) return String(v);
+    return shortAddr(String(s));
+  }, [domainsState]);
+
   // Share dialog
   const [shareOpen, setShareOpen] = useState(false);
 
@@ -178,6 +231,29 @@ export default function MAINTokenMetaPanel({
           <span style={{ fontSize: '.75rem', opacity: .85 }}>
             Minted {format(new Date(token.firstTime), 'MMM dd, yyyy')} • {editions} edition{editions !== 1 ? 's' : ''}
           </span>
+        )}
+        {creatorsRaw.length > 0 && (
+          <div style={{ fontSize: '.8rem' }}>
+            <strong>Creator(s):</strong>{' '}
+            {creatorsRaw.map((c, i) => {
+              const raw = typeof c === 'string' ? c : (c?.address || c?.wallet || '');
+              const pref = i ? ', ' : '';
+              const href = /^tz/i.test(raw || '') ? `/u/${encodeURIComponent(raw)}`
+                         : /^KT1/i.test(raw || '') ? `/contracts/${encodeURIComponent(raw)}`
+                         : null;
+              const content = fmtCreator(c);
+              return href ? (
+                <span key={`${String(raw)}_${i}`}>
+                  {pref}
+                  <a href={href} style={{ color: 'var(--zu-accent-sec,#6ff)', textDecoration: 'none' }}>
+                    {content}
+                  </a>
+                </span>
+              ) : (
+                <span key={`${String(content)}_${i}`}>{pref}{content}</span>
+              );
+            })}
+          </div>
         )}
       </Section>
 

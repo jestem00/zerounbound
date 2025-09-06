@@ -145,12 +145,6 @@ const List = styled.ul.attrs((p)=>({$n:p.$n}))`
 /*════════ component ════════════════════════════════════*/
 export default function OperationOverlay({
   status    = '',
-  /**
-   * Optional legacy prop used by older components.  When provided
-   * and status is empty, this value is used for the progress
-   * message.  New code should pass `status` instead.  Kept for
-   * backward compatibility with existing marketplace dialogs.
-   */
   label,
   progress: progressProp = 0,
   error,
@@ -159,13 +153,6 @@ export default function OperationOverlay({
   current,
   step,
   total = 1,
-  /**
-   * Optional URL pointing to the freshly minted token. When provided
-   * (e.g. by the mint entrypoint after successful completion), the
-   * overlay will render a “View Token” button that links directly
-   * to the token detail page on the correct network.  Without this
-   * prop the overlay behaves exactly as before.
-   */
   tokenUrl,
   onRetry  = undefined,
   onCancel = () => {},

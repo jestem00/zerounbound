@@ -2,7 +2,7 @@
    File: src/ui/TokenListingCard.jsx
    Rev:  r1245
    Summary: Preserve preview interactivity and guarantee navigation; add
-            optional initialListing to pre‑seed BUY (seller/nonce/price/amount)
+            optional initialListing to pre seed BUY (seller/nonce/price/amount)
             so the dialog is ready immediately; polling still updates. */
 
 import React, {
@@ -29,16 +29,17 @@ import { shortKt, shortAddr as _shortAddr } from '../utils/formatAddress.js';
 
 import { useWalletContext } from '../contexts/WalletContext.js';
 import { fetchLowestListing, fetchListings } from '../core/marketplace.js';
+import { fetchSellerListingsViaTzkt, fetchTokenListingsViaView, resolveSellerListingForTokenRobust } from '../core/marketplaceHelper.js';
 import decodeHexFields from '../utils/decodeHexFields.js';
 import { NETWORK_KEY } from '../config/deployTarget.js';
 import { tzktBase as tzktV1Base } from '../utils/tzkt.js';
 import { resolveTezosDomain } from '../utils/resolveTezosDomain.js';
 import { jFetch } from '../core/net.js'; // I40: centralized HTTP
 
-// styled-components import may be ESM/CJS — normalize reference:
+// styled-components import may be ESM/CJS normalize reference:
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
-/*──────────────── styled shells ────────────────────────────────────────────*/
+/*styled shells*/
 const Card = styled.article`
   position: relative;
   width: 100%;
@@ -50,7 +51,7 @@ const Card = styled.article`
   flex-direction: column;
   transition: box-shadow .15s;
   &:hover { box-shadow: 0 0 6px var(--zu-accent-sec, #ff0); }
-  /* NOTE: no &:active translate to avoid inner CTA “jump” */
+  /* NOTE: no &:active translate to avoid inner CTA GǣjumpGǥ */
 `;
 
 const Thumb = styled.div`
@@ -156,7 +157,7 @@ const ActionsRow = styled.div`
   align-items: center;
 `;
 
-/*──────────────── utilities ────────────────────────────────────────────────*/
+/*utilities*/
 const PLACEHOLDER = '/sprites/cover_default.svg';
 
 const toArray = (src) => {
@@ -283,23 +284,23 @@ const pickArtifactUri = (m = {}) => {
   return htmlCandidate || firstCandidate || '';
 };
 
-/*──────────────── name‑resolver (no 404s; deduped; TTL) ────────────────────*/
-/** In‑memory cache & inflight deduper for contract names. */
+/*name resolver (no 404s; deduped; TTL)*/
+/** In memory cache & inflight deduper for contract names. */
 const NAME_TTL_MS = 10 * 60 * 1000; // 10 minutes
-const _nameCache = new Map();       // key → { value: string, exp: number }
-const _inflight = new Map();        // key → Promise<string>
+const _nameCache = new Map();       // key { value: string, exp: number }
+const _inflight = new Map();        // key Promise<string>
 
 async function _fetchJson(url, opts) {
   try {
     const r = await jFetch(url, opts);
-    if (!r || !r.ok) return null;      // 4xx/5xx → null (silent)
+    if (!r || !r.ok) return null;      // 4xx/5xx null (silent)
     try { return await r.json(); } catch { return null; }
   } catch {
     return null;
   }
 }
 
-/** Best‑effort TZIP‑16/alias resolver without hitting 404 endpoints. */
+/** Best effort TZIP 16/alias resolver without hitting 404 endpoints. */
 async function resolveContractName(tzktV1, kt1, signal) {
   const addr = String(kt1 || '').trim();
   if (!/^KT1[0-9A-Za-z]{33}$/i.test(addr)) return '';
@@ -340,7 +341,7 @@ async function resolveContractName(tzktV1, kt1, signal) {
   return p;
 }
 
-/*──────────────── component ────────────────────────────────────────────────*/
+/*component*/
 export default function TokenListingCard({
   contract,
   tokenId,
@@ -348,7 +349,7 @@ export default function TokenListingCard({
   metadata: metadataProp,
   contractName, // optional; we fetch if missing or stale for the current contract
   initialListing, // NEW: optional seed for lowest listing (seller/nonce/price/amount)
-  expectedSeller, // NEW (dashboard): prefer this seller’s pair during JIT canonicalization
+  expectedSeller, // NEW (dashboard): prefer this sellers pair during JIT canonicalization
 }) {
   const router = useRouter();
   /* wallet / network context */
@@ -363,7 +364,7 @@ export default function TokenListingCard({
   /* local metadata state (if not provided via props) */
   const [meta, setMeta] = useState(metadataProp || null);
 
-  /* resolved collection name (best‑effort) */
+  /* resolved collection name (best effort) */
   const [collName, setCollName] = useState(contractName || '');
 
   // Single authoritative effect handles both prop-provided names + fetch on contract change.
@@ -433,7 +434,7 @@ export default function TokenListingCard({
   const [revealType, setRevealType] = useState(null); // 'nsfw' | 'flash' | null
   const [termsOk, setTermsOk] = useState(false);
 
-  /* consent — per-feature and per-token (no global toggle for scripts) */
+  /* consent per-feature and per-token (no global toggle for scripts) */
   const [allowNSFW, setAllowNSFW] = useConsent('nsfw', false);
   const [allowFlash, setAllowFlash] = useConsent('flash', false);
   const scriptKey = useMemo(() => `scripts:${contract}:${tokenId}`, [contract, tokenId]);
@@ -463,7 +464,7 @@ export default function TokenListingCard({
           }
         }
       } catch {
-        /* ignore — card remains functional with fallbacks; jFetch handles backoff */
+        /* ignore card remains functional with fallbacks; jFetch handles backoff */
       }
     })();
 
@@ -558,7 +559,7 @@ return () => { stop = true; clearInterval(t); };
           const res = await fetchLowestListing({ toolkit, nftContract: contract, tokenId }).catch(() => null);
           mine = !!(res && res.seller && String(res.seller).toLowerCase() === String(walletAddr).toLowerCase());
         } catch { mine = false; }
-        // Fallback: scan all listings via big‑map/on‑chain readers
+        // Fallback: scan all listings via big map/on chain readers
         if (!mine) {
           const all = await fetchListings({ toolkit, nftContract: contract, tokenId }).catch(() => []);
           if (Array.isArray(all) && all.length) {
@@ -592,7 +593,7 @@ return () => { stop = true; clearInterval(t); };
     [contract, tokenId],
   );
 
-  /* creators/authors (domain‑aware) */
+  /* creators/authors (domain aware) */
   const creators = useMemo(() => {
     const raw = toArray(meta?.creators);
     return raw.length ? raw : toArray(meta?.authors || meta?.artists);
@@ -673,9 +674,9 @@ return () => { stop = true; clearInterval(t); };
     if (!isMediaControlsHit(e)) goDetail();
   }, [blocked, needsNSFW, goDetail, isMediaControlsHit]);
 
-  /* Capture‑phase guard for nested elements that stop propagation (non-embed cases). */
+  /* Capture phase guard for nested elements that stop propagation (non-embed cases). */
   const onThumbClickCapture = useCallback((e) => {
-    // Don’t interfere with explicit interactive targets inside the tile
+    // Don t interfere with explicit interactive targets inside the tile
     if (e.target?.closest?.('[data-no-nav="true"],button,[role="button"],a,input,select,textarea,label')) return;
 
     if (blocked) {
@@ -690,7 +691,7 @@ return () => { stop = true; clearInterval(t); };
     }
   }, [blocked, needsNSFW, isMediaControlsHit, goDetail]);
 
-  /*──────── embedded‑document detection for overlay activation ────────*/
+  /*  embedded document detection for overlay activation  */
   const previewMime = useMemo(() => {
     const m = String(meta?.mimeType || meta?.mime || '').toLowerCase().trim();
     if (m) return m;
@@ -708,7 +709,7 @@ return () => { stop = true; clearInterval(t); };
     return '';
   }, [meta, previewUri]);
 
-  // Overlay should be active only when click events won’t bubble: script-enabled SVG/HTML previews.
+  // Overlay should be active only when click events won t bubble: script-enabled SVG/HTML previews.
   const overlayActive = useMemo(
     () =>
       !blocked &&
@@ -718,7 +719,7 @@ return () => { stop = true; clearInterval(t); };
     [blocked, hazards.scripts, allowScr, previewMime],
   );
 
-  /*────────────────────── render ───────────────────────────────────────────*/
+  /* render*/
   return (
     <Card aria-label={`Token listing card for ${title}`}>
       {/* clickable 1:1 tile; media fits without cropping and with 0 radius */}
@@ -769,7 +770,7 @@ return () => { stop = true; clearInterval(t); };
                 aria-label="Reveal NSFW content (confirmation required)"
                 title="Reveal NSFW content"
               >
-                NSFW&nbsp;🔞
+                NSFW&nbsp;=��P
               </PixelButton>
             )}
             {needsFlash && (
@@ -781,13 +782,13 @@ return () => { stop = true; clearInterval(t); };
                 aria-label="Reveal flashing content (confirmation required)"
                 title="Reveal flashing content"
               >
-                Flashing&nbsp;🚨
+                Flashing&nbsp;=�ܿ
               </PixelButton>
             )}
           </div>
         )}
 
-        {/* NEW: navigation overlay – only active when embedded documents swallow clicks */}
+        {/* NEW: navigation overlay only active when embedded documents swallow clicks */}
         <NavOverlay
           href={tokenHref}
           $active={overlayActive}
@@ -805,12 +806,12 @@ return () => { stop = true; clearInterval(t); };
           size="xs"
           aria-label={
             blocked
-              ? (needsNSFW ? 'NSFW locked — confirm to view' : 'Flashing locked — confirm to view')
+              ? (needsNSFW ? 'NSFW locked   confirm to view' : 'Flashing locked   confirm to view')
               : (!hazards.scripts || allowScr ? 'Open fullscreen' : 'Enable scripts first')
           }
           title={
             blocked
-              ? (needsNSFW ? 'NSFW locked — confirm to view' : 'Flashing locked — confirm to view')
+              ? (needsNSFW ? 'NSFW locked   confirm to view' : 'Flashing locked   confirm to view')
               : (!hazards.scripts || allowScr ? 'Fullscreen' : 'Enable scripts first')
           }
           disabled={blocked || (hazards.scripts && !allowScr)}
@@ -863,7 +864,7 @@ return () => { stop = true; clearInterval(t); };
         <BuyRow>
           <PixelButton
             size="xs"                 /* small as requested */
-            noActiveFx                /* do not “shrink” on press */
+            noActiveFx                /* do not shrink on press */
             disabled={cardBuyDisabled}
             onMouseDown={(e) => { e.stopPropagation(); }}  /* prevent tile click */
             onClick={async (e) => {
@@ -877,11 +878,27 @@ return () => { stop = true; clearInterval(t); };
                   });
                 }
               } catch {}
-              // Just‑in‑time canonicalization before opening
-              const haveCanonical = !!(lowest && lowest.seller && Number.isFinite(Number(lowest.nonce)));
+              // Just in time canonicalization before opening
               if (toolkit) {
                 try {
+                  // If a specific seller context is provided (dashboard), resolve their canonical listing first.
+                  try {
+                    const expectedSellerLc = String(expectedSeller || initialListing?.seller || lowest?.seller || '').toLowerCase();
+                    if (expectedSellerLc) {
+                      const netKey = (toolkit?._network?.type && /mainnet/i.test(toolkit._network.type)) ? 'mainnet' : (NETWORK_KEY || 'ghostnet');
+                      const fixed = await resolveSellerListingForTokenRobust(contract, Number(tokenId), expectedSeller, netKey).catch(() => null);
+                      if (fixed && Number(fixed.nonce) > 0) {
+                        const sellerChanged = !!(lowest?.seller && fixed?.seller) && String(lowest.seller).toLowerCase() !== String(fixed.seller).toLowerCase();
+                        const nonceChanged  = Number(lowest?.nonce) !== Number(fixed?.nonce);
+                        const priceChanged  = Number(lowest?.priceMutez ?? -1) !== Number(fixed.priceMutez);
+                        if (sellerChanged || nonceChanged || priceChanged || !lowest) {
+                          setLowest({ ...fixed });
+                        }
+                      }
+                    }
+                  } catch { /* best effort */ }
                   let res = null;
+                  // 1) Start with current lowest from helpers (no stale check)
                   try {
                     res = await fetchLowestListing({
                       toolkit,
@@ -891,33 +908,70 @@ return () => { stop = true; clearInterval(t); };
                     });
                   } catch {
                     try {
-                      res = await fetchLowestListing(toolkit, {
-                        nftContract: contract,
-                        tokenId,
-                        staleCheck: false,
-                      });
+                      res = await fetchLowestListing(toolkit, { nftContract: contract, tokenId, staleCheck: false });
                     } catch { res = null; }
                   }
                   const expectedSellerLc = String(expectedSeller || initialListing?.seller || lowest?.seller || '').toLowerCase();
-                  if (res && Number(res.priceMutez) > 0) {
-                    // If resolver picked a different seller than the card/Dashboard seller, try seller‑scoped listings
-                    if (expectedSellerLc && String(res.seller || '').toLowerCase() !== expectedSellerLc) {
-                      try {
-                        const all = await fetchListings({ toolkit, nftContract: contract, tokenId });
-                        const onlyMine = (all || []).filter((l) => String(l.seller || '').toLowerCase() === expectedSellerLc);
-                        if (onlyMine && onlyMine.length) {
-                          const prefPrice = Number(initialListing?.priceMutez ?? lowest?.priceMutez ?? priceMutez);
-                          let chosen = Number.isFinite(prefPrice)
-                            ? onlyMine.find((l) => Number(l.priceMutez) === prefPrice)
-                            : null;
-                          if (!chosen) {
-                            // Prefer most-recent listing (highest nonce) when price match isn’t found
-                            chosen = onlyMine.reduce((m, c) => (Number(c.nonce) > Number(m.nonce) ? c : m));
-                          }
-                          if (chosen) res = chosen;
+
+                  // 2) If we have a result but it points to a different seller than the dashboard context, try to pick this seller's listing
+                  if (res && Number(res.priceMutez) > 0 && expectedSellerLc && String(res.seller || '').toLowerCase() !== expectedSellerLc) {
+                    try {
+                      const all = await fetchListings({ toolkit, nftContract: contract, tokenId });
+                      const onlyMine = (all || []).filter((l) => String(l.seller || '').toLowerCase() === expectedSellerLc);
+                      if (onlyMine && onlyMine.length) {
+                        const prefPrice = Number(lowest?.priceMutez ?? initialListing?.priceMutez ?? priceMutez);
+                        let chosen = Number.isFinite(prefPrice)
+                          ? onlyMine.find((l) => Number(l.priceMutez) === prefPrice)
+                          : null;
+                        if (!chosen) {
+                          // Prefer most-recent listing (highest nonce) when price match isn't found
+                          chosen = onlyMine.reduce((m, c) => (Number(c.nonce) > Number(m.nonce) ? c : m));
                         }
-                      } catch { /* keep res */ }
-                    }
+                        if (chosen) res = chosen;
+                      } else {
+                        // Harder fallback: execute on-chain view via TzKT and filter by seller
+                        try {
+                          const netKey = (toolkit?._network?.type && /mainnet/i.test(toolkit._network.type)) ? 'mainnet' : (NETWORK_KEY || 'ghostnet');
+                          const viaView = await fetchTokenListingsViaView(contract, Number(tokenId), netKey).catch(() => []);
+                          const viewMine = (viaView || []).filter((r) => String(r.seller || '').toLowerCase() === expectedSellerLc);
+                          if (viewMine && viewMine.length) {
+                            res = viewMine.reduce((m, c) => (Number(c.nonce) > Number(m.nonce) ? c : m));
+                          }
+                        } catch { /* ignore */ }
+                        // Seller index fallback to lift exact nonces quickly
+                        if (!res) {
+                          try {
+                            const netKey = (toolkit?._network?.type && /mainnet/i.test(toolkit._network.type)) ? 'mainnet' : (NETWORK_KEY || 'ghostnet');
+                            let mineIdx = await fetchSellerListingsViaTzkt(expectedSeller || '', netKey).catch(() => []);
+                            mineIdx = (mineIdx || []).filter((r) => String(r.contract) === String(contract) && Number(r.tokenId) === Number(tokenId));
+                            if (mineIdx && mineIdx.length) {
+                              res = mineIdx.reduce((m, c) => (Number(c.nonce) > Number(m.nonce) ? c : m));
+                            }
+                          } catch { /* ignore */ }
+                        }
+                      }
+                    } catch { /* keep res */ }
+                  }
+
+                  // 3) If no result at all but we expect a specific seller, derive seller-specific via view/index
+                  if (!res && expectedSellerLc) {
+                    try {
+                      const netKey = (toolkit?._network?.type && /mainnet/i.test(toolkit._network.type)) ? 'mainnet' : (NETWORK_KEY || 'ghostnet');
+                      const viaView = await fetchTokenListingsViaView(contract, Number(tokenId), netKey).catch(() => []);
+                      const viewMine = (viaView || []).filter((r) => String(r.seller || '').toLowerCase() === expectedSellerLc);
+                      if (viewMine && viewMine.length) {
+                        res = viewMine.reduce((m, c) => (Number(c.nonce) > Number(m.nonce) ? c : m));
+                      } else {
+                        let mineIdx = await fetchSellerListingsViaTzkt(expectedSeller || '', netKey).catch(() => []);
+                        mineIdx = (mineIdx || []).filter((r) => String(r.contract) === String(contract) && Number(r.tokenId) === Number(tokenId));
+                        if (mineIdx && mineIdx.length) {
+                          res = mineIdx.reduce((m, c) => (Number(c.nonce) > Number(m.nonce) ? c : m));
+                        }
+                      }
+                    } catch { /* keep res null */ }
+                  }
+
+                  if (res) {
                     const sellerChanged = !!(lowest?.seller && res?.seller) && String(lowest.seller).toLowerCase() !== String(res.seller).toLowerCase();
                     const nonceChanged  = Number(lowest?.nonce) !== Number(res?.nonce);
                     const priceChanged  = Number(lowest?.priceMutez ?? -1) !== Number(res.priceMutez);
@@ -944,8 +998,8 @@ return () => { stop = true; clearInterval(t); };
               isSeller
                 ? 'You cannot buy your own listing'
                 : lowest && lowest.priceMutez != null
-                  ? `Buy for ${(lowest.priceMutez / 1_000_000).toLocaleString(undefined, { minimumFractionDigits: 6, maximumFractionDigits: 6 })} ꜩ`
-                  : (busy ? '…' : 'No active listing')
+                  ? `Buy for ${(lowest.priceMutez / 1_000_000).toLocaleString(undefined, { minimumFractionDigits: 6, maximumFractionDigits: 6 })} ?`
+                  : (busy ? '?' : 'No active listing')
             }
             aria-label="Open buy dialog"
           >
@@ -953,7 +1007,7 @@ return () => { stop = true; clearInterval(t); };
           </PixelButton>
 
           <Price aria-live="polite">
-            {priceXTZ ? `${priceXTZ} ꜩ` : (busy ? '…' : '—')}
+            {priceXTZ ? `${priceXTZ} ?` : (busy ? '?' : ' ')}
           </Price>
         </BuyRow>
 
@@ -1076,11 +1130,11 @@ return () => { stop = true; clearInterval(t); };
       {revealType && (
         <PixelConfirmDialog
           open
-          title={`Reveal ${revealType === 'nsfw' ? 'NSFW' : 'flashing‑hazard'} content?`}
+          title={`Reveal ${revealType === 'nsfw' ? 'NSFW' : 'flashing hazard'} content?`}
           message={(
             <>
               {revealType === 'nsfw'
-                ? <p style={{ margin: '0 0 8px' }}>This asset is flagged as <strong>Not‑Safe‑For‑Work (NSFW)</strong>. Viewer discretion is advised.</p>
+                ? <p style={{ margin: '0 0 8px' }}>This asset is flagged as <strong>Not Safe For Work (NSFW)</strong>. Viewer discretion is advised.</p>
                 : <p style={{ margin: '0 0 8px' }}>This asset contains <strong>rapid flashing or strobing effects</strong>.</p>}
               <label style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
                 <input
@@ -1088,7 +1142,7 @@ return () => { stop = true; clearInterval(t); };
                   checked={termsOk}
                   onChange={(e) => setTermsOk(e.target.checked)}
                 />
-                I&nbsp;confirm&nbsp;I&nbsp;am&nbsp;18 + and&nbsp;agree&nbsp;to&nbsp;<a href="/terms" target="_blank" rel="noopener noreferrer">Terms</a>
+                I&nbsp;confirm&nbsp;I&nbsp;am&nbsp;18Gǻ+-�and&nbsp;agree&nbsp;to&nbsp;<a href="/terms" target="_blank" rel="noopener noreferrer">Terms</a>
               </label>
             </>
           )}
@@ -1132,8 +1186,14 @@ TokenListingCard.defaultProps = {
 };
 
 /* What changed & why (r1245):
-   • NEW prop `initialListing` to seed the lowest listing (seller/nonce/price/amount)
+     NEW prop `initialListing` to seed the lowest listing (seller/nonce/price/amount)
      from the parent page; BUY is immediately enabled when wallet is connected.
-   • Kept existing 15s polling via fetchLowestListing() to stay current.
-   • No behavioural regression: other pages can ignore the new prop. */
+     Kept existing 15s polling via fetchLowestListing() to stay current.
+     No behavioural regression: other pages can ignore the new prop. */
 // EOF
+
+
+
+
+
+

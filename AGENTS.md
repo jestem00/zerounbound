@@ -119,3 +119,14 @@ Unchanged. See the Manifest for a complete map of critical files and
 entry‑points.
 
 /* What changed & why: Updated to r9. Replaced the embedded sample configuration with a reference to the new root-level config.toml and summarised the key recommendations. The config file itself tracks the authoritative settings. Bumped revision and summary accordingly. */
+
+10  Anti‑Glyph Discipline (r10)
+To avoid odd glyphs and newline artifacts entering code or docs:
+
+- ASCII punctuation only in source: use plain quotes (' ") and hyphens (-). Do not paste smart quotes, em/en dashes, arrows or box‑drawing characters.
+- UTF‑8 files with real newlines: never insert literal "\n" in source where an actual newline is intended.
+- Imports must be single‑line ASCII; do not append escaped newline fragments to import statements.
+- Quick pre‑commit scan: check diffs for non‑ASCII (e.g., rg -n "[^\x00-\x7F]") and normalize before merge.
+- Exceptions: binary assets/SVG/media payloads may contain non‑ASCII; do not alter their contents.
+
+This operationalizes manifest invariant I251 and complements the existing UTF‑8/newline rule.

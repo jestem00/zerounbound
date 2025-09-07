@@ -92,8 +92,11 @@ export default async function handler(req, res) {
       if (comma < 0) throw new Error('Malformed data URI');
       const metaPart = uri.slice(5, comma);
       mime = (metaPart.split(';')[0] || '').toLowerCase();
-      const base64 = uri.slice(comma + 1);
-      buffer = Buffer.from(base64, 'base64');
+      const payload = uri.slice(comma + 1);
+      const isB64 = /;base64/i.test(metaPart);
+      // Support both base64 and UTF-8/URL-encoded data URIs (e.g., SVG)
+      if (isB64) buffer = Buffer.from(payload, 'base64');
+      else buffer = Buffer.from(decodeURIComponent(payload), 'utf8');
     } else {
       const resp = await fetch(uri);
       if (!resp.ok) throw new Error(`Failed to download ${uri}`);

@@ -64,7 +64,7 @@ const StyledButton = styled.button`
   ${({ $noActiveFx }) => $noActiveFx && activeOff}
 `;
 
-export default function PixelButton({
+const PixelButton = React.forwardRef(function PixelButton({
   children,
   onClick,
   title,
@@ -76,7 +76,7 @@ export default function PixelButton({
   as,
   href,
   ...rest
-}) {
+}, ref) {
   /* eslint-disable react/jsx-props-no-spreading */
   return (
     <StyledButton
@@ -90,12 +90,15 @@ export default function PixelButton({
       $warn={!!warning}
       $size={size}
       $noActiveFx={!!noActiveFx}
+      ref={ref}
       {...rest}
     >
       {children}
     </StyledButton>
   );
-}
+});
+
+export default PixelButton;
 
 /* What changed & why:
    • New transient prop `$noActiveFx` prevents React DOM warnings.

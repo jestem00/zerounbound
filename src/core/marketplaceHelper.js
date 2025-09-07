@@ -330,6 +330,226 @@ export async function fetchSellerListingsViaTzkt(seller, net = NETWORK_KEY) {
   return out;
 }
 
+/** Execute onchain_listings_for_token via TzKT (robust input variants).
+ * Returns: [{ contract, tokenId, priceMutez, amount, seller, nonce, active }]
+ */
+export async function fetchTokenListingsViaView(nftContract, tokenId, net = NETWORK_KEY) {
+  const market = marketplaceAddr(net);
+  if (!isKt(market) || !isKt(nftContract) || !Number.isFinite(Number(tokenId))) return [];
+  const base = tzktV1(net).replace(/\/+$/, '');
+  const urlBase = `${base}/contracts/${market}/views/onchain_listings_for_token`;
+
+  const id = Number(tokenId);
+  const attempts = [
+    // Micheline JSON: (Pair address nat)
+    { input: JSON.stringify({ prim: 'Pair', args: [{ string: nftContract }, { int: String(id) }] }), format: 'json', unlimited: 'true' },
+    // Micheline JSON: (Pair nat address) — some ABIs flip order
+    { input: JSON.stringify({ prim: 'Pair', args: [{ int: String(id) }, { string: nftContract }] }), format: 'json', unlimited: 'true' },
+    // Michelson expression: (Pair "KT1.." 123)
+    { input: `(Pair \"${nftContract}\" ${id})`, unlimited: 'true' },
+  ];
+
+  let raw = null;
+  for (const qsObj of attempts) {
+    try {
+      const qs = new URLSearchParams(qsObj);
+      raw = await jFetch(`${urlBase}?${qs.toString()}`, 1);
+      if (raw != null) break;
+    } catch { /* try next variant */ }
+  }
+  if (raw == null) return [];
+
+  const out = [];
+  const push = (n, v) => {
+    if (!v || typeof v !== 'object') return;
+    const contract = String(v.nft_contract || v.contract || v.collection || '');
+    const tid = Number(v.token_id ?? v.tokenId ?? v?.token?.id ?? v?.token?.token_id ?? id);
+    const seller = String(v.seller || v.owner || '');
+    const price  = Number(v.priceMutez ?? v.price ?? 0);
+    const amount = Number(v.amount ?? v.quantity ?? v.amountTokens ?? 0);
+    const active = !!(v.active ?? v.is_active ?? true);
+    // Prefer explicit nonce fields on the value; fall back to key for map-shaped results
+    const nonce  = Number(v.nonce ?? v.listing_nonce ?? v.id ?? n);
+    if (!isKt(contract) || !Number.isFinite(tid) || !Number.isFinite(price) || price < 0 || amount <= 0) return;
+    out.push({ contract, tokenId: tid, seller, priceMutez: price, amount, nonce, active });
+  };
+
+  try {
+    if (raw?.entries && typeof raw.entries === 'function') {
+      for (const [k, v] of raw.entries()) push(k, v);
+    } else if (Array.isArray(raw)) {
+      raw.forEach((v, i) => push(i, v));
+    } else if (raw && typeof raw === 'object') {
+      for (const [k, v] of Object.entries(raw)) push(k, v);
+    }
+  } catch { /* ignore shape issues */ }
+
+  return out.filter((r) => r.active && Number.isFinite(r.nonce));
+}
+
+/**
+ * Resolve the canonical listing for a given (contract, tokenId, seller) by
+ * scanning the `listings` big-map holder directly. Returns null if not found.
+ * Shape: { contract, tokenId, priceMutez, amount, seller, nonce }
+ */
+export async function resolveSellerListingForToken(nftContract, tokenId, seller, net = NETWORK_KEY) {
+  const kt = String(nftContract || '').trim();
+  const id = Number(tokenId);
+  const tz = String(seller || '').trim();
+  if (!isKt(kt) || !Number.isFinite(id) || !isTz(tz)) return null;
+  const market = marketplaceAddr(net);
+  if (!isKt(market)) return null;
+
+  const TZKT_V1 = tzktV1(net);
+  const idx = await probeMarketIndexes(TZKT_V1, market);
+  if (!idx.listings) return null;
+  try {
+    const qs = new URLSearchParams({ 'key.address': kt, 'key.nat': String(id), select: 'value', limit: '1', active: 'true' });
+    const rows = await jFetch(`${TZKT_V1}/bigmaps/${idx.listings}/keys?${qs}`, 1).catch(() => []);
+    const holder = Array.isArray(rows) && rows[0]?.value ? rows[0].value : null;
+    if (holder && (typeof holder === 'object' || Array.isArray(holder))) {
+      let chosen = null;
+      const tzLc = tz.toLowerCase();
+      if (Array.isArray(holder)) {
+        for (const listing of holder) {
+          if (!listing || typeof listing !== 'object') continue;
+          const s = String(listing?.seller || listing?.owner || '');
+          const price = Number(listing?.price ?? listing?.priceMutez);
+          const amount = Number(listing?.amount ?? listing?.quantity ?? listing?.amountTokens ?? 0);
+          const active = !!(listing?.active ?? listing?.is_active ?? true);
+          const nonce = Number(listing?.nonce ?? listing?.listing_nonce ?? listing?.id);
+          if (s.toLowerCase() !== tzLc || !Number.isFinite(price) || amount <= 0 || !active || !Number.isFinite(nonce)) continue;
+          const row = { contract: kt, tokenId: id, priceMutez: price, amount, seller: s, nonce, active: true };
+          if (!chosen || Number(row.nonce) > Number(chosen.nonce)) chosen = row;
+        }
+      } else {
+        for (const [nonceKey, listing] of Object.entries(holder)) {
+          if (!listing || typeof listing !== 'object') continue;
+          const s = String(listing?.seller || listing?.owner || '');
+          const price = Number(listing?.price ?? listing?.priceMutez);
+          const amount = Number(listing?.amount ?? listing?.quantity ?? listing?.amountTokens ?? 0);
+          const active = !!(listing?.active ?? listing?.is_active ?? true);
+          if (String(s).toLowerCase() !== tzLc || !Number.isFinite(price) || amount <= 0 || !active) continue;
+          const nonce = Number(nonceKey);
+          if (!Number.isFinite(nonce)) continue;
+          const row = { contract: kt, tokenId: id, priceMutez: price, amount, seller: s, nonce, active: true };
+          if (!chosen || Number(row.nonce) > Number(chosen.nonce)) chosen = row;
+        }
+      }
+      return chosen;
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+/** Verify a specific (contract, tokenId, seller, nonce) exists and is active via TzKT big-map. */
+export async function verifyListingPairViaTzkt(nftContract, tokenId, seller, nonce, net = NETWORK_KEY) {
+  const kt = String(nftContract || '').trim();
+  const id = Number(tokenId);
+  const tz = String(seller || '').trim();
+  const nn = Number(nonce);
+  if (!isKt(kt) || !Number.isFinite(id) || !isTz(tz) || !Number.isFinite(nn)) return null;
+  const market = marketplaceAddr(net);
+  if (!isKt(market)) return null;
+
+  const TZKT_V1 = tzktV1(net);
+  const idx = await probeMarketIndexes(TZKT_V1, market);
+  if (!idx.listings) return null;
+  try {
+    const qs = new URLSearchParams({ 'key.address': kt, 'key.nat': String(id), select: 'value', limit: '1', active: 'true' });
+    const rows = await jFetch(`${TZKT_V1}/bigmaps/${idx.listings}/keys?${qs}`, 1).catch(() => []);
+    const holder = Array.isArray(rows) && rows[0]?.value ? rows[0].value : null;
+    if (holder && typeof holder === 'object') {
+      const listing = holder?.[String(nn)];
+      if (listing && typeof listing === 'object') {
+        const s = String(listing?.seller || listing?.owner || '');
+        const price = Number(listing?.price ?? listing?.priceMutez);
+        const amount = Number(listing?.amount ?? listing?.quantity ?? 0);
+        const active = !!(listing?.active ?? listing?.is_active ?? true);
+        if (s && s.toLowerCase() === tz.toLowerCase() && Number.isFinite(price) && amount > 0 && active) {
+          return { contract: kt, tokenId: id, priceMutez: price, amount, seller: s, nonce: nn, active: true };
+        }
+      }
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+/**
+ * Robust resolver for a seller’s listing nonce that also consults the
+ * `collection_listings` holder when available. Some deployments keep
+ * the canonical listing map there rather than under `listings`.
+ * Returns: { contract, tokenId, priceMutez, amount, seller, nonce, active } | null
+ */
+export async function resolveSellerListingForTokenRobust(nftContract, tokenId, seller, net = NETWORK_KEY) {
+  const kt = String(nftContract || '').trim();
+  const id = Number(tokenId);
+  const tz = String(seller || '').trim();
+  if (!isKt(kt) || !Number.isFinite(id) || !isTz(tz)) return null;
+  const market = marketplaceAddr(net);
+  if (!isKt(market)) return null;
+
+  const TZKT_V1 = tzktV1(net);
+  const idx = await probeMarketIndexes(TZKT_V1, market);
+
+  // 1) Prefer collection_listings: key is collection KT1; value is tokenId -> { nonce -> listing }
+  if (idx.collection_listings) {
+    try {
+      let holder = null;
+      // Try direct key then query variants
+      try {
+        holder = await jFetch(`${TZKT_V1}/bigmaps/${idx.collection_listings}/keys/${encodeURIComponent(kt)}?select=value`, 1);
+      } catch {
+        const variants = [
+          `${TZKT_V1}/bigmaps/${idx.collection_listings}/keys?key=${encodeURIComponent(kt)}&select=value&limit=1`,
+          `${TZKT_V1}/bigmaps/${idx.collection_listings}/keys?key.address=${encodeURIComponent(kt)}&select=value&limit=1`,
+        ];
+        for (const url of variants) { try { holder = await jFetch(url, 1); if (holder) break; } catch { /* next */ } }
+        if (Array.isArray(holder)) holder = holder[0]?.value ?? holder[0] ?? null;
+      }
+      const tzLc = tz.toLowerCase();
+      if (holder && typeof holder === 'object') {
+        const bucket = holder[String(id)];
+        const scanPairs = (obj) => {
+          let best = null;
+          for (const [nonceKey, listing] of Object.entries(obj || {})) {
+            if (!listing || typeof listing !== 'object') continue;
+            const s = String(listing?.seller || listing?.owner || '');
+            const price = Number(listing?.price ?? listing?.priceMutez);
+            const amount = Number(listing?.amount ?? listing?.quantity ?? listing?.amountTokens ?? 0);
+            const active = !!(listing?.active ?? listing?.is_active ?? true);
+            const nonce = Number(listing?.nonce ?? listing?.listing_nonce ?? nonceKey);
+            if (s.toLowerCase() !== tzLc || !Number.isFinite(price) || amount <= 0 || !active || !Number.isFinite(nonce)) continue;
+            const row = { contract: kt, tokenId: id, priceMutez: price, amount, seller: s, nonce, active: true };
+            if (!best || Number(row.nonce) > Number(best.nonce)) best = row;
+          }
+          return best;
+        };
+        let chosen = null;
+        if (bucket && typeof bucket === 'object') chosen = scanPairs(bucket);
+        if (!chosen) {
+          // Some shapes flatten token -> listing arrays; scan the whole holder conservatively
+          for (const val of Object.values(holder)) {
+            if (chosen) break;
+            if (val && typeof val === 'object') {
+              const tryOne = scanPairs(val);
+              if (tryOne) chosen = tryOne;
+            }
+          }
+        }
+        if (chosen) return chosen;
+      }
+    } catch { /* continue */ }
+  }
+
+  // 2) Fallback to existing resolvers
+  const viaListings = await resolveSellerListingForToken(nftContract, tokenId, seller, net).catch(() => null);
+  if (viaListings) return viaListings;
+  const viaIdx = await fetchSellerListingsViaTzkt(seller, net).catch(() => []);
+  const match = (viaIdx || []).find((r) => String(r.contract) === kt && Number(r.tokenId) === id);
+  return match || null;
+}
+
 /* What changed & why (r3):
    • Implemented fetchCollectionListingsViaView() that executes
      `onchain_listings_for_collection` through TzKT, handling multiple

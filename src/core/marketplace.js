@@ -104,14 +104,29 @@ export async function getMarketContract(toolkit) {
 /*──────────────── on‑chain & off‑chain views (token‑level) ───────────────*/
 export async function fetchOnchainListings({ toolkit, nftContract, tokenId }) {
   if (!ENABLE_ONCHAIN_VIEWS || isRpcDegraded()) return [];
-  let raw;
+  const id = Number(tokenId);
+  let raw = null;
   try {
     raw = await withRpcFallback(toolkit, async (tk) => {
       const market = await getMarketContract(tk);
       const viewCaller = await getViewCaller(market, tk);
-      return market.contractViews
-        .onchain_listings_for_token({ nft_contract: nftContract, token_id: Number(tokenId) })
-        .executeView({ viewCaller });
+      const v = market?.contractViews?.onchain_listings_for_token;
+      if (typeof v !== 'function') return null;
+      const variants = [
+        { nft_contract: nftContract, token_id: id },
+        { address: nftContract, token_id: id },
+        { collection: nftContract, token_id: id },
+        [nftContract, id],
+        [id, nftContract],
+      ];
+      for (const arg of variants) {
+        try {
+          const handle = Array.isArray(arg) ? v(...arg) : v(arg);
+          const res = await handle.executeView({ viewCaller });
+          if (res != null) return res;
+        } catch { /* try next */ }
+      }
+      return null;
     });
   } catch {
     markRpcDegraded();
@@ -120,16 +135,19 @@ export async function fetchOnchainListings({ toolkit, nftContract, tokenId }) {
 
   const out = [];
   const push = (n, o) => out.push({
-    nonce     : Number(n ?? o?.nonce ?? 0),
-    priceMutez: Number(o?.price),
-    amount    : Number(o?.amount),
-    seller    : String(o?.seller || ''),
-    active    : !!o?.active,
+    // Prefer explicit nonce on the object; fall back to key for map-shaped results
+    nonce     : Number(o?.nonce ?? o?.listing_nonce ?? o?.id ?? n ?? 0),
+    priceMutez: Number(o?.price ?? o?.priceMutez),
+    amount    : Number(o?.amount ?? o?.quantity ?? 0),
+    seller    : String(o?.seller || o?.owner || ''),
+    active    : !!(o?.active ?? o?.is_active ?? true),
   });
 
-  if (raw?.entries) for (const [k, v] of raw.entries()) push(k, v);
-  else if (Array.isArray(raw)) raw.forEach((v, i) => push(i, v));
-  else if (raw && typeof raw === 'object') Object.entries(raw).forEach(([k, v]) => push(k, v));
+  try {
+    if (raw?.entries) for (const [k, v] of raw.entries()) push(k, v);
+    else if (Array.isArray(raw)) raw.forEach((v, i) => push(i, v));
+    else if (raw && typeof raw === 'object') Object.entries(raw).forEach(([k, v]) => push(k, v));
+  } catch { /* shape issues: return empty */ }
 
   return out;
 }
@@ -320,12 +338,42 @@ async function fetchListingsViaTzktBigmap({ nftContract, tokenId, net = NETWORK_
     const q3 = new URLSearchParams({
       'value.nft_contract': nftContract,
       'value.token_id'   : String(tokenId),
-      select             : 'value',
+      select             : 'key,value',
       active             : 'true',
       limit              : '10000',
     });
     const rows = await jFetch(`${TZKT_V1}/bigmaps/${idx.listings_active}/keys?${q3}`, 1).catch(() => []);
-    for (const r of rows || []) for (const l of walkListings(r)) out.push(l);
+
+    const extractNonceFromKey = (key) => {
+      const tryNum = (x) => { const n = Number(x); return Number.isFinite(n) && n >= 0 ? n : null; };
+      if (key == null) return null;
+      if (typeof key === 'number' || typeof key === 'string') return tryNum(key);
+      if (Array.isArray(key)) { for (const it of key) { const n = extractNonceFromKey(it); if (n != null) return n; } return null; }
+      if (typeof key === 'object') {
+        const cand = key.nonce ?? key.listing_nonce ?? key.id ?? key['2'];
+        const n1 = tryNum(cand);
+        if (n1 != null) return n1;
+        for (const v of Object.values(key)) { const n = extractNonceFromKey(v); if (n != null) return n; }
+      }
+      return null;
+    };
+
+    for (const r of rows || []) {
+      const nonceFromKey = extractNonceFromKey(r?.key);
+      const val = r?.value;
+      if (val && typeof val === 'object') {
+        // Attach nonce from key if missing
+        if (val.nonce == null && val.listing_nonce == null && nonceFromKey != null) {
+          try { val.nonce = nonceFromKey; } catch {}
+        }
+        for (const l of walkListings(val)) {
+          if (l && l.nonce == null && l.listing_nonce == null && nonceFromKey != null) {
+            try { l.nonce = nonceFromKey; } catch {}
+          }
+          out.push(l);
+        }
+      }
+    }
   }
 
   return out.map((l) => ({
@@ -602,24 +650,45 @@ export async function buildBuyParams(toolkit, { nftContract, tokenId, priceMutez
   }
 
   if (typeof objFn === 'function') {
-    transferParams = objFn({
-      amount: Number(amount),
-      nft_contract: nftContract,
-      nonce: Number(nonce),
-      seller,
-      token_id: Number(tokenId),
-    }).toTransferParams({ amount: Number(priceMutez), mutez: true });
-  } else if (typeof posFn === 'function') {
-    transferParams = posFn(
-      Number(amount),
-      nftContract,
-      Number(nonce),
-      seller,
-      Number(tokenId),
-    ).toTransferParams({ amount: Number(priceMutez), mutez: true });
-  } else {
-    throw new Error('buy entrypoint unavailable on marketplace contract');
+    const amt = Number(amount);
+    const tok = Number(tokenId);
+    const nn  = Number(nonce);
+    if (!Number.isFinite(amt) || amt < 1) throw new Error('Invalid amount for buy');
+    if (!Number.isFinite(tok) || tok < 0) throw new Error('Invalid token id for buy');
+    if (!Number.isFinite(nn)  || nn  < 0) throw new Error('Invalid listing nonce for buy');
+    const opts = { amount: Number(priceMutez), mutez: true };
+    const tryObj = (input) => { try { return objFn(input).toTransferParams(opts); } catch { return null; } };
+    // Try common object shapes in order of likelihood
+    const candidates = [
+      { amount: amt, nft_contract: nftContract, listing_nonce: nn, seller, token_id: tok },
+      { amount: amt, nft_contract: nftContract, nonce: nn, seller, token_id: tok },
+      { amount: amt, nft_contract: nftContract, listing_id: nn, seller, token_id: tok },
+      { amount: amt, contract: nftContract, listing_nonce: nn, seller, token_id: tok },
+      { amount: amt, collection: nftContract, listing_nonce: nn, seller, token_id: tok },
+      // Some ABIs group token fields under `token`
+      { amount: amt, token: { nft_contract: nftContract, token_id: tok }, listing_nonce: nn, seller },
+      { amount: amt, token: { contract: nftContract, token_id: tok }, listing_nonce: nn, seller },
+      { amount: amt, token: { fa2: nftContract, token_id: tok }, listing_nonce: nn, seller },
+      { amount: amt, token: { address: nftContract, id: tok }, listing_nonce: nn, seller },
+      { amount: amt, nft_contract: nftContract, listing_nonce: nn, seller_address: seller, token_id: tok },
+    ];
+    for (const input of candidates) { transferParams = tryObj(input); if (transferParams) break; }
   }
+
+  if (!transferParams && typeof posFn === 'function') {
+    const amt = Number(amount);
+    const tok = Number(tokenId);
+    const nn  = Number(nonce);
+    const opts = { amount: Number(priceMutez), mutez: true };
+    const tryPos = (...args) => { try { return posFn(...args).toTransferParams(opts); } catch { return null; } };
+    const candidates = [
+      [amt, nftContract, nn, seller, tok],
+      [amt, nftContract, seller, tok, nn],
+    ];
+    for (const args of candidates) { transferParams = tryPos(...args); if (transferParams) break; }
+  }
+
+  if (!transferParams) throw new Error('buy entrypoint unavailable on marketplace contract');
 
   return [{ kind: OpKind.TRANSACTION, ...transferParams }];
 }

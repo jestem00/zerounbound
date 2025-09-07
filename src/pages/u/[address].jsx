@@ -27,7 +27,7 @@ import decodeHexFields from '../../utils/decodeHexFields.js';
 import detectHazards from '../../utils/hazards.js';
 import hashMatrix from '../../data/hashMatrix.json';
 import { useWalletContext } from '../../contexts/WalletContext.js';
-import { fetchOnchainListingsForSeller, filterStaleListings, marketplaceAddr } from '../../core/marketplace.js';
+import { fetchOnchainListingsForSeller, filterStaleListings, marketplaceAddr, fetchLowestListing } from '../../core/marketplace.js';
 import { fetchSellerListingsViaTzkt } from '../../core/marketplaceHelper.js';
 import { listActiveCollections, listListingsForCollectionViaBigmap } from '../../utils/marketplaceListings.js';
 

@@ -117,7 +117,11 @@ export default function ShareDialog({
   const message = (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
       {previewUri && (
-        <Preview src={previewUri} alt={title} />
+        <Preview
+          src={previewUri}
+          alt={title}
+          onError={(e) => { try { e.currentTarget.onerror = null; e.currentTarget.src = '/sprites/Banner.png'; } catch {} }}
+        />
       )}
       <ShareText>{text}</ShareText>
       <ButtonRow>

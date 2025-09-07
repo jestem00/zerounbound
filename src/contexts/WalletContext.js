@@ -1,4 +1,4 @@
-﻿/*â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+﻿/*
   Developed by @jams2blues with love for the Tezos community
   File:    src/contexts/WalletContext.js
   Rev :    r1025   2025â€‘07â€‘29
@@ -15,7 +15,7 @@
   â€œReceiving end does not existâ€ error.  The context manages the
   TezosToolkit and BeaconWallet instances, restores existing
   sessions, and exposes connect/disconnect and reveal helpers.
-â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€*/
+*/
 
 import React, {
   createContext,
@@ -28,19 +28,19 @@ import React, {
 } from 'react';
 import { TezosToolkit } from '@taquito/taquito';
 import { BeaconWallet }  from '@taquito/beacon-wallet';
-import { DEFAULT_NETWORK } from '../config/deployTarget.js';
+import { DEFAULT_NETWORK, FALLBACK_RPCS } from '../config/deployTarget.js';
 import { chooseFastestRpc } from '../utils/chooseFastestRpc.js';
 
-/*â”€â”€â”€â”€â”€â”€â”€â”€ constants â”€â”€â”€â”€â”€â”€â”€â”€â”€*/
+/* constants */
 const APP_NAME      = 'ZeroUnbound.art';
 const BALANCE_FLOOR = 500_000;     /* 0.5Â êœ© mutez */
 
-/*â”€â”€â”€â”€â”€â”€â”€â”€ context helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€*/
+/* context helpers */
 const WalletCtx = createContext(null);
 export const useWalletContext = () => useContext(WalletCtx);
 export const useWallet = useWalletContext;
 
-/*â”€â”€â”€â”€â”€â”€â”€â”€ provider â”€â”€â”€â”€â”€â”€â”€â”€â”€*/
+/* provider */
 export function WalletProvider({ children, initialNetwork = DEFAULT_NETWORK }) {
   const tkRef     = useRef(null);
   const walletRef = useRef(null);
@@ -79,7 +79,13 @@ export function WalletProvider({ children, initialNetwork = DEFAULT_NETWORK }) {
   const init = useCallback(async () => {
     if (initRef.current) return initRef.current;
     const p = (async () => {
-      const rpc = await chooseFastestRpc().catch(() => '');
+      let rpc = await chooseFastestRpc().catch(() => '');
+      if (!rpc) {
+        try {
+          const fb = (FALLBACK_RPCS && typeof FALLBACK_RPCS[network] === 'string') ? FALLBACK_RPCS[network] : '';
+          rpc = fb || '';
+        } catch {}
+      }
       rpcRef.current = rpc;
       const tk = new TezosToolkit(rpc);
       tk.setProvider({ config:{
@@ -88,7 +94,7 @@ export function WalletProvider({ children, initialNetwork = DEFAULT_NETWORK }) {
       }});
       tkRef.current = tk;
 
-      walletRef.current = new BeaconWallet({
+      try { walletRef.current = new BeaconWallet({
         name            : APP_NAME,
         preferredNetwork: network,
         colorMode       : 'dark',
@@ -99,11 +105,19 @@ export function WalletProvider({ children, initialNetwork = DEFAULT_NETWORK }) {
         // connectionâ€ errors and ensures the extension handles
         // large origination requests properly.
         matrixNodes     : [],
-      });
+      }); } catch { walletRef.current = new BeaconWallet({
+        name            : APP_NAME,
+        preferredNetwork: network,
+        colorMode       : 'dark',
+      }); }
       // no metrics
       walletRef.current.client.sendMetrics = async () => {};
       walletRef.current.client.updateMetricsStorage = async () => {};
       tkRef.current.setWalletProvider(walletRef.current);
+
+      // Note: avoid aggressive pairing cleanup here; some wallets rely on
+      // existing pairings to bootstrap their connect flows. We keep init
+      // non-destructive and handle transient ping errors elsewhere.
       // Silent restore
       const acc = await walletRef.current.client.getActiveAccount().catch(() => null);
       if (acc) await sync();
@@ -134,9 +148,28 @@ export function WalletProvider({ children, initialNetwork = DEFAULT_NETWORK }) {
       }
     }
     if (!acc) {
-      await walletRef.current.requestPermissions({
-        network: { type: network, rpcUrl: rpcRef.current },
-      });
+      try {
+        await walletRef.current.requestPermissions({
+          network: { type: network, rpcUrl: rpcRef.current },
+        });
+      } catch (err) {
+        const msg = String(err?.message || err).toLowerCase();
+        if (msg.includes('parameters_invalid') || msg.includes('parameters invalid')) {
+          try { await walletRef.current.clearActiveAccount?.(); } catch {}
+          try {
+            const alt = new BeaconWallet({
+              name            : APP_NAME,
+              preferredNetwork: network,
+              colorMode       : 'dark',
+            });
+            walletRef.current = alt;
+            tkRef.current.setWalletProvider(alt);
+            await alt.requestPermissions({
+              network: { type: network, rpcUrl: rpcRef.current },
+            });
+          } catch (e2) { throw e2; }
+        } else { throw err; }
+      }
     }
     await sync();
   }, [network, sync, init, disconnect]);

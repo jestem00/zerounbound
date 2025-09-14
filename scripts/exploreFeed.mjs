@@ -16,6 +16,7 @@ const args = Object.fromEntries(process.argv.slice(2).map(s => {
   const m = s.match(/^--([^=]+)=(.*)$/); return m ? [m[1], m[2]] : [s.replace(/^--/, ''), true];
 }));
 const NETWORK   = String(args.network || 'mainnet').toLowerCase();
+const STRICT_ZERO_GATING = String(process.env.STRICT_ZERO_GATING || '1') !== '0';
 const PAGE_SIZE = Math.max(10, Math.min(500, Number(args['page-size'] || 100)));
 const MAX_PAGES = Math.max(1, Math.min(1000, Number(args['max-pages'] || 120)));
 const MAX_ACCEPTED = PAGE_SIZE * MAX_PAGES;
@@ -63,7 +64,54 @@ async function j(url){
   return ct.includes('application/json') ? res.json() : res.text().then(t => { try{return JSON.parse(t);}catch{return [];}});
 }
 
+const ZERO_EP_MARKERS = [
+  'append_artifact_uri', 'append_extrauri', 'clear_uri', 'destroy',
+  'append_token_metadata', 'update_token_metadata', 'update_contract_metadata',
+  'edit_token_metadata', 'edit_contract_metadata',
+];
+
+async function probeEntrypoints(addr){
+  try{
+    const res = await j(`${apiBase}/contracts/${encodeURIComponent(addr)}/entrypoints`).catch(()=>null);
+    const list = Array.isArray(res) ? res : (Array.isArray(res?.entrypoints) ? res.entrypoints : (res && typeof res === 'object' ? Object.keys(res) : []));
+    const names = new Set((list||[]).map(s => String(s).toLowerCase()));
+    return ZERO_EP_MARKERS.some(m => names.has(m));
+  }catch{ return false; }
+}
+
+async function buildAllowedCodeHashes(){
+  const qs = new URLSearchParams();
+  qs.set('typeHash.in', TYPE_HASHES);
+  qs.set('select', 'address,codeHash');
+  qs.set('sort.desc', 'lastActivityTime');
+  qs.set('limit', '800');
+  const rows = await j(`${apiBase}/contracts?${qs.toString()}`).catch(()=>[]);
+  const byHash = new Map(); // codeHash -> sample addr
+  for (const r of rows||[]){ const ch = r.codeHash ?? r.code_hash; if (Number.isFinite(ch) && !byHash.has(ch)) byHash.set(Number(ch), r.address); }
+  const ok = new Set();
+  const entries = [...byHash.entries()];
+  const CONC = 8; let idx = 0;
+  await Promise.all(new Array(CONC).fill(0).map(async () => {
+    while (idx < entries.length){
+      const [ch, addr] = entries[idx++];
+      const good = await probeEntrypoints(addr);
+      if (good) ok.add(ch);
+    }
+  }));
+  return { ok, rows };
+}
+
 async function listAllowedContracts(){
+  // Prefer codeHash-gated list to avoid bootloaders/generators with shared typeHash
+  if (STRICT_ZERO_GATING) {
+    try{
+      const { ok, rows } = await buildAllowedCodeHashes();
+      if (ok.size && rows && rows.length){
+        return rows.filter(r => ok.has(Number(r.codeHash ?? r.code_hash))).map(r => r.address).filter(Boolean);
+      }
+    }catch{}
+  }
+  // Fallback to typeHash-only list (robust)
   const qs = new URLSearchParams();
   qs.set('typeHash.in', TYPE_HASHES);
   qs.set('select', 'address');

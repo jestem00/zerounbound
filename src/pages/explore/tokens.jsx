@@ -34,6 +34,31 @@ const FEED_BASE = '/api/explore/static';
 // Auto-pagination: when true, automatically continues loading batches
 // until the end is reached (generic explore mode only).
 const AUTO_LOAD_ALL = true;
+// Minimal ZeroContract fingerprint (entrypoints), used for static feed only
+const ZERO_EP_MARKERS = [
+  'append_artifact_uri', 'append_extrauri', 'clear_uri', 'destroy',
+  'append_token_metadata', 'update_token_metadata', 'update_contract_metadata',
+  'edit_token_metadata', 'edit_contract_metadata',
+];
+const ZERO_GATE_CACHE = new Map(); // addr -> { ok, at }
+const ZERO_GATE_TTL = 10 * 60_000;
+async function isZeroContractByEntrypoints(tzktV1, addr){
+  const row = ZERO_GATE_CACHE.get(addr);
+  const now = Date.now();
+  if (row && (now - row.at) < ZERO_GATE_TTL) return row.ok;
+  try {
+    const url = `${tzktV1}/contracts/${encodeURIComponent(addr)}/entrypoints`;
+    const res = await jFetch(url, 2, { ttl: 120_000 }).catch(() => null);
+    let list = [];
+    if (Array.isArray(res)) list = res;
+    else if (Array.isArray(res?.entrypoints)) list = res.entrypoints;
+    else if (res && typeof res === 'object') list = Object.keys(res);
+    const names = new Set(list.map((s) => String(s).toLowerCase()));
+    const ok = ZERO_EP_MARKERS.some((m) => names.has(m));
+    ZERO_GATE_CACHE.set(addr, { ok, at: now });
+    return ok;
+  } catch { ZERO_GATE_CACHE.set(addr, { ok: true, at: now }); return true; }
+}
 
 /*-----------------------------------------------------------*
  * Layout
@@ -93,6 +118,10 @@ function isDataUri(str) {
   return typeof str === 'string'
     && /^data:(image|video|audio|text\/html|image\/svg\+xml)/i.test(str.trim());
 }
+function isRemoteMedia(str) {
+  return typeof str === 'string'
+    && /^(ipfs:|https?:|ar:|arweave:)/i.test(str.trim());
+}
 function hasRenderablePreview(m = {}) {
   const keys = [
     'displayUri', 'display_uri',
@@ -103,12 +132,12 @@ function hasRenderablePreview(m = {}) {
   ];
   for (const k of keys) {
     const v = m && typeof m === 'object' ? m[k] : null;
-    if (isDataUri(v) || (typeof v === 'string' && /^tezos-storage:/i.test(v.trim()))) return true;
+    if (isDataUri(v) || isRemoteMedia(v) || (typeof v === 'string' && /^tezos-storage:/i.test(v.trim()))) return true;
   }
   if (Array.isArray(m?.formats)) {
     for (const f of m.formats) {
       const cand = f?.uri || f?.url;
-      if (isDataUri(cand) || (typeof cand === 'string' && /^tezos-storage:/i.test(cand.trim()))) return true;
+      if (isDataUri(cand) || isRemoteMedia(cand) || (typeof cand === 'string' && /^tezos-storage:/i.test(cand.trim()))) return true;
     }
   }
   return false;
@@ -310,13 +339,15 @@ export default function ExploreTokens() {
           }
         }
         if (Array.isArray(arr)) {
-          const staticSlice = arr.slice(inPageOff, inPageOff + step).map((r) => ({
+          const staticSliceRaw = arr.slice(inPageOff, inPageOff + step).map((r) => ({
             contract: r.contract,
             tokenId: Number(r.tokenId),
             metadata: r.metadata || {},
             holdersCount: r.holdersCount,
             firstTime: r.firstTime,
           }));
+          // Gate static results by ZeroContract entrypoints (best-effort) on first pages only\n          let staticSlice = staticSliceRaw;\n          if (pageIdx < 4) {\n            const seenAddrs = [...new Set(staticSliceRaw.map((r)=> String(r.contract)).filter(Boolean))];\n            const OK = new Set();\n            const CONC = 6; let ix = 0;\n            await Promise.all(new Array(CONC).fill(0).map(async () => {\n              while (ix < seenAddrs.length) {\n                const i = ix++; const a = seenAddrs[i];\n                let ok = false;\n                try { ok = await isZeroContractByEntrypoints(tzktV1, a); } catch { ok = false; }\n                if (ok) OK.add(a);\n              }\n            }));\n            staticSlice = staticSliceRaw.filter((r)=> OK.has(String(r.contract)));\n          }
+          
           // Merge live + static, de-dupe, then sort by firstTime desc with tie-breaker
           const seen = new Set();
           const union = [];
@@ -332,7 +363,7 @@ export default function ExploreTokens() {
             .map((r) => ({
               ...r,
               firstTime: r.firstTime,
-            }))
+          }))
             .sort((a, b) => {
               const ta = Date.parse(a.firstTime || 0) || 0;
               const tb = Date.parse(b.firstTime || 0) || 0;
@@ -519,8 +550,7 @@ export default function ExploreTokens() {
 
   /**
    * Scan ahead until we accumulate at least `minAccept` newly accepted tokens
-   * (or we truly hit the end). This prevents the “only 1–2 new cards per click”
-   * problem.  It guarantees =10 newly added cards per click in generic mode.
+   * (or we truly hit the end). This prevents the 'only 1-2 new cards per click' problem.  It guarantees =10 newly added cards per click in generic mode.
    */
   const loadPage = useCallback(async (initial = false) => {
     if (fetching || end) return;
@@ -665,7 +695,7 @@ export default function ExploreTokens() {
         next.length = 0; Array.prototype.push.apply(next, keepAll);
       } catch { /* best effort */ }
 
-      setTokens((prev) => {
+            setTokens((prev) => {
         // Guard against any duplicates by key
         const have = new Set(prev.map((t) => `${t.contract}:${t.tokenId}`));
         const filteredNext = next.filter((t) => {
@@ -686,7 +716,7 @@ export default function ExploreTokens() {
           }
         } catch { base = prev; }
         const merged = dedupeTokens(filteredNext.length ? base.concat(filteredNext) : base);
-        // Global stable newest→oldest order by firstTime, with tie-breakers
+        // Global stable newest->oldest order by firstTime, with tie-breakers
         merged.sort((a, b) => {
           const ta = Date.parse(a.firstTime || 0) || 0;
           const tb = Date.parse(b.firstTime || 0) || 0;
@@ -767,7 +797,7 @@ export default function ExploreTokens() {
 
   const title = showTokensAdmin
     ? `Tokens by ${adminFilter} (${fmtInt(adminTok.length)})`
-    : 'Explore · Tokens';
+    : 'Explore - Tokens';
 
   const tokenCards = (list) => (
     <Grid>
@@ -824,10 +854,10 @@ export default function ExploreTokens() {
 
       {error && <Subtle role="alert">{error}</Subtle>}
 
-      {loading && <Subtle>Loading…</Subtle>}
+      {loading && <Subtle>Loading...</Subtle>}
       {!loading && cards}
 
-      {/* Pagination controls — generic mode ensures =10 new cards per click */}
+      {/* Pagination controls - generic mode ensures =10 new cards per click */}
       {!showTokensAdmin && !end && (
         <Center>
           <PixelButton
@@ -838,7 +868,7 @@ export default function ExploreTokens() {
             noActiveFx
           >
             {fetching
-              ? (<><LoadingSpinner size={16} style={{ marginRight: 6, verticalAlign: 'text-bottom' }} /> Loading…</>)
+              ? (<><LoadingSpinner size={16} style={{ marginRight: 6, verticalAlign: 'text-bottom' }} /> Loading...</>)
               : 'Load More'}
           </PixelButton>
         </Center>
@@ -867,12 +897,16 @@ export default function ExploreTokens() {
   );
 }
 
-/* What changed & why:
-   • Removed misleading global “Total …” (FA2-wide) — it counted every FA2 on TzKT.
-   • Guaranteed =10 newly accepted cards per click via scan-until-yield loop.
-   • Kept initial scan snappy (=24 accepted) for a full first impression.
-   • Preserved perfect admin-filter behaviour; left title “Tokens by … (N)”.
-   • Lint-clean: trimmed unused imports/vars; no dead code. */
+/* What changed & why:\n   - Removed misleading global 'Total ...' (FA2-wide).\n   - Guaranteed =10 newly accepted cards per click via scan-until-yield loop.\n   - Kept initial scan snappy (=24 accepted) for a full first impression.\n   - Preserved admin-filter behaviour; title 'Tokens by ... (N)'.\n   - Lint-clean: trimmed unused imports/vars; no dead code. */
+
+
+
+
+
+
+
+
+
 
 
 

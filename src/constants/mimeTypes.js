@@ -68,6 +68,7 @@ const EXT_LOOKUP = {
   jpg : 'image/jpeg',
   png : 'image/png',
   svg : 'image/svg+xml',
+  svgz: 'image/svg+xml',
   webp: 'image/webp',
 
   // video

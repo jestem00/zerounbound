@@ -1,27 +1,27 @@
-/──────── docs/TZIP_Compliance_Invariants_ZeroContract_V4.md ────────/
+/──────── docs/TZIP_Compliance_Invariants_ZeroContract_V4+.md ────────/
 /─────────────────────────────────────────────────────────────────
-Developed by @jams2blues – ZeroContract Studio
-File: docs/TZIP_Compliance_Invariants_ZeroContract_V4.md
-Rev : r7 2025-09-07 UTC
+Developed by @jams2blues – ZeroContract Studio
+File: docs/TZIP_Compliance_Invariants_ZeroContract_V4+.md
+Rev : r7 2025-09-07 UTC
 Summary: add canonical slicing + IDB-only checkpoints; reinforce diff-aware append rules.
 ──────────────────────────────────────────────────────────────/
 
-TZIP_Compliance_Invariants_ZeroContract_V4.md
+TZIP_Compliance_Invariants_ZeroContract_V4+.md
 Purpose
-Standardise all metadata and storage invariants for ZeroContract V4 so that
-collections and tokens remain 100 % TZIP‑compatible, interoperable with major
+Standardise all metadata and storage invariants for ZeroContract V4 so that
+collections and tokens remain 100 % TZIP‑compatible, interoperable with major
 Tezos marketplaces (Objkt, ZeroUnbound, etc.), and fully on‑chain.
 
 ──────────────────────────────────────────────────────────────────────────────
 1 · TZIP STANDARDS SUMMARY
 ──────────────────────────────────────────────────────────────────────────────
-• TZIP‑12 (FA2 Token Metadata) — minimum per‑token keys: decimals, name and symbol (unchanged).
-• TZIP‑16 (Contract Metadata) — minimum contract‑level keys: name, description, version,
+• TZIP‑12 (FA2 Token Metadata) — minimum per‑token keys: decimals, name and symbol (unchanged).
+• TZIP‑16 (Contract Metadata) — minimum contract‑level keys: name, description, version,
 license, authors, homepage (optional), interfaces (must list "TZIP‑012" when FA2).
-• TZIP‑21 (Rich Token Metadata) — extends TZIP‑12; adds artifactUri, displayUri and thumbnailUri.
+• TZIP‑21 (Rich Token Metadata) — extends TZIP‑12; adds artifactUri, displayUri and thumbnailUri.
 
 ──────────────────────────────────────────────────────────────────────────────
-2 · ZERO‑CONTRACT V4(now v4e) — METADATA INVARIANTS
+2 · ZERO‑CONTRACT V4(now v4e) — METADATA INVARIANTS
 ──────────────────────────────────────────────────────────────────────────────
 
 2.1 Contract‑Level Metadata
@@ -31,24 +31,24 @@ big‑map. Single‑stage origination is now recommended for all wallets; there 
 no longer a dual‑stage process. Consequently, the full views array and
 imageUri are included at origination.
 
-• tezos‑storage:content · Mandatory — header key ("0x74657a6f732d…") pointing to
+• tezos‑storage:content · Mandatory — header key ("0x74657a6f732d…") pointing to
 metadata JSON stored at map key "content". Guarantees indexers resolve
 contract metadata deterministically (TZIP‑16 §5.1).
-• name · Mandatory — human‑readable collection title.
-• symbol · Mandatory — short mandatory symbol for the contract, i.e. "symbol": "ZUART"
-(3‑5 A‑Z/0‑9).
-• description · Mandatory — short collection synopsis.
-• version · Mandatory — auto‑injected "ZeroContractV4".
-• license · Mandatory — dropdown; default “No License, All Rights Reserved”.
-• authors · Mandatory — ≥ 1 comma‑separated names.
-• homepage · Optional — validated http/https (future web3 schemes accepted).
-• authoraddress · Mandatory — comma‑separated tz‑addresses (editable; pre‑filled from wallet).
-• creators · Mandatory — comma‑separated tz‑addresses (editable; pre‑filled from wallet).
-• type · Mandatory — dropdown: art | music | collectible | other.
-• interfaces · Mandatory — auto‑includes ["TZIP‑012","TZIP‑016"]. Deduped and upper‑cased.
-• imageUri · Mandatory — base64 data‑URI (1:1 aspect; validated). The real imageUri
+• name · Mandatory — human‑readable collection title.
+• symbol · Mandatory — short mandatory symbol for the contract, i.e. "symbol": "ZUART"
+(3‑5 A‑Z/0‑9).
+• description · Mandatory — short collection synopsis.
+• version · Mandatory — auto‑injected "ZeroContractV4".
+• license · Mandatory — dropdown; default “No License, All Rights Reserved”.
+• authors · Mandatory — ≥ 1 comma‑separated names.
+• homepage · Optional — validated http/https (future web3 schemes accepted).
+• authoraddress · Mandatory — comma‑separated tz‑addresses (editable; pre‑filled from wallet).
+• creators · Mandatory — comma‑separated tz‑addresses (editable; pre‑filled from wallet).
+• type · Mandatory — dropdown: art | music | collectible | other.
+• interfaces · Mandatory — auto‑includes ["TZIP‑012","TZIP‑016"]. Deduped and upper‑cased.
+• imageUri · Mandatory — base64 data‑URI (1:1 aspect; validated). The real imageUri
 is stored during the single‑stage origination; no placeholder is used.
-• views · Mandatory — off‑chain view array (Michelson; stored in
+• views · Mandatory — off‑chain view array (Michelson; stored in
 /contracts/metadata/views/Zero_Contract_v4_views.json). The full JSON view
 array is encoded and stored at origination; no placeholder pointer is used.
 
@@ -57,6 +57,7 @@ array is encoded and stored at origination; no placeholder pointer is used.
 - **name** · Mandatory — NFT title.  
 - **description** · Optional — strongly recommended (warning toast when blank).  
 - **mimeType** · **Mandatory** — auto‑detected on upload.  
+- **compression** · Optional — string; when present and equal to "gzip" the primary artifact is stored as gzipped bytes (e.g., SVGZ). Added immediately after `mimeType` for clarity and forward‑compatibility. Note: as of r1209 this key is UI‑level only while we validate cross‑indexer behavior; the on‑chain emission is gated.  
 - **authors** · Optional — multiline comma‑list (warning when blank).  
 - **artists** · Optional — multiline comma‑list (legacy/v4b only).  
 - **creators** · **Mandatory** — editable; pre‑filled from wallet.  

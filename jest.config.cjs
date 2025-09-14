@@ -8,6 +8,7 @@ Summary: include tests/ directory and support CommonJS helper.
 module.exports = {
   testEnvironment: 'jsdom',
   testMatch: ['**/__tests__/**/*.test.[jt]s?(x)', '**/tests/**/*.test.[jt]s?(x)'],
+  testPathIgnorePatterns: ['/node_modules/', '/summarized_files/'],
   collectCoverage: false,
   setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
 };

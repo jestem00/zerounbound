@@ -1,4 +1,4 @@
-/* Developed by @jams2blues — ZeroContract Studio
+﻿/* Developed by @jams2blues ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ZeroContract Studio
    File: src/pages/api/explore/feed.js
    Rev : r1
    Summary: Edge-friendly, serverless aggregator for explore/tokens.
@@ -16,12 +16,16 @@ const TYPE_HASHES = Object.keys(hashMatrix)
   .join(',');
 
 const apiBase = `${String(TZKT_API || '').replace(/\/+$/, '')}/v1`;
+const STRICT_ZERO_GATING = String(process.env.STRICT_ZERO_GATING || '1') !== '0';
 
 function isDataUri(str) {
   return typeof str === 'string' && /^data:(image|video|audio|text\/html|image\/svg\+xml)/i.test(str.trim());
 }
 function isTezosStorage(str) {
   return typeof str === 'string' && /^tezos-storage:/i.test(str.trim());
+}
+function isRemoteMedia(str) {
+  return typeof str === 'string' && /^(ipfs:|https?:|ar:|arweave:)/i.test(str.trim());
 }
 function hasRenderablePreview(m = {}) {
   const keys = [
@@ -33,12 +37,12 @@ function hasRenderablePreview(m = {}) {
   ];
   for (const k of keys) {
     const v = m && typeof m === 'object' ? m[k] : null;
-    if (isDataUri(v) || isTezosStorage(v)) return true;
+    if (isDataUri(v) || isTezosStorage(v) || isRemoteMedia(v)) return true;
   }
   if (Array.isArray(m?.formats)) {
     for (const f of m.formats) {
       const cand = f?.uri || f?.url;
-      if (isDataUri(cand) || isTezosStorage(cand)) return true;
+      if (isDataUri(cand) || isTezosStorage(cand) || isRemoteMedia(cand)) return true;
     }
   }
   return false;
@@ -53,20 +57,69 @@ async function j(url) {
 }
 
 let ALLOWED_ADDR_CACHE = { at: 0, list: [] };
+// Cache for ZeroContract entrypoint fingerprint checks
+const ZERO_EP_CACHE = new Map(); // addr -> { ok:boolean, at:number }
+const ZERO_EP_TTL = 5 * 60_000; // 5 minutes
+// Cache of codeHashes permitted for ZeroContract (rebuilt periodically)
+let CODEHASH_ALLOW = { at: 0, set: new Set() };
+const CODEHASH_TTL = 10 * 60_000; // 10 minutes
+
 async function getAllowedContracts() {
   const now = Date.now();
   if (ALLOWED_ADDR_CACHE.list.length && (now - ALLOWED_ADDR_CACHE.at) < 2 * 60_000) {
     return ALLOWED_ADDR_CACHE.list;
   }
-  const cq = new URLSearchParams();
-  cq.set('typeHash.in', TYPE_HASHES);
-  cq.set('select', 'address');
-  cq.set('sort.desc', 'lastActivityTime');
-  cq.set('limit', '800');
-  const contracts = await j(`${apiBase}/contracts?${cq.toString()}`).catch(() => []);
-  const addrs = (contracts || []).map((r) => (typeof r === 'string' ? r : r.address)).filter(Boolean);
-  ALLOWED_ADDR_CACHE = { at: now, list: addrs };
-  return addrs;
+  if (STRICT_ZERO_GATING && (!CODEHASH_ALLOW.set.size || (now - CODEHASH_ALLOW.at) > CODEHASH_TTL)) {
+    try {
+      const qs = new URLSearchParams();
+      qs.set('typeHash.in', TYPE_HASHES);
+      qs.set('select', 'address,codeHash');
+      qs.set('sort.desc', 'lastActivityTime');
+      qs.set('limit', '800');
+      const rows = await j(`${apiBase}/contracts?${qs.toString()}`).catch(() => []);
+      const byHash = new Map();
+      for (const r of rows || []) {
+        const ch = r.codeHash ?? r.code_hash;
+        if (Number.isFinite(ch) && !byHash.has(ch)) byHash.set(ch, r.address);
+      }
+      const ok = new Set();
+      const ZERO_EP_MARKERS = ['append_artifact_uri','append_extrauri','clear_uri','destroy','append_token_metadata','update_token_metadata','update_contract_metadata','edit_token_metadata','edit_contract_metadata'];
+      const probe = async (addr) => {
+        try {
+          const res = await j(`${apiBase}/contracts/${encodeURIComponent(addr)}/entrypoints`).catch(() => null);
+          const list = Array.isArray(res) ? res : (Array.isArray(res?.entrypoints) ? res.entrypoints : (res && typeof res === 'object' ? Object.keys(res) : []));
+          const names = new Set((list || []).map((s) => String(s).toLowerCase()));
+          return ZERO_EP_MARKERS.some((m) => names.has(m));
+        } catch { return false; }
+      };
+      const entries = [...byHash.entries()];
+      const CONC = 8; let idx = 0;
+      await Promise.all(new Array(CONC).fill(0).map(async () => {
+        while (idx < entries.length) {
+          const i = idx++; const [ch, addr] = entries[i];
+          const okEp = await probe(addr);
+          if (okEp) ok.add(Number(ch));
+        }
+      }));
+      CODEHASH_ALLOW = { at: now, set: ok };
+    } catch { CODEHASH_ALLOW = { at: now, set: new Set() }; }
+  }
+  try {
+    const cq = new URLSearchParams();
+    cq.set('typeHash.in', TYPE_HASHES);
+    cq.set('select', STRICT_ZERO_GATING ? 'address,codeHash' : 'address');
+    cq.set('sort.desc', 'lastActivityTime');
+    cq.set('limit', '800');
+    const rows = await j(`${apiBase}/contracts?${cq.toString()}`).catch(() => []);
+    let addrs = [];
+    if (STRICT_ZERO_GATING && rows && rows.length && CODEHASH_ALLOW.set.size) {
+      addrs = rows.filter((r) => CODEHASH_ALLOW.set.has(Number(r.codeHash ?? r.code_hash))).map((r) => r.address).filter(Boolean);
+    } else {
+      addrs = (rows || []).map((r) => r.address).filter(Boolean);
+    }
+    ALLOWED_ADDR_CACHE = { at: now, list: addrs };
+    return addrs;
+  } catch { ALLOWED_ADDR_CACHE = { at: now, list: [] }; return []; }
 }
 
 async function listTokens(contractFilter, offset = 0, limit = 48) {
@@ -77,7 +130,7 @@ async function listTokens(contractFilter, offset = 0, limit = 48) {
     p.set('offset', String(Math.max(0, offset|0)));
     p.set('limit',  String(Math.max(1, Math.min(200, limit|0))));
     p.set('totalSupply.gt', '0');
-    p.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply,firstTime');
+    p.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply,firstTime,contract.typeHash');
     return p;
   };
 
@@ -140,18 +193,19 @@ export default async function handler(req, res) {
     const t0 = Date.now();
 
     // Scan ahead until we accept >= target or hit time budget/end
-    while (accepted.length < acceptTarget && !hardEnd && (Date.now() - t0) < TIME_BUDGET_MS) {
-      const chunk = await listTokens(contract, cursor, PAGE);
+  while (accepted.length < acceptTarget && !hardEnd && (Date.now() - t0) < TIME_BUDGET_MS) {
+    const chunk = await listTokens(contract, cursor, PAGE);
       const rawLen = Array.isArray(chunk) ? chunk.length : 0;
       scanned += rawLen;
       if (rawLen === 0) { hardEnd = true; break; }
 
-      const prelim = (chunk || []).map((r) => ({
+      let prelim = (chunk || []).map((r) => ({
         ...r,
         metadata: decodeHexFields(r?.metadata || {}),
       })).filter((r) => hasRenderablePreview(r.metadata));
 
-      // Burn filter optimized: only check tokens with exactly 1 holder
+      // ZeroContract fingerprint gate (filters out lookalikes such as bootloaders)
+          // Burn filter optimized: only check tokens with exactly 1 holder
       const singlesByC = new Map();
       for (const r of prelim) {
         const kt = r.contract?.address || r.contract;
@@ -186,3 +240,10 @@ export default async function handler(req, res) {
     res.status(200).json({ items: [], cursor: Number(req?.query?.offset || 0), end: false });
   }
 }
+
+
+
+
+
+
+

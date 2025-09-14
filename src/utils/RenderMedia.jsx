@@ -1,4 +1,4 @@
-/*Developed by @jams2blues
+﻿/*Developed by @jams2blues
 
   File: src/utils/RenderMedia.jsx
 
@@ -18,7 +18,8 @@ import {
 
 } from '../constants/mimeTypes.js';
 
-import { mimeFromDataUri } from './uriHelpers.js';
+import { mimeFromDataUri, isSvgDataUri, isSvgzDataUri, normalizeSvgDataUri } from './uriHelpers.js';
+import { isZipDataUri, unpackZipDataUri } from './interactiveZip.js';
 
 
 
@@ -38,7 +39,7 @@ const {
 
 
 
-/*Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ helpers Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬*/
+/*ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ helpers ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬*/
 
 /**
 
@@ -120,7 +121,7 @@ function resolveMime(uri, explicit = '') {
 
 
 
-/** OneÃ¢â‚¬â€˜time loader for <model-viewer> (SSRÃ¢â‚¬â€˜safe). */
+/** OneÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Ëœtime loader for <model-viewer> (SSRÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Ëœsafe). */
 
 function useModelViewerOnce() {
 
@@ -144,21 +145,21 @@ function useModelViewerOnce() {
 
 
 
-/*Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ internal: <video> wrapper Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬*/
+/*ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ internal: <video> wrapper ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬*/
 
 /**
 
  * Notes:
 
- *  Ã¢â‚¬Â¢ Wrapper shrinkÃ¢â‚¬â€˜wraps by default (inlineÃ¢â‚¬â€˜block) so the FullscreenModal can
+ *  ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ Wrapper shrinkÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Ëœwraps by default (inlineÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Ëœblock) so the FullscreenModal can
 
- *    drive size/scale. In 1Ãƒâ€”1 preview tiles we override this via CSS:
+ *    drive size/scale. In 1ÃƒÆ’Ã¢â‚¬â€1 preview tiles we override this via CSS:
 
  *      .preview-1x1 > div[data-zu-media="video"] { inset:0; width/height:100% !important; }
 
- *  Ã¢â‚¬Â¢ Forward the ref to <video> so FullscreenModal can read videoWidth/Height.
+ *  ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ Forward the ref to <video> so FullscreenModal can read videoWidth/Height.
 
- *  Ã¢â‚¬Â¢ Hide native fullscreen PiP; keep transport bar visible.
+ *  ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ Hide native fullscreen PiP; keep transport bar visible.
 
  */
 
@@ -203,6 +204,7 @@ const ZuVideo = forwardRef(function ZuVideo(
   const vref = useRef(null);
 
   const [errored, setErrored] = useState(false);
+
 
 
 
@@ -372,7 +374,7 @@ const ZuVideo = forwardRef(function ZuVideo(
 
           onMouseLeave={(e) => { e.currentTarget.style.opacity = '.8'; }}
         >
-          ⛶
+          â›¶
         </button>
       )}
     </div>
@@ -423,13 +425,16 @@ function RenderMediaRaw({
 
   useModelViewerOnce();
 
-
-
   const { uri: safeUri, trimmed } = sanitizeUri(uri);
 
   const type = useMemo(() => resolveMime(safeUri, mime), [safeUri, mime]);
 
   const [errored, setErrored] = useState(false);
+  const [svgViewUri, setSvgViewUri] = useState('');
+  const [zipViewUri, setZipViewUri] = useState('');
+  const zipCleanupRef = useRef(null);
+
+
 
 
 
@@ -456,6 +461,40 @@ function RenderMediaRaw({
 
 
   useEffect(() => { if (trimmed) onInvalid('sanitised'); }, [trimmed, onInvalid]);
+  // Auto-normalise gzipped SVG data URIs to plain UTF-8 for compatibility
+  useEffect(() => {
+    let canceled = false;
+    (async () => {
+      setSvgViewUri('');
+      try {
+        if (type === 'image/svg+xml' && isSvgDataUri(safeUri) && isSvgzDataUri(safeUri)) {
+          const norm = await normalizeSvgDataUri(safeUri);
+          if (!canceled) setSvgViewUri(norm || safeUri);
+        }
+      } catch {}
+    })();
+    return () => { canceled = true; };
+  }, [safeUri, type]);
+
+  // Constrained interactive ZIP support for data:application/zip
+  useEffect(() => {
+    let canceled = false;
+    (async () => {
+      try { zipCleanupRef.current?.(); } catch {}
+      zipCleanupRef.current = null;
+      setZipViewUri('');
+      try {
+        if (type === 'application/zip' && isZipDataUri(safeUri)) {
+          const res = await unpackZipDataUri(safeUri);
+          if (!canceled && res?.ok && res.indexUrl) {
+            setZipViewUri(res.indexUrl);
+            zipCleanupRef.current = res.cleanup;
+          }
+        }
+      } catch {}
+    })();
+    return () => { canceled = true; try { zipCleanupRef.current?.(); } catch {} };
+  }, [safeUri, type]);
 
 
 
@@ -503,7 +542,7 @@ function RenderMediaRaw({
 
       >
 
-        Unsupported media Ã¢â‚¬â€ open externally.
+        Unsupported media ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â open externally.
 
       </a>
 
@@ -553,9 +592,9 @@ function RenderMediaRaw({
 
       return (
 
-        <object data={safeUri} type="image/svg+xml" style={svgStyle} className={className} onLoad={onLoad} data-zu-media="svg">
+        <object data={svgViewUri || safeUri} type="image/svg+xml" style={svgStyle} className={className} onLoad={onLoad} data-zu-media="svg">
 
-          <img src={safeUri} alt={alt} loading="lazy" decoding="async" {...commonImgProps} data-zu-media="svg" />
+          <img src={svgViewUri || safeUri} alt={alt} loading="lazy" decoding="async" {...commonImgProps} data-zu-media="svg" />
 
         </object>
 
@@ -563,7 +602,7 @@ function RenderMediaRaw({
 
     }
 
-    return <img src={safeUri} alt={alt} loading="lazy" decoding="async" {...commonImgProps} data-zu-media="svg" />;
+    return <img src={svgViewUri || safeUri} alt={alt} loading="lazy" decoding="async" {...commonImgProps} data-zu-media="svg" />;
 
   }
 
@@ -719,7 +758,22 @@ function RenderMediaRaw({
 
 
 
-  // PDFs/HTML/text Ã¢â‚¬â€œ sandboxed iframe by default
+
+  // ZIP (interactive; sandboxed iframe with CSP injected by unpacker)
+  if (type === 'application/zip' && zipViewUri) {
+    const sandbox = allowScripts ? 'allow-scripts' : '';
+    return (
+      <iframe
+        src={zipViewUri}
+        title={alt || 'interactive-zip'}
+        sandbox={sandbox}
+        style={{ border: 'none', width: '100%', height: '100%', ...style }}
+        className={className}
+        referrerPolicy='no-referrer'
+      />
+    );
+  }
+  // PDFs/HTML/text ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ sandboxed iframe by default
 
   if (type === 'application/pdf' || type === 'text/html' || type === 'text/plain') {
 
@@ -793,10 +847,23 @@ export default RenderMedia;
 
 /* What changed & why: r788
 
-   Ã¢â‚¬Â¢ Restored clean file (removed bad merge artifacts; fixed import path).
+   ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ Restored clean file (removed bad merge artifacts; fixed import path).
 
-   Ã¢â‚¬Â¢ Let CSS force video wrapper to fill in .preview-1x1 tiles (no crop).
+   ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ Let CSS force video wrapper to fill in .preview-1x1 tiles (no crop).
 
-   Ã¢â‚¬Â¢ Kept fullscreen modal behavior: ref on <video>, shrink-wrap by default. */
+   ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ Kept fullscreen modal behavior: ref on <video>, shrink-wrap by default. */
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 

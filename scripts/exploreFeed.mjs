@@ -129,8 +129,14 @@ async function pageTokens(offset=0, limit=120){
   qs.set('offset', String(offset));
   qs.set('limit',  String(limit));
   qs.set('totalSupply.gt','0');
-  qs.set('select','contract,tokenId,metadata,holdersCount,totalSupply,firstTime');
-  if (addrs.length) qs.set('contract.in', addrs.join(','));
+  // Always include contract.typeHash in select so downstream clients can gate-by-matrix
+  qs.set('select','contract,tokenId,metadata,holdersCount,totalSupply,firstTime,contract.typeHash');
+  if (addrs.length) {
+    qs.set('contract.in', addrs.join(','));
+  } else {
+    // Fallback: restrict by typeHash when address discovery fails
+    qs.set('contract.typeHash.in', TYPE_HASHES);
+  }
   return j(`${apiBase}/tokens?${qs.toString()}`).catch(()=>[]);
 }
 
@@ -183,6 +189,8 @@ async function buildFeed(){
       metadata: r.metadata,
       holdersCount: r.holdersCount,
       firstTime: r.firstTime,
+      // Preserve typeHash if available for downstream gating
+      typeHash: typeof r.contract?.typeHash === 'number' ? r.contract.typeHash : (typeof r.contract_typeHash === 'number' ? r.contract_typeHash : undefined),
     })));
     offset += rawLen;
   }

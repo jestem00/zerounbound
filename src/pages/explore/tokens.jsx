@@ -346,7 +346,7 @@ export default function ExploreTokens() {
             holdersCount: r.holdersCount,
             firstTime: r.firstTime,
           }));
-          // Gate static results by ZeroContract entrypoints (best-effort) on first pages only\n          let staticSlice = staticSliceRaw;\n          if (pageIdx < 4) {\n            const seenAddrs = [...new Set(staticSliceRaw.map((r)=> String(r.contract)).filter(Boolean))];\n            const OK = new Set();\n            const CONC = 6; let ix = 0;\n            await Promise.all(new Array(CONC).fill(0).map(async () => {\n              while (ix < seenAddrs.length) {\n                const i = ix++; const a = seenAddrs[i];\n                let ok = false;\n                try { ok = await isZeroContractByEntrypoints(tzktV1, a); } catch { ok = false; }\n                if (ok) OK.add(a);\n              }\n            }));\n            staticSlice = staticSliceRaw.filter((r)=> OK.has(String(r.contract)));\n          }
+          // Gate static results by ZeroContract entrypoints (best-effort)\n          const seenAddrs = [...new Set(staticSliceRaw.map((r)=> String(r.contract)).filter(Boolean))];\n          const OK = new Set();\n          const CONC = 8; let ix = 0;\n          await Promise.all(new Array(CONC).fill(0).map(async () => {\n            while (ix < seenAddrs.length) {\n              const i = ix++; const a = seenAddrs[i];\n              let ok = false;\n              try { ok = await isZeroContractByEntrypoints(tzktV1, a); } catch { ok = false; }\n              if (ok) OK.add(a);\n            }\n          }));\n          const staticSlice = staticSliceRaw.filter((r)=> OK.has(String(r.contract)));\n          }
           
           // Merge live + static, de-dupe, then sort by firstTime desc with tie-breaker
           const seen = new Set();
@@ -468,8 +468,7 @@ export default function ExploreTokens() {
     const out = [];
     const seen = new Set();
     for (const r of merged) {
-      const typeHash = Number(r.contract?.typeHash ?? NaN);
-      if (Number.isFinite(typeHash) && !ALLOWED_TYPE_HASHES.has(typeHash)) continue;
+      const typeHash = Number(r.contract?.typeHash ?? r.typeHash ?? NaN); if (!ALLOWED_TYPE_HASHES.has(typeHash)) continue;
 
       const t = normalizeAndAcceptToken(r);
       if (!t) continue;
@@ -650,8 +649,7 @@ export default function ExploreTokens() {
           reachedEnd = reachedEnd || (isAgg ? endFlag : (got < PAGE));
 
           for (const r of rows) {
-            const typeHash = Number(r.contract?.typeHash ?? NaN);
-            if (Number.isFinite(typeHash) && !ALLOWED_TYPE_HASHES.has(typeHash)) continue;
+            const typeHash = Number(r.contract?.typeHash ?? r.typeHash ?? NaN); if (!ALLOWED_TYPE_HASHES.has(typeHash)) continue;
             const t = normalizeAndAcceptToken(r);
             if (!t) continue;
             try { Object.defineProperty(t, '__origin', { value: origin, enumerable: false }); } catch { /* ignore */ }
@@ -898,6 +896,8 @@ export default function ExploreTokens() {
 }
 
 /* What changed & why:\n   - Removed misleading global 'Total ...' (FA2-wide).\n   - Guaranteed =10 newly accepted cards per click via scan-until-yield loop.\n   - Kept initial scan snappy (=24 accepted) for a full first impression.\n   - Preserved admin-filter behaviour; title 'Tokens by ... (N)'.\n   - Lint-clean: trimmed unused imports/vars; no dead code. */
+
+
 
 
 

@@ -141,3 +141,32 @@ Hotfix (r11-grid)
   - Disabled client/server entrypoint fingerprint gating (kept typeHash-based contract set). Files: src/pages/explore/tokens.jsx, src/pages/api/explore/feed.js.
   - Broadened preview acceptance in both server and client to include ipfs/https/ar/arweave alongside data:/tezos-storage. Files: same as above.
   - Left static feed proxy intact (/api/explore/static); aggregator fallback remains when static feed is missing.
+
+Hotfix (r11-feed-ghostnet)
+- Symptom: Ghostnet static Explore feed showed 0 pages (404 on `ghostnet/page-0.json`), while mainnet worked. UI at `/explore/tokens` appeared empty on ghostnet when relying on static pages.
+- Root cause: `scripts/exploreFeed.mjs` preferred a `contract.in=<800+ addresses>` tokens query after discovering allowed contracts. On ghostnet, this produced `414 Request-URI Too Large` from TzKT, which our fetch helper swallowed, yielding an empty chunk and zero accepted tokens.
+- Fix: Robust dual-path token query with length guard.
+  - Prefer `contract.typeHash.in=<matrix>` for broad scans to avoid long URLs.
+  - If the discovered address list is small (join length ≤ 7000 chars), attempt precise `contract.in` first; if it returns empty, fall back to the type-hash filter.
+  - This preserves strictness when small, and guarantees results at scale.
+- Files changed: `scripts/exploreFeed.mjs` (pageTokens: new baseQS, length guard, safe fallback path).
+- Validation (local, Node 22):
+  - Ghostnet: pages=3 total=111 with `--page-size=50 --max-pages=2` (test run)
+  - Mainnet:  pages=4 total=158 with `--page-size=50 --max-pages=2` (test run)
+  - Action uses `--page-size=120` matching `FEED_PAGE_SIZE` in `src/config/deployTarget.js`.
+- Operational note: The serverless aggregator (`src/pages/api/explore/feed.js`) already had a fallback from `contract.in` to `contract.typeHash.in` when rows are empty; no changes required there.
+  - Added dedicated meta proxy route: `src/pages/api/explore/static/[net]/meta.js` so the client can fetch `${FEED_STATIC_BASE}/<net>/meta.json` instead of falling back to aggregator immediately.
+
+Explore Feed Format & Next Improvements
+- Current page schema (per item): `{ contract, tokenId, metadata, holdersCount, firstTime, typeHash? }`.
+  - Pros: self-contained; on-chain previews render without secondary lookups; works offline from Pages.
+  - Cons: base64 data URIs can bloat pages; initial page fetch costs can be high on slow networks.
+- Near-term, safe improvements:
+  - Add `meta.json` (already emitted) and keep it stable: `{network,pageSize,pages,total,lastUpdated}`.
+  - Consider optional `page-*.json.gz` to let clients request compressed pages when supported (keep `.json` for compatibility). GitHub Pages may auto-gzip; measure first.
+  - Provide a minimal mirror format for fast-list UIs (name, preview uri, contract, tokenId, firstTime). Keep the rich format as-is and publish under `/full/` if we add the lean variant.
+  - Keep `hasRenderablePreview` aligned across client/server so grids never fetch pages that are later rejected.
+- Longer-term options (discuss):
+  - Precompute per-contract rolling indexes (most-recent token ids) to accelerate admin-filtered views.
+  - Introduce a tiny sitemap (latest N page ids per network) to skip `meta.json` fetch in hot paths.
+  - If Pages latency becomes a limiter, lean more on the serverless aggregator which already de-duplicates and burn-filters live data with caching.

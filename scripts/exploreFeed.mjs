@@ -123,21 +123,39 @@ async function listAllowedContracts(){
 
 async function pageTokens(offset=0, limit=120){
   const addrs = await listAllowedContracts();
-  const qs = new URLSearchParams();
-  qs.set('standard','fa2');
-  qs.set('sort.desc','firstTime');
-  qs.set('offset', String(offset));
-  qs.set('limit',  String(limit));
-  qs.set('totalSupply.gt','0');
-  // Always include contract.typeHash in select so downstream clients can gate-by-matrix
-  qs.set('select','contract,tokenId,metadata,holdersCount,totalSupply,firstTime,contract.typeHash');
-  if (addrs.length) {
-    qs.set('contract.in', addrs.join(','));
-  } else {
-    // Fallback: restrict by typeHash when address discovery fails
+  const baseQS = () => {
+    const qs = new URLSearchParams();
+    qs.set('standard','fa2');
+    qs.set('sort.desc','firstTime');
+    qs.set('offset', String(offset));
+    qs.set('limit',  String(limit));
+    qs.set('totalSupply.gt','0');
+    // Always include contract.typeHash in select so downstream clients can gate-by-matrix
+    qs.set('select','contract,tokenId,metadata,holdersCount,totalSupply,firstTime,contract.typeHash');
+    return qs;
+  };
+
+  // Prefer typeHash filtering to avoid 414 URI Too Large when the allowed
+  // contract list grows (observed on ghostnet). If address list is small,
+  // we can still attempt contract.in for precision; otherwise fall back.
+  const tooManyAddrs = addrs.length > 0 && addrs.join(',').length > 7000;
+
+  if (!addrs.length || tooManyAddrs) {
+    const qs = baseQS();
     qs.set('contract.typeHash.in', TYPE_HASHES);
+    return j(`${apiBase}/tokens?${qs.toString()}`).catch(()=>[]);
   }
-  return j(`${apiBase}/tokens?${qs.toString()}`).catch(()=>[]);
+
+  // Try address filter first (precise)
+  const qsAddr = baseQS();
+  qsAddr.set('contract.in', addrs.join(','));
+  let rows = await j(`${apiBase}/tokens?${qsAddr.toString()}`).catch(()=>[]);
+  if (Array.isArray(rows) && rows.length) return rows;
+
+  // Fallback to typeHash filter if address-filtered query yielded nothing
+  const qsType = baseQS();
+  qsType.set('contract.typeHash.in', TYPE_HASHES);
+  return j(`${apiBase}/tokens?${qsType.toString()}`).catch(()=>[]);
 }
 
 async function singlesBurned(kt, ids){

@@ -60,65 +60,47 @@ let ALLOWED_ADDR_CACHE = { at: 0, list: [] };
 // Cache for ZeroContract entrypoint fingerprint checks
 const ZERO_EP_CACHE = new Map(); // addr -> { ok:boolean, at:number }
 const ZERO_EP_TTL = 5 * 60_000; // 5 minutes
-// Cache of codeHashes permitted for ZeroContract (rebuilt periodically)
-let CODEHASH_ALLOW = { at: 0, set: new Set() };
-const CODEHASH_TTL = 10 * 60_000; // 10 minutes
+// Strict gating toggle (defaults on). When disabled, falls back to typeHash-only.
+const CODEHASH_TTL = 10 * 60_000; // kept for compatibility; not used in address-probe path
 
 async function getAllowedContracts() {
   const now = Date.now();
   if (ALLOWED_ADDR_CACHE.list.length && (now - ALLOWED_ADDR_CACHE.at) < 2 * 60_000) {
     return ALLOWED_ADDR_CACHE.list;
   }
-  if (STRICT_ZERO_GATING && (!CODEHASH_ALLOW.set.size || (now - CODEHASH_ALLOW.at) > CODEHASH_TTL)) {
-    try {
-      const qs = new URLSearchParams();
-      qs.set('typeHash.in', TYPE_HASHES);
-      qs.set('select', 'address,codeHash');
-      qs.set('sort.desc', 'lastActivityTime');
-      qs.set('limit', '800');
-      const rows = await j(`${apiBase}/contracts?${qs.toString()}`).catch(() => []);
-      const byHash = new Map();
-      for (const r of rows || []) {
-        const ch = r.codeHash ?? r.code_hash;
-        if (Number.isFinite(ch) && !byHash.has(ch)) byHash.set(ch, r.address);
-      }
-      const ok = new Set();
-      const ZERO_EP_MARKERS = ['append_artifact_uri','append_extrauri','clear_uri','destroy','append_token_metadata','update_token_metadata','update_contract_metadata','edit_token_metadata','edit_contract_metadata'];
-      const probe = async (addr) => {
+  // Strict address-level gating is performed below; legacy codeHash path removed
+  try {
+    const cq = new URLSearchParams();
+    cq.set('typeHash.in', TYPE_HASHES);
+    cq.set('select', 'address');
+    cq.set('sort.desc', 'lastActivityTime');
+    cq.set('limit', '800');
+    const rows = await j(`${apiBase}/contracts?${cq.toString()}`).catch(() => []);
+    const addrsRaw = (rows || []).map((r) => r.address).filter(Boolean);
+    if (!STRICT_ZERO_GATING) {
+      ALLOWED_ADDR_CACHE = { at: now, list: addrsRaw };
+      return addrsRaw;
+    }
+    const ZERO_EP_MARKERS = [
+      'append_artifact_uri', 'append_extrauri', 'clear_uri', 'destroy',
+      'append_token_metadata', 'update_token_metadata', 'update_contract_metadata',
+      'edit_token_metadata', 'edit_contract_metadata',
+    ];
+    const okAddrs = [];
+    const CONC = 12; let idx = 0;
+    await Promise.all(new Array(CONC).fill(0).map(async () => {
+      while (idx < addrsRaw.length) {
+        const addr = addrsRaw[idx++];
         try {
           const res = await j(`${apiBase}/contracts/${encodeURIComponent(addr)}/entrypoints`).catch(() => null);
           const list = Array.isArray(res) ? res : (Array.isArray(res?.entrypoints) ? res.entrypoints : (res && typeof res === 'object' ? Object.keys(res) : []));
           const names = new Set((list || []).map((s) => String(s).toLowerCase()));
-          return ZERO_EP_MARKERS.some((m) => names.has(m));
-        } catch { return false; }
-      };
-      const entries = [...byHash.entries()];
-      const CONC = 8; let idx = 0;
-      await Promise.all(new Array(CONC).fill(0).map(async () => {
-        while (idx < entries.length) {
-          const i = idx++; const [ch, addr] = entries[i];
-          const okEp = await probe(addr);
-          if (okEp) ok.add(Number(ch));
-        }
-      }));
-      CODEHASH_ALLOW = { at: now, set: ok };
-    } catch { CODEHASH_ALLOW = { at: now, set: new Set() }; }
-  }
-  try {
-    const cq = new URLSearchParams();
-    cq.set('typeHash.in', TYPE_HASHES);
-    cq.set('select', STRICT_ZERO_GATING ? 'address,codeHash' : 'address');
-    cq.set('sort.desc', 'lastActivityTime');
-    cq.set('limit', '800');
-    const rows = await j(`${apiBase}/contracts?${cq.toString()}`).catch(() => []);
-    let addrs = [];
-    if (STRICT_ZERO_GATING && rows && rows.length && CODEHASH_ALLOW.set.size) {
-      addrs = rows.filter((r) => CODEHASH_ALLOW.set.has(Number(r.codeHash ?? r.code_hash))).map((r) => r.address).filter(Boolean);
-    } else {
-      addrs = (rows || []).map((r) => r.address).filter(Boolean);
-    }
-    ALLOWED_ADDR_CACHE = { at: now, list: addrs };
-    return addrs;
+          if (ZERO_EP_MARKERS.some((m) => names.has(m))) okAddrs.push(addr);
+        } catch { /* skip */ }
+      }
+    }));
+    ALLOWED_ADDR_CACHE = { at: now, list: okAddrs };
+    return okAddrs;
   } catch { ALLOWED_ADDR_CACHE = { at: now, list: [] }; return []; }
 }
 

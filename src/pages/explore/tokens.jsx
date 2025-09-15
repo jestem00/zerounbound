@@ -34,31 +34,6 @@ const FEED_BASE = '/api/explore/static';
 // Auto-pagination: when true, automatically continues loading batches
 // until the end is reached (generic explore mode only).
 const AUTO_LOAD_ALL = true;
-// Minimal ZeroContract fingerprint (entrypoints), used for static feed only
-const ZERO_EP_MARKERS = [
-  'append_artifact_uri', 'append_extrauri', 'clear_uri', 'destroy',
-  'append_token_metadata', 'update_token_metadata', 'update_contract_metadata',
-  'edit_token_metadata', 'edit_contract_metadata',
-];
-const ZERO_GATE_CACHE = new Map(); // addr -> { ok, at }
-const ZERO_GATE_TTL = 10 * 60_000;
-async function isZeroContractByEntrypoints(tzktV1, addr){
-  const row = ZERO_GATE_CACHE.get(addr);
-  const now = Date.now();
-  if (row && (now - row.at) < ZERO_GATE_TTL) return row.ok;
-  try {
-    const url = `${tzktV1}/contracts/${encodeURIComponent(addr)}/entrypoints`;
-    const res = await jFetch(url, 2, { ttl: 120_000 }).catch(() => null);
-    let list = [];
-    if (Array.isArray(res)) list = res;
-    else if (Array.isArray(res?.entrypoints)) list = res.entrypoints;
-    else if (res && typeof res === 'object') list = Object.keys(res);
-    const names = new Set(list.map((s) => String(s).toLowerCase()));
-    const ok = ZERO_EP_MARKERS.some((m) => names.has(m));
-    ZERO_GATE_CACHE.set(addr, { ok, at: now });
-    return ok;
-  } catch { ZERO_GATE_CACHE.set(addr, { ok: true, at: now }); return true; }
-}
 
 /*-----------------------------------------------------------*
  * Layout
@@ -118,10 +93,6 @@ function isDataUri(str) {
   return typeof str === 'string'
     && /^data:(image|video|audio|text\/html|image\/svg\+xml)/i.test(str.trim());
 }
-function isRemoteMedia(str) {
-  return typeof str === 'string'
-    && /^(ipfs:|https?:|ar:|arweave:)/i.test(str.trim());
-}
 function hasRenderablePreview(m = {}) {
   const keys = [
     'displayUri', 'display_uri',
@@ -132,12 +103,12 @@ function hasRenderablePreview(m = {}) {
   ];
   for (const k of keys) {
     const v = m && typeof m === 'object' ? m[k] : null;
-    if (isDataUri(v) || isRemoteMedia(v) || (typeof v === 'string' && /^tezos-storage:/i.test(v.trim()))) return true;
+    if (isDataUri(v) || (typeof v === 'string' && /^tezos-storage:/i.test(v.trim()))) return true;
   }
   if (Array.isArray(m?.formats)) {
     for (const f of m.formats) {
       const cand = f?.uri || f?.url;
-      if (isDataUri(cand) || isRemoteMedia(cand) || (typeof cand === 'string' && /^tezos-storage:/i.test(cand.trim()))) return true;
+      if (isDataUri(cand) || (typeof cand === 'string' && /^tezos-storage:/i.test(cand.trim()))) return true;
     }
   }
   return false;
@@ -271,49 +242,6 @@ export default function ExploreTokens() {
 
   /*-------- queries --------*/
 
-  // Cached discovery of allowed ZeroContract code-hashes (strict gate)
-  const CH_CACHE = useRef({ at: 0, list: [] });
-  const getAllowedCodeHashes = useCallback(async () => {
-    const now = Date.now();
-    if (CH_CACHE.current.list.length && (now - CH_CACHE.current.at) < 10 * 60_000) {
-      return CH_CACHE.current.list;
-    }
-    try {
-      const cq = new URLSearchParams();
-      cq.set('typeHash.in', [...ALLOWED_TYPE_HASHES].join(','));
-      cq.set('select', 'address,codeHash');
-      cq.set('sort.desc', 'lastActivityTime');
-      cq.set('limit', '800');
-      const rows = await jFetch(`${tzktV1}/contracts?${cq.toString()}`, 2, { ttl: 60_000 }).catch(() => []);
-      const byHash = new Map(); // codeHash -> sample addr
-      for (const r of rows || []) {
-        const ch = r.codeHash ?? r.code_hash; const a = r.address;
-        if (Number.isFinite(ch) && a && !byHash.has(Number(ch))) byHash.set(Number(ch), a);
-      }
-      const ok = new Set();
-      const entries = [...byHash.entries()];
-      const CONC = 6; let idx = 0;
-      await Promise.all(new Array(CONC).fill(0).map(async () => {
-        while (idx < entries.length) {
-          const [ch, addr] = entries[idx++];
-          try {
-            const url = `${tzktV1}/contracts/${encodeURIComponent(addr)}/entrypoints`;
-            const res = await jFetch(url, 2, { ttl: 120_000 }).catch(() => null);
-            let list = [];
-            if (Array.isArray(res)) list = res;
-            else if (Array.isArray(res?.entrypoints)) list = res.entrypoints;
-            else if (res && typeof res === 'object') list = Object.keys(res);
-            const names = new Set(list.map((s) => String(s).toLowerCase()));
-            if (ZERO_EP_MARKERS.some((m) => names.has(m))) ok.add(ch);
-          } catch { /* ignore */ }
-        }
-      }));
-      const out = [...ok.values()];
-      CH_CACHE.current = { at: now, list: out };
-      return out;
-    } catch { CH_CACHE.current = { at: now, list: [] }; return []; }
-  }, [tzktV1]);
-
   /**
    * Batch token loader (generic browse).
    * Server filters by ZeroContract typeHash and totalSupply>0 to avoid scanning
@@ -350,12 +278,10 @@ export default function ExploreTokens() {
             qb.set('limit', String(step));
             qb.set('totalSupply.gt', '0');
             qb.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply,contract.typeHash,firstTime');
-            const chs = await getAllowedCodeHashes();
-            if (chs.length) qb.set('contract.codeHash.in', chs.join(','));
-            else qb.set('contract.typeHash.in', [...ALLOWED_TYPE_HASHES].join(','));
+            qb.set('contract.typeHash.in', [...ALLOWED_TYPE_HASHES].join(','));
             const rows = await jFetch(`${tzktV1}/tokens?${qb.toString()}`).catch(() => []);
             if (Array.isArray(rows) && rows.length) {
-              return { rows, rawCount: rows.length, usedAgg: false, end: rows.length < step, origin: 'tzkt' };
+              return { rows, rawCount: rows.length, usedAgg: false, end: rows.length < step };
             }
           } catch { /* ignore */ }
           // Nothing to show; mark end and stop.
@@ -365,27 +291,10 @@ export default function ExploreTokens() {
         const arr = await jFetch(url, 1, { ttl: 10_000 }).catch(() => []);
         // If the static page yields nothing (e.g., 404 -> []), treat as beyond coverage
         if (!Array.isArray(arr) || arr.length === 0) {
-          // 1) Try serverless aggregator
           const live = await jFetch(`/api/explore/feed?offset=${encodeURIComponent(String(startOffset))}&limit=${encodeURIComponent(String(step))}`).catch(() => null);
-          if (live && Array.isArray(live.items) && live.items.length) {
-            return { rows: live.items, rawCount: step, usedAgg: true, end: !!live.end, origin: 'agg' };
+          if (live && Array.isArray(live.items)) {
+            return { rows: live.items, rawCount: step, usedAgg: true, end: true, origin: 'agg' };
           }
-          // 2) Fall back to direct TzKT query scoped by typeHash
-          try {
-            const qb = new URLSearchParams();
-            qb.set('standard', 'fa2');
-            qb.set('sort.desc', 'firstTime');
-            qb.set('offset', String(startOffset));
-            qb.set('limit', String(step));
-            qb.set('totalSupply.gt', '0');
-            qb.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply,contract.typeHash,firstTime');
-            qb.set('contract.typeHash.in', [...ALLOWED_TYPE_HASHES].join(','));
-            const rows = await jFetch(`${tzktV1}/tokens?${qb.toString()}`).catch(() => []);
-            if (Array.isArray(rows) && rows.length) {
-              return { rows, rawCount: rows.length, usedAgg: false, end: rows.length < step, origin: 'tzkt' };
-            }
-          } catch { /* ignore */ }
-          // 3) Give up for this window
           return { rows: [], rawCount: step, usedAgg: true, end: true, origin: 'agg' };
         }
         // Optional hybrid overlay for newest pages: merge live + static for extra freshness
@@ -401,17 +310,13 @@ export default function ExploreTokens() {
           }
         }
         if (Array.isArray(arr)) {
-          const staticSliceRaw = arr.slice(inPageOff, inPageOff + step).map((r) => ({
+          const staticSlice = arr.slice(inPageOff, inPageOff + step).map((r) => ({
             contract: r.contract,
             tokenId: Number(r.tokenId),
             metadata: r.metadata || {},
             holdersCount: r.holdersCount,
             firstTime: r.firstTime,
-            // retain matrix gate value from static feed so client gating works
-            typeHash: typeof r.typeHash === 'number' ? r.typeHash : undefined,
           }));
-          // Gate static results by ZeroContract entrypoints (best-effort)\n          const seenAddrs = [...new Set(staticSliceRaw.map((r)=> String(r.contract)).filter(Boolean))];\n          const OK = new Set();\n          const CONC = 8; let ix = 0;\n          await Promise.all(new Array(CONC).fill(0).map(async () => {\n            while (ix < seenAddrs.length) {\n              const i = ix++; const a = seenAddrs[i];\n              let ok = false;\n              try { ok = await isZeroContractByEntrypoints(tzktV1, a); } catch { ok = false; }\n              if (ok) OK.add(a);\n            }\n          }));\n          const staticSlice = staticSliceRaw.filter((r)=> OK.has(String(r.contract)));\n          }
-          
           // Merge live + static, de-dupe, then sort by firstTime desc with tie-breaker
           const seen = new Set();
           const union = [];
@@ -427,7 +332,7 @@ export default function ExploreTokens() {
             .map((r) => ({
               ...r,
               firstTime: r.firstTime,
-          }))
+            }))
             .sort((a, b) => {
               const ta = Date.parse(a.firstTime || 0) || 0;
               const tb = Date.parse(b.firstTime || 0) || 0;
@@ -463,13 +368,7 @@ export default function ExploreTokens() {
     qs.set('offset', String(startOffset));
     qs.set('limit', '48');
     // Restrict to ZeroContract family on the server when supported
-    try {
-      const chs = await getAllowedCodeHashes();
-      if (chs.length) qs.set('contract.codeHash.in', chs.join(','));
-      else qs.set('contract.typeHash.in', [...ALLOWED_TYPE_HASHES].join(','));
-    } catch {
-      qs.set('contract.typeHash.in', [...ALLOWED_TYPE_HASHES].join(','));
-    }
+    qs.set('contract.typeHash.in', [...ALLOWED_TYPE_HASHES].join(','));
     qs.set('totalSupply.gt', '0');
     qs.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply,contract.typeHash,firstTime');
     if (contractFilter) qs.set('contract', contractFilter);
@@ -518,33 +417,17 @@ export default function ExploreTokens() {
     return { rows: Array.isArray(rows) ? rows : [], rawCount: Array.isArray(rows) ? rows.length : 0, usedAgg: false, end: (Array.isArray(rows) ? rows.length : 0) < step, origin: 'tzkt' };
   }, [tzktV1, contractFilter, adminFilter]);
 
-  /**
-   * Admin support: discover allowed ZeroContract collections (address list)
-   * without depending on helpers defined later in this module to avoid TDZ.
-   */
-  const getAllowedContractsForAdmin = useCallback(async () => {
-    const qs = new URLSearchParams();
-    qs.set('typeHash.in', [...ALLOWED_TYPE_HASHES].join(','));
-    qs.set('select', 'address');
-    qs.set('sort.desc', 'lastActivityTime');
-    qs.set('limit', '400');
-    const rows = await jFetch(`${tzktV1}/contracts?${qs.toString()}`).catch(() => []);
-    return (rows || []).map((r) => r.address).filter(Boolean);
-  }, [tzktV1]);
-
   /** admin-filtered token discovery (creator/firstMinter/meta authors/creators). */
   const fetchAdminTokens = useCallback(async () => {
     if (!adminFilter) return [];
 
     const base = tzktV1;
-    const sel = 'contract,tokenId,metadata,holdersCount,totalSupply,contract.typeHash,firstTime,creator,firstMinter';
-    const gate = `&contract.typeHash.in=${encodeURIComponent([...ALLOWED_TYPE_HASHES].join(','))}&totalSupply.gt=0&select=${encodeURIComponent(sel)}`;
     const queries = [
-      `${base}/tokens?creator=${encodeURIComponent(adminFilter)}&standard=fa2&limit=1000&sort.desc=firstTime${gate}`,
-      `${base}/tokens?firstMinter=${encodeURIComponent(adminFilter)}&standard=fa2&limit=1000&sort.desc=firstTime${gate}`,
+      `${base}/tokens?creator=${encodeURIComponent(adminFilter)}&standard=fa2&limit=1000&sort.desc=firstTime`,
+      `${base}/tokens?firstMinter=${encodeURIComponent(adminFilter)}&standard=fa2&limit=1000&sort.desc=firstTime`,
       // tolerant metadata lookups
-      `${base}/tokens?metadata.creators.contains=${encodeURIComponent(adminFilter)}&standard=fa2&limit=1000&sort.desc=firstTime${gate}`,
-      `${base}/tokens?metadata.authors.contains=${encodeURIComponent(adminFilter)}&standard=fa2&limit=1000&sort.desc=firstTime${gate}`,
+      `${base}/tokens?metadata.creators.contains=${encodeURIComponent(adminFilter)}&standard=fa2&limit=1000&sort.desc=firstTime`,
+      `${base}/tokens?metadata.authors.contains=${encodeURIComponent(adminFilter)}&standard=fa2&limit=1000&sort.desc=firstTime`,
     ];
 
     const batches = await Promise.all(queries.map((u) => jFetch(u).catch(() => [])));
@@ -554,8 +437,8 @@ export default function ExploreTokens() {
     const out = [];
     const seen = new Set();
     for (const r of merged) {
-      const typeHash = Number(r.contract?.typeHash ?? r['contract.typeHash'] ?? r.typeHash ?? NaN);
-      if (!ALLOWED_TYPE_HASHES.has(typeHash)) continue;
+      const typeHash = Number(r.contract?.typeHash ?? NaN);
+      if (Number.isFinite(typeHash) && !ALLOWED_TYPE_HASHES.has(typeHash)) continue;
 
       const t = normalizeAndAcceptToken(r);
       if (!t) continue;
@@ -636,7 +519,8 @@ export default function ExploreTokens() {
 
   /**
    * Scan ahead until we accumulate at least `minAccept` newly accepted tokens
-   * (or we truly hit the end). This prevents the 'only 1-2 new cards per click' problem.  It guarantees =10 newly added cards per click in generic mode.
+   * (or we truly hit the end). This prevents the “only 1–2 new cards per click”
+   * problem.  It guarantees =10 newly added cards per click in generic mode.
    */
   const loadPage = useCallback(async (initial = false) => {
     if (fetching || end) return;
@@ -736,9 +620,8 @@ export default function ExploreTokens() {
           reachedEnd = reachedEnd || (isAgg ? endFlag : (got < PAGE));
 
           for (const r of rows) {
-            // Enforce matrix gate for all origins (belt-and-suspenders)
-            const typeHash = Number(r.contract?.typeHash ?? r['contract.typeHash'] ?? r.typeHash ?? NaN);
-            if (!ALLOWED_TYPE_HASHES.has(typeHash)) continue;
+            const typeHash = Number(r.contract?.typeHash ?? NaN);
+            if (Number.isFinite(typeHash) && !ALLOWED_TYPE_HASHES.has(typeHash)) continue;
             const t = normalizeAndAcceptToken(r);
             if (!t) continue;
             try { Object.defineProperty(t, '__origin', { value: origin, enumerable: false }); } catch { /* ignore */ }
@@ -782,7 +665,7 @@ export default function ExploreTokens() {
         next.length = 0; Array.prototype.push.apply(next, keepAll);
       } catch { /* best effort */ }
 
-            setTokens((prev) => {
+      setTokens((prev) => {
         // Guard against any duplicates by key
         const have = new Set(prev.map((t) => `${t.contract}:${t.tokenId}`));
         const filteredNext = next.filter((t) => {
@@ -803,7 +686,7 @@ export default function ExploreTokens() {
           }
         } catch { base = prev; }
         const merged = dedupeTokens(filteredNext.length ? base.concat(filteredNext) : base);
-        // Global stable newest->oldest order by firstTime, with tie-breakers
+        // Global stable newest→oldest order by firstTime, with tie-breakers
         merged.sort((a, b) => {
           const ta = Date.parse(a.firstTime || 0) || 0;
           const tb = Date.parse(b.firstTime || 0) || 0;
@@ -820,7 +703,7 @@ export default function ExploreTokens() {
 
     setFetching(false);
     if (initial) setLoading(false);
-  }, [fetching, end, offset, fetchBatchTokens, adminFilter, contractFilter, fetchTokensByContract]);
+  }, [fetching, end, offset, fetchBatchTokens, adminFilter, contractFilter, fetchAllowedContracts, fetchTokensByContract]);
 
   /*-------- effects --------*/
 
@@ -884,7 +767,7 @@ export default function ExploreTokens() {
 
   const title = showTokensAdmin
     ? `Tokens by ${adminFilter} (${fmtInt(adminTok.length)})`
-    : 'Explore - Tokens';
+    : 'Explore · Tokens';
 
   const tokenCards = (list) => (
     <Grid>
@@ -941,10 +824,10 @@ export default function ExploreTokens() {
 
       {error && <Subtle role="alert">{error}</Subtle>}
 
-      {loading && <Subtle>Loading...</Subtle>}
+      {loading && <Subtle>Loading…</Subtle>}
       {!loading && cards}
 
-      {/* Pagination controls - generic mode ensures =10 new cards per click */}
+      {/* Pagination controls — generic mode ensures =10 new cards per click */}
       {!showTokensAdmin && !end && (
         <Center>
           <PixelButton
@@ -955,7 +838,7 @@ export default function ExploreTokens() {
             noActiveFx
           >
             {fetching
-              ? (<><LoadingSpinner size={16} style={{ marginRight: 6, verticalAlign: 'text-bottom' }} /> Loading...</>)
+              ? (<><LoadingSpinner size={16} style={{ marginRight: 6, verticalAlign: 'text-bottom' }} /> Loading…</>)
               : 'Load More'}
           </PixelButton>
         </Center>
@@ -984,19 +867,12 @@ export default function ExploreTokens() {
   );
 }
 
-/* What changed & why:\n   - Removed misleading global 'Total ...' (FA2-wide).\n   - Guaranteed =10 newly accepted cards per click via scan-until-yield loop.\n   - Kept initial scan snappy (=24 accepted) for a full first impression.\n   - Preserved admin-filter behaviour; title 'Tokens by ... (N)'.\n   - Lint-clean: trimmed unused imports/vars; no dead code. */
-
-
-
-
-
-
-
-
-
-
-
-
+/* What changed & why:
+   • Removed misleading global “Total …” (FA2-wide) — it counted every FA2 on TzKT.
+   • Guaranteed =10 newly accepted cards per click via scan-until-yield loop.
+   • Kept initial scan snappy (=24 accepted) for a full first impression.
+   • Preserved perfect admin-filter behaviour; left title “Tokens by … (N)”.
+   • Lint-clean: trimmed unused imports/vars; no dead code. */
 
 
 

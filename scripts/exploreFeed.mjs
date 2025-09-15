@@ -24,26 +24,33 @@ const MAX_ACCEPTED = PAGE_SIZE * MAX_PAGES;
 const BURN_ADDR = 'tz1burnburnburnburnburnburnburjAYjjX';
 
 const hashMatrix = JSON.parse(fs.readFileSync(path.join(repoRoot, 'src', 'data', 'hashMatrix.json'), 'utf8'));
-const TYPE_HASHES = Object.keys(hashMatrix).filter(k => /^-?\d+$/.test(k)).join(',');
+const TYPE_HASH_VALUES = Object.keys(hashMatrix).filter(k => /^-?\d+$/.test(k)).map(Number);
+const TYPE_HASHES = TYPE_HASH_VALUES.join(',');
+const TYPE_HASH_SET = new Set(TYPE_HASH_VALUES);
 
 const apiBase = NETWORK === 'ghostnet' ? 'https://api.ghostnet.tzkt.io/v1' : 'https://api.tzkt.io/v1';
 
 function isDataUri(str) {
-  return typeof str === 'string' && /^data:(image|video|audio|text\/html|image\/svg\+xml)/i.test(str.trim());
+  return typeof str === 'string' && /^data:(?:image|audio|video)\//i.test(str.trim());
+}
+function isSvgDataUri(str) {
+  return typeof str === 'string' && /^data:image\/svg\+xml/i.test(str.trim());
 }
 function isTezosStorage(str) {
   return typeof str === 'string' && /^tezos-storage:/i.test(str.trim());
-}
-function isRemoteMedia(str){
-  return typeof str === 'string' && /^(ipfs:|https?:|ar:|arweave:)/i.test(str.trim());
 }
 function hasRenderablePreview(m = {}) {
   const keys = ['displayUri','display_uri','imageUri','image_uri','image','thumbnailUri','thumbnail_uri','artifactUri','artifact_uri','mediaUri','media_uri'];
   for (const k of keys) {
     const v = m && typeof m === 'object' ? m[k] : null;
-    if (isDataUri(v) || isTezosStorage(v) || isRemoteMedia(v)) return true;
+    if (isTezosStorage(v) || isDataUri(v) || isSvgDataUri(v)) return true;
   }
-  if (Array.isArray(m?.formats)) for (const f of m.formats) { const u = f?.uri || f?.url; if (isDataUri(u) || isTezosStorage(u) || isRemoteMedia(u)) return true; }
+  if (Array.isArray(m?.formats)) {
+    for (const f of m.formats) {
+      const u = f?.uri || f?.url;
+      if (isTezosStorage(u) || isDataUri(u) || isSvgDataUri(u)) return true;
+    }
+  }
   return false;
 }
 
@@ -62,7 +69,7 @@ function decodeHexFields(v){
 
 async function j(url){
   const res = await fetch(url, { headers: { accept:'application/json' } });
-  if (!res.ok) throw new Error(String(res.status));
+  if (!res.ok) throw new Error(`${url} -> ${res.status}`);
   const ct = (res.headers.get('content-type')||'').toLowerCase();
   return ct.includes('application/json') ? res.json() : res.text().then(t => { try{return JSON.parse(t);}catch{return [];}});
 }
@@ -73,59 +80,101 @@ const ZERO_EP_MARKERS = [
   'edit_token_metadata', 'edit_contract_metadata',
 ];
 
+let allowedContractsCache = null;
+const rejectedContracts = new Set();
+
 async function probeEntrypoints(addr){
   try{
     const res = await j(`${apiBase}/contracts/${encodeURIComponent(addr)}/entrypoints`).catch(()=>null);
     const list = Array.isArray(res) ? res : (Array.isArray(res?.entrypoints) ? res.entrypoints : (res && typeof res === 'object' ? Object.keys(res) : []));
-    const names = new Set((list||[]).map(s => String(s).toLowerCase()));
+    const names = new Set((list||[]).map(s => String(s?.name ?? s).toLowerCase()));
     return ZERO_EP_MARKERS.some(m => names.has(m));
   }catch{ return false; }
 }
 
-async function buildAllowedCodeHashes(){
+async function buildAllowedContracts(){
   const qs = new URLSearchParams();
   qs.set('typeHash.in', TYPE_HASHES);
-  qs.set('select', 'address,codeHash');
+  qs.set('select', 'address,codeHash,typeHash');
   qs.set('sort.desc', 'lastActivityTime');
-  qs.set('limit', '800');
+  qs.set('limit', '1200');
   const rows = await j(`${apiBase}/contracts?${qs.toString()}`).catch(()=>[]);
-  const byHash = new Map(); // codeHash -> sample addr
-  for (const r of rows||[]){ const ch = r.codeHash ?? r.code_hash; if (Number.isFinite(ch) && !byHash.has(ch)) byHash.set(Number(ch), r.address); }
-  const ok = new Set();
-  const entries = [...byHash.entries()];
+  const allowed = new Map();
+  const codeHashes = new Set();
+  const entries = (rows||[]).map(r => ({
+    address: r?.address,
+    typeHash: Number(r?.typeHash ?? r?.type_hash),
+    codeHash: Number(r?.codeHash ?? r?.code_hash),
+  })).filter(r => r.address && Number.isFinite(r.typeHash) && TYPE_HASH_SET.has(r.typeHash));
+  if (!entries.length) return { addresses: allowed, addressList: [], codeHashes };
   const CONC = 8; let idx = 0;
   await Promise.all(new Array(CONC).fill(0).map(async () => {
-    while (idx < entries.length){
-      const [ch, addr] = entries[idx++];
-      const good = await probeEntrypoints(addr);
-      if (good) ok.add(ch);
+    while (true){
+      const next = idx++;
+      if (next >= entries.length) return;
+      const entry = entries[next];
+      let ok = true;
+      if (STRICT_ZERO_GATING) {
+        ok = await probeEntrypoints(entry.address);
+      }
+      if (ok) {
+        allowed.set(entry.address, { typeHash: entry.typeHash, codeHash: Number.isFinite(entry.codeHash) ? entry.codeHash : undefined });
+        if (Number.isFinite(entry.codeHash)) codeHashes.add(entry.codeHash);
+      } else {
+        rejectedContracts.add(entry.address);
+      }
     }
   }));
-  return { ok, rows };
+  return { addresses: allowed, addressList: [...allowed.keys()], codeHashes };
 }
 
-async function listAllowedContracts(){
-  // Prefer codeHash-gated list to avoid bootloaders/generators with shared typeHash
-  if (STRICT_ZERO_GATING) {
-    try{
-      const { ok, rows } = await buildAllowedCodeHashes();
-      if (ok.size && rows && rows.length){
-        return rows.filter(r => ok.has(Number(r.codeHash ?? r.code_hash))).map(r => r.address).filter(Boolean);
-      }
-    }catch{}
+async function ensureAllowedContracts(){
+  if (allowedContractsCache) return allowedContractsCache;
+  allowedContractsCache = await buildAllowedContracts();
+  return allowedContractsCache;
+}
+
+async function fetchContractFingerprint(addr){
+  try{
+    const meta = await j(`${apiBase}/contracts/${encodeURIComponent(addr)}?select=address,codeHash,typeHash`).catch(()=>null);
+    if (!meta) return null;
+    const typeHash = Number(meta?.typeHash ?? meta?.type_hash);
+    if (!Number.isFinite(typeHash) || !TYPE_HASH_SET.has(typeHash)) return null;
+    let ok = true;
+    if (STRICT_ZERO_GATING) {
+      ok = await probeEntrypoints(addr);
+    }
+    if (!ok) return null;
+    const codeHash = Number(meta?.codeHash ?? meta?.code_hash);
+    return { typeHash, codeHash: Number.isFinite(codeHash) ? codeHash : undefined };
+  }catch{ return null; }
+}
+
+async function ensureContractsKnown(addresses){
+  const cache = await ensureAllowedContracts();
+  const pending = [];
+  for (const addr of addresses){
+    const normalized = String(addr || '');
+    if (!normalized) continue;
+    if (cache.addresses.has(normalized) || rejectedContracts.has(normalized)) continue;
+    pending.push(normalized);
   }
-  // Fallback to typeHash-only list (robust)
-  const qs = new URLSearchParams();
-  qs.set('typeHash.in', TYPE_HASHES);
-  qs.set('select', 'address');
-  qs.set('sort.desc', 'lastActivityTime');
-  qs.set('limit', '800');
-  const rows = await j(`${apiBase}/contracts?${qs.toString()}`).catch(()=>[]);
-  return (rows||[]).map(r => r.address || r).filter(Boolean);
+  for (const addr of pending){
+    const info = await fetchContractFingerprint(addr);
+    if (info) {
+      cache.addresses.set(addr, info);
+      cache.addressList = [...cache.addresses.keys()];
+      if (Number.isFinite(info.codeHash)) cache.codeHashes.add(info.codeHash);
+    } else {
+      rejectedContracts.add(addr);
+    }
+  }
+  return cache;
 }
 
 async function pageTokens(offset=0, limit=120){
-  const addrs = await listAllowedContracts();
+  const cache = await ensureAllowedContracts();
+  const addrs = cache.addressList || [];
   const baseQS = () => {
     const qs = new URLSearchParams();
     qs.set('standard','fa2');
@@ -133,30 +182,20 @@ async function pageTokens(offset=0, limit=120){
     qs.set('offset', String(offset));
     qs.set('limit',  String(limit));
     qs.set('totalSupply.gt','0');
-    // Always include contract.typeHash in select so downstream clients can gate-by-matrix
-    qs.set('select','contract,tokenId,metadata,holdersCount,totalSupply,firstTime,contract.typeHash');
-    // Always gate by ZeroContract matrix
+    qs.set('select','contract,tokenId,metadata,holdersCount,totalSupply,firstTime,contract.typeHash,contract.codeHash');
     qs.set('contract.typeHash.in', TYPE_HASHES);
     return qs;
   };
 
-  // Prefer typeHash filtering to avoid 414 URI Too Large when the allowed
-  // contract list grows (observed on ghostnet). If address list is small,
-  // we can still attempt contract.in for precision; otherwise fall back.
   const tooManyAddrs = addrs.length > 0 && addrs.join(',').length > 7000;
-
   if (!addrs.length || tooManyAddrs) {
     const qs = baseQS();
     return j(`${apiBase}/tokens?${qs.toString()}`).catch(()=>[]);
   }
-
-  // Try address filter first (precise)
   const qsAddr = baseQS();
   qsAddr.set('contract.in', addrs.join(','));
   let rows = await j(`${apiBase}/tokens?${qsAddr.toString()}`).catch(()=>[]);
   if (Array.isArray(rows) && rows.length) return rows;
-
-  // Fallback to typeHash filter if address-filtered query yielded nothing
   const qsType = baseQS();
   return j(`${apiBase}/tokens?${qsType.toString()}`).catch(()=>[]);
 }
@@ -187,53 +226,81 @@ async function buildFeed(){
     const rawLen = Array.isArray(chunk) ? chunk.length : 0;
     if (!rawLen) break;
 
-    // decode + preview
-    const prelim = []; for (const r of chunk){ const m = decodeHexFields(r?.metadata||{}); if (hasRenderablePreview(m)) prelim.push({ ...r, metadata:m }); }
+    const contractAddrs = [...new Set((chunk||[]).map(r => r?.contract?.address || r?.contract).filter(Boolean))];
+    const cache = await ensureContractsKnown(contractAddrs);
+    const allowed = cache.addresses;
 
-    // singles burn filter
+    const prelim = [];
+    for (const r of chunk||[]){
+      const contract = r?.contract?.address || r?.contract;
+      if (!contract) continue;
+      const info = allowed.get(contract);
+      if (!info) continue;
+      const metadata = decodeHexFields(r?.metadata || {});
+      if (!hasRenderablePreview(metadata)) continue;
+      const holdersCount = Number(r?.holdersCount);
+      const tokenId = Number(r?.tokenId);
+      if (!Number.isFinite(tokenId)) continue;
+      const typeHashRaw = Number.isFinite(info.typeHash) ? info.typeHash : Number(r?.['contract.typeHash'] ?? r?.contract?.typeHash ?? NaN);
+      const typeHash = Number.isFinite(typeHashRaw) ? typeHashRaw : undefined;
+      prelim.push({
+        contract,
+        tokenId,
+        metadata,
+        holdersCount,
+        firstTime: r?.firstTime,
+        typeHash,
+      });
+    }
+
     const singles = new Map();
-    for (const r of prelim){ const hc = Number(r.holdersCount); if (hc === 1){ const kt = r.contract?.address || r.contract; const id = Number(r.tokenId); if(kt && Number.isFinite(id)){ if(!singles.has(kt)) singles.set(kt, []); singles.get(kt).push(id); } } }
+    for (const item of prelim){
+      if (item.holdersCount === 1){
+        if (!singles.has(item.contract)) singles.set(item.contract, []);
+        singles.get(item.contract).push(item.tokenId);
+      }
+    }
     const burnedMap = new Map();
     for (const [kt, ids] of singles.entries()){ burnedMap.set(kt, await singlesBurned(kt, ids)); }
 
-    const kept = prelim.filter(r => {
-      const hc = Number(r.holdersCount);
-      if (hc > 1) return true;
-      const kt = r.contract?.address || r.contract; const id = Number(r.tokenId);
-      const bset = burnedMap.get(kt);
-      return !(bset && bset.has(id));
+    const kept = prelim.filter(item => {
+      if (item.holdersCount !== 1) return true;
+      const bset = burnedMap.get(item.contract);
+      return !(bset && bset.has(item.tokenId));
     });
 
-    accepted.push(...kept.map(r => ({
-      contract: r.contract?.address || r.contract,
-      tokenId : Number(r.tokenId),
-      metadata: r.metadata,
-      holdersCount: r.holdersCount,
-      firstTime: r.firstTime,
-      // Preserve typeHash if available for downstream gating
-      typeHash: (() => { const th = (typeof r["contract.typeHash"] === 'number') ? r["contract.typeHash"] : (typeof r.contract?.typeHash === 'number' ? r.contract.typeHash : undefined); return (typeof th === 'number' && Number.isFinite(th)) ? th : undefined; })(),
-    })));
+    const slot = MAX_ACCEPTED - accepted.length;
+    if (slot <= 0) break;
+    const normalized = kept.slice(0, slot).map(item => ({
+      contract: item.contract,
+      tokenId : item.tokenId,
+      metadata: item.metadata,
+      holdersCount: item.holdersCount,
+      firstTime: item.firstTime,
+      typeHash: Number.isFinite(item.typeHash) ? item.typeHash : undefined,
+    }));
+    accepted.push(...normalized);
     offset += rawLen;
   }
 
-  // Write pages
+  const finalAccepted = accepted.slice(0, MAX_ACCEPTED);
   const outBase = process.env.FEED_OUT_DIR ? path.resolve(process.env.FEED_OUT_DIR) : path.join(repoRoot, 'feed-dist');
   const outDir = path.join(outBase, NETWORK);
   fs.mkdirSync(outDir, { recursive: true });
-  const pages = Math.ceil(accepted.length / PAGE_SIZE);
+  const pages = Math.ceil(finalAccepted.length / PAGE_SIZE);
   for (let i=0;i<pages;i+=1){
-    const slice = accepted.slice(i*PAGE_SIZE, (i+1)*PAGE_SIZE);
+    const slice = finalAccepted.slice(i*PAGE_SIZE, (i+1)*PAGE_SIZE);
     const file = path.join(outDir, `page-${i}.json`);
     fs.writeFileSync(file, JSON.stringify(slice), 'utf8');
   }
-  const meta = { network: NETWORK, pageSize: PAGE_SIZE, pages, total: accepted.length, lastUpdated: new Date().toISOString() };
+  const meta = { network: NETWORK, pageSize: PAGE_SIZE, pages, total: finalAccepted.length, lastUpdated: new Date().toISOString() };
   fs.writeFileSync(path.join(outDir, 'meta.json'), JSON.stringify(meta), 'utf8');
-  // Also write a compact, curated index strictly limited to ZeroContract (matrix) tokens
+
   const versionOf = (th) => {
     try { return hashMatrix[String(th)] || null; } catch { return null; }
   };
-  const curated = accepted
-    .map(t => ({ contract: t.contract, tokenId: t.tokenId, typeHash: (typeof t.typeHash === 'number' && Number.isFinite(t.typeHash)) ? t.typeHash : undefined }))
+  const curated = finalAccepted
+    .map(t => ({ contract: t.contract, tokenId: t.tokenId, typeHash: typeof t.typeHash === 'number' ? t.typeHash : undefined }))
     .filter(t => typeof t.typeHash === 'number' && versionOf(t.typeHash));
   const indexDir = path.join(outDir, 'index');
   fs.mkdirSync(indexDir, { recursive: true });
@@ -248,7 +315,7 @@ async function buildFeed(){
   }
   const metaIdx = { network: NETWORK, pageSize: PAGE_SIZE, pages: pagesIdx, total: curated.length, lastUpdated: new Date().toISOString(), kind: 'index' };
   fs.writeFileSync(path.join(indexDir, 'meta.json'), JSON.stringify(metaIdx), 'utf8');
-  console.log(`Feed built: ${NETWORK} pages=${pages} total=${accepted.length}`);
+  console.log(`Feed built: ${NETWORK} pages=${pages} total=${finalAccepted.length}`);
 }
 
 buildFeed().catch(e=>{ console.error(e); process.exit(1); });

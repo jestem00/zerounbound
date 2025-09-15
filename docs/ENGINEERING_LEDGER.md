@@ -1,7 +1,14 @@
 ﻿ZeroUnbound v4 - Engineering Progress Ledger
-Rev: r11 2025-09-14
+Rev: r12 2025-09-15
 
 Purpose: Track files touched, pending cleanups, and invariant notes as we iteratively harden the codebase following recent edits (ZIP generative, SVGZ, TzKT fallbacks, on/off-chain redundancy) and fix Next.js dev/runtime regressions.
+
+This Pass (r12 feed gating hardening)
+- Symptom: GitHub Action gating step failed because static feed admitted Bootloader/generative tokens (typeHash null) even after type-hash filtering; CI rejected page-0.json.
+- Fixes:
+  - scripts/exploreFeed.mjs: cached ZeroContract fingerprints (typeHash + entrypoint probes) and filtered tokens against the verified set before burn hygiene; fills typeHash for every saved row so CI gating stays strict.
+  - scripts/exploreFeed.mjs: restricted preview acceptance to on-chain URIs (data:/tezos-storage), enforced MAX_ACCEPTED limits, and kept contract verification resilient when TzKT omits typeHash; curated index now reuses the gated rows.
+  - scripts/exploreFeed.mjs: local sanity check of mainnet/ghostnet samples now passes (no non-matrix type hashes); GitHub workflow gating should succeed.
 
 Rollback Note (2025-09-12)
 - App rolled back to previously live version. Only these new artifacts remain: 

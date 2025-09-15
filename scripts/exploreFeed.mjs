@@ -102,26 +102,36 @@ async function probeEntrypoints(addr){
 }
 
 async function buildAllowedContracts(){
-  const qs = new URLSearchParams();
-  qs.set('typeHash.in', TYPE_HASHES);
-  qs.set('select', 'address,codeHash,typeHash');
-  qs.set('sort.desc', 'lastActivityTime');
-  qs.set('limit', '1200');
-  const rows = await j(`${apiBase}/contracts?${qs.toString()}`).catch(()=>[]);
   const allowed = new Map();
   const codeHashes = new Set();
-  const entries = (rows||[]).map(r => ({
-    address: r?.address,
-    typeHash: Number(r?.typeHash ?? r?.type_hash),
-    codeHash: Number(r?.codeHash ?? r?.code_hash),
-  })).filter(r => r.address && Number.isFinite(r.typeHash) && TYPE_HASH_SET.has(r.typeHash));
-  if (!entries.length) return { addresses: allowed, addressList: [], codeHashes };
-  const CONC = 8; let idx = 0;
+  const rows = [];
+  const PAGE = 400;
+  for (let offset = 0; offset < 20000; offset += PAGE) {
+    const qs = new URLSearchParams();
+    qs.set('typeHash.in', TYPE_HASHES);
+    qs.set('select', 'address,codeHash,typeHash');
+    qs.set('sort.desc', 'lastActivityTime');
+    qs.set('limit', String(PAGE));
+    qs.set('offset', String(offset));
+    const chunk = await j(`${apiBase}/contracts?${qs.toString()}`).catch(()=>[]);
+    if (!Array.isArray(chunk) || !chunk.length) break;
+    rows.push(...chunk);
+    if (chunk.length < PAGE) break;
+  }
+  const entries = (rows||[])
+    .map(r => ({
+      address: r?.address,
+      typeHash: Number(r?.typeHash ?? r?.type_hash),
+      codeHash: Number(r?.codeHash ?? r?.code_hash),
+    }))
+    .filter(r => r.address && Number.isFinite(r.typeHash) && TYPE_HASH_SET.has(r.typeHash));
+  const CONC = 12; let idx = 0;
   await Promise.all(new Array(CONC).fill(0).map(async () => {
     while (true){
       const next = idx++;
       if (next >= entries.length) return;
       const entry = entries[next];
+      if (!entry || allowed.has(entry.address) || rejectedContracts.has(entry.address)) continue;
       let rejected = false;
       if (STRICT_ZERO_GATING) {
         const probe = await probeEntrypoints(entry.address);

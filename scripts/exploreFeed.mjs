@@ -36,6 +36,10 @@ function isDataUri(str) {
 function isSvgDataUri(str) {
   return typeof str === 'string' && /^data:image\/svg\+xml/i.test(str.trim());
 }
+
+function isRemoteMedia(str){
+  return typeof str === 'string' && /^(ipfs:|https?:|ar:|arweave:)/i.test(str.trim());
+}
 function isTezosStorage(str) {
   return typeof str === 'string' && /^tezos-storage:/i.test(str.trim());
 }
@@ -43,12 +47,12 @@ function hasRenderablePreview(m = {}) {
   const keys = ['displayUri','display_uri','imageUri','image_uri','image','thumbnailUri','thumbnail_uri','artifactUri','artifact_uri','mediaUri','media_uri'];
   for (const k of keys) {
     const v = m && typeof m === 'object' ? m[k] : null;
-    if (isTezosStorage(v) || isDataUri(v) || isSvgDataUri(v)) return true;
+    if (isTezosStorage(v) || isDataUri(v) || isSvgDataUri(v) || isRemoteMedia(v)) return true;
   }
   if (Array.isArray(m?.formats)) {
     for (const f of m.formats) {
       const u = f?.uri || f?.url;
-      if (isTezosStorage(u) || isDataUri(u) || isSvgDataUri(u)) return true;
+      if (isTezosStorage(u) || isDataUri(u) || isSvgDataUri(u) || isRemoteMedia(u)) return true;
     }
   }
   return false;

@@ -683,7 +683,7 @@ export default function ExploreTokens() {
           windowRows += got;
           windowRaw  += raw;
           scannedRows += raw;
-          reachedEnd = reachedEnd || endFlag || (raw < minAccept);
+          reachedEnd = reachedEnd || (isAgg ? endFlag : (raw < minAccept));
 
           for (const r of rows) {
             // Enforce matrix gate using row typeHash when present; otherwise
@@ -714,6 +714,15 @@ export default function ExploreTokens() {
         if (windowRaw === 0) { reachedEnd = true; break; }
         if (initial && Date.now() - tStart > TIME_BUDGET_MS && accepted >= 10) break;
       }
+    }
+
+
+    if (!next.length) {
+      setOffset(localOffset);
+      setFetching(false);
+      if (!reachedEnd) setEnd(true);
+      if (initial) setLoading(false);
+      return;
     }
 
     if (next.length) {

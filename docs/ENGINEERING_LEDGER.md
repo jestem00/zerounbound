@@ -1,7 +1,15 @@
 ﻿ZeroUnbound v4 - Engineering Progress Ledger
-Rev: r13 2025-09-15
+Rev: r14 2025-09-15
 
 Purpose: Track files touched, pending cleanups, and invariant notes as we iteratively harden the codebase following recent edits (ZIP generative, SVGZ, TzKT fallbacks, on/off-chain redundancy) and fix Next.js dev/runtime regressions.
+
+
+This Pass (r14 explore auto-paginate + preview parity)
+- Symptom: Explore grid stalled at ~242 tokens with the spinner stuck because strict batch end detection marked the run complete once heavily filtered static pages returned; feed generation also excluded ipfs/ar previews, shrinking static coverage.
+- Fixes:
+  - src/pages/explore/tokens.jsx: differentiate aggregator and static end conditions (using raw < minAccept) and bail out cleanly when a scan yields zero accepted items, preventing endless auto-load loops while advancing the cursor.
+  - scripts/exploreFeed.mjs: restored ipfs/https/ar preview acceptance so static pages mirror the aggregator/client filters and republish the full ZeroContract corpus for ghostnet/mainnet.
+- Validation: local mainnet/ghostnet feed builds (page-size 20) plus hashMatrix gating on page-0.json; manual auto-load exercise shows the spinner clearing once pages are exhausted.
 
 This Pass (r13 explore pagination & gating sync)
 - Symptom: Explore grid stopped after the first 24 cards and feeds only contained a few hundred tokens because strict entrypoint gating filtered nearly every ZeroContract before pagination.

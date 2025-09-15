@@ -228,6 +228,26 @@ async function buildFeed(){
   }
   const meta = { network: NETWORK, pageSize: PAGE_SIZE, pages, total: accepted.length, lastUpdated: new Date().toISOString() };
   fs.writeFileSync(path.join(outDir, 'meta.json'), JSON.stringify(meta), 'utf8');
+  // Also write a compact, curated index strictly limited to ZeroContract (matrix) tokens
+  const versionOf = (th) => {
+    try { return hashMatrix[String(th)] || null; } catch { return null; }
+  };
+  const curated = accepted
+    .map(t => ({ contract: t.contract, tokenId: t.tokenId, typeHash: Number(t.typeHash ?? NaN) }))
+    .filter(t => Number.isFinite(t.typeHash) && versionOf(t.typeHash));
+  const indexDir = path.join(outDir, 'index');
+  fs.mkdirSync(indexDir, { recursive: true });
+  const pagesIdx = Math.ceil(curated.length / PAGE_SIZE);
+  for (let i=0;i<pagesIdx;i+=1){
+    const slice = curated.slice(i*PAGE_SIZE, (i+1)*PAGE_SIZE).map(t => ({
+      contract: t.contract,
+      tokenId: t.tokenId,
+      zerocontractversion: versionOf(t.typeHash),
+    }));
+    fs.writeFileSync(path.join(indexDir, `page-${i}.json`), JSON.stringify(slice), 'utf8');
+  }
+  const metaIdx = { network: NETWORK, pageSize: PAGE_SIZE, pages: pagesIdx, total: curated.length, lastUpdated: new Date().toISOString(), kind: 'index' };
+  fs.writeFileSync(path.join(indexDir, 'meta.json'), JSON.stringify(metaIdx), 'utf8');
   console.log(`Feed built: ${NETWORK} pages=${pages} total=${accepted.length}`);
 }
 

@@ -108,6 +108,10 @@ function isDataUri(str) {
   return typeof str === 'string'
     && /^data:(image|video|audio|text\/html|image\/svg\+xml)/i.test(str.trim());
 }
+function isRemoteMedia(str) {
+  return typeof str === 'string'
+    && /^(ipfs:|https?:|ar:|arweave:)/i.test(str.trim());
+}
 function hasRenderablePreview(m = {}) {
   const keys = [
     'displayUri', 'display_uri',
@@ -118,12 +122,12 @@ function hasRenderablePreview(m = {}) {
   ];
   for (const k of keys) {
     const v = m && typeof m === 'object' ? m[k] : null;
-    if (isDataUri(v) || (typeof v === 'string' && /^tezos-storage:/i.test(v.trim()))) return true;
+    if (isDataUri(v) || isRemoteMedia(v) || (typeof v === 'string' && /^tezos-storage:/i.test(v.trim()))) return true;
   }
   if (Array.isArray(m?.formats)) {
     for (const f of m.formats) {
       const cand = f?.uri || f?.url;
-      if (isDataUri(cand) || (typeof cand === 'string' && /^tezos-storage:/i.test(cand.trim()))) return true;
+      if (isDataUri(cand) || isRemoteMedia(cand) || (typeof cand === 'string' && /^tezos-storage:/i.test(cand.trim()))) return true;
     }
   }
   return false;
@@ -270,6 +274,40 @@ export default function ExploreTokens() {
       const pageIdx = Math.floor(startOffset / FEED_PAGE_SIZE);
       const inPageOff = startOffset % FEED_PAGE_SIZE;
       try {
+        // First, prefer curated compact index pages if available
+        try {
+          const idxMeta = await jFetch(`${FEED_BASE.replace(/\/+$/,'')}/${netKey}/index/meta`, 1, { ttl: 20_000 }).catch(() => null);
+          const idxPages = Number(idxMeta?.pages || 0);
+          if (Number.isFinite(idxPages) && idxPages > 0 && pageIdx < idxPages) {
+            const idx = await jFetch(`${FEED_BASE.replace(/\/+$/,'')}/${netKey}/index/${pageIdx}`, 1, { ttl: 10_000 }).catch(() => []);
+            if (Array.isArray(idx) && idx.length) {
+              const byC = new Map();
+              for (const it of idx.slice(inPageOff, inPageOff + step)) {
+                const kt = String(it.contract || ''); const id = Number(it.tokenId);
+                if (!kt || !Number.isFinite(id)) continue;
+                if (!byC.has(kt)) byC.set(kt, []);
+                byC.get(kt).push(id);
+              }
+              const rowsAll = [];
+              for (const [kt, ids] of byC.entries()) {
+                const b = 25;
+                for (let i=0;i<ids.length;i+=b){
+                  const chunkIds = ids.slice(i,i+b);
+                  const qb = new URLSearchParams();
+                  qb.set('contract', kt);
+                  qb.set('tokenId.in', chunkIds.join(','));
+                  qb.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply,contract.typeHash,firstTime');
+                  const rr = await jFetch(`${tzktV1}/tokens?${qb.toString()}`).catch(() => []);
+                  if (Array.isArray(rr) && rr.length) rowsAll.push(...rr);
+                }
+              }
+              if (rowsAll.length) {
+                return { rows: rowsAll, rawCount: rowsAll.length, usedAgg: false, end: rowsAll.length < step, origin: 'tzkt' };
+              }
+            }
+          }
+        } catch { /* fall through to regular static */ }
+
         // fetch meta once to know how many static pages exist
         let pagesLocal = feedPages;
         if (pagesLocal === null) {
@@ -300,7 +338,7 @@ export default function ExploreTokens() {
             }
           } catch { /* ignore */ }
           // Nothing to show; mark end and stop.
-          return { rows: [], rawCount: step, usedAgg: true, end: true };
+          return { rows: [], rawCount: step, usedAgg: false, end: false };
         }
         const url = `${FEED_BASE.replace(/\/+$/,'')}/${netKey}/${pageIdx}`;
         const arr = await jFetch(url, 1, { ttl: 10_000 }).catch(() => []);
@@ -308,9 +346,9 @@ export default function ExploreTokens() {
         if (!Array.isArray(arr) || arr.length === 0) {
           const live = await jFetch(`/api/explore/feed?offset=${encodeURIComponent(String(startOffset))}&limit=${encodeURIComponent(String(step))}`).catch(() => null);
           if (live && Array.isArray(live.items)) {
-            return { rows: live.items, rawCount: step, usedAgg: true, end: true, origin: 'agg' };
+            return { rows: live.items, rawCount: step, usedAgg: true, end: !!live.end, origin: 'agg' };
           }
-          return { rows: [], rawCount: step, usedAgg: true, end: true, origin: 'agg' };
+          return { rows: [], rawCount: step, usedAgg: false, end: false, origin: 'tzkt' };
         }
         // Optional hybrid overlay for newest pages: merge live + static for extra freshness
         const HYBRID_PAGES = 2;
@@ -331,6 +369,10 @@ export default function ExploreTokens() {
             metadata: r.metadata || {},
             holdersCount: r.holdersCount,
             firstTime: r.firstTime,
+            // carry typeHash through when present so downstream gating can read it
+            typeHash: (typeof r.typeHash === 'number')
+              ? r.typeHash
+              : (typeof r['contract.typeHash'] === 'number' ? r['contract.typeHash'] : undefined),
           }));
           // Merge live + static, de-dupe, then sort by firstTime desc with tie-breaker
           const seen = new Set();
@@ -437,12 +479,14 @@ export default function ExploreTokens() {
     if (!adminFilter) return [];
 
     const base = tzktV1;
+    const sel = 'contract,tokenId,metadata,holdersCount,totalSupply,contract.typeHash,firstTime,creator,firstMinter';
+    const gate = `&contract.typeHash.in=${encodeURIComponent([...ALLOWED_TYPE_HASHES].join(','))}&totalSupply.gt=0&select=${encodeURIComponent(sel)}`;
     const queries = [
-      `${base}/tokens?creator=${encodeURIComponent(adminFilter)}&standard=fa2&limit=1000&sort.desc=firstTime`,
-      `${base}/tokens?firstMinter=${encodeURIComponent(adminFilter)}&standard=fa2&limit=1000&sort.desc=firstTime`,
+      `${base}/tokens?creator=${encodeURIComponent(adminFilter)}&standard=fa2&limit=1000&sort.desc=firstTime${gate}`,
+      `${base}/tokens?firstMinter=${encodeURIComponent(adminFilter)}&standard=fa2&limit=1000&sort.desc=firstTime${gate}`,
       // tolerant metadata lookups
-      `${base}/tokens?metadata.creators.contains=${encodeURIComponent(adminFilter)}&standard=fa2&limit=1000&sort.desc=firstTime`,
-      `${base}/tokens?metadata.authors.contains=${encodeURIComponent(adminFilter)}&standard=fa2&limit=1000&sort.desc=firstTime`,
+      `${base}/tokens?metadata.creators.contains=${encodeURIComponent(adminFilter)}&standard=fa2&limit=1000&sort.desc=firstTime${gate}`,
+      `${base}/tokens?metadata.authors.contains=${encodeURIComponent(adminFilter)}&standard=fa2&limit=1000&sort.desc=firstTime${gate}`,
     ];
 
     const batches = await Promise.all(queries.map((u) => jFetch(u).catch(() => [])));
@@ -452,8 +496,15 @@ export default function ExploreTokens() {
     const out = [];
     const seen = new Set();
     for (const r of merged) {
-      const typeHash = Number(r.contract?.typeHash ?? NaN);
+      const typeHash = Number(r.contract?.typeHash ?? r['contract.typeHash'] ?? r.typeHash ?? NaN);
       if (Number.isFinite(typeHash) && !ALLOWED_TYPE_HASHES.has(typeHash)) continue;
+      if (!Number.isFinite(typeHash)) {
+        try {
+          const allow = await getAllowedAddrs(tzktV1);
+          const addr = String(r.contract?.address || r.contract || '');
+          if (!allow.has(addr)) continue;
+        } catch { continue; }
+      }
 
       const t = normalizeAndAcceptToken(r);
       if (!t) continue;
@@ -635,8 +686,18 @@ export default function ExploreTokens() {
           reachedEnd = reachedEnd || (isAgg ? endFlag : (got < PAGE));
 
           for (const r of rows) {
-            const typeHash = Number(r.contract?.typeHash ?? NaN);
-            if (Number.isFinite(typeHash) && !ALLOWED_TYPE_HASHES.has(typeHash)) continue;
+            // Enforce matrix gate using row typeHash when present; otherwise
+            // fall back to allowed address set derived from the matrix.
+            const typeHash = Number(r.contract?.typeHash ?? r['contract.typeHash'] ?? r.typeHash ?? NaN);
+            if (Number.isFinite(typeHash)) {
+              if (!ALLOWED_TYPE_HASHES.has(typeHash)) continue;
+            } else {
+              try {
+                const allow = await getAllowedAddrs(tzktV1);
+                const addr = String(r.contract?.address || r.contract || '');
+                if (!allow.has(addr)) continue;
+              } catch { continue; }
+            }
             const t = normalizeAndAcceptToken(r);
             if (!t) continue;
             try { Object.defineProperty(t, '__origin', { value: origin, enumerable: false }); } catch { /* ignore */ }
@@ -673,8 +734,13 @@ export default function ExploreTokens() {
           try { live = await listLiveTokenIds(kt, net, false); } catch { live = []; }
           const liveSet = new Set(live.map(Number));
           liveByC.set(kt, liveSet);
-          for (const t of arr) {
-            if (liveSet.has(Number(t.tokenId))) keepAll.push(t);
+          if (liveSet.size === 0) {
+            // Unknown live set → keep all tokens for this contract
+            Array.prototype.push.apply(keepAll, arr);
+          } else {
+            for (const t of arr) {
+              if (liveSet.has(Number(t.tokenId))) keepAll.push(t);
+            }
           }
         }
         next.length = 0; Array.prototype.push.apply(next, keepAll);
@@ -695,7 +761,7 @@ export default function ExploreTokens() {
           if (typeof liveByC !== 'undefined' && liveByC && liveByC.size) {
             base = prev.filter((t) => {
               const set = liveByC.get(t.contract);
-              if (!set) return true; // not evaluated this round
+              if (!set || set.size === 0) return true; // unknown → keep existing
               return set.has(Number(t.tokenId));
             });
           }
@@ -888,6 +954,7 @@ export default function ExploreTokens() {
    • Kept initial scan snappy (=24 accepted) for a full first impression.
    • Preserved perfect admin-filter behaviour; left title “Tokens by … (N)”.
    • Lint-clean: trimmed unused imports/vars; no dead code. */
+
 
 
 

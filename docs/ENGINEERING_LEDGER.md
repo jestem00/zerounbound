@@ -205,3 +205,11 @@ Static pass-through fix (r11-static-typehash)
 - Symptom: explore/tokens empty despite static pages existing. Root cause: client dropped static rows because typeHash wasn’t copied when mapping static page items into memory; matrix gating then removed them.
 - Fix: include typeHash from the static JSON into staticSliceRaw so the subsequent matrix gate accepts static items. File: src/pages/explore/tokens.jsx.
 
+- Compact Static Index (r11-index)
+- Added a curated, minimal static index alongside full pages. Pages are strictly matrix‑gated and contain only `{contract, tokenId, zerocontractversion}`. This reduces payload and lets the client batch‑fetch fresh metadata from TzKT quickly while avoiding any local filtering.
+  - Generator: `scripts/exploreFeed.mjs` writes `<net>/index/page-*.json` + `index/meta.json`.
+  - API proxy: `src/pages/api/explore/static/[net]/index/meta.js` and `[net]/index/[page].js`.
+  - Client: `src/pages/explore/tokens.jsx` prefers the index when present; groups by contract and fetches `/v1/tokens?contract=<KT1>&tokenId.in=…` in small batches; still enforces matrix/address fallback locally.
+
+- Static fallback loop tightness
+- When static pages are missing or empty, client now advances offset without signaling `end=true`, ensuring it keeps scanning via aggregator and TzKT rather than stalling.

@@ -407,6 +407,8 @@ export default function ExploreTokens() {
             metadata: r.metadata || {},
             holdersCount: r.holdersCount,
             firstTime: r.firstTime,
+            // retain matrix gate value from static feed so client gating works
+            typeHash: typeof r.typeHash === 'number' ? r.typeHash : undefined,
           }));
           // Gate static results by ZeroContract entrypoints (best-effort)\n          const seenAddrs = [...new Set(staticSliceRaw.map((r)=> String(r.contract)).filter(Boolean))];\n          const OK = new Set();\n          const CONC = 8; let ix = 0;\n          await Promise.all(new Array(CONC).fill(0).map(async () => {\n            while (ix < seenAddrs.length) {\n              const i = ix++; const a = seenAddrs[i];\n              let ok = false;\n              try { ok = await isZeroContractByEntrypoints(tzktV1, a); } catch { ok = false; }\n              if (ok) OK.add(a);\n            }\n          }));\n          const staticSlice = staticSliceRaw.filter((r)=> OK.has(String(r.contract)));\n          }
           

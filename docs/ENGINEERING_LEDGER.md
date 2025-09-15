@@ -200,3 +200,8 @@ Explore Feed Format & Next Improvements
   - Precompute per-contract rolling indexes (most-recent token ids) to accelerate admin-filtered views.
   - Introduce a tiny sitemap (latest N page ids per network) to skip `meta.json` fetch in hot paths.
   - If Pages latency becomes a limiter, lean more on the serverless aggregator which already de-duplicates and burn-filters live data with caching.
+
+Static pass-through fix (r11-static-typehash)
+- Symptom: explore/tokens empty despite static pages existing. Root cause: client dropped static rows because typeHash wasn’t copied when mapping static page items into memory; matrix gating then removed them.
+- Fix: include typeHash from the static JSON into staticSliceRaw so the subsequent matrix gate accepts static items. File: src/pages/explore/tokens.jsx.
+

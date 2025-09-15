@@ -34,13 +34,16 @@ function isDataUri(str) {
 function isTezosStorage(str) {
   return typeof str === 'string' && /^tezos-storage:/i.test(str.trim());
 }
+function isRemoteMedia(str){
+  return typeof str === 'string' && /^(ipfs:|https?:|ar:|arweave:)/i.test(str.trim());
+}
 function hasRenderablePreview(m = {}) {
   const keys = ['displayUri','display_uri','imageUri','image_uri','image','thumbnailUri','thumbnail_uri','artifactUri','artifact_uri','mediaUri','media_uri'];
   for (const k of keys) {
     const v = m && typeof m === 'object' ? m[k] : null;
-    if (isDataUri(v) || isTezosStorage(v)) return true;
+    if (isDataUri(v) || isTezosStorage(v) || isRemoteMedia(v)) return true;
   }
-  if (Array.isArray(m?.formats)) for (const f of m.formats) { const u = f?.uri || f?.url; if (isDataUri(u) || isTezosStorage(u)) return true; }
+  if (Array.isArray(m?.formats)) for (const f of m.formats) { const u = f?.uri || f?.url; if (isDataUri(u) || isTezosStorage(u) || isRemoteMedia(u)) return true; }
   return false;
 }
 
@@ -132,6 +135,8 @@ async function pageTokens(offset=0, limit=120){
     qs.set('totalSupply.gt','0');
     // Always include contract.typeHash in select so downstream clients can gate-by-matrix
     qs.set('select','contract,tokenId,metadata,holdersCount,totalSupply,firstTime,contract.typeHash');
+    // Always gate by ZeroContract matrix
+    qs.set('contract.typeHash.in', TYPE_HASHES);
     return qs;
   };
 
@@ -142,7 +147,6 @@ async function pageTokens(offset=0, limit=120){
 
   if (!addrs.length || tooManyAddrs) {
     const qs = baseQS();
-    qs.set('contract.typeHash.in', TYPE_HASHES);
     return j(`${apiBase}/tokens?${qs.toString()}`).catch(()=>[]);
   }
 
@@ -154,7 +158,6 @@ async function pageTokens(offset=0, limit=120){
 
   // Fallback to typeHash filter if address-filtered query yielded nothing
   const qsType = baseQS();
-  qsType.set('contract.typeHash.in', TYPE_HASHES);
   return j(`${apiBase}/tokens?${qsType.toString()}`).catch(()=>[]);
 }
 
@@ -208,7 +211,7 @@ async function buildFeed(){
       holdersCount: r.holdersCount,
       firstTime: r.firstTime,
       // Preserve typeHash if available for downstream gating
-      typeHash: typeof r.contract?.typeHash === 'number' ? r.contract.typeHash : (typeof r.contract_typeHash === 'number' ? r.contract_typeHash : undefined),
+      typeHash: (typeof r["contract.typeHash"] !== 'undefined') ? Number(r["contract.typeHash"]) : (typeof r.contract?.typeHash === 'number' ? r.contract.typeHash : undefined),
     })));
     offset += rawLen;
   }

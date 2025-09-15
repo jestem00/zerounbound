@@ -24,9 +24,6 @@ function isDataUri(str) {
 function isTezosStorage(str) {
   return typeof str === 'string' && /^tezos-storage:/i.test(str.trim());
 }
-function isRemoteMedia(str) {
-  return typeof str === 'string' && /^(ipfs:|https?:|ar:|arweave:)/i.test(str.trim());
-}
 function hasRenderablePreview(m = {}) {
   const keys = [
     'displayUri', 'display_uri',
@@ -57,6 +54,7 @@ async function j(url) {
 }
 
 let ALLOWED_ADDR_CACHE = { at: 0, list: [] };
+let ALLOWED_CODEHASH_CACHE = { at: 0, list: [] }; // number[]
 // Cache for ZeroContract entrypoint fingerprint checks
 const ZERO_EP_CACHE = new Map(); // addr -> { ok:boolean, at:number }
 const ZERO_EP_TTL = 5 * 60_000; // 5 minutes
@@ -104,6 +102,52 @@ async function getAllowedContracts() {
   } catch { ALLOWED_ADDR_CACHE = { at: now, list: [] }; return []; }
 }
 
+async function getAllowedCodeHashes() {
+  const now = Date.now();
+  if (ALLOWED_CODEHASH_CACHE.list.length && (now - ALLOWED_CODEHASH_CACHE.at) < 10 * 60_000) {
+    return ALLOWED_CODEHASH_CACHE.list;
+  }
+  try {
+    const cq = new URLSearchParams();
+    cq.set('typeHash.in', TYPE_HASHES);
+    cq.set('select', 'address,codeHash');
+    cq.set('sort.desc', 'lastActivityTime');
+    cq.set('limit', '800');
+    const rows = await j(`${apiBase}/contracts?${cq.toString()}`).catch(() => []);
+    const byHash = new Map(); // codeHash -> sample addr
+    for (const r of rows || []) {
+      const ch = r.codeHash ?? r.code_hash;
+      if (Number.isFinite(ch) && !byHash.has(Number(ch))) byHash.set(Number(ch), r.address);
+    }
+    // Validate with entrypoint fingerprint
+    const ZERO_EP_MARKERS = [
+      'append_artifact_uri', 'append_extrauri', 'clear_uri', 'destroy',
+      'append_token_metadata', 'update_token_metadata', 'update_contract_metadata',
+      'edit_token_metadata', 'edit_contract_metadata',
+    ];
+    const ok = new Set();
+    const entries = [...byHash.entries()];
+    const CONC = 10; let idx = 0;
+    await Promise.all(new Array(CONC).fill(0).map(async () => {
+      while (idx < entries.length) {
+        const [ch, addr] = entries[idx++];
+        try {
+          const res = await j(`${apiBase}/contracts/${encodeURIComponent(addr)}/entrypoints`).catch(() => null);
+          const list = Array.isArray(res) ? res : (Array.isArray(res?.entrypoints) ? res.entrypoints : (res && typeof res === 'object' ? Object.keys(res) : []));
+          const names = new Set((list || []).map((s) => String(s).toLowerCase()));
+          if (ZERO_EP_MARKERS.some((m) => names.has(m))) ok.add(ch);
+        } catch { /* skip */ }
+      }
+    }));
+    const out = [...ok.values()];
+    ALLOWED_CODEHASH_CACHE = { at: now, list: out };
+    return out;
+  } catch {
+    ALLOWED_CODEHASH_CACHE = { at: now, list: [] };
+    return [];
+  }
+}
+
 async function listTokens(contractFilter, offset = 0, limit = 48) {
   const baseParams = () => {
     const p = new URLSearchParams();
@@ -116,13 +160,26 @@ async function listTokens(contractFilter, offset = 0, limit = 48) {
     return p;
   };
 
-  // Prefer contract.in list to avoid broad FA2 scans; fallback if empty
+  // Prefer strict codeHash gating first to avoid bootloaders/lookalikes.
   if (!contractFilter) {
     try {
-      const addrs = await getAllowedContracts();
-      if (addrs.length) {
+      const chs = await getAllowedCodeHashes();
+      if (chs.length) {
         const qb = baseParams();
-        qb.set('contract.in', addrs.join(','));
+        qb.set('contract.codeHash.in', chs.join(','));
+        qb.set('contract.typeHash.in', TYPE_HASHES);
+        const rows = await j(`${apiBase}/tokens?${qb.toString()}`).catch(() => []);
+        if (Array.isArray(rows) && rows.length) return rows;
+      }
+    } catch { /* ignore */ }
+    // Secondary: try contract.in if URL stays small enough, otherwise skip to fallback below
+    try {
+      const addrs = await getAllowedContracts();
+      const joined = addrs.join(',');
+      if (joined.length && joined.length < 7000) {
+        const qb = baseParams();
+        qb.set('contract.in', joined);
+        qb.set('contract.typeHash.in', TYPE_HASHES);
         const rows = await j(`${apiBase}/tokens?${qb.toString()}`).catch(() => []);
         if (Array.isArray(rows) && rows.length) return rows;
       }
@@ -130,8 +187,21 @@ async function listTokens(contractFilter, offset = 0, limit = 48) {
   }
 
   const qs = baseParams();
-  if (contractFilter && /^KT1[0-9A-Za-z]{33}$/.test(contractFilter)) qs.set('contract', contractFilter);
-  else qs.set('contract.typeHash.in', TYPE_HASHES);
+  if (contractFilter && /^KT1[0-9A-Za-z]{33}$/.test(contractFilter)) {
+    qs.set('contract', contractFilter);
+  } else {
+    // Prefer strict codeHash gating to avoid bootloaders/lookalikes; falls back to typeHash
+    try {
+      const chs = await getAllowedCodeHashes();
+      if (chs.length) {
+        qs.set('contract.codeHash.in', chs.join(','));
+      } else {
+        qs.set('contract.typeHash.in', TYPE_HASHES);
+      }
+    } catch {
+      qs.set('contract.typeHash.in', TYPE_HASHES);
+    }
+  }
   const rows = await j(`${apiBase}/tokens?${qs.toString()}`).catch(() => []);
   return Array.isArray(rows) ? rows : [];
 }

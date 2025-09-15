@@ -271,6 +271,49 @@ export default function ExploreTokens() {
 
   /*-------- queries --------*/
 
+  // Cached discovery of allowed ZeroContract code-hashes (strict gate)
+  const CH_CACHE = useRef({ at: 0, list: [] });
+  const getAllowedCodeHashes = useCallback(async () => {
+    const now = Date.now();
+    if (CH_CACHE.current.list.length && (now - CH_CACHE.current.at) < 10 * 60_000) {
+      return CH_CACHE.current.list;
+    }
+    try {
+      const cq = new URLSearchParams();
+      cq.set('typeHash.in', [...ALLOWED_TYPE_HASHES].join(','));
+      cq.set('select', 'address,codeHash');
+      cq.set('sort.desc', 'lastActivityTime');
+      cq.set('limit', '800');
+      const rows = await jFetch(`${tzktV1}/contracts?${cq.toString()}`, 2, { ttl: 60_000 }).catch(() => []);
+      const byHash = new Map(); // codeHash -> sample addr
+      for (const r of rows || []) {
+        const ch = r.codeHash ?? r.code_hash; const a = r.address;
+        if (Number.isFinite(ch) && a && !byHash.has(Number(ch))) byHash.set(Number(ch), a);
+      }
+      const ok = new Set();
+      const entries = [...byHash.entries()];
+      const CONC = 6; let idx = 0;
+      await Promise.all(new Array(CONC).fill(0).map(async () => {
+        while (idx < entries.length) {
+          const [ch, addr] = entries[idx++];
+          try {
+            const url = `${tzktV1}/contracts/${encodeURIComponent(addr)}/entrypoints`;
+            const res = await jFetch(url, 2, { ttl: 120_000 }).catch(() => null);
+            let list = [];
+            if (Array.isArray(res)) list = res;
+            else if (Array.isArray(res?.entrypoints)) list = res.entrypoints;
+            else if (res && typeof res === 'object') list = Object.keys(res);
+            const names = new Set(list.map((s) => String(s).toLowerCase()));
+            if (ZERO_EP_MARKERS.some((m) => names.has(m))) ok.add(ch);
+          } catch { /* ignore */ }
+        }
+      }));
+      const out = [...ok.values()];
+      CH_CACHE.current = { at: now, list: out };
+      return out;
+    } catch { CH_CACHE.current = { at: now, list: [] }; return []; }
+  }, [tzktV1]);
+
   /**
    * Batch token loader (generic browse).
    * Server filters by ZeroContract typeHash and totalSupply>0 to avoid scanning
@@ -307,10 +350,12 @@ export default function ExploreTokens() {
             qb.set('limit', String(step));
             qb.set('totalSupply.gt', '0');
             qb.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply,contract.typeHash,firstTime');
-            qb.set('contract.typeHash.in', [...ALLOWED_TYPE_HASHES].join(','));
+            const chs = await getAllowedCodeHashes();
+            if (chs.length) qb.set('contract.codeHash.in', chs.join(','));
+            else qb.set('contract.typeHash.in', [...ALLOWED_TYPE_HASHES].join(','));
             const rows = await jFetch(`${tzktV1}/tokens?${qb.toString()}`).catch(() => []);
             if (Array.isArray(rows) && rows.length) {
-              return { rows, rawCount: rows.length, usedAgg: false, end: rows.length < step };
+              return { rows, rawCount: rows.length, usedAgg: false, end: rows.length < step, origin: 'tzkt' };
             }
           } catch { /* ignore */ }
           // Nothing to show; mark end and stop.
@@ -320,10 +365,27 @@ export default function ExploreTokens() {
         const arr = await jFetch(url, 1, { ttl: 10_000 }).catch(() => []);
         // If the static page yields nothing (e.g., 404 -> []), treat as beyond coverage
         if (!Array.isArray(arr) || arr.length === 0) {
+          // 1) Try serverless aggregator
           const live = await jFetch(`/api/explore/feed?offset=${encodeURIComponent(String(startOffset))}&limit=${encodeURIComponent(String(step))}`).catch(() => null);
-          if (live && Array.isArray(live.items)) {
-            return { rows: live.items, rawCount: step, usedAgg: true, end: true, origin: 'agg' };
+          if (live && Array.isArray(live.items) && live.items.length) {
+            return { rows: live.items, rawCount: step, usedAgg: true, end: !!live.end, origin: 'agg' };
           }
+          // 2) Fall back to direct TzKT query scoped by typeHash
+          try {
+            const qb = new URLSearchParams();
+            qb.set('standard', 'fa2');
+            qb.set('sort.desc', 'firstTime');
+            qb.set('offset', String(startOffset));
+            qb.set('limit', String(step));
+            qb.set('totalSupply.gt', '0');
+            qb.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply,contract.typeHash,firstTime');
+            qb.set('contract.typeHash.in', [...ALLOWED_TYPE_HASHES].join(','));
+            const rows = await jFetch(`${tzktV1}/tokens?${qb.toString()}`).catch(() => []);
+            if (Array.isArray(rows) && rows.length) {
+              return { rows, rawCount: rows.length, usedAgg: false, end: rows.length < step, origin: 'tzkt' };
+            }
+          } catch { /* ignore */ }
+          // 3) Give up for this window
           return { rows: [], rawCount: step, usedAgg: true, end: true, origin: 'agg' };
         }
         // Optional hybrid overlay for newest pages: merge live + static for extra freshness
@@ -399,7 +461,13 @@ export default function ExploreTokens() {
     qs.set('offset', String(startOffset));
     qs.set('limit', '48');
     // Restrict to ZeroContract family on the server when supported
-    qs.set('contract.typeHash.in', [...ALLOWED_TYPE_HASHES].join(','));
+    try {
+      const chs = await getAllowedCodeHashes();
+      if (chs.length) qs.set('contract.codeHash.in', chs.join(','));
+      else qs.set('contract.typeHash.in', [...ALLOWED_TYPE_HASHES].join(','));
+    } catch {
+      qs.set('contract.typeHash.in', [...ALLOWED_TYPE_HASHES].join(','));
+    }
     qs.set('totalSupply.gt', '0');
     qs.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply,contract.typeHash,firstTime');
     if (contractFilter) qs.set('contract', contractFilter);
@@ -448,17 +516,33 @@ export default function ExploreTokens() {
     return { rows: Array.isArray(rows) ? rows : [], rawCount: Array.isArray(rows) ? rows.length : 0, usedAgg: false, end: (Array.isArray(rows) ? rows.length : 0) < step, origin: 'tzkt' };
   }, [tzktV1, contractFilter, adminFilter]);
 
+  /**
+   * Admin support: discover allowed ZeroContract collections (address list)
+   * without depending on helpers defined later in this module to avoid TDZ.
+   */
+  const getAllowedContractsForAdmin = useCallback(async () => {
+    const qs = new URLSearchParams();
+    qs.set('typeHash.in', [...ALLOWED_TYPE_HASHES].join(','));
+    qs.set('select', 'address');
+    qs.set('sort.desc', 'lastActivityTime');
+    qs.set('limit', '400');
+    const rows = await jFetch(`${tzktV1}/contracts?${qs.toString()}`).catch(() => []);
+    return (rows || []).map((r) => r.address).filter(Boolean);
+  }, [tzktV1]);
+
   /** admin-filtered token discovery (creator/firstMinter/meta authors/creators). */
   const fetchAdminTokens = useCallback(async () => {
     if (!adminFilter) return [];
 
     const base = tzktV1;
+    const sel = 'contract,tokenId,metadata,holdersCount,totalSupply,contract.typeHash,firstTime,creator,firstMinter';
+    const gate = `&contract.typeHash.in=${encodeURIComponent([...ALLOWED_TYPE_HASHES].join(','))}&totalSupply.gt=0&select=${encodeURIComponent(sel)}`;
     const queries = [
-      `${base}/tokens?creator=${encodeURIComponent(adminFilter)}&standard=fa2&limit=1000&sort.desc=firstTime`,
-      `${base}/tokens?firstMinter=${encodeURIComponent(adminFilter)}&standard=fa2&limit=1000&sort.desc=firstTime`,
+      `${base}/tokens?creator=${encodeURIComponent(adminFilter)}&standard=fa2&limit=1000&sort.desc=firstTime${gate}`,
+      `${base}/tokens?firstMinter=${encodeURIComponent(adminFilter)}&standard=fa2&limit=1000&sort.desc=firstTime${gate}`,
       // tolerant metadata lookups
-      `${base}/tokens?metadata.creators.contains=${encodeURIComponent(adminFilter)}&standard=fa2&limit=1000&sort.desc=firstTime`,
-      `${base}/tokens?metadata.authors.contains=${encodeURIComponent(adminFilter)}&standard=fa2&limit=1000&sort.desc=firstTime`,
+      `${base}/tokens?metadata.creators.contains=${encodeURIComponent(adminFilter)}&standard=fa2&limit=1000&sort.desc=firstTime${gate}`,
+      `${base}/tokens?metadata.authors.contains=${encodeURIComponent(adminFilter)}&standard=fa2&limit=1000&sort.desc=firstTime${gate}`,
     ];
 
     const batches = await Promise.all(queries.map((u) => jFetch(u).catch(() => [])));
@@ -468,7 +552,8 @@ export default function ExploreTokens() {
     const out = [];
     const seen = new Set();
     for (const r of merged) {
-      const typeHash = Number(r.contract?.typeHash ?? r.typeHash ?? NaN); if (!ALLOWED_TYPE_HASHES.has(typeHash)) continue;
+      const typeHash = Number(r.contract?.typeHash ?? r['contract.typeHash'] ?? r.typeHash ?? NaN);
+      if (!ALLOWED_TYPE_HASHES.has(typeHash)) continue;
 
       const t = normalizeAndAcceptToken(r);
       if (!t) continue;
@@ -649,7 +734,9 @@ export default function ExploreTokens() {
           reachedEnd = reachedEnd || (isAgg ? endFlag : (got < PAGE));
 
           for (const r of rows) {
-            const typeHash = Number(r.contract?.typeHash ?? r.typeHash ?? NaN); if (!ALLOWED_TYPE_HASHES.has(typeHash)) continue;
+            // Enforce matrix gate for all origins (belt-and-suspenders)
+            const typeHash = Number(r.contract?.typeHash ?? r['contract.typeHash'] ?? r.typeHash ?? NaN);
+            if (!ALLOWED_TYPE_HASHES.has(typeHash)) continue;
             const t = normalizeAndAcceptToken(r);
             if (!t) continue;
             try { Object.defineProperty(t, '__origin', { value: origin, enumerable: false }); } catch { /* ignore */ }
@@ -731,7 +818,7 @@ export default function ExploreTokens() {
 
     setFetching(false);
     if (initial) setLoading(false);
-  }, [fetching, end, offset, fetchBatchTokens, adminFilter, contractFilter, fetchAllowedContracts, fetchTokensByContract]);
+  }, [fetching, end, offset, fetchBatchTokens, adminFilter, contractFilter, fetchTokensByContract]);
 
   /*-------- effects --------*/
 

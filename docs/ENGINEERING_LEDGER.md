@@ -157,6 +157,36 @@ Hotfix (r11-feed-ghostnet)
 - Operational note: The serverless aggregator (`src/pages/api/explore/feed.js`) already had a fallback from `contract.in` to `contract.typeHash.in` when rows are empty; no changes required there.
   - Added dedicated meta proxy route: `src/pages/api/explore/static/[net]/meta.js` so the client can fetch `${FEED_STATIC_BASE}/<net>/meta.json` instead of falling back to aggregator immediately.
 
+Hotfix (r11-feed-fallbacks)
+- Symptom: Explore grid showed "No more tokens to show" in both generic and admin views even after the Pages workflow succeeded.
+- Root causes:
+  - Client re-gated aggregator/static results by `contract.typeHash`, dropping rows where TzKT did not echo `typeHash` (observed on ghostnet), resulting in zero accepted items.
+  - Static-page miss path returned immediately after aggregator, without attempting a direct TzKT fallback.
+  - Admin-filtered queries required `typeHash` on rows; TzKT responses often omit it when not explicitly selected, causing valid ZeroContract tokens to be filtered out.
+- Fixes:
+  - tokens.jsx: Enforce `typeHash` gating only for raw TzKT-origin batches; accept aggregator/static rows as pre-gated.
+  - tokens.jsx: When a static page is missing/empty, try aggregator, then a strict TzKT `contract.typeHash.in` slice before giving up.
+  - tokens.jsx: Admin filter now accepts a token if either `contract.typeHash` is in the matrix OR `contract.address` is in the discovered ZeroContract address set (from `contracts?typeHash.in`). Prevents over-dropping when `typeHash` is absent on the row.
+- Files changed:
+  - src/pages/explore/tokens.jsx (batch gating, static miss fallbacks, admin gating w/ allowlist)
+  - Note: Fixed a TDZ (temporal dead zone) by avoiding a pre-initialization reference to `fetchAllowedContracts` in `fetchAdminTokens` using a local helper `getAllowedContractsForAdmin` defined above the admin hook.
+
+Hotfix (r11-gating-codehash)
+- Symptom: explore/tokens showed non‑ZeroContract tokens (bootloaders), while many v2–v4e ZeroContract tokens were missing.
+- Causes:
+  - Fallbacks used `contract.typeHash.in`, which is shared by some lookalike contracts.
+  - Preview acceptance allowed ipfs/https media, letting non‑on‑chain items in.
+  - Large `contract.in` filters hit 414s and fell back to typeHash, re‑introducing pollution.
+- Fixes:
+  - Strict gating via `contract.codeHash.in` derived from the ZeroContract matrix, validated by entrypoint fingerprinting.
+  - Serverless aggregator now prefers codeHash gating, then short address lists, then strict typeHash fallback.
+  - Static feed generator uses codeHash gating when the address list would exceed URL limits.
+  - Explore grid preview acceptance tightened to on‑chain only (data: and tezos-storage), removing off‑chain media.
+- Files changed:
+  - src/pages/api/explore/feed.js (codeHash discovery + gating, on‑chain preview)
+  - scripts/exploreFeed.mjs (codeHash path for large address sets)
+  - src/pages/explore/tokens.jsx (on‑chain preview; direct TzKT fallback uses codeHash gating with cached discovery)
+
 Explore Feed Format & Next Improvements
 - Current page schema (per item): `{ contract, tokenId, metadata, holdersCount, firstTime, typeHash? }`.
   - Pros: self-contained; on-chain previews render without secondary lookups; works offline from Pages.

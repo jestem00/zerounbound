@@ -26,15 +26,15 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Detect repo root
+      - name: Detect repo root (prefer package dir)
         id: root
         shell: bash
         run: |
           set -e
-          if [ -f scripts/exploreFeed.mjs ]; then
-            echo "dir=." >> $GITHUB_OUTPUT
-          elif [ -f zerounbound/scripts/exploreFeed.mjs ]; then
+          if [ -f zerounbound/scripts/exploreFeed.mjs ]; then
             echo "dir=zerounbound" >> $GITHUB_OUTPUT
+          elif [ -f scripts/exploreFeed.mjs ]; then
+            echo "dir=." >> $GITHUB_OUTPUT
           else
             echo "::error::exploreFeed.mjs not found in repo"; ls -la; exit 1
           fi
@@ -44,6 +44,7 @@ jobs:
         working-directory: ${{ steps.root.outputs.dir }}
         run: |
           set -e
+          echo "Using root: $PWD"
           FEED_OUT_DIR="$GITHUB_WORKSPACE/feed-dist" node scripts/exploreFeed.mjs --network=mainnet --page-size=120 --max-pages=200
 
       - name: Generate feed (ghostnet)
@@ -51,7 +52,29 @@ jobs:
         working-directory: ${{ steps.root.outputs.dir }}
         run: |
           set -e
+          echo "Using root: $PWD"
           FEED_OUT_DIR="$GITHUB_WORKSPACE/feed-dist" node scripts/exploreFeed.mjs --network=ghostnet --page-size=120 --max-pages=100
+
+      - name: Sanity check gating (sample)
+        shell: bash
+        run: |
+          set -e
+          node - <<'NODE'
+          const fs=require('fs');
+          const matrix=require(process.cwd()+"/${{ steps.root.outputs.dir }}/src/data/hashMatrix.json");
+          const allowed=new Set(Object.keys(matrix).filter(k=>/^(-?\d+)$/.test(k)).map(Number));
+          function check(file){
+            if(!fs.existsSync(file)) return true;
+            const arr=JSON.parse(fs.readFileSync(file,'utf8'));
+            for(const r of arr){
+              const th = typeof r.typeHash==='number'?r.typeHash: (typeof r['contract.typeHash']==='number'? r['contract.typeHash']:null);
+              if(!allowed.has(th)) { console.error('Bad item in',file, r.contract, r.tokenId, th); process.exit(1); }
+            }
+            return true;
+          }
+          check(process.cwd()+"/feed-dist/mainnet/page-0.json");
+          check(process.cwd()+"/feed-dist/ghostnet/page-0.json");
+          NODE
 
       - name: Add .nojekyll
         run: |

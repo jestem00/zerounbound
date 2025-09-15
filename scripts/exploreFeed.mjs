@@ -211,7 +211,7 @@ async function buildFeed(){
       holdersCount: r.holdersCount,
       firstTime: r.firstTime,
       // Preserve typeHash if available for downstream gating
-      typeHash: (typeof r["contract.typeHash"] !== 'undefined') ? Number(r["contract.typeHash"]) : (typeof r.contract?.typeHash === 'number' ? r.contract.typeHash : undefined),
+      typeHash: (() => { const th = (typeof r["contract.typeHash"] === 'number') ? r["contract.typeHash"] : (typeof r.contract?.typeHash === 'number' ? r.contract.typeHash : undefined); return (typeof th === 'number' && Number.isFinite(th)) ? th : undefined; })(),
     })));
     offset += rawLen;
   }
@@ -233,8 +233,8 @@ async function buildFeed(){
     try { return hashMatrix[String(th)] || null; } catch { return null; }
   };
   const curated = accepted
-    .map(t => ({ contract: t.contract, tokenId: t.tokenId, typeHash: Number(t.typeHash ?? NaN) }))
-    .filter(t => Number.isFinite(t.typeHash) && versionOf(t.typeHash));
+    .map(t => ({ contract: t.contract, tokenId: t.tokenId, typeHash: (typeof t.typeHash === 'number' && Number.isFinite(t.typeHash)) ? t.typeHash : undefined }))
+    .filter(t => typeof t.typeHash === 'number' && versionOf(t.typeHash));
   const indexDir = path.join(outDir, 'index');
   fs.mkdirSync(indexDir, { recursive: true });
   const pagesIdx = Math.ceil(curated.length / PAGE_SIZE);

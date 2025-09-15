@@ -683,7 +683,7 @@ export default function ExploreTokens() {
           windowRows += got;
           windowRaw  += raw;
           scannedRows += raw;
-          reachedEnd = reachedEnd || (isAgg ? endFlag : (got < PAGE));
+          reachedEnd = reachedEnd || endFlag || (raw < minAccept);
 
           for (const r of rows) {
             // Enforce matrix gate using row typeHash when present; otherwise

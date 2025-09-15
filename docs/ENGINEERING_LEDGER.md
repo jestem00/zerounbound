@@ -1,7 +1,15 @@
 ﻿ZeroUnbound v4 - Engineering Progress Ledger
-Rev: r12 2025-09-15
+Rev: r13 2025-09-15
 
 Purpose: Track files touched, pending cleanups, and invariant notes as we iteratively harden the codebase following recent edits (ZIP generative, SVGZ, TzKT fallbacks, on/off-chain redundancy) and fix Next.js dev/runtime regressions.
+
+This Pass (r13 explore pagination & gating sync)
+- Symptom: Explore grid stopped after the first 24 cards and feeds only contained a few hundred tokens because strict entrypoint gating filtered nearly every ZeroContract before pagination.
+- Fixes:
+  - src/pages/explore/tokens.jsx: reachedEnd tracking now honors the aggregator end flag and raw batch count instead of comparing filtered rows to the window size, so auto-load keeps scanning until the real end.
+  - scripts/exploreFeed.mjs: replaced positive entrypoint gating with a forbidden-marker guard, preserving all ZeroContract versions while still excluding bootloader/generative entrypoints; caches code hashes and type hashes for reuse.
+  - scripts/exploreFeed.mjs: fallback fingerprint discovery now populates the allowed-address map for unseen contracts and only rejects addresses flagged by the forbidden markers.
+- Validation: local mainnet/ghostnet feed builds (page-size 20) and hashMatrix gating check over page-0.json.
 
 This Pass (r12 feed gating hardening)
 - Symptom: GitHub Action gating step failed because static feed admitted Bootloader/generative tokens (typeHash null) even after type-hash filtering; CI rejected page-0.json.

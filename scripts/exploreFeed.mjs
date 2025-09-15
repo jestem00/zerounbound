@@ -74,10 +74,12 @@ async function j(url){
   return ct.includes('application/json') ? res.json() : res.text().then(t => { try{return JSON.parse(t);}catch{return [];}});
 }
 
-const ZERO_EP_MARKERS = [
-  'append_artifact_uri', 'append_extrauri', 'clear_uri', 'destroy',
-  'append_token_metadata', 'update_token_metadata', 'update_contract_metadata',
-  'edit_token_metadata', 'edit_contract_metadata',
+const FORBIDDEN_EP_MARKERS = [
+  'add_bootloader', 'add_moderator', 'airdrop', 'create_generator', 'create_generator_v2',
+  'disable_generator', 'disable_sale', 'enable_generator', 'enable_sale', 'mint_reserved',
+  'remove_moderator', 'set_bootloader_code', 'set_bootloader_name', 'set_bootloader_thumbnail',
+  'set_generator_reserved', 'set_generator_thumbnail', 'set_price', 'set_split_fee',
+  'start_sale', 'stop_sale', 'update_generator', 'update_thumbnail', 'withdraw_funds',
 ];
 
 let allowedContractsCache = null;
@@ -88,8 +90,11 @@ async function probeEntrypoints(addr){
     const res = await j(`${apiBase}/contracts/${encodeURIComponent(addr)}/entrypoints`).catch(()=>null);
     const list = Array.isArray(res) ? res : (Array.isArray(res?.entrypoints) ? res.entrypoints : (res && typeof res === 'object' ? Object.keys(res) : []));
     const names = new Set((list||[]).map(s => String(s?.name ?? s).toLowerCase()));
-    return ZERO_EP_MARKERS.some(m => names.has(m));
-  }catch{ return false; }
+    const forbidden = FORBIDDEN_EP_MARKERS.some(m => names.has(m));
+    return { names, forbidden };
+  }catch{
+    return { names: new Set(), forbidden: false };
+  }
 }
 
 async function buildAllowedContracts(){
@@ -113,16 +118,17 @@ async function buildAllowedContracts(){
       const next = idx++;
       if (next >= entries.length) return;
       const entry = entries[next];
-      let ok = true;
+      let rejected = false;
       if (STRICT_ZERO_GATING) {
-        ok = await probeEntrypoints(entry.address);
+        const probe = await probeEntrypoints(entry.address);
+        rejected = probe.forbidden;
       }
-      if (ok) {
-        allowed.set(entry.address, { typeHash: entry.typeHash, codeHash: Number.isFinite(entry.codeHash) ? entry.codeHash : undefined });
-        if (Number.isFinite(entry.codeHash)) codeHashes.add(entry.codeHash);
-      } else {
+      if (rejected) {
         rejectedContracts.add(entry.address);
+        continue;
       }
+      allowed.set(entry.address, { typeHash: entry.typeHash, codeHash: Number.isFinite(entry.codeHash) ? entry.codeHash : undefined });
+      if (Number.isFinite(entry.codeHash)) codeHashes.add(entry.codeHash);
     }
   }));
   return { addresses: allowed, addressList: [...allowed.keys()], codeHashes };
@@ -140,11 +146,12 @@ async function fetchContractFingerprint(addr){
     if (!meta) return null;
     const typeHash = Number(meta?.typeHash ?? meta?.type_hash);
     if (!Number.isFinite(typeHash) || !TYPE_HASH_SET.has(typeHash)) return null;
-    let ok = true;
+    let rejected = false;
     if (STRICT_ZERO_GATING) {
-      ok = await probeEntrypoints(addr);
+      const probe = await probeEntrypoints(addr);
+      rejected = probe.forbidden;
     }
-    if (!ok) return null;
+    if (rejected) return null;
     const codeHash = Number(meta?.codeHash ?? meta?.code_hash);
     return { typeHash, codeHash: Number.isFinite(codeHash) ? codeHash : undefined };
   }catch{ return null; }

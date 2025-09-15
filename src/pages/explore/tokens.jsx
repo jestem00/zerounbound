@@ -35,6 +35,21 @@ const FEED_BASE = '/api/explore/static';
 // until the end is reached (generic explore mode only).
 const AUTO_LOAD_ALL = true;
 
+// cache of allowed ZeroContract addresses (matrix) for client-side gating fallback
+const ALLOWED_ADDRS = { set: new Set(), at: 0 };
+async function getAllowedAddrs(tzktV1) {
+  const now = Date.now();
+  if (ALLOWED_ADDRS.set.size && (now - ALLOWED_ADDRS.at) < 120000) return ALLOWED_ADDRS.set;
+  const qs = new URLSearchParams();
+  qs.set('typeHash.in', Object.keys(hashMatrix).filter((k) => /^-?\d+$/.test(k)).join(','));
+  qs.set('select', 'address');
+  qs.set('sort.desc', 'lastActivityTime');
+  qs.set('limit', '800');
+  const rows = await jFetch(`${tzktV1}/contracts?${qs.toString()}`).catch(() => []);
+  const s = new Set((rows || []).map((r) => r.address || r).filter(Boolean));
+  ALLOWED_ADDRS.set = s; ALLOWED_ADDRS.at = now; return s;
+}
+
 /*-----------------------------------------------------------*
  * Layout
  *-----------------------------------------------------------*/
@@ -581,7 +596,7 @@ export default function ExploreTokens() {
           scannedRows += got;
           if (got) perContract.current.offsets.set(kt, (perContract.current.offsets.get(kt) || 0) + got);
           for (const r of rows) {
-            const t = normalizeAndAcceptToken(r);
+            // Fallback gate: if typeHash missing, ensure contract is a known ZeroContract address\n            let typeHash = Number(r.contract?.typeHash ?? r['contract.typeHash'] ?? r.typeHash ?? NaN);\n            if (!Number.isFinite(typeHash)) {\n              try { const allow = await getAllowedAddrs(tzktV1); if (!allow.has(String(r.contract?.address || r.contract || ''))) continue; } catch { continue; }\n            }\n            const t = normalizeAndAcceptToken(r);
             if (!t) continue;
             const key = `${t.contract}:${t.tokenId}`;
             if (!seenTok.current.has(key)) {
@@ -873,6 +888,10 @@ export default function ExploreTokens() {
    • Kept initial scan snappy (=24 accepted) for a full first impression.
    • Preserved perfect admin-filter behaviour; left title “Tokens by … (N)”.
    • Lint-clean: trimmed unused imports/vars; no dead code. */
+
+
+
+
 
 
 

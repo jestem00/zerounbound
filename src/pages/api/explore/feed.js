@@ -23,6 +23,9 @@ function isDataUri(str) {
 function isTezosStorage(str) {
   return typeof str === 'string' && /^tezos-storage:/i.test(str.trim());
 }
+function isRemoteMedia(str) {
+  return typeof str === 'string' && /^(ipfs:|https?:|ar:|arweave:)/i.test(str.trim());
+}
 function hasRenderablePreview(m = {}) {
   const keys = [
     'displayUri', 'display_uri',
@@ -33,12 +36,12 @@ function hasRenderablePreview(m = {}) {
   ];
   for (const k of keys) {
     const v = m && typeof m === 'object' ? m[k] : null;
-    if (isDataUri(v) || isTezosStorage(v)) return true;
+    if (isDataUri(v) || isTezosStorage(v) || isRemoteMedia(v)) return true;
   }
   if (Array.isArray(m?.formats)) {
     for (const f of m.formats) {
       const cand = f?.uri || f?.url;
-      if (isDataUri(cand) || isTezosStorage(cand)) return true;
+      if (isDataUri(cand) || isTezosStorage(cand) || isRemoteMedia(cand)) return true;
     }
   }
   return false;
@@ -77,7 +80,8 @@ async function listTokens(contractFilter, offset = 0, limit = 48) {
     p.set('offset', String(Math.max(0, offset|0)));
     p.set('limit',  String(Math.max(1, Math.min(200, limit|0))));
     p.set('totalSupply.gt', '0');
-    p.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply,firstTime');
+    // Always fetch contract.typeHash so downstream clients can gate locally if needed
+    p.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply,firstTime,contract.typeHash');
     return p;
   };
 
@@ -88,6 +92,8 @@ async function listTokens(contractFilter, offset = 0, limit = 48) {
       if (addrs.length) {
         const qb = baseParams();
         qb.set('contract.in', addrs.join(','));
+        // AND with typeHash matrix to avoid lookalikes when address list is broad
+        qb.set('contract.typeHash.in', TYPE_HASHES);
         const rows = await j(`${apiBase}/tokens?${qb.toString()}`).catch(() => []);
         if (Array.isArray(rows) && rows.length) return rows;
       }

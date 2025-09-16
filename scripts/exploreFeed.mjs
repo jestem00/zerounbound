@@ -101,12 +101,13 @@ async function probeEntrypoints(addr){
   }
 }
 
+
 async function buildAllowedContracts(){
   const allowed = new Map();
   const codeHashes = new Set();
   const rows = [];
   const PAGE = 400;
-  for (let offset = 0; offset < 20000; offset += PAGE) {
+  for (let offset = 0; offset < 50000; offset += PAGE) {
     const qs = new URLSearchParams();
     qs.set('typeHash.in', TYPE_HASHES);
     qs.set('select', 'address,codeHash,typeHash');
@@ -118,33 +119,16 @@ async function buildAllowedContracts(){
     rows.push(...chunk);
     if (chunk.length < PAGE) break;
   }
-  const entries = (rows||[])
-    .map(r => ({
-      address: r?.address,
-      typeHash: Number(r?.typeHash ?? r?.type_hash),
-      codeHash: Number(r?.codeHash ?? r?.code_hash),
-    }))
-    .filter(r => r.address && Number.isFinite(r.typeHash) && TYPE_HASH_SET.has(r.typeHash));
-  const CONC = 12; let idx = 0;
-  await Promise.all(new Array(CONC).fill(0).map(async () => {
-    while (true){
-      const next = idx++;
-      if (next >= entries.length) return;
-      const entry = entries[next];
-      if (!entry || allowed.has(entry.address) || rejectedContracts.has(entry.address)) continue;
-      let rejected = false;
-      if (STRICT_ZERO_GATING) {
-        const probe = await probeEntrypoints(entry.address);
-        rejected = probe.forbidden;
-      }
-      if (rejected) {
-        rejectedContracts.add(entry.address);
-        continue;
-      }
-      allowed.set(entry.address, { typeHash: entry.typeHash, codeHash: Number.isFinite(entry.codeHash) ? entry.codeHash : undefined });
-      if (Number.isFinite(entry.codeHash)) codeHashes.add(entry.codeHash);
+  for (const r of rows) {
+    const address = r?.address;
+    const typeHash = Number(r?.typeHash ?? r?.type_hash);
+    const codeHash = Number(r?.codeHash ?? r?.code_hash);
+    if (!address || !Number.isFinite(typeHash) || !TYPE_HASH_SET.has(typeHash)) continue;
+    if (!allowed.has(address)) {
+      allowed.set(address, { typeHash, codeHash: Number.isFinite(codeHash) ? codeHash : undefined });
+      if (Number.isFinite(codeHash)) codeHashes.add(codeHash);
     }
-  }));
+  }
   return { addresses: allowed, addressList: [...allowed.keys()], codeHashes };
 }
 
@@ -193,32 +177,17 @@ async function ensureContractsKnown(addresses){
   return cache;
 }
 
-async function pageTokens(offset=0, limit=120){
-  const cache = await ensureAllowedContracts();
-  const addrs = cache.addressList || [];
-  const baseQS = () => {
-    const qs = new URLSearchParams();
-    qs.set('standard','fa2');
-    qs.set('sort.desc','firstTime');
-    qs.set('offset', String(offset));
-    qs.set('limit',  String(limit));
-    qs.set('totalSupply.gt','0');
-    qs.set('select','contract,tokenId,metadata,holdersCount,totalSupply,firstTime,contract.typeHash,contract.codeHash');
-    qs.set('contract.typeHash.in', TYPE_HASHES);
-    return qs;
-  };
 
-  const tooManyAddrs = addrs.length > 0 && addrs.join(',').length > 7000;
-  if (!addrs.length || tooManyAddrs) {
-    const qs = baseQS();
-    return j(`${apiBase}/tokens?${qs.toString()}`).catch(()=>[]);
-  }
-  const qsAddr = baseQS();
-  qsAddr.set('contract.in', addrs.join(','));
-  let rows = await j(`${apiBase}/tokens?${qsAddr.toString()}`).catch(()=>[]);
-  if (Array.isArray(rows) && rows.length) return rows;
-  const qsType = baseQS();
-  return j(`${apiBase}/tokens?${qsType.toString()}`).catch(()=>[]);
+async function pageTokens(cursorId = null, limit = 120){
+  const qs = new URLSearchParams();
+  qs.set('standard','fa2');
+  qs.set('sort.desc','id');
+  qs.set('limit',  String(limit));
+  qs.set('totalSupply.gt','0');
+  qs.set('select','id,contract,tokenId,metadata,holdersCount,totalSupply,firstTime,contract.typeHash');
+  qs.set('contract.typeHash.in', TYPE_HASHES);
+  if (cursorId !== null) qs.set('id.lt', String(cursorId));
+  return j(`${apiBase}/tokens?${qs.toString()}`).catch(()=>[]);
 }
 
 async function singlesBurned(kt, ids){
@@ -237,72 +206,74 @@ async function singlesBurned(kt, ids){
 }
 
 async function buildFeed(){
-  const accepted = [];
-  let offset = 0;
-  const RAW_STEP = 360; // raw TzKT page per scan
-  const HARD_TIME = Date.now()+ 1000*180; // 180s cap for action step
+const accepted = [];
+const seenKeys = new Set();
+let cursorId = null;
+const RAW_STEP = 360; // raw TzKT page per scan
+const HARD_TIME = Date.now() + 1000 * 180; // 180s cap for action step
+const discovered = await ensureAllowedContracts();
+const allowed = discovered.addresses || new Map();
 
-  while (accepted.length < MAX_ACCEPTED && Date.now() < HARD_TIME){
-    const chunk = await pageTokens(offset, RAW_STEP);
-    const rawLen = Array.isArray(chunk) ? chunk.length : 0;
-    if (!rawLen) break;
+while (accepted.length < MAX_ACCEPTED && Date.now() < HARD_TIME){
+  const chunk = await pageTokens(cursorId, RAW_STEP);
+  const rawLen = Array.isArray(chunk) ? chunk.length : 0;
+  if (!rawLen) break;
 
-    const contractAddrs = [...new Set((chunk||[]).map(r => r?.contract?.address || r?.contract).filter(Boolean))];
-    const cache = await ensureContractsKnown(contractAddrs);
-    const allowed = cache.addresses;
+  cursorId = (() => {
+    const last = chunk[rawLen - 1];
+    const id = Number(last?.id ?? last?.token?.id ?? NaN);
+    return Number.isFinite(id) ? id : cursorId;
+  })();
 
-    const prelim = [];
-    for (const r of chunk||[]){
-      const contract = r?.contract?.address || r?.contract;
-      if (!contract) continue;
+  const prelim = [];
+  for (const r of chunk || []){
+    const contract = r?.contract?.address || r?.contract;
+    if (!contract) continue;
+    let typeHash = Number(r?.['contract.typeHash'] ?? r?.contract?.typeHash ?? r?.typeHash ?? NaN);
+    if (!Number.isFinite(typeHash)) {
       const info = allowed.get(contract);
-      if (!info) continue;
-      const metadata = decodeHexFields(r?.metadata || {});
-      if (!hasRenderablePreview(metadata)) continue;
-      const holdersCount = Number(r?.holdersCount);
-      const tokenId = Number(r?.tokenId);
-      if (!Number.isFinite(tokenId)) continue;
-      const typeHashRaw = Number.isFinite(info.typeHash) ? info.typeHash : Number(r?.['contract.typeHash'] ?? r?.contract?.typeHash ?? NaN);
-      const typeHash = Number.isFinite(typeHashRaw) ? typeHashRaw : undefined;
-      prelim.push({
-        contract,
-        tokenId,
-        metadata,
-        holdersCount,
-        firstTime: r?.firstTime,
-        typeHash,
-      });
+      if (info && Number.isFinite(info.typeHash)) typeHash = info.typeHash;
     }
-
-    const singles = new Map();
-    for (const item of prelim){
-      if (item.holdersCount === 1){
-        if (!singles.has(item.contract)) singles.set(item.contract, []);
-        singles.get(item.contract).push(item.tokenId);
-      }
-    }
-    const burnedMap = new Map();
-    for (const [kt, ids] of singles.entries()){ burnedMap.set(kt, await singlesBurned(kt, ids)); }
-
-    const kept = prelim.filter(item => {
-      if (item.holdersCount !== 1) return true;
-      const bset = burnedMap.get(item.contract);
-      return !(bset && bset.has(item.tokenId));
+    if (!Number.isFinite(typeHash) || !TYPE_HASH_SET.has(typeHash)) continue;
+    const metadata = decodeHexFields(r?.metadata || {});
+    if (!hasRenderablePreview(metadata)) continue;
+    const holdersCount = Number(r?.holdersCount);
+    const tokenId = Number(r?.tokenId);
+    if (!Number.isFinite(tokenId)) continue;
+    const key = `${contract}:${tokenId}`;
+    if (seenKeys.has(key)) continue;
+    seenKeys.add(key);
+    prelim.push({
+      contract,
+      tokenId,
+      metadata,
+      holdersCount,
+      firstTime: r?.firstTime,
+      typeHash,
     });
-
-    const slot = MAX_ACCEPTED - accepted.length;
-    if (slot <= 0) break;
-    const normalized = kept.slice(0, slot).map(item => ({
-      contract: item.contract,
-      tokenId : item.tokenId,
-      metadata: item.metadata,
-      holdersCount: item.holdersCount,
-      firstTime: item.firstTime,
-      typeHash: Number.isFinite(item.typeHash) ? item.typeHash : undefined,
-    }));
-    accepted.push(...normalized);
-    offset += rawLen;
   }
+
+  const singles = new Map();
+  for (const item of prelim){
+    if (item.holdersCount === 1){
+      if (!singles.has(item.contract)) singles.set(item.contract, []);
+      singles.get(item.contract).push(item.tokenId);
+    }
+  }
+  const burnedMap = new Map();
+  for (const [kt, ids] of singles.entries()){ burnedMap.set(kt, await singlesBurned(kt, ids)); }
+
+  const kept = prelim.filter(item => {
+    if (item.holdersCount !== 1) return true;
+    const bset = burnedMap.get(item.contract);
+    return !(bset && bset.has(item.tokenId));
+  });
+
+  const slot = MAX_ACCEPTED - accepted.length;
+  if (slot <= 0) break;
+  const normalized = kept.slice(0, slot);
+  accepted.push(...normalized);
+}
 
   const finalAccepted = accepted.slice(0, MAX_ACCEPTED);
   const outBase = process.env.FEED_OUT_DIR ? path.resolve(process.env.FEED_OUT_DIR) : path.join(repoRoot, 'feed-dist');

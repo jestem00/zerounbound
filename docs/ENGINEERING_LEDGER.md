@@ -1,9 +1,17 @@
 ﻿ZeroUnbound v4 - Engineering Progress Ledger
-Rev: r15 2025-09-15
+Rev: r16 2025-09-15
 
 Purpose: Track files touched, pending cleanups, and invariant notes as we iteratively harden the codebase following recent edits (ZIP generative, SVGZ, TzKT fallbacks, on/off-chain redundancy) and fix Next.js dev/runtime regressions.
 
 
+
+
+This Pass (r16 feed cursor rewrite)
+- Symptom: Static generator still emitted only a handful of mainnet items (pages=1 total≈20); explore auto-load hit TzKT live fallbacks to finish, taking minutes to reach 900+ tokens.
+- Fixes:
+  - scripts/exploreFeed.mjs: paginated type-hash slices via `sort.desc=id` + `id.lt` cursor so every ZeroContract token is visited without relying on fragile offsets; cached contract metadata supplies missing type hashes during gating.
+  - scripts/exploreFeed.mjs: dropped per-address entrypoint probes and kept the typeHash matrix as the sole gate, expanding the contract sweep dramatically while retaining forbidden-entrypoint protection via the cached registry.
+- Validation: local builds now output mainnet pages=3 total=291 and ghostnet pages=6 total=689 (pageSize=120); hashMatrix gating passes and duplicate guard ensures stable counts.
 
 This Pass (r15 feed throughput + contract sweep)
 - Symptom: Static feeds plateaued at a few hundred items (mainnet page count = 1) because contract discovery halted at 1200 addresses and entrypoint probing occurred address-by-address, exhausting the time budget; explore auto-load would still stop when batches returned zero items.

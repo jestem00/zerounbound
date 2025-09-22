@@ -1,9 +1,8 @@
-﻿/* Developed by @jams2blues — ZeroContract Studio
+/* Developed by @jams2blues - ZeroContract Studio
    File: src/pages/api/explore/feed.js
-   Rev : r1
-   Summary: Edge-friendly, serverless aggregator for explore/tokens.
-            Returns dense, pre-filtered ZeroContract tokens fast, with
-            burn filtering and minimal fields. Cache: s-maxage=30. */
+   Rev : r2 2025-09-19
+   Summary: Respect client offsets, trim to deterministic slices and keep
+            ZIP preview sanitisation aligned with ascii-only output. */
 
 import { TZKT_API } from '../../../config/deployTarget.js';
 import hashMatrix from '../../../data/hashMatrix.json';
@@ -48,17 +47,17 @@ function hasRenderablePreview(m = {}) {
 }
 
 async function j(url) {
-  const res = await fetch(url, { headers: { 'accept': 'application/json' } });
+  const res = await fetch(url, { headers: { accept: 'application/json' } });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const ctype = (res.headers.get('content-type') || '').toLowerCase();
   if (ctype.includes('application/json')) return res.json();
-  return res.text().then((t) => { try { return JSON.parse(t); } catch { return []; } });
+  return res.text().then((txt) => { try { return JSON.parse(txt); } catch { return []; } });
 }
 
 let ALLOWED_ADDR_CACHE = { at: 0, list: [] };
 async function getAllowedContracts() {
   const now = Date.now();
-  if (ALLOWED_ADDR_CACHE.list.length && (now - ALLOWED_ADDR_CACHE.at) < 2 * 60_000) {
+  if (ALLOWED_ADDR_CACHE.list.length && (now - ALLOWED_ADDR_CACHE.at) < 120_000) {
     return ALLOWED_ADDR_CACHE.list;
   }
   const cq = new URLSearchParams();
@@ -67,48 +66,30 @@ async function getAllowedContracts() {
   cq.set('sort.desc', 'lastActivityTime');
   cq.set('limit', '800');
   const contracts = await j(`${apiBase}/contracts?${cq.toString()}`).catch(() => []);
-  const addrs = (contracts || []).map((r) => (typeof r === 'string' ? r : r.address)).filter(Boolean);
+  const addrs = (contracts || [])
+    .map((row) => (typeof row === 'string' ? row : row?.address))
+    .filter(Boolean);
   ALLOWED_ADDR_CACHE = { at: now, list: addrs };
   return addrs;
 }
 
 async function listTokens(contractFilter, offset = 0, limit = 48) {
-  const baseParams = () => {
-    const p = new URLSearchParams();
-    p.set('standard', 'fa2');
-    p.set('sort.desc', 'firstTime');
-    p.set('offset', String(Math.max(0, offset|0)));
-    p.set('limit',  String(Math.max(1, Math.min(200, limit|0))));
-    p.set('totalSupply.gt', '0');
-    // Always fetch contract.typeHash so downstream clients can gate locally if needed
-    p.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply,firstTime,contract.typeHash');
-    return p;
-  };
+  const qs = new URLSearchParams();
+  qs.set('standard', 'fa2');
+  qs.set('sort.desc', 'firstTime');
+  qs.set('offset', String(Math.max(0, offset | 0)));
+  qs.set('limit', String(Math.max(1, Math.min(200, limit | 0))));
+  qs.set('totalSupply.gt', '0');
+  qs.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply,firstTime,contract.typeHash');
 
-  // Prefer contract.in list to avoid broad FA2 scans; fallback if empty
-  if (!contractFilter) {
-    try {
-      const addrs = await getAllowedContracts();
-      if (addrs.length) {
-        const qb = baseParams();
-        qb.set('contract.in', addrs.join(','));
-        // AND with typeHash matrix to avoid lookalikes when address list is broad
-        qb.set('contract.typeHash.in', TYPE_HASHES);
-        const rows = await j(`${apiBase}/tokens?${qb.toString()}`).catch(() => []);
-        if (Array.isArray(rows) && rows.length) return rows;
-      }
-    } catch { /* ignore */ }
-  }
-
-  const qs = baseParams();
   if (contractFilter && /^KT1[0-9A-Za-z]{33}$/.test(contractFilter)) qs.set('contract', contractFilter);
   else qs.set('contract.typeHash.in', TYPE_HASHES);
+
   const rows = await j(`${apiBase}/tokens?${qs.toString()}`).catch(() => []);
   return Array.isArray(rows) ? rows : [];
 }
 
 async function filterSinglesBurned(contractsToSingleIds) {
-  // Returns Map<kt1, Set<burnedId>> for tokens where the ONLY holder is the burn address.
   const burned = new Map();
   const entries = [...contractsToSingleIds.entries()].filter(([, ids]) => ids.length);
   for (const [kt, ids] of entries) {
@@ -127,7 +108,7 @@ async function filterSinglesBurned(contractsToSingleIds) {
     }
     burned.set(kt, set);
   }
-  return burned; // Map<kt, Set(id)>
+  return burned;
 }
 
 export default async function handler(req, res) {
@@ -136,28 +117,44 @@ export default async function handler(req, res) {
     const startOffset = Math.max(0, Number(offset) || 0);
     const acceptTarget = Math.max(1, Math.min(200, Number(limit) || 48));
 
-    const PAGE = 120;            // scan larger raw pages to find acceptances faster
-    const TIME_BUDGET_MS = 3000; // a bit more time to evaluate previews & burn
+    const PAGE = 120;
+    const TIME_BUDGET_MS = 3000;
+
+    const allowedContracts = contract ? null : await getAllowedContracts();
+    const allowSet = allowedContracts ? new Set(allowedContracts) : null;
 
     let cursor = startOffset;
-    let accepted = [];
     let scanned = 0;
     let hardEnd = false;
+    const accepted = [];
+    const seen = new Set();
     const t0 = Date.now();
 
-    // Scan ahead until we accept >= target or hit time budget/end
     while (accepted.length < acceptTarget && !hardEnd && (Date.now() - t0) < TIME_BUDGET_MS) {
       const chunk = await listTokens(contract, cursor, PAGE);
       const rawLen = Array.isArray(chunk) ? chunk.length : 0;
       scanned += rawLen;
       if (rawLen === 0) { hardEnd = true; break; }
 
-      const prelim = (chunk || []).map((r) => ({
-        ...r,
-        metadata: decodeHexFields(r?.metadata || {}),
-      })).filter((r) => hasRenderablePreview(r.metadata));
+      const prelim = (chunk || [])
+        .filter((row) => {
+          const kt = row?.contract?.address || row?.contract;
+          if (!kt) return false;
+          if (allowSet && !allowSet.has(kt)) return false;
+          return true;
+        })
+        .map((row) => ({
+          ...row,
+          metadata: decodeHexFields(row?.metadata || {}),
+        }))
+        .filter((row) => hasRenderablePreview(row.metadata))
+        .filter((row) => {
+          const key = `${row.contract?.address || row.contract}:${row.tokenId}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
 
-      // Burn filter optimized: only check tokens with exactly 1 holder
       const singlesByC = new Map();
       for (const r of prelim) {
         const kt = r.contract?.address || r.contract;
@@ -170,24 +167,25 @@ export default async function handler(req, res) {
         }
       }
       const burnedSingles = await filterSinglesBurned(singlesByC).catch(() => new Map());
-      const kept = prelim.filter((r) => {
+      for (const r of prelim) {
         const hc = Number(r.holdersCount);
-        if (hc > 1) return true;
+        if (hc > 1) {
+          accepted.push(r);
+          continue;
+        }
         const kt = r.contract?.address || r.contract;
         const id = Number(r.tokenId);
         const set = burnedSingles.get(kt);
-        return !(set && set.has(id));
-      });
+        if (!(set && set.has(id))) accepted.push(r);
+      }
 
-      accepted.push(...kept);
-      cursor += PAGE; // advance by raw page regardless of accept count
+      cursor += PAGE;
     }
 
-    // Trim to target size
-    if (accepted.length > acceptTarget) accepted = accepted.slice(0, acceptTarget);
-
+    const trimmed = accepted.length > acceptTarget ? accepted.slice(0, acceptTarget) : accepted;
+    const nextCursor = startOffset + scanned;
     res.setHeader('cache-control', 'public, s-maxage=30, stale-while-revalidate=60');
-    res.status(200).json({ items: accepted, cursor, end: hardEnd });
+    res.status(200).json({ items: trimmed, cursor: nextCursor, end: hardEnd });
   } catch (e) {
     res.status(200).json({ items: [], cursor: Number(req?.query?.offset || 0), end: false });
   }

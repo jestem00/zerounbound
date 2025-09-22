@@ -1,9 +1,9 @@
-/*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
-  File:    src/ui/Entrypoints/MintUpload.jsx
-  Rev :    r708   2025-07-21
-  Summary: add clear/reset support and allow re‑upload of same‑named files
-─────────────────────────────────────────────────────────────*/
+/*-------------------------------------------------------------
+Developed by @jams2blues - ZeroContract Studio
+File:    src/ui/Entrypoints/MintUpload.jsx
+Rev :    r709   2025-09-21
+Summary: Keeps clear/reset support and normalises ZIP uploads to application/zip for portability.
+-------------------------------------------------------------*/
 import React, { useRef, useState } from 'react';
 import styledPkg            from 'styled-components';
 import PixelButton          from '../PixelButton.jsx';
@@ -160,6 +160,9 @@ export default function MintUpload({
         dataUri = dataUri.replace('model/gltf-binary', 'model/gltf-binary');
       } else if (dataUri.startsWith('data:model/gltf+json')) {
         dataUri = dataUri.replace('model/gltf+json', 'model/gltf+json');
+      }
+      if (dataUri.startsWith('data:application/x-zip-compressed')) {
+        dataUri = dataUri.replace('application/x-zip-compressed', 'application/zip');
       }
       onFileDataUrlChange(dataUri);
       setBusy(false);

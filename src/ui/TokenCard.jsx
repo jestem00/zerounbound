@@ -27,10 +27,8 @@ import PixelConfirmDialog        from './PixelConfirmDialog.jsx';
 import countAmount               from '../utils/countAmount.js';
 import { shortAddr }             from '../utils/formatAddress.js';
 import { resolveTezosDomain }    from '../utils/resolveTezosDomain.js';
-import decodeHexFields, { decodeHexJson } from '../utils/decodeHexFields.js';
-import { TZKT_API, NETWORK_KEY } from '../config/deployTarget.js';
-import { jFetch } from '../core/net.js';
-
+import decodeHexFields from '../utils/decodeHexFields.js';
+import { NETWORK_KEY } from '../config/deployTarget.js';
 const PLACEHOLDER = '/sprites/cover_default.svg';
 const VALID_DATA  = /^data:/i;
 
@@ -68,49 +66,7 @@ const hrefFor = (addr = '') => {
   return '#';
 };
 
-/*── TzKT helpers to resolve a collection name from KT1 ──*/
-const COLL_NAME_CACHE = new Map(); // lc(KT1) -> name
-const apiBase = `${String(TZKT_API || '').replace(/\/+$/, '')}/v1`;
-
-async function fetchCollectionName(kt1) {
-  if (!isKt(kt1)) return '';
-  const key = kt1.toLowerCase();
-  if (COLL_NAME_CACHE.has(key)) return COLL_NAME_CACHE.get(key);
-
-  let name = '';
-  try {
-    // Try big-map metadata/content first (often hex-encoded JSON).
-    try {
-      const arr = await jFetch(
-        `${apiBase}/contracts/${encodeURIComponent(kt1)}/bigmaps/metadata/keys?key=content&select=value&limit=1`,
-        2,
-        { ttl: 600_000, priority: 'low', dedupeKey: `bm:${key}` },
-      );
-      const raw = Array.isArray(arr) ? arr[0] : null;
-      const parsed = decodeHexJson(typeof raw === 'string' ? raw : '');
-      if (parsed && typeof parsed === 'object') {
-        const m = decodeHexFields(parsed);
-        name = String(m.name || m.collectionName || m.title || '').trim();
-      }
-    } catch { /* ignore */ }
-
-    // Fallback: contract metadata field.
-    if (!name) {
-      const obj = await jFetch(
-        `${apiBase}/contracts/${encodeURIComponent(kt1)}`,
-        2,
-        { ttl: 600_000, priority: 'low', dedupeKey: `ct:${key}` },
-      );
-      const m = decodeHexFields(obj?.metadata || {});
-      name = String(m.name || m.collectionName || m.title || '').trim();
-    }
-  } catch { /* network issues → empty */ }
-
-  COLL_NAME_CACHE.set(key, name);
-  return name;
-}
-
-/*── filename helpers for universal downloads ──*/
+/* filename helpers for universal downloads */
 const sanitizeFilename = (s) =>
   String(s || '').replace(/[\\/:*?"<>|]+/g, '').replace(/\s+/g, ' ').trim();
 
@@ -136,7 +92,6 @@ const suggestedFilename = (meta = {}, tokenId) => {
   const ext  = extFromMime(meta?.mimeType) || '';
   return ext ? `${base}.${ext}` : base;
 };
-
 /*──────── styled shells ────────────────────────────────────*/
 const Card = styled.article`
   position: relative;
@@ -411,21 +366,29 @@ export default function TokenCard({
     if (!isMediaControlsHit(e)) goDetail();
   }, [blocked, needsNSFW, goDetail, isMediaControlsHit]);
 
-  /* collection name: resolve from KT1 when no prop is provided */
-  const [collectionName, setCollectionName] = useState(contractName || '');
-  useEffect(() => {
-    let cancel = false;
-    (async () => {
-      if (contractName && contractName.trim()) { setCollectionName(contractName.trim()); return; }
-      const name = await fetchCollectionName(contractAddress);
-      if (!cancel) setCollectionName(name || '');
-    })();
-    return () => { cancel = true; };
-  }, [contractAddress, contractName]);
-
-  const collectionLabel = collectionName && collectionName.trim()
-    ? collectionName.trim()
-    : shortAddr(contractAddress);
+  /* collection label: prefer provided prop, fall back to metadata hints */
+  const collectionLabel = useMemo(() => {
+    if (contractName && contractName.trim()) return contractName.trim();
+    const meta = token?.metadata || {};
+    const candidates = [
+      meta.collectionName,
+      meta.collection_name,
+      meta.collectionTitle,
+      meta.collection_title,
+      meta.collection?.name,
+      meta.contractName,
+      meta.contract_name,
+      meta.name,
+      meta.symbol,
+    ];
+    for (const entry of candidates) {
+      if (typeof entry === 'string') {
+        const trimmed = entry.trim();
+        if (trimmed) return trimmed;
+      }
+    }
+    return shortAddr(contractAddress);
+  }, [contractAddress, contractName, token]);
 
   /* Is the preview scripted and currently allowed? 
      If yes, overlay a full‑tile <a> so clicks always route to detail,

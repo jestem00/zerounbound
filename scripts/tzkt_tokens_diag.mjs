@@ -56,7 +56,6 @@ async function main() {
   const cq = new URLSearchParams();
   cq.set('typeHash.in', TYPE_HASHES);
   cq.set('select', 'address');
-  cq.set('sort.desc', 'lastActivityTime');
   cq.set('limit', '200');
   const contracts = await j('contracts', `${base}/contracts?${cq.toString()}`);
   const addrs = contracts.map((r) => (typeof r === 'string' ? r : r.address)).filter(Boolean);

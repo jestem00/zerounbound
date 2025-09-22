@@ -13,7 +13,7 @@
     "start": "next start -p 4000",
     "bundle": "node scripts/generateBundles.js",
     "lint": "eslint . --ext js,jsx,ts,tsx --max-warnings 0",
-    "test": "jest",
+    "test": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js",
     "ci:guard": "node scripts/ci/guard-compromised.js"
   },
   "dependencies": {
@@ -48,6 +48,8 @@
   },
   "devDependencies": {
     "@babel/core": "7.22.0",
+    "@babel/preset-env": "7.27.2",
+    "@babel/preset-react": "7.27.1",
     "@testing-library/dom": "^10.4.0",
     "@testing-library/react": "^14.3.1",
     "@types/babel__core": "^7",
@@ -55,6 +57,7 @@
     "@types/react": "18.2.25",
     "@types/react-dom": "18.2.12",
     "@types/styled-components": "^5.1.26",
+    "babel-jest": "30.0.4",
     "eslint": "8.57.0",
     "eslint-config-next": "^15.3.5",
     "eslint-plugin-styled-components-a11y": "^2.2.1",

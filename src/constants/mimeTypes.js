@@ -1,15 +1,15 @@
-/*─────────────────────────────────────────────────────────────
+/*
   Developed by @jams2blues with love for the Tezos community
   File:    src/constants/mimeTypes.js
-  Rev :    r4   2025-07-10
-  Summary: added preferredExt helper + audio/mp3 alias
- */
-  
+  Rev :    r5   2025-09-19
+  Summary: added JS/CSS blob MIME mappings and kept preferredExt helper.
+*/
+
 // NOTE: Keep alphabetical inside category blocks for merge hygiene.
 // Update DeployCollectionForm.jsx validation + RenderMedia.jsx
 // renderer cascade when editing this list.
 
-/*────────────────── whitelisted MIME types ──────────────────*/
+/* whitelisted MIME types */
 export const MIME_TYPES = [
   /* images */
   'image/apng',
@@ -48,7 +48,7 @@ export const MIME_TYPES = [
   'text/html',            // will render in sandboxed iframe
   'text/plain',
 
-  /* fonts (inline‑data URIs are fully on‑chain & wallet‑safe) */
+  /* fonts (inline data URIs are fully on-chain and wallet-safe) */
   'font/ttf',
   'font/woff',
   'font/woff2',
@@ -58,7 +58,7 @@ export const MIME_TYPES = [
   'application/zip',
 ];
 
-/*────────────────── helpers ──────────────────────────────────*/
+/* helpers */
 const EXT_LOOKUP = {
   // images
   apng: 'image/apng',
@@ -92,10 +92,16 @@ const EXT_LOOKUP = {
   wave: 'audio/wav',
 
   // docs / misc
+  css : 'text/css',
   html: 'text/html',
   json: 'application/json',
   pdf : 'application/pdf',
   txt : 'text/plain',
+
+  // script assets
+  cjs : 'text/javascript',
+  js  : 'text/javascript',
+  mjs : 'text/javascript',
 
   // fonts
   ttf : 'font/ttf',
@@ -140,7 +146,7 @@ export function isMimeWhitelisted(mime) {
 }
 
 /* What changed & why:
-   • Added audio/mp3 alias to MIME_TYPES + EXT_LOOKUP for browser variance.
-   • Added PREFERRED_EXT map + preferredExt() for .mp3 over .mpeg in downloads.
-   • Rev bumped to r4. */
+   r4 - Added audio/mp3 alias plus preferredExt helper.
+   r5 - Map css/js/cjs/mjs extensions to text MIME types for interactive ZIP blobs.
+*/
 /* EOF */

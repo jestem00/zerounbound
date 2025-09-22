@@ -297,6 +297,67 @@ export default function TokenDetailPage() {
   const needsFlash = hazards.flashing && !allowFlash;
   const hidden     = needsNSFW || needsFlash;
   const mediaUri   = cur.value || '';
+  const isZipMedia = (cur.mime || '').startsWith('application/zip');
+  const [zipAspect, setZipAspect] = useState(null);
+
+  useEffect(() => {
+    if (!isZipMedia) {
+      setZipAspect(null);
+      return undefined;
+    }
+
+    setZipAspect(null);
+
+    const extractMetrics = (payload) => {
+      if (!payload) return null;
+      let data = payload;
+      if (typeof data === 'string') {
+        try { data = JSON.parse(data); }
+        catch { return null; }
+      }
+      if (!data || typeof data !== 'object') return null;
+      if (data.type === 'zu:zip:metrics') {
+        const width = Number(data.width) || 0;
+        const height = Number(data.height) || 0;
+        if (width > 0 && height > 0) return { width, height };
+        return null;
+      }
+      if ('data' in data) return extractMetrics(data.data);
+      return null;
+    };
+
+    const onMessage = (event) => {
+      const metrics = extractMetrics(event?.data);
+      if (!metrics) return;
+      const ratio = metrics.height / metrics.width;
+      if (!Number.isFinite(ratio) || ratio <= 0) return;
+      setZipAspect((prev) => (prev && Math.abs(prev - ratio) < 0.0001 ? prev : ratio));
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('message', onMessage);
+      return () => window.removeEventListener('message', onMessage);
+    }
+    return undefined;
+  }, [isZipMedia, mediaUri]);
+
+  const mediaWrapStyle = useMemo(() => {
+    if (!isZipMedia) return undefined;
+    const ratio = zipAspect && Number.isFinite(zipAspect) && zipAspect > 0 ? zipAspect : 1;
+    const widthOverHeight = ratio ? 1 / ratio : 1;
+    return {
+      aspectRatio: widthOverHeight,
+      width: '100%',
+      flex: '0 0 auto',
+      maxHeight: '100%',
+    };
+  }, [isZipMedia, zipAspect]);
+
+  const renderMediaStyle = useMemo(() => (
+    isZipMedia
+      ? { width: '100%', height: '100%', display: 'block' }
+      : { maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }
+  ), [isZipMedia]);
 
   /* reveal handlers */
   const requestReveal = useCallback((type) => {
@@ -378,7 +439,7 @@ export default function TokenDetailPage() {
       <Grid>
         {/*──────── main media preview (controls moved below) ────────*/}
         <MediaGroup>
-          <MediaWrap>
+          <MediaWrap style={mediaWrapStyle}>
             {!hidden && (
               <RenderMedia
                 uri={mediaUri}
@@ -387,7 +448,7 @@ export default function TokenDetailPage() {
                 allowScripts={hazards.scripts && allowJs}
                 /* force re‑mount on index or JS‑consent changes */
                 key={`${uriIdx}-${allowJs}`}
-                style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                style={renderMediaStyle}
               />
             )}
 

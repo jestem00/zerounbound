@@ -1,11 +1,9 @@
-/*─────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+/*
+  Developed by @jams2blues " ZeroContract Studio
   File:    src/utils/hazards.js
-  Rev :    r11    2025‑10‑16
-  Summary: accessibility.hazards & rating parsing
-           • detects flashing / mature flags inside nested JSON
-           • expands NSFW & flashing heuristics
-──────────────────────────────────────────────────────────────*/
+  Rev :    r12    2025-09-18 UTC
+  Summary: Flags application/zip media as scripted hazards and keeps consent gating consistent.
+*/
 import { mimeFromFilename } from '../constants/mimeTypes.js';
 
 /*──────── regex helpers ─────────────────────────────────────*/
@@ -18,6 +16,12 @@ const RE_HTML_EXT = /\.(?:html?|js)(?:[\?#]|$)/i;
 const RE_XML_EXT  = /\.xml(?:[\?#]|$)/i;
 const RE_SVG_SCRIPT = /<script[\s>]/i;            /* inline <script> test */
 const RE_IPFS_FILENAME = /filename=([^&]+)/i;
+const RE_DATA_ZIP = /^data:application\/(zip|x-zip-compressed)/i;
+const ZIP_MIME_SET = new Set([
+  'application/zip',
+  'application/x-zip-compressed',
+  'application/x-directory',
+]);
 
 /* decode textual data:URIs (SVG focus) */
 function decodeDataUri(uri = '') {
@@ -164,8 +168,12 @@ export default function detectHazards(meta) {
     mimeList.includes('image/svg+xml')
     && (m.body && typeof m.body === 'string' && RE_SVG_SCRIPT.test(m.body));
 
+  const zipMime = mimeList.some((mt) => ZIP_MIME_SET.has(mt));
+  const zipData = uris.some((u) => RE_DATA_ZIP.test(u));
+
   const scripts = mimeScript || extScript || dataScript
-    || ipfsFileScript || inlineSvgScript || svgDataScript;
+    || ipfsFileScript || inlineSvgScript || svgDataScript
+    || zipMime || zipData;
 
   return {
     nsfw    : nsfwFlag,
@@ -173,11 +181,8 @@ export default function detectHazards(meta) {
     scripts,
   };
 }
-/* What changed & why (r11):
-   • Added `parseAccessibilityFlags()` to handle structured
-     `accessibility` objects with `hazards` arrays & ratings.
-   • NSFW / flashing flags now include tokens derived from
-     `accessibility.hazards` + `accessibility.rating`.
-   • Keeps previous heuristics intact; no behavioural regressions.
+/* What changed & why (r12):
+   - Treats application/zip media as scripted hazards so consent overlays trigger.
+   - Exposes ZIP pattern constants reused across viewers and keeps legacy heuristics intact.
 */
 /* EOF */

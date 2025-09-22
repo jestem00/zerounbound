@@ -1,4 +1,4 @@
-﻿/*Developed by @jams2blues
+/*Developed by @jams2blues
   File: src/pages/explore/tokens.jsx
   Rev:  r2
   Summary: Correct count UI; 10+ new cards per click; smoother scan-ahead. */
@@ -20,7 +20,7 @@ import LoadingSpinner from '../../ui/LoadingSpinner.jsx';
 
 import { useWalletContext }                 from '../../contexts/WalletContext.js';
 import { jFetch }                           from '../../core/net.js';
-import { TZKT_API, NETWORK_KEY, FEED_PAGE_SIZE }            from '../../config/deployTarget.js';
+import { TZKT_API, NETWORK_KEY }            from '../../config/deployTarget.js';
 import decodeHexFields                      from '../../utils/decodeHexFields.js';
 import hashMatrix                           from '../../data/hashMatrix.json';
 // IDB cache intentionally not used on explore/tokens to avoid stale grids
@@ -28,9 +28,6 @@ import listLiveTokenIds                     from '../../utils/listLiveTokenIds.j
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
-// Static feed proxy base (served by our own domain to avoid CORS):
-// /api/explore/static/<network>/<page>
-const FEED_BASE = '/api/explore/static';
 // Auto-pagination: when true, automatically continues loading batches
 // until the end is reached (generic explore mode only).
 const AUTO_LOAD_ALL = true;
@@ -169,13 +166,19 @@ const ALLOWED_TYPE_HASHES = new Set(
     .map((k) => Number(k)),
 );
 
+const ALLOWED_TYPE_HASHES_STR = [...ALLOWED_TYPE_HASHES].join(',');
+const PER_CONTRACT_CHUNK = 18;
+
 /** decode + accept a token row into the UI shape, with hazard/preview guard. */
 function normalizeAndAcceptToken(row) {
   if (!row) return null;
-  if (Number(row.totalSupply) === 0) return null; // 0-token exclusion (UI hygiene)
+  const supply = Number(row.totalSupply ?? row.total_supply);
+  if (Number.isFinite(supply) && supply <= 0) return null;
   let md = row.metadata || {};
   try { md = decodeHexFields(md); } catch { /* best effort */ }
-  if (!hasRenderablePreview(md)) return null;
+  if (!hasRenderablePreview(md)) {
+    md = { ...md, __placeholder: true };
+  }
   const addr = String(row.contract?.address || row.contract || '').trim();
   return {
     contract: addr,
@@ -213,6 +216,7 @@ export default function ExploreTokens() {
   const router = useRouter();
   const { toolkit } = useWalletContext() || {};
   const tzktV1 = useTzktV1Base(toolkit);
+  const networkKey = useMemo(() => (tzktV1.includes('ghostnet') ? 'ghostnet' : 'mainnet'), [tzktV1]);
 
   // query: admin=tz..., contract=KT1...
   const adminFilter = useMemo(() => {
@@ -238,7 +242,6 @@ export default function ExploreTokens() {
 
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState('');
-  const [feedPages, setFeedPages] = useState(null); // null=unknown, number=static pages count
 
   // de-dupe (global to component lifetime)
   const seenTok = useRef(new Set());
@@ -246,7 +249,7 @@ export default function ExploreTokens() {
   const warmSeeded = useRef(false);
   const queuedLoadMore = useRef(false);
   // per-contract round-robin state for fast-path loading
-  const perContract = useRef({ list: [], offsets: new Map(), idx: 0, ready: false });
+  const perContract = useRef({ list: [], offsets: new Map(), ids: new Map(), idx: 0, ready: false, exhausted: new Set() });
 
   // reset on param change
   useEffect(() => {
@@ -255,8 +258,7 @@ export default function ExploreTokens() {
     seenTok.current.clear();
     setError('');
     warmSeeded.current = false;
-    perContract.current = { list: [], offsets: new Map(), idx: 0, ready: false };
-    setFeedPages(null);
+    perContract.current = { list: [], offsets: new Map(), ids: new Map(), idx: 0, ready: false, exhausted: new Set() };
   }, [adminFilter, contractFilter, tzktV1]);
 
   /*-------- queries --------*/
@@ -267,212 +269,153 @@ export default function ExploreTokens() {
    * the entire FA2 corpus. Falls back to broad scan if the server rejects the
    * nested filter (robust across forks).
    */
-  const fetchBatchTokens = useCallback(async (startOffset = 0, step = 48) => {
-    // Try static feed (GH Pages) when configured and not filtered
-    if (!adminFilter && !contractFilter && FEED_BASE) {
-      const netKey = (NETWORK_KEY || 'mainnet').toLowerCase().includes('ghostnet') ? 'ghostnet' : 'mainnet';
-      const pageIdx = Math.floor(startOffset / FEED_PAGE_SIZE);
-      const inPageOff = startOffset % FEED_PAGE_SIZE;
-      try {
-        // First, prefer curated compact index pages if available
-        try {
-          const idxMeta = await jFetch(`${FEED_BASE.replace(/\/+$/,'')}/${netKey}/index/meta`, 1, { ttl: 20_000 }).catch(() => null);
-          const idxPages = Number(idxMeta?.pages || 0);
-          if (Number.isFinite(idxPages) && idxPages > 0 && pageIdx < idxPages) {
-            const idx = await jFetch(`${FEED_BASE.replace(/\/+$/,'')}/${netKey}/index/${pageIdx}`, 1, { ttl: 10_000 }).catch(() => []);
-            if (Array.isArray(idx) && idx.length) {
-              const byC = new Map();
-              for (const it of idx.slice(inPageOff, inPageOff + step)) {
-                const kt = String(it.contract || ''); const id = Number(it.tokenId);
-                if (!kt || !Number.isFinite(id)) continue;
-                if (!byC.has(kt)) byC.set(kt, []);
-                byC.get(kt).push(id);
-              }
-              const rowsAll = [];
-              for (const [kt, ids] of byC.entries()) {
-                const b = 25;
-                for (let i=0;i<ids.length;i+=b){
-                  const chunkIds = ids.slice(i,i+b);
-                  const qb = new URLSearchParams();
-                  qb.set('contract', kt);
-                  qb.set('tokenId.in', chunkIds.join(','));
-                  qb.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply,contract.typeHash,firstTime');
-                  const rr = await jFetch(`${tzktV1}/tokens?${qb.toString()}`).catch(() => []);
-                  if (Array.isArray(rr) && rr.length) rowsAll.push(...rr);
-                }
-              }
-              if (rowsAll.length) {
-                return { rows: rowsAll, rawCount: rowsAll.length, usedAgg: false, end: rowsAll.length < step, origin: 'tzkt' };
-              }
-            }
-          }
-        } catch { /* fall through to regular static */ }
-
-        // fetch meta once to know how many static pages exist
-        let pagesLocal = feedPages;
-        if (pagesLocal === null) {
-          const meta = await jFetch(`${FEED_BASE.replace(/\/+$/,'')}/${netKey}/meta`, 1, { ttl: 20_000 }).catch(() => ({}));
-          const p = Number(meta?.pages || 0);
-          pagesLocal = Number.isFinite(p) && p > 0 ? p : 0;
-          setFeedPages(pagesLocal);
+  const fetchAllowedContracts = useCallback(async () => {
+    const pageSize = 240;
+    const seen = new Set();
+    const roster = [];
+    let offsetLocal = 0;
+    while (true) {
+      const qs = new URLSearchParams();
+      qs.set('typeHash.in', ALLOWED_TYPE_HASHES_STR);
+      qs.set('tokensCount.gt', '0');
+      qs.set('select', 'address');
+      qs.set('sort.desc', 'lastActivityTime');
+      qs.set('limit', String(pageSize));
+      if (offsetLocal) qs.set('offset', String(offsetLocal));
+      const rows = await jFetch(`${tzktV1}/contracts?${qs.toString()}`).catch(() => []);
+      const batch = Array.isArray(rows) ? rows : [];
+      if (!batch.length) break;
+      for (const entry of batch) {
+        const addr = typeof entry === 'string' ? entry : entry?.address;
+        if (addr && !seen.has(addr)) {
+          seen.add(addr);
+          roster.push(addr);
         }
-        if (typeof pagesLocal === 'number' && pagesLocal >= 0 && pageIdx >= pagesLocal) {
-          // beyond static coverage: try live aggregator first
-          const live = await jFetch(`/api/explore/feed?offset=${encodeURIComponent(String(startOffset))}&limit=${encodeURIComponent(String(step))}`).catch(() => null);
-          if (live && Array.isArray(live.items) && live.items.length) {
-            return { rows: live.items, rawCount: step, usedAgg: true, end: !!live.end, origin: 'agg' };
-          }
-          // live yielded nothing: perform a single direct TzKT fallback
-          try {
-            const qb = new URLSearchParams();
-            qb.set('standard', 'fa2');
-            qb.set('sort.desc', 'firstTime');
-            qb.set('offset', String(startOffset));
-            qb.set('limit', String(step));
-            qb.set('totalSupply.gt', '0');
-            qb.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply,contract.typeHash,firstTime');
-            qb.set('contract.typeHash.in', [...ALLOWED_TYPE_HASHES].join(','));
-            const rows = await jFetch(`${tzktV1}/tokens?${qb.toString()}`).catch(() => []);
-            if (Array.isArray(rows) && rows.length) {
-              return { rows, rawCount: rows.length, usedAgg: false, end: rows.length < step };
-            }
-          } catch { /* ignore */ }
-          // Nothing to show; mark end and stop.
-          return { rows: [], rawCount: step, usedAgg: false, end: false };
-        }
-        const url = `${FEED_BASE.replace(/\/+$/,'')}/${netKey}/${pageIdx}`;
-        const arr = await jFetch(url, 1, { ttl: 10_000 }).catch(() => []);
-        // If the static page yields nothing (e.g., 404 -> []), treat as beyond coverage
-        if (!Array.isArray(arr) || arr.length === 0) {
-          const live = await jFetch(`/api/explore/feed?offset=${encodeURIComponent(String(startOffset))}&limit=${encodeURIComponent(String(step))}`).catch(() => null);
-          if (live && Array.isArray(live.items)) {
-            return { rows: live.items, rawCount: step, usedAgg: true, end: !!live.end, origin: 'agg' };
-          }
-          return { rows: [], rawCount: step, usedAgg: false, end: false, origin: 'tzkt' };
-        }
-        // Optional hybrid overlay for newest pages: merge live + static for extra freshness
-        const HYBRID_PAGES = 2;
-        let liveRows = [];
-        let liveEnd = false;
-        if (pageIdx < HYBRID_PAGES) {
-          const live = await jFetch(`/api/explore/feed?offset=${encodeURIComponent(String(startOffset))}&limit=${encodeURIComponent(String(step))}`)
-            .catch(() => null);
-          if (live && Array.isArray(live.items)) {
-            liveRows = live.items;
-            liveEnd = !!live.end;
-          }
-        }
-        if (Array.isArray(arr)) {
-          const staticSlice = arr.slice(inPageOff, inPageOff + step).map((r) => ({
-            contract: r.contract,
-            tokenId: Number(r.tokenId),
-            metadata: r.metadata || {},
-            holdersCount: r.holdersCount,
-            firstTime: r.firstTime,
-            // carry typeHash through when present so downstream gating can read it
-            typeHash: (typeof r.typeHash === 'number')
-              ? r.typeHash
-              : (typeof r['contract.typeHash'] === 'number' ? r['contract.typeHash'] : undefined),
-          }));
-          // Merge live + static, de-dupe, then sort by firstTime desc with tie-breaker
-          const seen = new Set();
-          const union = [];
-          const add = (rows) => {
-            for (const r of (rows || [])) {
-              const k = `${r.contract?.address || r.contract}:${Number(r.tokenId)}`;
-              if (!seen.has(k)) { seen.add(k); union.push(r); }
-            }
-          };
-          add(liveRows);
-          add(staticSlice);
-          const out = union
-            .map((r) => ({
-              ...r,
-              firstTime: r.firstTime,
-            }))
-            .sort((a, b) => {
-              const ta = Date.parse(a.firstTime || 0) || 0;
-              const tb = Date.parse(b.firstTime || 0) || 0;
-              if (tb !== ta) return tb - ta;
-              // tie-breaker on contract then tokenId desc
-              if (a.contract !== b.contract) return a.contract > b.contract ? 1 : -1;
-              return Number(b.tokenId) - Number(a.tokenId);
-            })
-            .slice(0, step);
-          if (out.length) {
-            // end is only true if both static underflows and live indicates end
-            const end = (staticSlice.length < step) && liveEnd;
-            return { rows: out, rawCount: step, usedAgg: true, end, origin: 'static' };
-          }
-        }
-      } catch { /* ignore and fall through */ }
+      }
+      if (batch.length < pageSize) break;
+      offsetLocal += batch.length;
     }
-    // Try local aggregator (serverless) first for dense, burn-filtered results
+    const finalRoster = roster.filter(Boolean);
+    const store = perContract.current || {};
+    const prevOffsets = store.offsets instanceof Map ? store.offsets : new Map();
+    const prevIds = store.ids instanceof Map ? store.ids : new Map();
+    const prevExhausted = store.exhausted instanceof Set ? store.exhausted : new Set();
+    const nextOffsets = new Map();
+    const nextIds = new Map();
+    const nextExhausted = new Set();
+    for (const addr of finalRoster) {
+      nextOffsets.set(addr, prevOffsets.get(addr) || 0);
+      if (prevIds.has(addr)) nextIds.set(addr, prevIds.get(addr));
+      if (prevExhausted.has(addr)) nextExhausted.add(addr);
+    }
+    store.list = finalRoster;
+    store.offsets = nextOffsets;
+    store.ids = nextIds;
+    store.exhausted = nextExhausted;
+    store.ready = finalRoster.length > 0;
+    if (!Number.isFinite(store.idx) || store.idx < 0 || (finalRoster.length && store.idx >= finalRoster.length)) {
+      store.idx = 0;
+    }
+    return finalRoster;
+  }, [tzktV1]);
+
+  const fetchBatchTokens = useCallback(async (startOffset = 0, step = 48) => {
+    const limit = Math.max(1, Math.min(200, step || 48));
+
     if (!adminFilter) {
-      const aggUrl = `/api/explore/feed?offset=${encodeURIComponent(String(startOffset))}&limit=${encodeURIComponent(String(step))}`
+      const aggUrl = `/api/explore/feed?offset=${encodeURIComponent(String(startOffset))}&limit=${encodeURIComponent(String(limit))}`
         + (contractFilter ? `&contract=${encodeURIComponent(contractFilter)}` : '');
       const aggRes = await jFetch(aggUrl).catch(() => null);
-      if (aggRes && Array.isArray(aggRes.items)) {
-        const cursor = Number(aggRes.cursor || (startOffset + step));
-        const rawCount = Math.max(0, cursor - startOffset) || step;
+      if (aggRes && Array.isArray(aggRes.items) && aggRes.items.length) {
+        const cursor = Number(aggRes.cursor || (startOffset + limit));
+        const rawCount = Math.max(aggRes.items.length, cursor - startOffset);
         return { rows: aggRes.items, rawCount, usedAgg: true, end: !!aggRes.end, origin: 'agg' };
       }
     }
 
     const qs = new URLSearchParams();
     qs.set('standard', 'fa2');
-    qs.set('sort.desc', 'firstTime');       // latest mints first
+    qs.set('sort.desc', 'firstTime');
     qs.set('offset', String(startOffset));
-    qs.set('limit', '48');
-    // Restrict to ZeroContract family on the server when supported
-    qs.set('contract.typeHash.in', [...ALLOWED_TYPE_HASHES].join(','));
+    qs.set('limit', String(limit));
     qs.set('totalSupply.gt', '0');
     qs.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply,contract.typeHash,firstTime');
-    if (contractFilter) qs.set('contract', contractFilter);
 
-    // Prefer dense contract.in path first when not explicitly filtering by a single contract
-    const tryContractInFirst = !contractFilter;
-    let rows = null;
-    if (tryContractInFirst) {
-      const qb = new URLSearchParams();
-      qb.set('standard', 'fa2');
-      qb.set('sort.desc', 'firstTime');
-      qb.set('offset', String(startOffset));
-      qb.set('limit', '48');
-      qb.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply,contract.typeHash,firstTime');
+    if (contractFilter) {
+      qs.set('contract', contractFilter);
+    } else {
+      qs.set('contract.typeHash.in', ALLOWED_TYPE_HASHES_STR);
+    }
 
-      // Reuse discovered contracts if available; otherwise fetch a fresh list
-      let addrs = perContract.current?.list || [];
-      if (!addrs || addrs.length === 0) {
-        try {
-          const cq = new URLSearchParams();
-          cq.set('typeHash.in', [...ALLOWED_TYPE_HASHES].join(','));
-          cq.set('select', 'address');
-          cq.set('sort.desc', 'lastActivityTime');
-          cq.set('limit', '400');
-          const contracts = await jFetch(`${tzktV1}/contracts?${cq.toString()}`, 2, { ttl: 30_000, priority: 'low' }).catch(() => []);
-          addrs = (contracts || []).map((r) => r.address).filter(Boolean);
-          if (addrs.length) {
-            perContract.current.list = addrs.slice(0, 120);
-            perContract.current.offsets = new Map(perContract.current.list.map((a) => [a, 0]));
-            perContract.current.ready = true;
+    if (!contractFilter) {
+      try {
+        let addrs = perContract.current?.list;
+        if (!Array.isArray(addrs) || addrs.length === 0) {
+          addrs = await fetchAllowedContracts();
+        }
+        if (Array.isArray(addrs) && addrs.length) {
+          const denseRows = [];
+          const chunkSize = 60;
+          for (let i = 0; i < addrs.length && denseRows.length < limit * 3; i += chunkSize) {
+            const group = addrs.slice(i, i + chunkSize);
+            if (!group.length) break;
+            const qb = new URLSearchParams(qs);
+            qb.delete('contract');
+            qb.set('contract.in', group.join(','));
+            qb.set('contract.typeHash.in', ALLOWED_TYPE_HASHES_STR);
+            const resp = await jFetch(`${tzktV1}/tokens?${qb.toString()}`).catch(() => []);
+            if (Array.isArray(resp) && resp.length) {
+              denseRows.push(...resp);
+            }
+            if (group.length < chunkSize) break;
           }
-        } catch { /* best effort */ }
-      }
-      if (Array.isArray(addrs) && addrs.length) qb.set('contract.in', addrs.join(','));
-      rows = await jFetch(`${tzktV1}/tokens?${qb.toString()}`).catch(() => []);
-      if (Array.isArray(rows)) {
-        return { rows, rawCount: rows.length, usedAgg: false, end: rows.length < step, origin: 'tzkt' };
-      }
+          if (denseRows.length) {
+            const trimmed = denseRows.slice(0, limit);
+            return { rows: trimmed, rawCount: trimmed.length, usedAgg: false, end: false, origin: 'tzkt' };
+          }
+        }
+      } catch { /* best effort */ }
     }
 
-    // Strict path (nested typeHash filter) as a fallback if needed
-    if (!Array.isArray(rows) || rows.length === 0) {
-      const urlStrict = `${tzktV1}/tokens?${qs.toString()}`;
-      rows = await jFetch(urlStrict).catch(() => []);
+    const rows = await jFetch(`${tzktV1}/tokens?${qs.toString()}`).catch(() => []);
+    const list = Array.isArray(rows) ? rows : [];
+    return { rows: list, rawCount: list.length, usedAgg: false, end: list.length < limit, origin: 'tzkt' };
+  }, [tzktV1, contractFilter, adminFilter, fetchAllowedContracts]);
+
+  const fetchTokensByIds = useCallback(async (kt1, ids = []) => {
+    if (!kt1 || !Array.isArray(ids) || !ids.length) return [];
+    const slice = ids.filter((id) => Number.isFinite(Number(id)));
+    if (!slice.length) return [];
+    const qs = new URLSearchParams();
+    qs.set('contract', kt1);
+    qs.set('tokenId.in', slice.join(','));
+    qs.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply,firstTime,contract.typeHash,creator,firstMinter');
+    qs.set('limit', String(slice.length));
+    const rows = await jFetch(`${tzktV1}/tokens?${qs.toString()}`).catch(() => []);
+    return Array.isArray(rows) ? rows : [];
+  }, [tzktV1]);
+
+  const ensureContractIds = useCallback(async (kt1) => {
+    if (!kt1) return [];
+    const store = perContract.current || {};
+    if (!(store.ids instanceof Map)) store.ids = new Map();
+    if (store.ids.has(kt1)) {
+      const cached = store.ids.get(kt1);
+      if (Array.isArray(cached)) return cached;
     }
-    return { rows: Array.isArray(rows) ? rows : [], rawCount: Array.isArray(rows) ? rows.length : 0, usedAgg: false, end: (Array.isArray(rows) ? rows.length : 0) < step, origin: 'tzkt' };
-  }, [tzktV1, contractFilter, adminFilter]);
+    let ids = [];
+    try {
+      ids = await listLiveTokenIds(kt1, networkKey, false);
+    } catch { ids = []; }
+    const normalized = Array.isArray(ids)
+      ? [...new Set(ids.map((n) => Number(n)).filter((n) => Number.isFinite(n)))].sort((a, b) => b - a)
+      : [];
+    store.ids.set(kt1, normalized);
+    if (!(store.offsets instanceof Map)) store.offsets = new Map();
+    if (!store.offsets.has(kt1)) store.offsets.set(kt1, 0);
+    if (store.exhausted instanceof Set) store.exhausted.delete(kt1);
+    return normalized;
+  }, [networkKey]);
 
   /** admin-filtered token discovery (creator/firstMinter/meta authors/creators). */
   const fetchAdminTokens = useCallback(async () => {
@@ -480,7 +423,7 @@ export default function ExploreTokens() {
 
     const base = tzktV1;
     const sel = 'contract,tokenId,metadata,holdersCount,totalSupply,contract.typeHash,firstTime,creator,firstMinter';
-    const gate = `&contract.typeHash.in=${encodeURIComponent([...ALLOWED_TYPE_HASHES].join(','))}&totalSupply.gt=0&select=${encodeURIComponent(sel)}`;
+    const gate = `&contract.typeHash.in=${encodeURIComponent(ALLOWED_TYPE_HASHES_STR)}&totalSupply.gt=0&select=${encodeURIComponent(sel)}`;
     const queries = [
       `${base}/tokens?creator=${encodeURIComponent(adminFilter)}&standard=fa2&limit=1000&sort.desc=firstTime${gate}`,
       `${base}/tokens?firstMinter=${encodeURIComponent(adminFilter)}&standard=fa2&limit=1000&sort.desc=firstTime${gate}`,
@@ -561,31 +504,9 @@ export default function ExploreTokens() {
    * Fast-path helpers: discover active ZeroContract collections and page
    * tokens per contract rather than scanning the global FA2 space.
    */
-  const fetchAllowedContracts = useCallback(async () => {
-    const qs = new URLSearchParams();
-    qs.set('typeHash.in', [...ALLOWED_TYPE_HASHES].join(','));
-    qs.set('select', 'address');
-    qs.set('sort.desc', 'lastActivityTime');
-    qs.set('limit', '400');
-    const rows = await jFetch(`${tzktV1}/contracts?${qs.toString()}`).catch(() => []);
-    return (rows || []).map((r) => r.address).filter(Boolean);
-  }, [tzktV1]);
-
-  const fetchTokensByContract = useCallback(async (kt1, off = 0, step = 24) => {
-    const qs = new URLSearchParams();
-    qs.set('contract', kt1);
-    qs.set('sort.desc', 'tokenId');
-    qs.set('limit', '48');
-    qs.set('offset', String(off));
-    qs.set('totalSupply.gt', '0');
-    qs.set('select', 'contract,tokenId,metadata,holdersCount,totalSupply,firstTime');
-    const rows = await jFetch(`${tzktV1}/tokens?${qs.toString()}`).catch(() => []);
-    return Array.isArray(rows) ? rows : [];
-  }, [tzktV1]);
-
   /**
    * Scan ahead until we accumulate at least `minAccept` newly accepted tokens
-   * (or we truly hit the end). This prevents the “only 1–2 new cards per click”
+   * (or we truly hit the end). This prevents the "only 1-2 new cards per click"
    * problem.  It guarantees =10 newly added cards per click in generic mode.
    */
   const loadPage = useCallback(async (initial = false) => {
@@ -610,57 +531,67 @@ export default function ExploreTokens() {
 
     const next = [];
 
-    const USE_RR = false; // disable round-robin now that aggregator is dense and complete
-    // Branch: prefer per-contract round-robin fast-path when not filtered
-    if (USE_RR && !adminFilter && !contractFilter) {
-      // Ensure we have a recent list of active ZeroContract collections
-      if (!perContract.current.ready || perContract.current.list.length === 0) {
+    const useRoundRobin = !adminFilter && !contractFilter;
+    if (useRoundRobin) {
+      const store = perContract.current || {};
+      if (!store.ready || !Array.isArray(store.list) || store.list.length === 0) {
         try {
-          const addrs = await fetchAllowedContracts();
-          perContract.current.list = (addrs || []).slice(0, 120); // cap to avoid huge rounds
-          perContract.current.offsets = new Map(perContract.current.list.map((a) => [a, 0]));
-          perContract.current.idx = 0;
-          perContract.current.ready = true;
-        } catch { /* fall back below */ }
+          await fetchAllowedContracts();
+        } catch { /* roster fetch best-effort */ }
       }
-
-      const PC_WINDOW = initial ? 4 : 3; // modest concurrency, bucket-friendly
-
-      let safety = perContract.current.list.length * 2 + 8; // guard against infinite loops
-      while (accepted < minAccept && safety-- > 0) {
-        const tasks = [];
-        for (let i = 0; i < PC_WINDOW; i += 1) {
-          if (!perContract.current.list.length) break;
-          const idx = perContract.current.idx % perContract.current.list.length;
-          const kt = perContract.current.list[idx];
-          perContract.current.idx += 1;
-          const off = perContract.current.offsets.get(kt) || 0;
-          tasks.push(
-            fetchTokensByContract(kt, off, 12).then((rows) => ({ kt, rows: Array.isArray(rows) ? rows : [] }))
-          );
+      const roster = Array.isArray(store.list) ? store.list : [];
+      const maxPasses = roster.length ? (roster.length * 2 + 16) : 0;
+      let passes = maxPasses;
+      while (accepted < minAccept && passes-- > 0) {
+        if (!roster.length) break;
+        const idxLocal = store.idx % roster.length;
+        store.idx += 1;
+        const kt = roster[idxLocal];
+        if (!kt) continue;
+        if (store.exhausted instanceof Set && store.exhausted.has(kt)) continue;
+        let idsForContract = [];
+        try {
+          idsForContract = await ensureContractIds(kt);
+        } catch { idsForContract = []; }
+        if (!idsForContract.length) {
+          if (store.exhausted instanceof Set) store.exhausted.add(kt);
+          continue;
         }
-        const results = await Promise.all(tasks);
-        let roundRows = 0;
-        for (const { kt, rows } of results) {
-          const got = rows.length;
-          roundRows += got;
-          scannedRows += got;
-          if (got) perContract.current.offsets.set(kt, (perContract.current.offsets.get(kt) || 0) + got);
-          for (const r of rows) {
-            // Fallback gate: if typeHash missing, ensure contract is a known ZeroContract address\n            let typeHash = Number(r.contract?.typeHash ?? r['contract.typeHash'] ?? r.typeHash ?? NaN);\n            if (!Number.isFinite(typeHash)) {\n              try { const allow = await getAllowedAddrs(tzktV1); if (!allow.has(String(r.contract?.address || r.contract || ''))) continue; } catch { continue; }\n            }\n            const t = normalizeAndAcceptToken(r);
-            if (!t) continue;
-            const key = `${t.contract}:${t.tokenId}`;
-            if (!seenTok.current.has(key)) {
-              seenTok.current.add(key);
-              next.push(t);
-              accepted += 1;
-              if (accepted >= minAccept) break;
-            }
+        const cursor = store.offsets instanceof Map ? (store.offsets.get(kt) || 0) : 0;
+        if (cursor >= idsForContract.length) {
+          if (store.exhausted instanceof Set) store.exhausted.add(kt);
+          continue;
+        }
+        const sliceIds = idsForContract.slice(cursor, cursor + PER_CONTRACT_CHUNK);
+        store.offsets.set(kt, cursor + sliceIds.length);
+        let rows = [];
+        try {
+          rows = await fetchTokensByIds(kt, sliceIds);
+        } catch { rows = []; }
+        const got = Array.isArray(rows) ? rows.length : 0;
+        if (got) scannedRows += got;
+        for (const r of rows || []) {
+          let typeHash = Number(r.contract?.typeHash ?? r['contract.typeHash'] ?? r.typeHash ?? Number.NaN);
+          if (Number.isFinite(typeHash) && !ALLOWED_TYPE_HASHES.has(typeHash)) continue;
+          const token = normalizeAndAcceptToken(r);
+          if (!token) continue;
+          try { Object.defineProperty(token, '__origin', { value: 'contract', enumerable: false }); } catch { /* ignore */ }
+          const key = `${token.contract}:${token.tokenId}`;
+          if (!seenTok.current.has(key)) {
+            seenTok.current.add(key);
+            next.push(token);
+            accepted += 1;
+            if (accepted >= minAccept) break;
           }
-          if (accepted >= minAccept) break;
         }
-        if (roundRows === 0) break; // nothing more to fetch
+        if (store.offsets.get(kt) >= idsForContract.length && store.exhausted instanceof Set) {
+          store.exhausted.add(kt);
+        }
         if (initial && Date.now() - tStart > TIME_BUDGET_MS && accepted >= 10) break;
+        if (accepted >= minAccept) break;
+      }
+      if ((store.exhausted instanceof Set) && roster.length && store.exhausted.size >= roster.length) {
+        reachedEnd = true;
       }
     }
 
@@ -744,7 +675,7 @@ export default function ExploreTokens() {
           const liveSet = new Set(live.map(Number));
           liveByC.set(kt, liveSet);
           if (liveSet.size === 0) {
-            // Unknown live set → keep all tokens for this contract
+            // Unknown live set -> keep all tokens for this contract
             Array.prototype.push.apply(keepAll, arr);
           } else {
             for (const t of arr) {
@@ -770,13 +701,13 @@ export default function ExploreTokens() {
           if (typeof liveByC !== 'undefined' && liveByC && liveByC.size) {
             base = prev.filter((t) => {
               const set = liveByC.get(t.contract);
-              if (!set || set.size === 0) return true; // unknown → keep existing
+              if (!set || set.size === 0) return true; // unknown -> keep existing
               return set.has(Number(t.tokenId));
             });
           }
         } catch { base = prev; }
         const merged = dedupeTokens(filteredNext.length ? base.concat(filteredNext) : base);
-        // Global stable newest→oldest order by firstTime, with tie-breakers
+        // Global stable newest->oldest order by firstTime, with tie-breakers
         merged.sort((a, b) => {
           const ta = Date.parse(a.firstTime || 0) || 0;
           const tb = Date.parse(b.firstTime || 0) || 0;
@@ -793,7 +724,7 @@ export default function ExploreTokens() {
 
     setFetching(false);
     if (initial) setLoading(false);
-  }, [fetching, end, offset, fetchBatchTokens, adminFilter, contractFilter, fetchAllowedContracts, fetchTokensByContract]);
+  }, [fetching, end, offset, fetchBatchTokens, adminFilter, contractFilter, fetchAllowedContracts, ensureContractIds, fetchTokensByIds]);
 
   /*-------- effects --------*/
 
@@ -857,7 +788,7 @@ export default function ExploreTokens() {
 
   const title = showTokensAdmin
     ? `Tokens by ${adminFilter} (${fmtInt(adminTok.length)})`
-    : 'Explore · Tokens';
+    : 'Explore - Tokens';
 
   const tokenCards = (list) => (
     <Grid>
@@ -914,10 +845,10 @@ export default function ExploreTokens() {
 
       {error && <Subtle role="alert">{error}</Subtle>}
 
-      {loading && <Subtle>Loading…</Subtle>}
+      {loading && <Subtle>Loading...</Subtle>}
       {!loading && cards}
 
-      {/* Pagination controls — generic mode ensures =10 new cards per click */}
+      {/* Pagination controls - generic mode ensures =10 new cards per click */}
       {!showTokensAdmin && !end && (
         <Center>
           <PixelButton
@@ -928,7 +859,7 @@ export default function ExploreTokens() {
             noActiveFx
           >
             {fetching
-              ? (<><LoadingSpinner size={16} style={{ marginRight: 6, verticalAlign: 'text-bottom' }} /> Loading…</>)
+              ? (<><LoadingSpinner size={16} style={{ marginRight: 6, verticalAlign: 'text-bottom' }} /> Loading...</>)
               : 'Load More'}
           </PixelButton>
         </Center>
@@ -958,11 +889,11 @@ export default function ExploreTokens() {
 }
 
 /* What changed & why:
-   • Removed misleading global “Total …” (FA2-wide) — it counted every FA2 on TzKT.
-   • Guaranteed =10 newly accepted cards per click via scan-until-yield loop.
-   • Kept initial scan snappy (=24 accepted) for a full first impression.
-   • Preserved perfect admin-filter behaviour; left title “Tokens by … (N)”.
-   • Lint-clean: trimmed unused imports/vars; no dead code. */
+   - Removed misleading global "Total ..." (FA2-wide) - it counted every FA2 on TzKT.
+   - Guaranteed =10 newly accepted cards per click via scan-until-yield loop.
+   - Kept initial scan snappy (=24 accepted) for a full first impression.
+   - Preserved perfect admin-filter behaviour; left title "Tokens by ... (N)".
+   - Lint-clean: trimmed unused imports/vars; no dead code. */
 
 
 

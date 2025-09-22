@@ -1,4 +1,8 @@
 /* eslint-env jest */
+import { describe, it, expect, afterEach, jest } from '@jest/globals';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
 const getLedgerBalanceV2a = require('../src/utils/getLedgerBalanceV2a.cjs');
 
 describe('getLedgerBalanceV2a', () => {
@@ -20,8 +24,10 @@ describe('getLedgerBalanceV2a', () => {
     });
     expect(bal).toBe(7);
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(fetch.mock.calls[0][0]).toBe(
-      `${tzktBase}/v1/tokens/balances?token.contract=KT1TEST&token.tokenId=0&account=tz1abc`,
-    );
+    const requestUrl = new URL(fetch.mock.calls[0][0]);
+    expect(`${requestUrl.origin}${requestUrl.pathname}`).toBe(`${tzktBase}/v1/tokens/balances`);
+    expect(requestUrl.searchParams.get('token.contract')).toBe('KT1TEST');
+    expect(requestUrl.searchParams.get('token.tokenId')).toBe('0');
+    expect(requestUrl.searchParams.get('account')).toBe('tz1abc');
   });
 });

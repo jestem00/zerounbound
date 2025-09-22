@@ -27,6 +27,12 @@ import { pixelUpscaleStyle } from '../utils/pixelUpscale.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
+const ZIP_MIME_SET = new Set([
+  'application/zip',
+  'application/x-zip-compressed',
+  'application/x-directory',
+]);
+
 /*──────────────────────── constants ─────────────────────────*/
 const TOPMOST_Z          = 2147483000; // above any site header
 const PAD                = 16;         // inner padding around art
@@ -83,22 +89,27 @@ const BottomBar = styled.div`
   position: sticky;
   bottom: 0; left: 0; right: 0;
   z-index: ${TOPMOST_Z + 2};
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex;
+  align-items: center;
+  justify-content: ${({ $zip }) => ($zip ? 'flex-end' : 'space-between')};
   gap: 10px;
   padding: 8px 10px;
   background: rgba(0,0,0,.55);
   border-top: 1px solid rgba(255,255,255,.12);
   font-size: .85rem; line-height: 1.2;
   user-select: none;
+  flex-wrap: wrap;
 `;
 
 const Viewport = styled.div`
   flex: 1 1 auto;
   position: relative;
-  display: flex; align-items: center; justify-content: center;
+  display: flex;
+  align-items: ${({ $zip }) => ($zip ? 'stretch' : 'center')};
+  justify-content: ${({ $zip }) => ($zip ? 'stretch' : 'center')};
   overflow: auto;               /* DO NOT hide – keeps native scrollbars */
   min-height: 0;
-  padding: ${PAD}px;
+  padding: ${({ $zip }) => ($zip ? '0' : `${PAD}px`)};
 
   /* Focusable to capture Space (so checkboxes don't toggle) */
   outline: none;
@@ -118,7 +129,12 @@ const MediaWrap = styled.div`
   position: relative;
   max-width: none;
   max-height: none;
-  display: inline-flex; align-items: center; justify-content: center;
+  display: ${({ $zip }) => ($zip ? 'flex' : 'inline-flex')};
+  align-items: ${({ $zip }) => ($zip ? 'stretch' : 'center')};
+  justify-content: ${({ $zip }) => ($zip ? 'stretch' : 'center')};
+  width: ${({ $zip }) => ($zip ? '100%' : 'auto')};
+  height: ${({ $zip }) => ($zip ? '100%' : 'auto')};
+  flex: ${({ $zip }) => ($zip ? '1 1 auto' : '0 0 auto')};
 
   /* Prevent the browser from stealing the interaction with native drag & drop */
   -webkit-user-drag: none;
@@ -337,6 +353,11 @@ export default function FullscreenModal({
   const pct = Math.round(scale * 100);
   const sliderMax = Math.max(ZOOM_MAX, Math.ceil(pct * 1.25));  // expands as you zoom in
 
+  const mimeShort = (mime || '').split(';', 1)[0];
+  const normalizedMime = (mimeShort || '').toLowerCase();
+  const isZipMedia = ZIP_MIME_SET.has(normalizedMime);
+  const allowZoomControls = !isZipMedia;
+
   const setPct = (nextPercent) => {
     const v = clamp(Number(nextPercent) || 100, 1, 10000);
     setScale(v / 100);
@@ -370,7 +391,7 @@ export default function FullscreenModal({
       }
 
       // Only *consume* Space when our viewport (or its descendants) are active.
-      if (spacePanEnabled && isSpace && !isFormEl && activeInsideViewport()) {
+      if (allowZoomControls && spacePanEnabled && isSpace && !isFormEl && activeInsideViewport()) {
         e.preventDefault(); // avoid page scroll / button activation
         if (e.type === 'keydown' && !e.repeat) setSpaceHeld(true);
         if (e.type === 'keyup') { setSpaceHeld(false); setDragging(false); }
@@ -386,10 +407,12 @@ export default function FullscreenModal({
 
       // Fit & Original, zoom shortcuts (no modifiers)
       if (!e.metaKey && !e.ctrlKey && !e.altKey) {
-        if (e.key === 'o' || e.key === 'O') { e.preventDefault(); toOriginal(); return; }
-        if (e.key === 'f' || e.key === 'F') { e.preventDefault(); toFit();      return; }
-        if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomOut();    return; }
-        if (e.key === '=' || e.key === '+' ) { e.preventDefault(); zoomIn();    return; }
+        if (allowZoomControls) {
+          if (e.key === 'o' || e.key === 'O') { e.preventDefault(); toOriginal(); return; }
+          if (e.key === 'f' || e.key === 'F') { e.preventDefault(); toFit();      return; }
+          if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomOut();    return; }
+          if (e.key === '=' || e.key === '+' ) { e.preventDefault(); zoomIn();    return; }
+        }
 
         // Left/Right navigation (keeps modal open)
         if (e.key === 'ArrowLeft' && hasPrev && typeof onPrev === 'function') {
@@ -408,7 +431,7 @@ export default function FullscreenModal({
       window.removeEventListener('keydown', onKey, true);
       window.removeEventListener('keyup', onKey, true);
     };
-  }, [open, hasPrev, hasNext, onPrev, onNext, onClose, spacePanEnabled, fitBase, pct, activeInsideViewport]);
+  }, [open, hasPrev, hasNext, onPrev, onNext, onClose, allowZoomControls, spacePanEnabled, fitBase, pct, activeInsideViewport]);
 
   /* Reset Space state if tab loses focus or page becomes hidden */
   useEffect(() => {
@@ -424,7 +447,7 @@ export default function FullscreenModal({
 
   /*──────── space‑drag panning with Pointer Events (mouse/touch/pen) ─────────*/
   const onPointerDown = useCallback((e) => {
-    if (!spacePanEnabled) return;
+    if (!allowZoomControls || !spacePanEnabled) return;
     // Accept both: Space was pressed *before* the click OR we already set spaceHeld
     const spaceActive = spaceDownRef.current || spaceHeld;
     if (!spaceActive) return;
@@ -451,7 +474,7 @@ export default function FullscreenModal({
     // Prevent image selection right away
     e.preventDefault();
     setDragging(true);
-  }, [spacePanEnabled, spaceHeld]);
+  }, [allowZoomControls, spacePanEnabled, spaceHeld]);
 
   const onPointerMove = useCallback((e) => {
     if (!dragging || !dragRef.current) return;
@@ -500,11 +523,11 @@ export default function FullscreenModal({
 
   /* Prevent native drag‑and‑drop from stealing the interaction while panning */
   const onDragStartCapture = useCallback((e) => {
-    if (spacePanEnabled && (spaceHeld || spaceDownRef.current)) {
+    if (allowZoomControls && spacePanEnabled && (spaceHeld || spaceDownRef.current)) {
       e.preventDefault();
       e.stopPropagation();
     }
-  }, [spacePanEnabled, spaceHeld]);
+  }, [allowZoomControls, spacePanEnabled, spaceHeld]);
 
   /* Label for which URI we’re on */
   const label = useMemo(() => {
@@ -516,17 +539,23 @@ export default function FullscreenModal({
     return `Artifact${name}${idxPart}`;
   }, [currentKey, currentName, currentIndex, total]);
 
-  const mimeShort = (mime || '').split(';', 1)[0];
-
   /* Render metrics */
-  const mediaStyle = {
-    ...pixelUpscaleStyle(scale, mime),
-    width : nat.w ? `${Math.max(1, Math.round(nat.w))}px` : undefined,
-    height: nat.h ? `${Math.max(1, Math.round(nat.h))}px` : undefined,
-    display: 'block',
-    maxWidth: 'none',
-    maxHeight: 'none',
-  };
+  const mediaStyle = isZipMedia
+    ? {
+        width: '100%',
+        height: '100%',
+        maxWidth: '100%',
+        maxHeight: '100%',
+        display: 'block',
+      }
+    : {
+        ...pixelUpscaleStyle(scale, mime),
+        width : nat.w ? `${Math.max(1, Math.round(nat.w))}px` : undefined,
+        height: nat.h ? `${Math.max(1, Math.round(nat.h))}px` : undefined,
+        display: 'block',
+        maxWidth: 'none',
+        maxHeight: 'none',
+      };
 
   return (
     <Overlay
@@ -553,23 +582,24 @@ export default function FullscreenModal({
       <Viewport
         ref={viewportRef}
         tabIndex={0}
-        $space={spacePanEnabled}
+        $zip={isZipMedia}
+        $space={allowZoomControls && spacePanEnabled}
         $held={spaceHeld}
         $drag={dragging}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={endPointerDrag}
-        onPointerCancel={endPointerDrag}
-        onPointerLeave={endPointerDrag}
-        onClickCapture={onClickCapture}
-        onDragStartCapture={onDragStartCapture}
+        onPointerDown={allowZoomControls ? onPointerDown : undefined}
+        onPointerMove={allowZoomControls ? onPointerMove : undefined}
+        onPointerUp={allowZoomControls ? endPointerDrag : undefined}
+        onPointerCancel={allowZoomControls ? endPointerDrag : undefined}
+        onPointerLeave={allowZoomControls ? endPointerDrag : undefined}
+        onClickCapture={allowZoomControls ? onClickCapture : undefined}
+        onDragStartCapture={allowZoomControls ? onDragStartCapture : undefined}
         /* Always re‑assert focus on interaction so Space remains scoped here */
         onMouseDown={() => viewportRef.current?.focus?.()}
         onTouchStart={() => viewportRef.current?.focus?.()}
         onMouseUp={() => viewportRef.current?.focus?.()}
         onTouchEnd={() => viewportRef.current?.focus?.()}
       >
-        <MediaWrap>
+        <MediaWrap $zip={isZipMedia}>
           <RenderMedia
             ref={mediaRef}
             uri={uri}
@@ -594,54 +624,65 @@ export default function FullscreenModal({
 
       {/* Bottom action bar (fully hides with HUD) */}
       {hudVisible && (
-        <BottomBar ref={botRef}>
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            <PixelButton $noActiveFx onClick={toOriginal} title="Original size (O)">ORIGINAL</PixelButton>
-            <PixelButton $noActiveFx onClick={toFit} title="Fit on screen (F)">FIT&nbsp;ON&nbsp;SCREEN</PixelButton>
-          </div>
+        isZipMedia ? (
+          <BottomBar ref={botRef} $zip>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <PixelButton $noActiveFx onClick={() => setHudVisible((v) => !v)} title="Hide HUD (H)">
+                {hudVisible ? 'HIDE HUD' : 'SHOW HUD'}
+              </PixelButton>
+              <PixelButton $noActiveFx onClick={onClose} title="Close (Esc)">CLOSE</PixelButton>
+            </div>
+          </BottomBar>
+        ) : (
+          <BottomBar ref={botRef}>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <PixelButton $noActiveFx onClick={toOriginal} title="Original size (O)">ORIGINAL</PixelButton>
+              <PixelButton $noActiveFx onClick={toFit} title="Fit on screen (F)">FIT ON SCREEN</PixelButton>
+            </div>
 
-          {/* Zoom percent navigator + slider */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <PixelButton size="xs" $noActiveFx onClick={zoomOut} aria-label="Zoom out">–</PixelButton>
-            <span
-              style={{
-                minWidth: 56, textAlign: 'center',
-                font: '700 .8rem/1 PixeloidSans,monospace',
-                color: 'var(--zu-fg)',
-              }}
-              aria-live="polite"
-            >
-              {pct}%
-            </span>
-            <PixelButton size="xs" $noActiveFx onClick={zoomIn} aria-label="Zoom in">+</PixelButton>
-            <ZoomSlider
-              min="10"
-              max={sliderMax}
-              value={pct}
-              onChange={(e) => setPct(e.target.value)}
-              aria-label="Zoom percent"
-              title="Drag to zoom"
-            />
-          </div>
-
-          {/* Space‑drag toggle + HUD/Close */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, userSelect: 'none' }}>
-              <input
-                type="checkbox"
-                checked={!!spacePanEnabled}
-                onChange={(e) => setSpacePanEnabled(!!e.target.checked)}
-                aria-label="Enable spacebar navigation (hold Space to drag‑pan)"
+            {/* Zoom percent navigator + slider */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <PixelButton size="xs" $noActiveFx onClick={zoomOut} aria-label="Zoom out">–</PixelButton>
+              <span
+                style={{
+                  minWidth: 56, textAlign: 'center',
+                  font: '700 .8rem/1 PixeloidSans,monospace',
+                  color: 'var(--zu-fg)',
+                }}
+                aria-live="polite"
+              >
+                {pct}%
+              </span>
+              <PixelButton size="xs" $noActiveFx onClick={zoomIn} aria-label="Zoom in">+</PixelButton>
+              <ZoomSlider
+                min="10"
+                max={sliderMax}
+                value={pct}
+                onChange={(e) => setPct(e.target.value)}
+                aria-label="Zoom percent"
+                title="Drag to zoom"
               />
-              Enable&nbsp;spacebar&nbsp;navigation&nbsp;👆
-            </label>
+            </div>
 
-            <PixelButton $noActiveFx onClick={() => setHudVisible((v) => !v)} title="Hide HUD (H)">
-              {hudVisible ? 'HIDE HUD' : 'SHOW HUD'}
-            </PixelButton>
-            <PixelButton $noActiveFx onClick={onClose} title="Close (Esc)">CLOSE</PixelButton>
-          </div>
-        </BottomBar>
+            {/* Space‑drag toggle + HUD/Close */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, userSelect: 'none' }}>
+                <input
+                  type="checkbox"
+                  checked={!!spacePanEnabled}
+                  onChange={(e) => setSpacePanEnabled(!!e.target.checked)}
+                  aria-label="Enable spacebar navigation (hold Space to drag‑pan)"
+                />
+                Enable spacebar navigation 👆
+              </label>
+
+              <PixelButton $noActiveFx onClick={() => setHudVisible((v) => !v)} title="Hide HUD (H)">
+                {hudVisible ? 'HIDE HUD' : 'SHOW HUD'}
+              </PixelButton>
+              <PixelButton $noActiveFx onClick={onClose} title="Close (Esc)">CLOSE</PixelButton>
+            </div>
+          </BottomBar>
+        )
       )}
 
       {/* Close and arrows — hidden when HUD is hidden */}

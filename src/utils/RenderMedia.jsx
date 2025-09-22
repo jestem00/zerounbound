@@ -432,6 +432,7 @@ function RenderMediaRaw({
   const [errored, setErrored] = useState(false);
   const [svgViewUri, setSvgViewUri] = useState('');
   const [zipViewUri, setZipViewUri] = useState('');
+  const [zipFallbackUrl, setZipFallbackUrl] = useState('');
   const zipCleanupRef = useRef(null);
 
 
@@ -483,11 +484,13 @@ function RenderMediaRaw({
       try { zipCleanupRef.current?.(); } catch {}
       zipCleanupRef.current = null;
       setZipViewUri('');
+      setZipFallbackUrl('');
       try {
         if (type === 'application/zip' && isZipDataUri(safeUri)) {
           const res = await unpackZipDataUri(safeUri);
           if (!canceled && res?.ok && res.indexUrl) {
             setZipViewUri(res.indexUrl);
+            setZipFallbackUrl(res.fallbackUrl || '');
             zipCleanupRef.current = res.cleanup;
           }
         }
@@ -760,8 +763,32 @@ function RenderMediaRaw({
 
 
   // ZIP (interactive; sandboxed iframe with CSP injected by unpacker)
-  if (type === 'application/zip' && zipViewUri) {
-    const sandbox = allowScripts ? 'allow-scripts' : '';
+  if (type === 'application/zip') {
+    if (!allowScripts || !zipViewUri) {
+      if (zipFallbackUrl) {
+        return (
+          <img
+            src={zipFallbackUrl}
+            alt={alt || 'interactive-zip-fallback'}
+            className={className}
+            style={{ width: '100%', height: '100%', objectFit: 'contain', ...style }}
+            onLoad={onLoad}
+            onError={handleErrorOnce}
+          />
+        );
+      }
+      return (
+        <div
+          className={className}
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%', ...style }}
+        >
+          <span style={{ opacity: 0.65 }}>Enable scripts to view this interactive ZIP.</span>
+        </div>
+      );
+    }
+
+    const sandbox = allowScripts ? 'allow-scripts allow-same-origin' : 'allow-same-origin';
+
     return (
       <iframe
         src={zipViewUri}

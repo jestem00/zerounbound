@@ -1,7 +1,7 @@
-/*─────────────────────────────────────────────────────────────────
-  Developed by @jams2blues – ZeroContract Studio
+/*-----------------------------------------------------------------
+  Developed by @jams2blues - ZeroContract Studio
   File:    src/config/deployTarget.js
-  Rev :    r1158    2025‑08‑05
+  Rev :    r1158    2025-08-05
   Summary: Corrected ghostnet marketplace address. Updated
            MARKETPLACE_ADDRESSES to use KT1R1PzLhBXEd98ei72mFuz4FrUYEcuV7t1p for
            ghostnet, fixing listing errors. Previous revision added
@@ -15,7 +15,7 @@
 // The ZeroUnbound platform supports multiple Tezos networks.  During
 // development the target network is usually switched by running one of
 // the provided yarn scripts (e.g. yarn set:ghostnet or yarn set:mainnet).
-// Historically, these scripts rewrote a hard‑coded TARGET constant in this
+// Historically, these scripts rewrote a hard-coded TARGET constant in this
 // file.  A recent revision replaced the constant with a dynamic lookup
 // against process.env.NEXT_PUBLIC_NETWORK, which broke the rewrite logic
 // and caused the dev server to always default to the ghostnet configuration.
@@ -39,7 +39,7 @@
 export const TARGET = 'ghostnet';
 
 // ---------------------------------------------------------------------------
-// Per‑network configuration
+// Per-network configuration
 //
 // Each supported network defines its own appearance, RPC endpoints, TzKT
 // API domains and other variables.  The fastest reachable RPC is selected
@@ -53,10 +53,10 @@ const nets = {
     label:        'GHOSTNET',
     themeColor:   '#6f79ff',
     borderVar:    '--zu-ghostnet',
-    manifestName: 'ZeroUnbound.art • Ghostnet',
+    manifestName: 'ZeroUnbound.art - Ghostnet',
     siteLogo:     '/sprites/ghostnet_logo.svg',
     ctaFirst:     '/deploy',
-    description:  'Test your fully-on-chain art collection risk‑free on Ghostnet.',
+    description:  'Test your fully-on-chain art collection risk-free on Ghostnet.',
     siteUrl:      'https://ghostnet.zerounbound.art',
     ogImage:      'https://ghostnet.zerounbound.art/sprites/ghostnetBanner.png',
     startUrl:     '/?source=pwa-ghostnet',
@@ -83,7 +83,7 @@ const nets = {
     manifestName: 'ZeroUnbound.art',
     siteLogo:     '/sprites/logo.svg',
     ctaFirst:     '/explore',
-    description:  'Create 100 % on‑chain art collections on Tezos mainnet.',
+    description:  'Create 100 % on-chain art collections on Tezos mainnet.',
     siteUrl:      'https://zerounbound.art',
     ogImage:      'https://zerounbound.art/sprites/Banner.png',
     startUrl:     '/?source=pwa-mainnet',
@@ -118,7 +118,7 @@ export const DESCRIPTION   = NET.description;
 export const CTA_FIRST     = NET.ctaFirst;
 export const SITE_URL      = NET.siteUrl;
 export const ROOT_URL      = SITE_URL;
-export const OG_TITLE      = 'Zero Unbound — ZeroContract Studio';
+export const OG_TITLE      = 'Zero Unbound - ZeroContract Studio';
 export const OG_IMAGE      = NET.ogImage;
 export const START_URL     = NET.startUrl;
 export const RPC_URLS      = NET.rpc;
@@ -169,7 +169,7 @@ export const ztTokenUrl     = (cid, tid) =>
   `${ZT_MINT_URL}&cid=${encodeURIComponent(cid)}&tid=${encodeURIComponent(tid)}`;
 
 // Factory contract addresses per network.  These addresses correspond to
-// factories deployed on 2025‑07‑29.  Ghostnet: KT1H8myPr7EmVPFLmBcnSxgiYigdMKZu3ayw.
+// factories deployed on 2025-07-29.  Ghostnet: KT1H8myPr7EmVPFLmBcnSxgiYigdMKZu3ayw.
 // Mainnet: KT1VbzbUiswEqCsE9ugTFsG1nwh3XwwEq6D2.  Both entries must be kept
 // identical across branches; deployTarget.js is the sole diverging file.
 export const FACTORY_ADDRESSES = {
@@ -187,13 +187,13 @@ export const FACTORY_ADDRESS = FACTORY_ADDRESSES[TARGET];
 // Marketplace contract addresses
 //
 // The ZeroSum marketplace lives at different addresses on Ghostnet and
-// Mainnet.  Rather than hard‑coding these values in multiple modules, we
-// centralise them here alongside other per‑network configuration.  Each
+// Mainnet.  Rather than hard-coding these values in multiple modules, we
+// centralise them here alongside other per-network configuration.  Each
 // entry corresponds to the canonical marketplace contract for the given
 // network.  These values should be kept identical across branches, with
 // deployTarget.js remaining the sole diverging file between Ghostnet and
 // Mainnet.  See src/core/marketplace.js for usage.
-// Marketplace – canonical ZeroSum contracts
+// Marketplace - canonical ZeroSum contracts
 export const MARKETPLACE_ADDRESSES = {
   ghostnet: 'KT19yn9fWP6zTSLPntGyrPwc7JuMHnYxAn1z',
   mainnet : 'KT1Stfgf6H5N1idSBcAMAbo1BdPMi9K6E43M',
@@ -206,19 +206,11 @@ export const MARKETPLACE_ADDRESSES = {
 export const MARKETPLACE_ADDRESS = MARKETPLACE_ADDRESSES[TARGET];
 
 // ---------------------------------------------------------------------------
-// Static Explore Feed (GitHub Pages) configuration
-// These values do not diverge between branches; they point to the same Pages
-// site that publishes both mainnet and ghostnet feeds under /<network>/.
-// Clients use FEED_PAGE_SIZE to compute pagination offsets into the static feed.
-export const FEED_STATIC_BASE = 'https://jams2blues.github.io/zerounbound';
-export const FEED_PAGE_SIZE   = 120; // must match scripts/exploreFeed.mjs --page-size
-
-// ---------------------------------------------------------------------------
 // Tezos Domain registry addresses and fallback RPCs
 //
 // DOMAIN_CONTRACTS exposes the NameRegistry contract addresses used by the
 // Tezos Domains project to store reverse record mappings.  FALLBACK_RPCS
-// lists network-specific endpoints for on‑chain domain lookup when
+// lists network-specific endpoints for on-chain domain lookup when
 // RPC_URLS is unavailable.  Both exports are consumed by
 // resolveTezosDomain.js to perform optional on-chain resolution.
 export const DOMAIN_CONTRACTS = {
@@ -248,7 +240,7 @@ const FORGE_URLS = {
 
 // Deprecated: always returns an empty string.  Remote forge services are
 // permanently disabled; client code should fall back to local forging via
-// Taquito’s LocalForger.  This export is retained solely to satisfy
+// Taquito's LocalForger.  This export is retained solely to satisfy
 // existing imports.
 export const FORGE_SERVICE_URL = '';
 
@@ -315,10 +307,11 @@ export const OBJKT_MARKET_ADDRESS = TARGET === 'mainnet'
   : 'KT1SegJhvGNsu9j9fPYC8PcH88Y4bFR9qi33';
 
 /* What changed & why:
-   • Added DOMAIN_CONTRACTS and FALLBACK_RPCS exports.  These new constants
+   - Added DOMAIN_CONTRACTS and FALLBACK_RPCS exports.  These new constants
      centralise the Tezos Domains registry contract addresses and fallback
      RPC endpoints per network.  resolveTezosDomain.js imports them to
-     perform network-aware on-chain lookups and avoid hard‑coded values,
-     complying with invariant I10.
-   • Added a revision header noting the new revision r1157 on 2025‑08‑01.
+     perform network-aware on-chain lookups and avoid hard-coded values,
+     complying with invariant I10.
+   - Added a revision header noting the new revision r1157 on 2025-08-01.
 */
+

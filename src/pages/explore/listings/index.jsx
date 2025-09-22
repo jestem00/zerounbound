@@ -23,6 +23,7 @@ import { jFetch }           from '../../../core/net.js';
 
 import decodeHexFields from '../../../utils/decodeHexFields.js';
 import detectHazards   from '../../../utils/hazards.js';
+import { hasRenderablePreview as hasRenderableMedia } from '../../../utils/mediaPreview.js';
 import { tzktBase }    from '../../../utils/tzkt.js';
 
 import {
@@ -51,40 +52,6 @@ const Center = styled.div`
 `;
 
 /* helpers */
-function isRenderableUri(uri) {
-  if (typeof uri !== 'string') return false;
-  const s = uri.slice(0, 64).toLowerCase();
-  if (s.startsWith('tezos-storage:')) return true; // on‑chain pointer
-  return (
-    s.startsWith('data:image') ||
-    s.startsWith('data:audio') ||
-    s.startsWith('data:video') ||
-    s.startsWith('data:application/svg+xml') ||
-    s.startsWith('data:text/html')
-  );
-}
-function hasRenderablePreview(m) {
-  const meta = m && typeof m === 'object' ? m : {};
-  const keys = [
-    'displayUri','display_uri',
-    'imageUri','image_uri','image',
-    'thumbnailUri','thumbnail_uri',
-    'artifactUri','artifact_uri',
-    'mediaUri','media_uri',
-    'animation_url','animationUrl',
-  ];
-  for (const k of keys) {
-    const v = meta[k];
-    if (isRenderableUri(v)) return true;
-  }
-  if (Array.isArray(meta.formats)) {
-    for (const f of meta.formats) {
-      const cand = (f && (f.uri || f.url)) || '';
-      if (isRenderableUri(cand)) return true;
-    }
-  }
-  return false;
-}
 function chunk(arr, n) { const out = []; for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n)); return out; }
 function uniqByPair(items) { const seen = new Set(); const out = []; for (const it of items) { const key = `${it.contract}|${it.tokenId}`; if (seen.has(key)) continue; seen.add(key); out.push(it); } return out; }
 
@@ -290,7 +257,7 @@ export default function ListingsPage() {
             const md         = metaEntry.metadata || {};
             const supply     = Number(metaEntry.totalSupply ?? 0);
             if (!Number.isFinite(priceMutez)) continue;
-            if (!hasRenderablePreview(md)) continue;
+            if (!hasRenderableMedia(md, { allowTezosStorage: true })) continue;
             if (detectHazards(md)?.broken) continue;
             if (supply === 0) continue;
             assembled.push({

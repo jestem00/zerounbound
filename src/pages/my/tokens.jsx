@@ -1,4 +1,4 @@
-﻿/*Developed by @jams2blues
+/*Developed by @jams2blues
   File: src/pages/my/tokens.jsx
   Rev:  r86
   Summary: Fix reverse DNS resolution by preserving tz-address case in
@@ -23,6 +23,7 @@ import decodeHexFields, { decodeHexJson } from '../../utils/decodeHexFields.js';
 import hashMatrix from '../../data/hashMatrix.json';
 import { listKey, getList, cacheList } from '../../utils/idbCache.js';
 import listLiveTokenIds from '../../utils/listLiveTokenIds.js';
+import { findInlineRenderableDataUri } from '../../utils/mediaPreview.js';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -144,36 +145,7 @@ function normalizeCreatorsField(src) {
 
 /** Robust preview validation for on‑chain data URIs (JPEG/PNG/APNG/GIF/BMP/WebP). */
 function isValidPreview(m = {}) {
-  const keys = [
-    'artifactUri', 'artifact_uri',
-    'displayUri', 'display_uri',
-    'imageUri',   'image',
-    'thumbnailUri','thumbnail_uri',
-    'mediaUri',   'media_uri',
-  ];
-  const mediaRe = /^data:(image\/|video\/|audio\/)/i;
-  let uri = null;
-  for (const k of keys) {
-    const v = m && typeof m === 'object' ? m[k] : undefined;
-    if (typeof v === 'string') {
-      const val = v.trim();
-      if (mediaRe.test(val)) { uri = val; break; }
-    }
-  }
-  if (!uri && Array.isArray(m.formats)) {
-    for (const fmt of m.formats) {
-      if (fmt && typeof fmt === 'object') {
-        const candidates = [];
-        if (fmt.uri) candidates.push(String(fmt.uri));
-        if (fmt.url) candidates.push(String(fmt.url));
-        for (const cand of candidates) {
-          const val = cand.trim();
-          if (mediaRe.test(val)) { uri = val; break; }
-        }
-      }
-      if (uri) break;
-    }
-  }
+  const uri = findInlineRenderableDataUri(m);
   if (!uri) return false;
   try {
     const comma = uri.indexOf(',');
@@ -182,10 +154,6 @@ function isValidPreview(m = {}) {
     const semi = header.indexOf(';');
     const mime = (semi >= 0 ? header.slice(0, semi) : header).toLowerCase();
     const isBase64 = /;base64/i.test(header);
-
-    // Accept non-base64 data URIs (e.g., image/svg+xml;utf8,...) without
-    // deep signature checks. These are common for SVG/HTML and are safe in
-    // our renderer which sanitizes/script-gates separately.
     if (!isBase64) return true;
 
     const b64  = uri.slice(comma + 1);

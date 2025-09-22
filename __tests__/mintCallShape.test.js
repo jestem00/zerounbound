@@ -1,4 +1,8 @@
 /* eslint-env jest */
+import { test, expect, jest } from '@jest/globals';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
 const { buildMintCall } = require('../src/ui/Entrypoints/mintCallShape.cjs');
 
 const mkC = () => ({ methods: { mint: jest.fn(() => ({ _tag: 'ok' })) } });

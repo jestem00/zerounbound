@@ -214,7 +214,7 @@ ThankButton.propTypes = {
 };
 
 /*──────── component ───────*/
-export default function TokenDetailsTabs({ addr, tokenId, tokenName, meta, rarity: _rarity, isCreator = false }) {
+function TokenDetailsTabs({ addr, tokenId, tokenName, meta, rarity: _rarity, isCreator = false }) {
   const { toolkit, address: walletAddr } = useWalletContext() || {};
   const base = useTzktBase(NETWORK_KEY);
   const tokenUrl = `${URL_OBJKT_TOKENS_BASE}${addr}/${tokenId}`; // external link for familiarity
@@ -521,3 +521,5 @@ TokenDetailsTabs.propTypes = {
 };
 
 /* EOF */
+
+export default TokenDetailsTabs;

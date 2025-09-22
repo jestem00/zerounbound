@@ -111,7 +111,6 @@ async function buildAllowedContracts(){
     const qs = new URLSearchParams();
     qs.set('typeHash.in', TYPE_HASHES);
     qs.set('select', 'address,codeHash,typeHash');
-    qs.set('sort.desc', 'lastActivityTime');
     qs.set('limit', String(PAGE));
     qs.set('offset', String(offset));
     const chunk = await j(`${apiBase}/contracts?${qs.toString()}`).catch(()=>[]);

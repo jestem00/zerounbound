@@ -202,7 +202,7 @@ export default function TokenDetailPage() {
               name       : meta.name || '',
               description: meta.description || '',
               value      : mainUri,
-              mime       : meta.mimeType || mimeFromDataUri(mainUri),
+              mime: mimeFromDataUri(mainUri) || meta.mimeType || "application/octet-stream"
             },
             ...extras,
           ].filter((u) => typeof u?.value === 'string' && u.value); // hygiene

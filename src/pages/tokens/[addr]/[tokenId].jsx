@@ -206,7 +206,11 @@ export default function TokenDetailPage() {
             },
             ...extras,
           ].filter((u) => typeof u?.value === 'string' && u.value); // hygiene
-
+		
+		console.log('MimeFromUri assigned:', mimeFromDataUri(mainUri));
+		console.log('MimeFromMeta assigned:', meta.mimeType);
+		console.log('MimeTypes assigned:', all.map(item => item.mime));
+		
           setUris(all);
           setUriIdx(0);
         }

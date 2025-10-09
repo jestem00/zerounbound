@@ -29,7 +29,7 @@ import { shortAddr }             from '../utils/formatAddress.js';
 import { resolveTezosDomain }    from '../utils/resolveTezosDomain.js';
 import decodeHexFields from '../utils/decodeHexFields.js';
 import { NETWORK_KEY } from '../config/deployTarget.js';
-import { mimeFromDataUri } from '../../utils/uriHelpers.js';
+import { mimeFromDataUri } from '../utils/uriHelpers.js';
 const PLACEHOLDER = '/sprites/cover_default.svg';
 const VALID_DATA  = /^data:/i;
 

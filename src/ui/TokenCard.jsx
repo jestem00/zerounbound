@@ -193,9 +193,9 @@ export default function TokenCard({
 
 		console.log('Token: ', token);
 		console.log('Datauri: ', pickDataUri(meta));
-		console.log('MimeFromUri assigned: ', mimeFromDataUri(mainUri));
+		console.log('MimeFromUri assigned: ', mimeFromDataUri(pickDataUri(meta)));
 		console.log('MimeFromMeta assigned: ', meta.mimeType);
-		console.log('MimeTypes assigned: ', all.map(item => item.mime));
+		//console.log('MimeTypes assigned: ', all.map(item => item.mime));
 		
   const { walletAddress } = useWallet() || {};
 

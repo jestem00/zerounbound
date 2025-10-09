@@ -188,9 +188,15 @@ export default function TokenCard({
   burned = false,
 }) {
   const meta          = token.metadata || {};
-  const mimeType = mimeFromDataUri(pickDataUri(meta) || '') || meta.mimeType || 'application/octet-stream';
+  const mimeType 	  = mimeFromDataUri(pickDataUri(meta)) || meta.mimeType || 'application/octet-stream';
   const integrity     = useMemo(() => checkOnChainIntegrity(meta), [meta]);
 
+		console.log('Token: ', token);
+		console.log('Datauri: ', pickDataUri(meta));
+		console.log('MimeFromUri assigned: ', mimeFromDataUri(mainUri));
+		console.log('MimeFromMeta assigned: ', meta.mimeType);
+		console.log('MimeTypes assigned: ', all.map(item => item.mime));
+		
   const { walletAddress } = useWallet() || {};
 
   /* consent flags */

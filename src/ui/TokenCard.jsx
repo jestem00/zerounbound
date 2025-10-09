@@ -29,6 +29,7 @@ import { shortAddr }             from '../utils/formatAddress.js';
 import { resolveTezosDomain }    from '../utils/resolveTezosDomain.js';
 import decodeHexFields from '../utils/decodeHexFields.js';
 import { NETWORK_KEY } from '../config/deployTarget.js';
+import { mimeFromDataUri } from '../../utils/uriHelpers.js';
 const PLACEHOLDER = '/sprites/cover_default.svg';
 const VALID_DATA  = /^data:/i;
 
@@ -187,6 +188,7 @@ export default function TokenCard({
   burned = false,
 }) {
   const meta          = token.metadata || {};
+  const mimeType = mimeFromDataUri(pickDataUri(meta) || '') || meta.mimeType || 'application/octet-stream';
   const integrity     = useMemo(() => checkOnChainIntegrity(meta), [meta]);
 
   const { walletAddress } = useWallet() || {};
@@ -426,7 +428,7 @@ export default function TokenCard({
           {!blocked && preview && !(!thumbOk || !preview) && (
             <RenderMedia
               uri={preview}
-              mime={meta.mimeType}
+              mime={mimeType}
               allowScripts={scriptHaz && allowScr}
               onInvalid={() => setThumbOk(false)}
               /* No inline sizing — CSS .preview-1x1 enforces contain fit for IMG/VIDEO */
@@ -508,7 +510,7 @@ export default function TokenCard({
           )}
 
           {/* FileType with universal download */}
-          {meta.mimeType && (
+          {mimeType && (
             <p>
               <strong>FileType</strong>:&nbsp;
               {downloadAllowed
@@ -519,10 +521,10 @@ export default function TokenCard({
                     title={`Download ${fname}`}
                     style={{ color: 'inherit' }}
                   >
-                    {meta.mimeType}
+                    {mimeType}
                   </a>
                 )
-                : meta.mimeType}
+                : mimeType}
             </p>
           )}
 
@@ -563,7 +565,7 @@ export default function TokenCard({
         open={fs}
         onClose={() => setFs(false)}
         uri={fsUri}
-        mime={meta.mimeType}
+        mime={mimeType}
         allowScripts={scriptHaz && allowScr}
         scriptHazard={scriptHaz}
       />

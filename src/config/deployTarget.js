@@ -173,8 +173,9 @@ export const ztTokenUrl     = (cid, tid) =>
 // Mainnet: KT1VbzbUiswEqCsE9ugTFsG1nwh3XwwEq6D2.  Both entries must be kept
 // identical across branches; deployTarget.js is the sole diverging file.
 export const FACTORY_ADDRESSES = {
-  ghostnet: 'KT1H8myPr7EmVPFLmBcnSxgiYigdMKZu3ayw',
-  mainnet:  'KT1VbzbUiswEqCsE9ugTFsG1nwh3XwwEq6D2',
+  ghostnet: 'KT1H8myPr7EmVPFLmBcnSxgiYigdMKZu3ayw',		// Old v4e with broken update_operators
+  // mainnet:  'KT1VbzbUiswEqCsE9ugTFsG1nwh3XwwEq6D2',	// Old v4e with broken update_operators
+  mainnet:	'KT1DTMB2GqNiHPowpPreeNsgSpkanxUar27f ',
 };
 
 // Selected factory address based on TARGET.  Use this constant to call

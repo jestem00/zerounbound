@@ -91,7 +91,8 @@ styledPkg.default;
     // Import the full contract code.  This is used for direct
     // origination when the factory is unavailable.  See
     // originateViaDirect() for usage.
-    import contractCode from '../../contracts/Zero_Contract_v4e.tz';
+    //import contractCode from '../../contracts/Zero_Contract_v4e.tz';	// This has been superceded
+	import contractCode from '../../contracts/Zero_Contract_v4f.tz';
 
     // Network helper for throttled sleep.  Used when polling for the
     // contract address if Taquito fails to populate it.
@@ -234,7 +235,7 @@ styledPkg.default;
       md.name        = name;
       md.symbol      = symbol;
       md.description = description;
-      md.version     = 'ZeroContractV4';
+      md.version     = 'ZeroContractV4F';
       md.license     = license;
       md.authors     = normArray(authors);
       md.homepage    = homepage;

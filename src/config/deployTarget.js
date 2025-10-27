@@ -36,7 +36,7 @@
 // 'mainnet' or 'ghostnet' as appropriate; deployTarget.js is the sole
 // diverging file between network branches.  During development, the
 // scripts/setTarget.js helper rewrites this line to toggle networks.
-export const TARGET = 'ghostnet';
+export const TARGET = 'mainnet';
 
 // ---------------------------------------------------------------------------
 // Per-network configuration
@@ -176,7 +176,7 @@ export const FACTORY_ADDRESSES = {
   // ghostnet: 'KT1H8myPr7EmVPFLmBcnSxgiYigdMKZu3ayw',		// Old v4e with broken update_operators
   // mainnet:  'KT1VbzbUiswEqCsE9ugTFsG1nwh3XwwEq6D2',	// Old v4e with broken update_operators
   ghostnet:	'KT1URrxfKGuTu5Medhwfm35vc9zWtvWcmX1G',
-  mainnet:	'KT1DTMB2GqNiHPowpPreeNsgSpkanxUar27f ',
+  mainnet:	'KT1DTMB2GqNiHPowpPreeNsgSpkanxUar27f',
 };
 
 // Selected factory address based on TARGET.  Use this constant to call

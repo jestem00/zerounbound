@@ -24,7 +24,7 @@ const MAX_DATA_URI_EDIT_BYTES = 49_152;          // ~48 KiB soft cap (edit flo
 /*──────── shared length caps ──*/
 export const MAX_ATTR        = 10;
 export const MAX_ATTR_N      = 64;
-export const MAX_ATTR_V      = 128;
+export const MAX_ATTR_V      = 164;
 export const MAX_TAGS        = 30;
 export const MAX_TAG_LEN     = 64;
 export const MAX_ROY_PCT     = 25;

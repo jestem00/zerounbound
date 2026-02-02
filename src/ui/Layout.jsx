@@ -21,7 +21,7 @@ const Main = styled.main`
   flex-direction: column;
   /* Removed overflow-y:auto to avoid nested scrollbars and unify scroll region */
   overflow-x: hidden;
-  overscroll-behavior: contain;
+  overscroll-behavior: auto;
   scrollbar-gutter: stable;
 `;
 

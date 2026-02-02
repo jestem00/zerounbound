@@ -50,7 +50,7 @@ const Wrap = styled.div`
   min-height: calc(var(--vh) - var(--hdr,0));
   overflow-y: auto;
   overflow-x: hidden;
-  overscroll-behavior: contain;
+  overscroll-behavior: auto;
   scrollbar-gutter: stable;
   padding: .8rem clamp(.4rem, 1.5vw, 1.2rem) 1.8rem;
   display: flex;

@@ -4,7 +4,7 @@
   Rev :    r1 2025-09-07
   Summary: canonical head/tail slicer and diff helpers
 ──────────────────────────────────────────────────────────────*/
-import { bytes2Char } from '@taquito/utils';
+import { stringToBytes } from '@taquito/utils';
 
 /*──────── constants ─────*/
 export const SLICE_MAX_BYTES   = 20_000;         /* optimistic default */
@@ -45,7 +45,7 @@ export async function computeOnChainPrefix({ tzktBase, contract, tokenId }) {
   try {
     const rows = await (await fetch(url)).json();
     let art = rows?.[0]?.metadata?.artifactUri || '';
-    if (art && /^0x[0-9a-fA-F]+$/.test(art)) art = bytes2Char(art);
+    if (art && /^0x[0-9a-fA-F]+$/.test(art)) art = stringToBytes(art);
     return String(art || '');
   } catch {
     return '';

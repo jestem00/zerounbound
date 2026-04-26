@@ -10,7 +10,7 @@
 */
 
 import sharp from 'sharp';
-import fetch from 'node-fetch';
+//import fetch from 'node-fetch';
 import path from 'path';
 import { promises as fs } from 'fs';
 

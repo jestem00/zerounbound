@@ -9,8 +9,8 @@ import { GenerateSW }       from 'workbox-webpack-plugin';
 import fs                   from 'fs';
 import path                 from 'path';
 import { fileURLToPath }    from 'url';
-import { char2Bytes }       from '@taquito/utils';
-
+//import { char2Bytes  }       from '@taquito/utils';
+import { stringToBytes } from '@taquito/utils';
 /*──────────────── helper: __dirname in ESM ────────────────*/
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -75,7 +75,7 @@ const nextConfig = {
         'contracts/metadata/views/Zero_Contract_v4_views.json',
       );
       const viewsData = fs.readFileSync(viewsPath, 'utf8');
-      const hex       = '0x' + char2Bytes(viewsData);
+      const hex       = '0x' + stringToBytes(viewsData);
       const outPath   = path.resolve(__dirname, 'src/constants/views.hex.js');
       fs.writeFileSync(outPath, `export default '${hex}';\n`);
     }

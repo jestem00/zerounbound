@@ -9,7 +9,7 @@ import React, {
 }                           from 'react';
 import styledPkg            from 'styled-components';
 import { Buffer }           from 'buffer';
-import { char2Bytes }       from '@taquito/utils';
+import { stringToBytes }       from '@taquito/utils';
 import { OpKind }           from '@taquito/taquito';
 
 import PixelHeading         from '../PixelHeading.jsx';
@@ -209,7 +209,7 @@ export default function EditContractMetadata({
       try {
         const c  = await toolkit.contract.at(contractAddress);
         const tp = await c.methods.edit_contract_metadata(
-          `0x${char2Bytes(JSON.stringify(slim))}`,
+          `0x${stringToBytes(JSON.stringify(slim))}`,
         ).toTransferParams();
         setParams([{ kind: OpKind.TRANSACTION, ...tp }]);
       } catch { setParams([]); }
@@ -222,7 +222,7 @@ export default function EditContractMetadata({
   const submit = async () => {
     const live = formRef.current;               // freshest snapshot
     const finalOrdered = buildOrdered(live);
-    const payload = `0x${char2Bytes(JSON.stringify(finalOrdered))}`;
+    const payload = `0x${stringToBytes(JSON.stringify(finalOrdered))}`;
 
     if (disabled) { snack('Fix highlighted errors first', 'error'); return; }
 

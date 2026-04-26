@@ -11,7 +11,7 @@ import React, {
   useCallback, useEffect, useState, useMemo,
 } from 'react';
 import styledPkg           from 'styled-components';
-import { char2Bytes }      from '@taquito/utils';
+import { stringToBytes }      from '@taquito/utils';
 
 import PixelHeading        from '../PixelHeading.jsx';
 import PixelButton         from '../PixelButton.jsx';
@@ -201,7 +201,7 @@ export default function RepairUriV4a({
     const val = meta[uriKey];
     const hx  = typeof val === 'string' && val.startsWith('0x')
       ? val.trim()
-      : `0x${char2Bytes(val || '')}`;
+      : `0x${stringToBytes(val || '')}`;
     setOrigHex(hx);
   }, [uriKey, meta]);
 
@@ -230,7 +230,7 @@ export default function RepairUriV4a({
   useEffect(() => {
     if (!dataUrl || !origHex) return;
     const { tail, conflict, origLonger } =
-      sliceTail(origHex, `0x${char2Bytes(dataUrl)}`);
+      sliceTail(origHex, `0x${stringToBytes(dataUrl)}`);
 
     if (conflict) {
       setConflictOpen(true);

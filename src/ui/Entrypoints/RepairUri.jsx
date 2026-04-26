@@ -23,7 +23,7 @@ import TokenMetaPanel from '../TokenMetaPanel.jsx';
 import LoadingSpinner from '../LoadingSpinner.jsx';
 import IntegrityBadge from '../IntegrityBadge.jsx';
 
-import { char2Bytes } from '@taquito/utils';
+import { stringToBytes } from '@taquito/utils';
 import { jFetch } from '../../core/net.js';
 import { useWalletContext } from '../../contexts/WalletContext.js';
 import {
@@ -57,9 +57,9 @@ const WARN_TEXT = `Files beyond ${WARN_MB}MB are experimental, attempt at your o
 /**
  * Convert a full data:URI string into hex of its bytes.
  * Always encodes the entire URI as string (no base64 decode).
- * Falls back to char2Bytes for non-data URIs.
+ * Falls back to stringToBytes for non-data URIs.
  */
-const dataUriToHex = (u = '') => char2Bytes(u);
+const dataUriToHex = (u = '') => stringToBytes(u);
 
 /* Normalize data:URI headers to avoid false diffs (e.g., audio/mp3 vs audio/mpeg,
    charset spacing/order differences). No decoding of base64 payload. */
@@ -325,7 +325,7 @@ export default function RepairUri({
     const val = meta[uriKey];
     const hx  = typeof val === 'string' && val.startsWith('0x')
       ? val.trim()
-      : `0x${char2Bytes(val || '')}`;
+      : `0x${stringToBytes(val || '')}`;
     setOrigHex(hx);
   }, [uriKey, meta]);
 
@@ -390,7 +390,7 @@ export default function RepairUri({
       try {
         const onChainStr = Buffer.from(origHex.slice(2), 'hex').toString('utf8');
         const norm = normalizeDataUri(onChainStr);
-        origHexNorm = `0x${char2Bytes(norm)}`;
+        origHexNorm = `0x${stringToBytes(norm)}`;
       } catch {}
 
       const { tail: t, conflict: c, origLonger: ol } = sliceTail(origHexNorm, uploadedHex, sliceSize, offset);

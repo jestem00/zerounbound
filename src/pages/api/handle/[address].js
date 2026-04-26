@@ -9,7 +9,7 @@
            If no handle is found, returns a shortened Tezos address.
 */
 
-import fetch from 'node-fetch';
+//import fetch from 'node-fetch';
 
 // In-memory cache
 const CACHE = new Map(); // address -> { handle, alias, exp }

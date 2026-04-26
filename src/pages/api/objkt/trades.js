@@ -6,7 +6,7 @@
            browser CORS. Returns a normalized list of trades.
 */
 
-import fetch from 'node-fetch';
+//import fetch from 'node-fetch';
 
 export default async function handler(req, res) {
   const { fa2, tokenId } = req.query || {};

@@ -31,3 +31,4 @@ summarized_files/
 # ensure workflow & templates are committed
 !.github/
 # ignore workflow runs
+.yarn/install-state.gz

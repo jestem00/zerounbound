@@ -1,18 +1,19 @@
-﻿/*
+/*
   Developed by @jams2blues with love for the Tezos community
   File:    src/contexts/WalletContext.js
-  Rev :    r1025   2025â€‘07â€‘29
-  Summary: synchronise wallet state and expose refresh() helper.  Updated
-           to use DEFAULT_NETWORK from deployTarget.js and delegate
-           fastest RPC selection to chooseFastestRpc().  Maintains the
-           matrixNodes: [] workaround for Temple wallet and ensures the
-           context remains compatible with the new contract factory.
-
+  Rev :    r1026   2025-08-05
+  Summary: Use BEACON_NETWORK_TYPE from deployTarget.js for all Beacon
+           network.type fields.  Fixes Temple 'Parameters incorrect' error
+           caused by passing 'ghostnet' when the active testnet is now
+           shadownet.  NetworkType.GHOSTNET is deprecated in Taquito
+           v24+; the correct value is 'shadownet'.  mismatch detection
+           also updated to compare against BEACON_NETWORK_TYPE.
+ 
   A simplified wallet context for ZeroUnbound.  We explicitly
   disable P2P transports by setting `matrixNodes: []` when
   constructing the BeaconWallet.  This forces Beacon to
-  communicate via the browser extension, fixing Templeâ€™s
-  â€œReceiving end does not existâ€ error.  The context manages the
+  communicate via the browser extension, fixing Temple’s
+  “Receiving end does not exist” error.  The context manages the
   TezosToolkit and BeaconWallet instances, restores existing
   sessions, and exposes connect/disconnect and reveal helpers.
 */
@@ -28,12 +29,13 @@ import React, {
 } from 'react';
 import { TezosToolkit } from '@taquito/taquito';
 import { BeaconWallet }  from '@taquito/beacon-wallet';
-import { DEFAULT_NETWORK, FALLBACK_RPCS } from '../config/deployTarget.js';
+//import { DEFAULT_NETWORK, FALLBACK_RPCS, NETWORK_LABEL } from '../config/deployTarget.js';
+import { DEFAULT_NETWORK, FALLBACK_RPCS, NETWORK_LABEL, BEACON_NETWORK_TYPE } from '../config/deployTarget.js'; // This has been added for the net Taquito with ghostnet deprecated
 import { chooseFastestRpc } from '../utils/chooseFastestRpc.js';
 
 /* constants */
 const APP_NAME      = 'ZeroUnbound.art';
-const BALANCE_FLOOR = 500_000;     /* 0.5Â êœ© mutez */
+const BALANCE_FLOOR = 500_000;     /* 0.5 ꜩ mutez */
 
 /* context helpers */
 const WalletCtx = createContext(null);
@@ -65,6 +67,7 @@ export function WalletProvider({ children, initialNetwork = DEFAULT_NETWORK }) {
     setConn(true);
     const netType = (acc.network?.type || '').toLowerCase();
     setMis(netType !== network);
+	setMis(netType !== BEACON_NETWORK_TYPE); // This has been added for the net Taquito with ghostnet deprecated
     try {
       const [mgrKey, balance] = await Promise.all([
         tkRef.current.rpc.getManagerKey(acc.address).catch(() => null),
@@ -96,18 +99,22 @@ export function WalletProvider({ children, initialNetwork = DEFAULT_NETWORK }) {
 
       try { walletRef.current = new BeaconWallet({
         name            : APP_NAME,
-        preferredNetwork: network,
+        // preferredNetwork: network,
+		preferredNetwork: BEACON_NETWORK_TYPE, // Added to work with new Taquito/Airgap replacements
+		network         : { type: BEACON_NETWORK_TYPE, rpcUrl: rpcRef.current }, // Added to work with new Taquito/Airgap replacements
         colorMode       : 'dark',
         // Disable P2P transports for Temple wallet.  When
         // matrixNodes is an empty array, Beacon attempts to
         // communicate exclusively with browser extensions via
-        // postMessage.  This prevents â€œCould not establish
-        // connectionâ€ errors and ensures the extension handles
+        // postMessage.  This prevents “Could not establish
+        // connection” errors and ensures the extension handles
         // large origination requests properly.
         matrixNodes     : [],
       }); } catch { walletRef.current = new BeaconWallet({
         name            : APP_NAME,
-        preferredNetwork: network,
+        //preferredNetwork: network,
+		preferredNetwork: BEACON_NETWORK_TYPE, // Added to work with new Taquito/Airgap replacements
+		network         : { type: BEACON_NETWORK_TYPE, rpcUrl: rpcRef.current }, // Added to work with new Taquito/Airgap replacements
         colorMode       : 'dark',
       }); }
       // no metrics
@@ -142,16 +149,18 @@ export function WalletProvider({ children, initialNetwork = DEFAULT_NETWORK }) {
     let acc = await walletRef.current.client.getActiveAccount().catch(() => null);
     if (acc) {
       const netType = (acc.network?.type || '').toLowerCase();
-      if (netType !== network) {
+      // if (netType !== network) { // Taquito upgrade
+	  if (netType !== BEACON_NETWORK_TYPE) {
         await disconnect();
         acc = null;
       }
     }
     if (!acc) {
       try {
-        await walletRef.current.requestPermissions({
-          network: { type: network, rpcUrl: rpcRef.current },
-        });
+		  await walletRef.current.requestPermissions();
+        //await walletRef.current.requestPermissions({
+        //  network: { type: network, rpcUrl: rpcRef.current },
+        //});
       } catch (err) {
         const msg = String(err?.message || err).toLowerCase();
         if (msg.includes('parameters_invalid') || msg.includes('parameters invalid')) {
@@ -159,14 +168,18 @@ export function WalletProvider({ children, initialNetwork = DEFAULT_NETWORK }) {
           try {
             const alt = new BeaconWallet({
               name            : APP_NAME,
-              preferredNetwork: network,
+              //preferredNetwork: network,
+			  preferredNetwork: BEACON_NETWORK_TYPE,	// Add this to work with the new taquito/airgap replacement
+			  network         : { type: BEACON_NETWORK_TYPE, rpcUrl: rpcRef.current },  // Add this to work with the new taquito/airgap replacement
               colorMode       : 'dark',
             });
             walletRef.current = alt;
             tkRef.current.setWalletProvider(alt);
-            await alt.requestPermissions({
-              network: { type: network, rpcUrl: rpcRef.current },
-            });
+			// Add this to work with the new taquito/airgap replacement
+			await alt.requestPermissions();			
+            //await alt.requestPermissions({
+            //  network: { type: network, rpcUrl: rpcRef.current },
+            //});
           } catch (e2) { throw e2; }
         } else { throw err; }
       }

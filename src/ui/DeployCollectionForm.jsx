@@ -12,7 +12,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import styledPkg from 'styled-components';
-import { char2Bytes } from '@taquito/utils';
+import { stringToBytes } from '@taquito/utils';
 import viewsJson from '../../contracts/metadata/views/Zero_Contract_v4_views.json';
 
 import MintUpload    from './Entrypoints/MintUpload.jsx';
@@ -113,7 +113,7 @@ export default function DeployCollectionForm({ onDeploy }) {
 
   /* baseline meta (no thumbnail) */
   const baseBytes = useMemo(() => (
-    char2Bytes(JSON.stringify({ ...metaBase, imageUri: '' })).length / 2
+    stringToBytes(JSON.stringify({ ...metaBase, imageUri: '' })).length / 2
   ), [metaBase]);
 
   /* per‑form thumbnail limit */

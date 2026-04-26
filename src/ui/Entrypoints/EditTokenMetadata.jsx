@@ -10,7 +10,7 @@ import React, {
 } from 'react';
 import styledPkg, { createGlobalStyle } from 'styled-components';
 import { MichelsonMap } from '@taquito/michelson-encoder';
-import { char2Bytes } from '@taquito/utils';
+import { stringToBytes } from '@taquito/utils';
 import { OpKind } from '@taquito/taquito';
 import { Buffer } from 'buffer';
 
@@ -567,7 +567,7 @@ export default function EditTokenMetadata({
   const diffMap = useMemo(() => {
     const m = new MichelsonMap();
     Object.entries(diffOnlyBlob).forEach(([k, v]) => {
-      m.set(k, '0x' + char2Bytes(enc(v)));
+      m.set(k, '0x' + stringToBytes(enc(v)));
     });
     return m;
   }, [diffOnlyBlob]);

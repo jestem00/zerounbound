@@ -6,7 +6,7 @@
 ──────────────────────────────────────────────────────────────*/
 import React, { useMemo, useState } from 'react';
 import styledPkg                    from 'styled-components';
-import { char2Bytes }               from '@taquito/utils';
+import { stringToBytes }               from '@taquito/utils';
 import { OpKind }                   from '@taquito/taquito';
 
 import PixelHeading                 from '../PixelHeading.jsx';
@@ -60,7 +60,7 @@ export default function UpdateContractMetadatav4a({
       const c = await toolkit.wallet.at(contractAddress);
       const params = [{
         kind: OpKind.TRANSACTION,
-        ...c.methods.update_contract_metadata(`0x${char2Bytes(json)}`).toTransferParams(),
+        ...c.methods.update_contract_metadata(`0x${stringToBytes(json)}`).toTransferParams(),
       }];
       const [e] = await toolkit.estimate.batch(params);
       setEst({
@@ -78,7 +78,7 @@ export default function UpdateContractMetadatav4a({
       setConfirm(false);
       setOv({ open: true, status: 'Waiting for signature…' });
       const c  = await toolkit.wallet.at(contractAddress);
-      const op = await c.methods.update_contract_metadata(`0x${char2Bytes(json)}`).send();
+      const op = await c.methods.update_contract_metadata(`0x${stringToBytes(json)}`).send();
       setOv({ open: true, status: 'Broadcasting…' });
       await op.confirmation();
       setOv({ open: true, opHash: op.opHash });

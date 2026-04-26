@@ -8,7 +8,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Buffer }          from 'buffer';
 import styledPkg           from 'styled-components';
 import { OpKind }          from '@taquito/taquito';
-import { char2Bytes }      from '@taquito/utils';
+import { stringToBytes }      from '@taquito/utils';
 
 import PixelHeading        from '../PixelHeading.jsx';
 import PixelInput          from '../PixelInput.jsx';
@@ -168,7 +168,7 @@ export default function AppendArtifactUri({
       setUrl(du);
       setMime(mimeFromFilename(file.name) || file.type || '');
 
-      const fullHex = `0x${char2Bytes(du)}`;
+      const fullHex = `0x${stringToBytes(du)}`;
       const slices = planSlices(fullHex, sliceSize);
       setPrep({
         slices,
@@ -187,7 +187,7 @@ export default function AppendArtifactUri({
     const c = await toolkit.wallet.at(contractAddress);
     const idNat = +tokenId;
 
-    let currBytes = meta?.artifactUri ? (char2Bytes(meta.artifactUri).length / 2) : 0;
+    let currBytes = meta?.artifactUri ? (stringToBytes(meta.artifactUri).length / 2) : 0;
     const currentBytesList = [];
     const ops = slices.map((hx) => {
       currentBytesList.push(currBytes);
@@ -247,7 +247,7 @@ export default function AppendArtifactUri({
     if (!prep) return;
     let startIdx = 0;
     if (meta?.artifactUri) {
-      const onChainHex = `0x${char2Bytes(meta.artifactUri)}`;
+      const onChainHex = `0x${stringToBytes(meta.artifactUri)}`;
       const { tail, conflict } = sliceTail(onChainHex, prep.fullHex);
       if (conflict) return snack('Conflict – file differs on-chain', 'error');
       startIdx = prep.slices.length - tail.length;

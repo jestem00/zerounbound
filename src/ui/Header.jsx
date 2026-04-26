@@ -273,7 +273,7 @@ export default function Header() {
             </ResetBtn>
 
             <NetSelect value={network} onChange={navNet} aria-label="Network">
-              <option value="ghostnet">Ghostnet</option>
+              <option value="ghostnet">Shadownet</option>
               <option value="mainnet">Mainnet</option>
             </NetSelect>
 

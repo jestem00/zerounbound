@@ -17,7 +17,7 @@ import styledPkg                   from 'styled-components';
 import { MichelsonMap }            from '@taquito/michelson-encoder';
 import { OpKind }                  from '@taquito/taquito';
 import { Buffer }                  from 'buffer';
-import { char2Bytes }              from '@taquito/utils';
+import { stringToBytes }              from '@taquito/utils';
 
 import PixelHeading       from '../PixelHeading.jsx';
 import PixelInput         from '../PixelInput.jsx';
@@ -287,7 +287,7 @@ export default function Mint({
   const [estimate, setEstimate] = useState(null);
 
   /* oversize slicing logic */
-  const artifactHex = useMemo(() => char2Bytes(url), [url]);
+  const artifactHex = useMemo(() => stringToBytes(url), [url]);
 
   const metaMap = useMemo(() => {
     const clean = attrs.filter((a) => a.name && a.value);
@@ -535,7 +535,7 @@ export default function Mint({
 
       const flat = packs.flat();
       const currentBytesList = [];
-      let curr = (slice0DataUri ? char2Bytes(slice0DataUri).length / 2 : 0);
+      let curr = (slice0DataUri ? stringToBytes(slice0DataUri).length / 2 : 0);
       const amt = parseInt(f.amount, 10) || 1;
       for (let i = 0; i < flat.length; i++) {
         if (flat[i].parameter.entrypoint === 'append_artifact_uri') {
@@ -544,7 +544,7 @@ export default function Mint({
           curr += appended;
         } else {
           currentBytesList.push(0); // mint ops
-          curr = (slice0DataUri ? char2Bytes(slice0DataUri).length / 2 : 0); // reset per edition
+          curr = (slice0DataUri ? stringToBytes(slice0DataUri).length / 2 : 0); // reset per edition
         }
       }
 

@@ -6,7 +6,7 @@ import PropTypes from 'prop-types';
 import styledPkg from 'styled-components';
 import PixelButton from '../PixelButton.jsx';
 import PixelConfirmDialog from '../PixelConfirmDialog.jsx';
-import { char2Bytes } from '@taquito/utils';
+import { stringToBytes } from '@taquito/utils';
 
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
 
@@ -26,7 +26,7 @@ function decodeDataUriToText(u = '') {
 }
 
 function bytesOfString(s = '') {
-  try { return char2Bytes(s).length / 2; } catch { return new TextEncoder().encode(s).length; }
+  try { return stringToBytes(s).length / 2; } catch { return new TextEncoder().encode(s).length; }
 }
 
 export default function SvgCompressor({ file, currentUrl, onChange }) {

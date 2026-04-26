@@ -10,7 +10,7 @@ import React, {
 import { Buffer }          from 'buffer';
 import styledPkg           from 'styled-components';
 import { OpKind }          from '@taquito/taquito';
-import { char2Bytes }      from '@taquito/utils';
+import { stringToBytes }      from '@taquito/utils';
 
 import PixelHeading        from '../PixelHeading.jsx';
 import PixelInput          from '../PixelInput.jsx';
@@ -171,7 +171,7 @@ export default function AppendExtraUri({
     reader.onload = async (e) => {
       const url = e.target.result;
       setDataUrl(url);
-      const hexStr = `0x${char2Bytes(url)}`;
+      const hexStr = `0x${stringToBytes(url)}`;
       const slices = planSlices(hexStr, sliceSize);
       setPrep({
         slices,
@@ -212,7 +212,7 @@ export default function AppendExtraUri({
     const idNat = +tokenId;
 
     const onChainKey = `extrauri_${finalLabel}`;
-    let currBytes = meta?.[onChainKey] ? (char2Bytes(meta[onChainKey]).length / 2) : 0;
+    let currBytes = meta?.[onChainKey] ? (stringToBytes(meta[onChainKey]).length / 2) : 0;
     const currentBytesList = [];
     const ops = slices.map((hx) => {
       currentBytesList.push(currBytes);
@@ -276,7 +276,7 @@ export default function AppendExtraUri({
   const handleAppendClick = () => {
     if (!prep) return;
     const onChainKey = `extrauri_${finalLabel}`;
-    const onChainHex = meta?.[onChainKey] ? `0x${char2Bytes(meta[onChainKey])}` : '0x';
+    const onChainHex = meta?.[onChainKey] ? `0x${stringToBytes(meta[onChainKey])}` : '0x';
     const { tail, conflict } = sliceTail(onChainHex, prep.fullHex);
     if (conflict) return snack('Conflict – on-chain bytes differ', 'error');
     const startIdx = prep.slices.length - tail.length;

@@ -36,7 +36,7 @@
 // 'mainnet' or 'ghostnet' as appropriate; deployTarget.js is the sole
 // diverging file between network branches.  During development, the
 // scripts/setTarget.js helper rewrites this line to toggle networks.
-export const TARGET = 'mainnet';
+export const TARGET = 'ghostnet';
 
 // ---------------------------------------------------------------------------
 // Per-network configuration
@@ -49,7 +49,35 @@ export const TARGET = 'mainnet';
 // mainnet defaults to 4000.
 
 const nets = {
-  ghostnet: {
+	// Really shadownet but using the ghosetnet label for ease of code
+	ghostnet: {
+	  label: 'SHADOWNET',
+	  themeColor: '#6f79ff',
+	  borderVar: '--zu-ghostnet',
+	  manifestName: 'ZeroUnbound.art - Shadownet',
+	  siteLogo: '/sprites/ghostnet_logo.svg',
+	  ctaFirst: '/deploy',
+	  description: 'Test your fully-on-chain art collection on Shadownet.',
+    siteUrl:      'https://ghostnet.zerounbound.art',
+    ogImage:      'https://ghostnet.zerounbound.art/sprites/ghostnetBanner.png',
+    startUrl:     '/?source=pwa-ghostnet',
+	  rpc: [
+		'https://rpc.shadownet.teztnets.com',
+	  ],
+	  tzkt: 'https://api.shadownet.tzkt.io',
+	  beaconNetworkType: 'shadownet', // This has been added for the net Taquito with ghostnet deprecated
+	  redirects: [
+		{
+		  source: '/:addr(kt1[0-9A-Za-z]{33})',
+		  destination: '/kt1/:addr',
+		  statusCode: 307,
+		},
+	  ],
+	  pkgName: 'zerounbound-ghostnet',
+	  devPort: 3001,
+	  ztBase: 'https://testnet.zeroterminal.art',
+	},
+  ghostnet_orig: {
     label:        'GHOSTNET',
     themeColor:   '#6f79ff',
     borderVar:    '--zu-ghostnet',
@@ -65,7 +93,8 @@ const nets = {
       'https://rpc.ghostnet.teztnets.com',
     ],
     tzkt:         'https://api.ghostnet.tzkt.io',
-    redirects: [
+    beaconNetworkType: 'ghostnet', // This has been added for the net Taquito with ghostnet deprecated
+	redirects: [
       {
         source: '/:addr(kt1[0-9A-Za-z]{33})',
         destination: '/kt1/:addr',
@@ -95,6 +124,7 @@ const nets = {
       'https://mainnet.smartpy.io',
     ],
     tzkt:         'https://api.tzkt.io',
+	beaconNetworkType: 'mainnet', // This has been added for the net Taquito with ghostnet deprecated
     redirects:    [],
     pkgName:      'zerounbound-mainnet',
     devPort:      4000,
@@ -122,6 +152,11 @@ export const OG_TITLE      = 'Zero Unbound - ZeroContract Studio';
 export const OG_IMAGE      = NET.ogImage;
 export const START_URL     = NET.startUrl;
 export const RPC_URLS      = NET.rpc;
+// The Beacon SDK NetworkType string for the active network.
+// Import NetworkType from '@taquito/beacon-wallet/types' to get the enum;
+// this constant provides the equivalent raw string so WalletContext and
+// other modules don't need a direct Beacon SDK import.
+export const BEACON_NETWORK_TYPE  = NET.beaconNetworkType; // This has been added for the net Taquito with ghostnet deprecated
 export const TZKT_API      = NET.tzkt;
 export const REDIRECTS     = NET.redirects;
 export const PACKAGE_NAME  = NET.pkgName;

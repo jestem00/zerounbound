@@ -15,7 +15,7 @@
           ordered metadata object conforming to the TZIP invariants
           (TZIP‑16 contract metadata + off‑chain views + imageUri).
         • Encode the full metadata JSON into a bytes value using
-          char2Bytes().  The factory builds the storage itself, so
+          stringToBytes().  The factory builds the storage itself, so
           only metadata is sent as the parameter; no storage pairs
           are included in this payload.
         • Call the factory’s `%deploy` entrypoint (or its
@@ -39,7 +39,7 @@
 
     import React, { useRef, useState } from 'react';
     import { MichelsonMap } from '@taquito/michelson-encoder';
-    import { char2Bytes } from '@taquito/utils';
+    import { stringToBytes } from '@taquito/utils';
 
     // UI components
     import DeployCollectionForm from '../ui/DeployCollectionForm.jsx';
@@ -161,7 +161,7 @@ styledPkg.default;
       burn_address     : 'tz1burnburnburnburnburnburnburjAYjjX',
       children         : [],
       collaborators    : [],
-      contract_id      : `0x${char2Bytes('ZeroContract')}`,
+      contract_id      : `0x${stringToBytes('ZeroContract')}`,
       destroyed_tokens : [],
       extrauri_counters: new MichelsonMap(),
       ledger           : new MichelsonMap(),
@@ -339,7 +339,7 @@ styledPkg.default;
         // this payload.
         const mdObj       = buildMetaObject(meta);
         const mdObjWithViews = { ...mdObj, views: viewsJson.views };
-        const paramBytes  = '0x' + char2Bytes(JSON.stringify(mdObjWithViews));
+        const paramBytes  = '0x' + stringToBytes(JSON.stringify(mdObjWithViews));
         // Begin origination via factory
         setErr('');
         setStep(1);
@@ -559,7 +559,7 @@ styledPkg.default;
         const mdObj       = buildMetaObject(meta);
         const mdViews     = { ...viewsJson };
         const mdObjWithViews = { ...mdObj, views: mdViews.views };
-        const headerBytes = '0x' + char2Bytes('tezos-storage:content');
+        const headerBytes = '0x' + stringToBytes('tezos-storage:content');
         const bodyHex     = utf8ToHex(JSON.stringify(mdObjWithViews), () => {});
         const md          = new MichelsonMap();
         md.set('', headerBytes);

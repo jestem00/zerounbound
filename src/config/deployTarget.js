@@ -193,10 +193,10 @@ export const URL_OBJKT_BASE = TARGET === 'ghostnet'
 // explicitly for convenience in UIs that need to construct token
 // links.  See ListTokenDialog.jsx for usage.
 export const URL_OBJKT_TOKENS_BASE = TARGET === 'ghostnet'
-  ? 'https://ghostnet.objkt.com/tokens/'
+  ? 'https://shadownet.objkt.com/tokens/'
   : 'https://objkt.com/tokens/';
 export const URL_TZKT_OP_BASE = TARGET === 'ghostnet'
-  ? 'https://ghostnet.tzkt.io/'
+  ? 'https://shadownet.tzkt.io/'
   : 'https://tzkt.io/';
 export const ZT_BASE_URL    = NET.ztBase;
 export const ZT_MINT_URL    = `${ZT_BASE_URL}/?cmd=tokendata`;
@@ -210,7 +210,8 @@ export const ztTokenUrl     = (cid, tid) =>
 export const FACTORY_ADDRESSES = {
   // ghostnet: 'KT1H8myPr7EmVPFLmBcnSxgiYigdMKZu3ayw',		// Old v4e with broken update_operators
   // mainnet:  'KT1VbzbUiswEqCsE9ugTFsG1nwh3XwwEq6D2',	// Old v4e with broken update_operators
-  ghostnet:	'KT1URrxfKGuTu5Medhwfm35vc9zWtvWcmX1G',
+  //ghostnet:	'KT1URrxfKGuTu5Medhwfm35vc9zWtvWcmX1G', // Deprecated Ghostnet
+  ghostnet: 'KT1Gw8UJEPDcS5A1PFAJWde4kouKLibhqFwa', //Current Shadownet
   mainnet:	'KT1DTMB2GqNiHPowpPreeNsgSpkanxUar27f',
 };
 
@@ -232,7 +233,7 @@ export const FACTORY_ADDRESS = FACTORY_ADDRESSES[TARGET];
 // Mainnet.  See src/core/marketplace.js for usage.
 // Marketplace - canonical ZeroSum contracts
 export const MARKETPLACE_ADDRESSES = {
-  ghostnet: 'KT19yn9fWP6zTSLPntGyrPwc7JuMHnYxAn1z',
+  //ghostnet: 'KT19yn9fWP6zTSLPntGyrPwc7JuMHnYxAn1z', // Deprecated with no Shadownet replacement
   mainnet : 'KT1Stfgf6H5N1idSBcAMAbo1BdPMi9K6E43M',
 };
 
@@ -251,12 +252,13 @@ export const MARKETPLACE_ADDRESS = MARKETPLACE_ADDRESSES[TARGET];
 // RPC_URLS is unavailable.  Both exports are consumed by
 // resolveTezosDomain.js to perform optional on-chain resolution.
 export const DOMAIN_CONTRACTS = {
-  ghostnet: 'KT1REqKBXwULnmU6RpZxnRBUgcBmESnXhCWs',
+  //ghostnet: 'KT1REqKBXwULnmU6RpZxnRBUgcBmESnXhCWs', //  Deprecated with no known shadownet replacement
   mainnet:  'KT1GBZmSxmnKJXGMdMLbugPfLyUPmuLSMwKS',
 };
 
 export const FALLBACK_RPCS = {
-  ghostnet: 'https://ghostnet.tezos.marigold.dev',
+  //ghostnet: 'https://ghostnet.tezos.marigold.dev', // Deprecated ghostnet
+  ghostnet: 'https://rpc.ankr.com/etherlink_shadownet_testnet', // Current shadownet
   mainnet:  'https://mainnet.api.tez.ie',
 };
 

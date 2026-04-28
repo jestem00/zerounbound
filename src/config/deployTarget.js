@@ -258,7 +258,7 @@ export const DOMAIN_CONTRACTS = {
 
 export const FALLBACK_RPCS = {
   //ghostnet: 'https://ghostnet.tezos.marigold.dev', // Deprecated ghostnet
-  ghostnet: 'https://rpc.ankr.com/etherlink_shadownet_testnet', // Current shadownet
+  ghostnet: 'https://rpc.shadownet.teztnets.com', // Current shadownet
   mainnet:  'https://mainnet.api.tez.ie',
 };
 

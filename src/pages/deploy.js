@@ -322,6 +322,8 @@ styledPkg.default;
        * @param {Object} meta Metadata collected from the form
        */
       async function originateViaFactory(meta) {
+		console.log('[deploy] toolkit value:', toolkit);
+		console.log('[deploy] FACTORY_ADDRESS:', FACTORY_ADDRESS);
         metaRef.current = meta;
         try {
           await ensureConnected();
@@ -347,26 +349,25 @@ styledPkg.default;
         setPct(0.25);
         try {
           const factory = await toolkit.wallet.at(FACTORY_ADDRESS);
+console.log('[deploy] factory object:', factory);
+console.log('[deploy] factory.methods:', factory?.methods);
+console.log('[deploy] factory.methods keys:', factory?.methods ? Object.keys(factory.methods) : 'NO METHODS');
           // Send call to the factory’s deploy entrypoint.  Use
           // whichever method is available: deploy, default or the
           // first entrypoint.  This guards against differences in
           // contract compilation (legacy vs modern syntax).
-          let method;
-          if (factory.methods && typeof factory.methods.deploy === 'function') {
-            method = factory.methods.deploy(paramBytes);
-          } else if (factory.methods && typeof factory.methods.default === 
- 'function') {
-            method = factory.methods.default(paramBytes);
-          } else if (factory.methods) {
-            const keys = Object.keys(factory.methods);
-            if (keys.length > 0) {
-              method = factory.methods[keys[0]](paramBytes);
-            } else {
-              throw new Error('No callable entrypoints found on factory');
-            }
-          } else {
-            throw new Error('Factory contract methods unavailable');
-          }
+		let method;
+		if (factory.methods && typeof factory.methods.deploy === 'function') {
+		  method = factory.methods.deploy(paramBytes);
+		} else if (factory.methods && typeof factory.methods.default === 'function') {
+		  method = factory.methods.default(paramBytes);
+		} else if (factory.methodsObject && typeof factory.methodsObject.deploy === 'function') {
+		  method = factory.methodsObject.deploy({ metadata_bytes: paramBytes });
+		} else if (factory.methodsObject && typeof factory.methodsObject.default === 'function') {
+		  method = factory.methodsObject.default(paramBytes);
+		} else {
+		  throw new Error('Factory contract methods unavailable');
+		}
           const op = await method.send();
           setStep(2);
           setLabel('Waiting for confirmation');

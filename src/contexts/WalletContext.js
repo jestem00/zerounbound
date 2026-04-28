@@ -128,7 +128,8 @@ export function WalletProvider({ children, initialNetwork = DEFAULT_NETWORK }) {
       // Silent restore
       const acc = await walletRef.current.client.getActiveAccount().catch(() => null);
       if (acc) await sync();
-
+console.log('[WalletContext] init complete, tkRef.current:', tkRef.current);
+console.log('[WalletContext] useMemo will snapshot toolkit as:', tkRef.current);
     })();
     initRef.current = p;
     await p;
@@ -203,27 +204,27 @@ export function WalletProvider({ children, initialNetwork = DEFAULT_NETWORK }) {
     return op.opHash;
   }, [address, needsFunds]);
 
-  const value = useMemo(() => ({
-    tezos:             tkRef.current,
-    toolkit:           tkRef.current,
-    wallet:            walletRef.current,
-    rpcUrl:            rpcRef.current,
-    network, address,
-    isWalletConnected: connected,
-    connect, disconnect,
-    networkMismatch:   mismatch,
-    needsReveal, needsFunds,
-    revealAccount,
-    // expose sync helper so external components (e.g. Header) can
-    // force a refresh of the wallet state when a stale session is detected
-    refresh:           sync,
-  }), [
-    network, address, connected, mismatch,
-    needsReveal, needsFunds, connect,
-    disconnect, revealAccount,
-    // include sync in dependencies to ensure memo invalidation when it changes
-    sync,
-  ]);
+	const value = useMemo(() => {
+	  console.log('[WalletContext] useMemo re-running, tkRef.current:', tkRef.current);
+	  return {
+		tezos:             tkRef.current,
+		toolkit:           tkRef.current,
+		wallet:            walletRef.current,
+		rpcUrl:            rpcRef.current,
+		network, address,
+		isWalletConnected: connected,
+		connect, disconnect,
+		networkMismatch:   mismatch,
+		needsReveal, needsFunds,
+		revealAccount,
+		refresh:           sync,
+	  };
+	}, [
+	  network, address, connected, mismatch,
+	  needsReveal, needsFunds, connect,
+	  disconnect, revealAccount,
+	  sync,
+	]);
 
   return (
     <WalletCtx.Provider value={value}>

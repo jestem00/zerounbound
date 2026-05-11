@@ -3,9 +3,6 @@
   Rev:  r2
   Summary: Correct count UI; 10+ new cards per click; smoother scan-ahead. */
 
-
-//*** Do we need to pass networkKey to all normalizeAndAcceptToken(r)? It was added when the switch was made to on-chain storage retrieval over tzkt calls ***//
-
 import React, {
   useCallback,
   useEffect,
@@ -25,7 +22,6 @@ import { useWalletContext }                 from '../../contexts/WalletContext.j
 import { jFetch }                           from '../../core/net.js';
 import { TZKT_API, NETWORK_KEY }            from '../../config/deployTarget.js';
 import decodeHexFields                      from '../../utils/decodeHexFields.js';
-import fetchOnchainMetadata 				from '../../utils/fetchOnchainMetadata';
 import hashMatrix                           from '../../data/hashMatrix.json';
 // IDB cache intentionally not used on explore/tokens to avoid stale grids
 import listLiveTokenIds                     from '../../utils/listLiveTokenIds.js';
@@ -174,47 +170,12 @@ const ALLOWED_TYPE_HASHES_STR = [...ALLOWED_TYPE_HASHES].join(',');
 const PER_CONTRACT_CHUNK = 18;
 
 /** decode + accept a token row into the UI shape, with hazard/preview guard. */
-// ASYNC VERSION IS NEW TO PULL METADATA FROM THE BLOCKCHAIN //
-async function normalizeAndAcceptToken(row, networkKey = 'mainnet') {
-  if (!row) return null;
-  const supply = Number(row.totalSupply ?? row.total_supply);
-  if (Number.isFinite(supply) && supply <= 0) return null;
-
-  const addr = String(row.contract?.address || row.contract || '').trim();
-  const tokenId = Number(row.tokenId);
-
-  // 1. Try on-chain FIRST
-  let md = await fetchOnchainMetadata(addr, tokenId, networkKey);
-  
-  // 2. Fallback to TzKT if on-chain failed/empty
-  /* TEMPORARY HIDE TO TEST ONCHAIN
-  if (!md || Object.keys(md).length === 0) {
-    md = row.metadata || {};
-    try { md = decodeHexFields(md); } catch { /* noop * / }
-  } */
-  
-  if (!hasRenderablePreview(md)) {
-    md = { ...md, __placeholder: true };
-  }
-
-  return {
-    contract: addr,
-    tokenId,
-    metadata: md,
-    holdersCount: row.holdersCount,
-    creator: row.creator,
-    firstMinter: row.firstMinter,
-    firstTime: row.firstTime,
-  };
-}
-// PREVIOUS VERSION THAT PULLS MEATADATA FROM TZKT //
-/*
 function normalizeAndAcceptToken(row) {
   if (!row) return null;
   const supply = Number(row.totalSupply ?? row.total_supply);
   if (Number.isFinite(supply) && supply <= 0) return null;
   let md = row.metadata || {};
-  try { md = decodeHexFields(md); } catch { / * best effort * / }
+  try { md = decodeHexFields(md); } catch { /* best effort */ }
   if (!hasRenderablePreview(md)) {
     md = { ...md, __placeholder: true };
   }
@@ -229,7 +190,6 @@ function normalizeAndAcceptToken(row) {
     firstTime: row.firstTime,
   };
 }
-*/
 
 /** simple integer formatter with thin-space groupings */
 function fmtInt(n) {
@@ -489,7 +449,7 @@ export default function ExploreTokens() {
         } catch { continue; }
       }
 
-      const t = await normalizeAndAcceptToken(r, networkKey);
+      const t = normalizeAndAcceptToken(r);
       if (!t) continue;
 
       // narrow to one collection if requested
@@ -613,7 +573,7 @@ export default function ExploreTokens() {
         for (const r of rows || []) {
           let typeHash = Number(r.contract?.typeHash ?? r['contract.typeHash'] ?? r.typeHash ?? Number.NaN);
           if (Number.isFinite(typeHash) && !ALLOWED_TYPE_HASHES.has(typeHash)) continue;
-          const token = await normalizeAndAcceptToken(r, networkKey);
+          const token = normalizeAndAcceptToken(r);
           if (!token) continue;
           try { Object.defineProperty(token, '__origin', { value: 'contract', enumerable: false }); } catch { /* ignore */ }
           const key = `${token.contract}:${token.tokenId}`;
@@ -669,7 +629,7 @@ export default function ExploreTokens() {
                 if (!allow.has(addr)) continue;
               } catch { continue; }
             }
-            const t = await normalizeAndAcceptToken(r, networkKey);
+            const t = normalizeAndAcceptToken(r);
             if (!t) continue;
             try { Object.defineProperty(t, '__origin', { value: origin, enumerable: false }); } catch { /* ignore */ }
             const key = `${t.contract}:${t.tokenId}`;
@@ -934,14 +894,3 @@ export default function ExploreTokens() {
    - Kept initial scan snappy (=24 accepted) for a full first impression.
    - Preserved perfect admin-filter behaviour; left title "Tokens by ... (N)".
    - Lint-clean: trimmed unused imports/vars; no dead code. */
-
-
-
-
-
-
-
-
-
-
-

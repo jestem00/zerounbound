@@ -195,7 +195,7 @@ export default function AppendArtifactUri({
       currBytes += appended;
       return {
         kind: OpKind.TRANSACTION,
-        ...c.methods.append_artifact_uri(idNat, hx).toTransferParams(),
+        ...c.methodsObject.append_artifact_uri({ token_id: idNat, value: hx }).toTransferParams(),
       };
     });
     return { ops, currentBytesList };
@@ -289,7 +289,7 @@ export default function AppendArtifactUri({
     try {
       setOv({ open: true, status: 'Waiting for signature…' });
       const c = await toolkit.wallet.at(contractAddress);
-      const op = await c.methods.clear_uri(+tokenId, 'artifactUri').send();
+      const op = await c.methodsObject.clear_uri({ token_id: +tokenId, key: 'artifactUri' }).send();
       setOv({ open: true, status: 'Broadcasting…' });
       await op.confirmation();
       setHasArt(false);

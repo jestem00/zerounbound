@@ -25,7 +25,7 @@ import { getIntegrityInfo } from '../constants/integrityBadges.js';
 import IntegrityBadge from './IntegrityBadge.jsx';
 import { resolveTezosDomain } from '../utils/resolveTezosDomain.js';
 import { shortAddr } from '../utils/formatAddress.js';
-import { NETWORK_KEY } from '../config/deployTarget.js';
+import { NETWORK_KEY, TZKT_API } from '../config/deployTarget.js';
 
 // styled-components factory helper; styledPkg.default on latest
 const styled = typeof styledPkg === 'function' ? styledPkg : styledPkg.default;
@@ -158,8 +158,8 @@ export default function TokenMetaPanel({
   contractVersion: _contractVersion = '',
   onRemove,
 }) {
-  // Access wallet address and network from context. Default to ghostnet.
-  const { address: wallet, network = 'ghostnet' } = useWalletContext() || {};
+  // Access wallet address and network from context.
+  const { address: wallet, network = NETWORK_KEY } = useWalletContext() || {};
 
   /* Normalize metadata into a plain object.  If meta is null or not
    * an object, use an empty object to avoid null checks.  This must be
@@ -361,9 +361,7 @@ export default function TokenMetaPanel({
    * This runs on contract or network changes. */
   useEffect(() => {
     if (!contractAddress) return;
-    const base = network === 'mainnet'
-      ? 'https://api.tzkt.io/v1'
-      : 'https://api.ghostnet.tzkt.io/v1';
+    const base = `${TZKT_API}/v1`;
     (async () => {
       try {
         const st = await jFetch(`${base}/contracts/${contractAddress}/storage`);
@@ -388,9 +386,7 @@ export default function TokenMetaPanel({
       return;
     }
 
-    const base = network === 'mainnet'
-      ? 'https://api.tzkt.io/v1'
-      : 'https://api.ghostnet.tzkt.io/v1';
+    const base = `${TZKT_API}/v1`;
 
     const sumBalances = async () => {
       const rows = await jFetch(
@@ -566,7 +562,7 @@ export default function TokenMetaPanel({
                     warning
                     title="delete uri"
                     style={{ marginLeft: 'auto' }}
-                    onClick={() => onRemove(k)}
+                    onClick={() => { console.log('k type:', typeof k, 'k value:', k); onRemove(k); }}
                   >
                     DELETE
                   </PixelButton>

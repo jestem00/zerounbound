@@ -220,13 +220,13 @@ export default function AppendExtraUri({
       currBytes += appended;
       return {
         kind: OpKind.TRANSACTION,
-        ...c.methods.append_extrauri(
-          desc.trim() || 'extra',
-          finalLabel,
-          name.trim() || 'asset',
-          idNat,
-          hx,
-        ).toTransferParams(),
+		...c.methodsObject.append_extrauri({
+		  description: desc.trim() || 'extra',
+		  label: finalLabel,
+		  name: name.trim() || 'asset',
+		  token_id: idNat,
+		  value: hx,
+		}).toTransferParams(),
       };
     });
     return { ops, currentBytesList };
@@ -318,7 +318,7 @@ export default function AppendExtraUri({
     try {
       setOv({ open: true, status: 'Waiting for signature…' });
       const c = await toolkit.wallet.at(contractAddress);
-      const op = await c.methods.clear_uri(+tokenId, key).send();
+      const op = await c.methodsObject.clear_uri({ token_id: +tokenId, key }).send();
       setOv({ open: true, status: 'Broadcasting…' });
       await op.confirmation();
       setExisting((e) => e.filter((x) => x.key !== key));

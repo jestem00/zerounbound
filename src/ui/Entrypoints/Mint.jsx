@@ -27,6 +27,7 @@ import MintPreview        from './MintPreview.jsx';
 import OperationOverlay   from '../OperationOverlay.jsx';
 import OperationConfirmDialog from '../OperationConfirmDialog.jsx';
 import PixelConfirmDialog    from '../PixelConfirmDialog.jsx';
+import { estimateMintCost } from '../../core/mintEstimator.js';
 
 import { useWalletContext } from '../../contexts/WalletContext.js';
 import {
@@ -518,7 +519,7 @@ export default function Mint({
       // user to continue without simulation errors.
       // Determine if this is a v2 contract.  Strip any leading “v” so that
       // both "2a" and "v2a" are recognised.
-      const isV2 = unprefixedVer.startsWith('2');
+      /*const isV2 = unprefixedVer.startsWith('2');
       if (isV2) {
         const flat        = packs.flat();
         const opCount     = flat.length || 1;
@@ -566,6 +567,7 @@ export default function Mint({
         amt,
       );
       setEstimate({ feeTez: toTez(feeMutez), storageTez: toTez(burnMutez) });
+
     } catch (e) {
       snack(isSimTimeout(e) ? 'Node refused simulation – heuristic used' : e.message, 'warning');
       const feeMutez  = (batches?.length || 1) * μBASE_TX_FEE;
@@ -575,6 +577,19 @@ export default function Mint({
         parseInt(f.amount, 10) || 1,
       );
       setEstimate({ feeTez: toTez(feeMutez), storageTez: toTez(burnMutez) });
+    } finally {
+      setIsEstim(false);
+    }
+	*/
+	
+      const est = estimateMintCost(
+        metaBytes + META_PAD_BYTES,
+        appendSlices,
+        parseInt(f.amount, 10) || 1,
+      );
+      setEstimate({ feeTez: est.feeTez, storageTez: est.storageTez });
+    } catch (e) {
+      snack(e.message, 'error');
     } finally {
       setIsEstim(false);
     }
@@ -624,7 +639,7 @@ export default function Mint({
           const hx = appendSlices[s - 1];
           out.push([{
             kind: OpKind.TRANSACTION,
-            ...(c.methods.append_artifact_uri(tokenId, hx).toTransferParams()),
+            ...c.methodsObject.append_artifact_uri({ token_id: tokenId, value: hx }).toTransferParams()
           }]);
         }
 

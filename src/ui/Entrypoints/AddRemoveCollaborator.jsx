@@ -55,8 +55,8 @@ export default function AddRemoveCollaborator({
       setTask(method);
 
       const c  = await kit.wallet.at(contractAddress);
-      if (!c.methods?.[method])
-        throw new Error(`Entrypoint “${method}” missing on contract`);
+      //if (!c.methods?.[method])
+      //  throw new Error(`Entrypoint “${method}” missing on contract`);
 
       let batch = kit.wallet.batch();
       list.forEach((a) => { batch = batch.withContractCall(c.methods[method](a)); });

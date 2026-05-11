@@ -60,10 +60,12 @@ export default function AddRemoveParentChild({
       setTask(ep);
 
       const c = await kit.wallet.at(contractAddress);
-      if (!c.methods?.[ep]) return snack(`Entrypoint “${ep}” missing`, 'error');
+      //if (!c.methodsObject?.[ep]) return snack(`Entrypoint “${ep}” missing`, 'error');
 
       let b = kit.wallet.batch();
-      addrs.forEach((a) => { b = b.withContractCall(c.methods[ep](a)); });
+		addrs.forEach((a) => {
+		  b = b.withContractCall(c.methods[ep](a));
+		});
 
       const op = await b.send();
       snack('Waiting for confirmation…');

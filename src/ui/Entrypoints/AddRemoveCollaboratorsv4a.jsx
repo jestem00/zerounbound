@@ -54,7 +54,7 @@ export default function AddRemoveCollaboratorsv4a({
       setBusy(true);
       const c  = await toolkit.wallet.at(contractAddress);
       /* Michelson set<address> – Taquito accepts plain JS array */
-      const op = await c.methods[ep](addrs).send();
+      const op = await c.methodsObject[ep]({ collaborators: addrs }).send();
       snack('Waiting for confirmation…');
       await op.confirmation();
       snack('Done', 'success');

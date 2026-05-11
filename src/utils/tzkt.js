@@ -4,13 +4,11 @@
   Summary: TzKT helpers – safe base URL + batched fetch + discovery helpers. */
 
 import { jFetch } from '../core/net.js';
+import { TZKT_API } from '../config/deployTarget.js';
 
 /** Choose correct TzKT base for a network. */
-export function tzktBase(network = 'mainnet') {
-  const net = String(network || '').toLowerCase();
-  return net === 'mainnet'
-    ? 'https://api.tzkt.io/v1'
-    : 'https://api.ghostnet.tzkt.io/v1';
+export function tzktBase() {
+  return `${TZKT_API}/v1`;
 }
 
 /**

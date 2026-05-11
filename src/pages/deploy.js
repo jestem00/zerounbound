@@ -349,9 +349,6 @@ styledPkg.default;
         setPct(0.25);
         try {
           const factory = await toolkit.wallet.at(FACTORY_ADDRESS);
-console.log('[deploy] factory object:', factory);
-console.log('[deploy] factory.methods:', factory?.methods);
-console.log('[deploy] factory.methods keys:', factory?.methods ? Object.keys(factory.methods) : 'NO METHODS');
           // Send call to the factory’s deploy entrypoint.  Use
           // whichever method is available: deploy, default or the
           // first entrypoint.  This guards against differences in

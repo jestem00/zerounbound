@@ -128,8 +128,6 @@ export function WalletProvider({ children, initialNetwork = DEFAULT_NETWORK }) {
       // Silent restore
       const acc = await walletRef.current.client.getActiveAccount().catch(() => null);
       if (acc) await sync();
-console.log('[WalletContext] init complete, tkRef.current:', tkRef.current);
-console.log('[WalletContext] useMemo will snapshot toolkit as:', tkRef.current);
     })();
     initRef.current = p;
     await p;
@@ -205,7 +203,6 @@ console.log('[WalletContext] useMemo will snapshot toolkit as:', tkRef.current);
   }, [address, needsFunds]);
 
 	const value = useMemo(() => {
-	  console.log('[WalletContext] useMemo re-running, tkRef.current:', tkRef.current);
 	  return {
 		tezos:             tkRef.current,
 		toolkit:           tkRef.current,

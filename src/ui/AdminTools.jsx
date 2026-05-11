@@ -14,7 +14,7 @@ import registry from '../data/entrypointRegistry.json' assert { type: 'json' };
 import RenderMedia from '../utils/RenderMedia.jsx';
 import countTokens from '../utils/countTokens.js';
 import { useWalletContext } from '../contexts/WalletContext.js';
-import { NETWORK_KEY } from '../config/deployTarget.js';
+import { NETWORK_KEY, TZKT_API } from '../config/deployTarget.js';
 import { jFetch } from '../core/net.js';
 import decodeHexFields from '../utils/decodeHexFields.js';
 
@@ -44,7 +44,7 @@ const cacheCounts = (addr, net, counts) => {
 };
 
 async function tzktCounts(addr, net = 'ghostnet') {
-  const base = net === 'mainnet' ? 'https://api.tzkt.io/v1' : 'https://api.ghostnet.tzkt.io/v1';
+  const base = `${TZKT_API}/v1`;
   const raw = await jFetch(
     `${base}/contracts/${addr}/storage?select=collaborators,parents,children,active_tokens,next_token_id`,
   ).catch(() => null);

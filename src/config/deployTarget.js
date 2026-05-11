@@ -36,7 +36,7 @@
 // 'mainnet' or 'ghostnet' as appropriate; deployTarget.js is the sole
 // diverging file between network branches.  During development, the
 // scripts/setTarget.js helper rewrites this line to toggle networks.
-export const TARGET = 'ghostnet';
+export const TARGET = 'mainnet';
 
 // ---------------------------------------------------------------------------
 // Per-network configuration
@@ -181,10 +181,10 @@ export const ENABLE_OFFCHAIN_MARKET_VIEWS = false;
 
 // External site URL prefixes.  These base URLs change by network.
 export const URL_BCD_BASE = TARGET === 'ghostnet'
-  ? 'https://better-call.dev/ghostnet/'
+  ? 'https://better-call.dev/shadownet/'
   : 'https://better-call.dev/mainnet/';
 export const URL_OBJKT_BASE = TARGET === 'ghostnet'
-  ? 'https://ghostnet.objkt.com/collection/'
+  ? 'https://shadownet.objkt.com/collection/'
   : 'https://objkt.com/collection/';
 
 // Base URL for the Objkt tokens pages.  This constant points to

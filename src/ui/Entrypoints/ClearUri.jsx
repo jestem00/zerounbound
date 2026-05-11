@@ -94,6 +94,7 @@ export default function ClearUri({
 
   /* clear op */
   const clearUri = async (k) => {
+	console.log('clearUri called with:', typeof k, k);
     if (!toolkit) return snack('Connect wallet', 'error');
     try {
       setOv({ open:true, status:'Waiting for signature…' });
@@ -166,7 +167,7 @@ export default function ClearUri({
           meta={meta}
           tokenId={tokenId}
           contractAddress={contractAddress}
-          onRemove={(k) => setConfirmKey(k)}
+          onRemove={(k) => setConfirmKey(String(k))}
         />
       </div>
 

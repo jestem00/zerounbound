@@ -584,7 +584,7 @@ export default function EditTokenMetadata({
     if (paramsKeyRef.current === diffKey) return paramsRef.current;
     const p = [{
       kind: OpKind.TRANSACTION,
-      ...contractHandle.methods.edit_token_metadata(diffMap, +tokenId).toTransferParams(),
+      ...contractHandle.methodsObject.edit_token_metadata({ metadata_updates: diffMap, token_id: +tokenId }).toTransferParams(),
     }];
     paramsRef.current = p;
     paramsKeyRef.current = diffKey;
@@ -622,7 +622,7 @@ export default function EditTokenMetadata({
       if (diffMap.size === 0) return snack('No changes', 'warning');
       if (!contractHandle) return snack('Contract not ready', 'error');
       setOv({ open: true, status: 'Waiting for signature…', total: 1, current: 1 });
-      const op = await contractHandle.methods.edit_token_metadata(diffMap, +tokenId).send();
+      const op = await contractHandle.methodsObject.edit_token_metadata({ metadata_updates: diffMap, token_id: +tokenId }).send();
       setOv({ open: true, status: 'Broadcasting…', total: 1, current: 1 });
       await op.confirmation();
       setOv({ open: true, opHash: op.opHash, total: 1, current: 1 });

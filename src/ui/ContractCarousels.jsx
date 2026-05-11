@@ -388,7 +388,8 @@ const ContractCarouselsComponent = forwardRef(function ContractCarousels({ onSel
         discoverCreated(walletAddress, network),
         discoverCollaborating(walletAddress, network, { limit: 160 }),
       ]);
-    } catch (e) {
+	  console.log('[carousel] created:', created, 'collab:', collaborating);
+	} catch (e) {
       console.error('Discovery failed:', e);
       setStage('error'); setError('Discovery failed after retries. Check network.');
       return;

@@ -6,7 +6,7 @@
            – dropdowns now show *only* tokens minted by wallet
 ──────────────────────────────────────────────────────────────*/
 import { jFetch }   from '../core/net.js';
-import { TZKT_API } from '../config/deployTarget.js';
+import { TZKT_API, NETWORK_KEY } from '../config/deployTarget.js';
 
 const MEM        = new Map();                       /* ids only              */
 const MEM_NAMES  = new Map();                       /* [{id,name}]           */
@@ -16,9 +16,6 @@ const CHUNK      = 80;                              /* per‑metadata chunk    *
 const PAGE       = 10_000;                          /* TzKT hard‑cap         */
 
 /*──────── helpers ───────────────────────────────────────────*/
-const baseURL = (net = 'ghostnet') =>
-  net === 'mainnet' ? 'https://api.tzkt.io/v1'
-                    : 'https://api.ghostnet.tzkt.io/v1';
 
 const chunk = (arr, n = CHUNK) => {
   const out = [];
@@ -40,7 +37,7 @@ const chunk = (arr, n = CHUNK) => {
  */
 export default async function listLiveTokenIds(
   contract = '',
-  net = (TZKT_API.includes('ghostnet') ? 'ghostnet' : 'mainnet'),
+  net = NETWORK_KEY,
   withNames = false,
   creatorAddr = '',
 ) {
@@ -53,7 +50,7 @@ export default async function listLiveTokenIds(
     if (hit && Date.now() - hit.ts < TTL_MS) return hit.ids;
   }
 
-  const api  = baseURL(net);
+  const api = `${TZKT_API}/v1`;
   const cand = new Map();                          /* id → present?         */
 
   /*──────── balance scan (fully paginated) ────────────────*/

@@ -19,6 +19,8 @@ import LoadingSpinner     from '../ui/LoadingSpinner.jsx';
 import { useWalletContext } from '../contexts/WalletContext.js';
 import { jFetch, sleep }  from '../core/net.js';
 import hashMatrix         from '../data/hashMatrix.json' assert { type: 'json' };
+import { TZKT_API } from '../config/deployTarget.js';
+import { NETWORK_KEY } from '../config/deployTarget.js';
 
 // Dynamically import the ContractCarousels component and wrap it in
 // React.forwardRef so the parent can call refresh() on its instance.
@@ -92,10 +94,7 @@ const ActionRow = styled.div`
 `;
 
 /*──────── helpers ──────────────────────────────────────────*/
-const TZKT = {
-  ghostnet: 'https://api.ghostnet.tzkt.io/v1',
-  mainnet : 'https://api.tzkt.io/v1',
-};
+
 
 const HASH_TO_VER = Object.entries(hashMatrix)
   .reduce((o, [h, v]) => { o[Number(h)] = v.toUpperCase(); return o; }, {});
@@ -136,7 +135,7 @@ async function fetchMeta(addr = '', net = 'ghostnet') {
   const cached = getCachedMeta(addr, net);
   if (cached) return cached;
 
-  const base = `${TZKT[net]}/contracts/${addr}`;
+  const base = `${TZKT_API}/v1/contracts/${addr}`;
   try {
     const [det, bmContents, bmContent] = await Promise.allSettled([
       jFetch(base),
@@ -184,7 +183,7 @@ export async function getServerSideProps() { return { props: {} }; }
 /*════════ component ════════════════════════════════════════*/
 export default function ManagePage() {
   const { network: walletNet } = useWalletContext();
-  const network = walletNet || 'ghostnet';
+  const network = walletNet || NETWORK_KEY;
   const router      = useRouter();
 
   const [hydrated,  setHydrated ] = useState(false);

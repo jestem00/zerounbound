@@ -453,8 +453,14 @@ export default function RepairUri({
         throw new Error(`Slice too large (${appended} > ${HARD_STORAGE_LIMIT} bytes). Clear URI and re-upload.`);
       }
       const params = uriKey.toLowerCase().startsWith('extrauri_')
-        ? c.methods.append_extrauri('', label, '', idNat, hx).toTransferParams()
-        : c.methods.append_artifact_uri(idNat, hx).toTransferParams();
+        ? c.methodsObject.append_extrauri({
+		description: '',
+		label,
+		name: '',
+		token_id: idNat,
+		value: hx,
+	  }).toTransferParams()
+		: c.methodsObject.append_artifact_uri({ token_id: idNat, value: hx }).toTransferParams();
       params.gasLimit = HARD_GAS_LIMIT;
       params.storageLimit = HARD_STORAGE_LIMIT;
       return { kind: OpKind.TRANSACTION, ...params };

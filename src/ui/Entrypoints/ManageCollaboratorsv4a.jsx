@@ -95,7 +95,7 @@ export default function ManageCollaboratorsv4a({
       setBusy(true);
       const c  = await toolkit.wallet.at(contractAddress);
       /* remove_collaborators expects set<address> */
-      const op = await c.methods.remove_collaborators([addr]).send();
+      const op = await c.methodsObject.remove_collaborators([addr]).send();
       snack('Removing…', 'info');
       await op.confirmation();
       snack('Removed', 'success');

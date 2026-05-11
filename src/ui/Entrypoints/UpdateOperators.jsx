@@ -146,7 +146,7 @@ export default function UpdateOperators({
         ? { add_operator:    { owner: walletAddress, operator: addr, token_id: toNat(tokenId) } }
         : { remove_operator: { owner: walletAddress, operator: addr, token_id: toNat(tokenId) } };
 
-      const op  = await c.methods.update_operators([row]).send();
+      const op = await c.methodsObject.update_operators([row]).send();
 
       setOv({ open:true, status:'Broadcasting…' });
       await op.confirmation();

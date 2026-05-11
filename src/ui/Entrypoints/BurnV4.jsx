@@ -155,27 +155,28 @@ export default function BurnV4({
   const toNat = (v) => new BigNumber(v).toFixed();
 
   /** ZeroTerminal flow — call native burn(nat,nat) per registry (v4a/v4c/v4d). :contentReference[oaicite:3]{index=3} */
-  const burnViaEntrypoint = async (idN, amtN) => {
-    const c  = await kit.wallet.at(contractAddress);
-    const ms = c?.methods;
-    if (!ms?.burn) throw new Error('No burn entry‑point');
-    /* Try both orders just in case of legacy parameter ordering (nat,nat). */
-    let op, lastErr;
-    for (const args of [[toNat(idN), toNat(amtN)], [toNat(amtN), toNat(idN)]]) {
-      try { op = await ms.burn(...args).send(); break; }
-      catch (e) { lastErr = e; }
-    }
-    if (!op) throw lastErr || new Error('Encode failed');
-    return op;
-  };
+	const burnViaEntrypoint = async (idN, amtN) => {
+	  const c = await kit.wallet.at(contractAddress);
+	  let op = null;
+	  let lastErr = null;
+	  for (const params of [
+		{ token_id: toNat(idN), amount: toNat(amtN) },
+		{ token_id: toNat(amtN), amount: toNat(idN) },
+	  ]) {
+		try { op = await c.methodsObject.burn(params).send(); break; }
+		catch (e) { lastErr = e; }
+	  }
+	  if (!op) throw lastErr || new Error('Encode failed');
+	  return op;
+	};
 
   /** ZeroContract v4 family — no native burn; FA2 transfer → burn address. :contentReference[oaicite:4]{index=4} */
   const burnViaTransfer = async (idN, amtN) => {
     const c  = await kit.wallet.at(contractAddress);
-    return c.methods.transfer([{
-      from_: walletAddress,
-      txs  : [{ to_: BURN_ADDR, token_id: Number(idN), amount: Number(amtN) }],
-    }]).send();
+	return c.methodsObject.transfer([{
+	  from_: walletAddress,
+	  txs  : [{ to_: BURN_ADDR, token_id: Number(idN), amount: Number(amtN) }],
+	}]).send();
   };
 
   const run = async () => {

@@ -28,7 +28,7 @@ import listLiveTokenIds from '../../utils/listLiveTokenIds.js';
 import decodeHexFields, { decodeHexJson } from '../../utils/decodeHexFields.js';
 import { findInlineRenderableDataUri } from '../../utils/mediaPreview.js';
 import { jFetch }       from '../../core/net.js';
-import { TARGET }       from '../../config/deployTarget.js';
+import { TARGET, TZKT_API as TZKT_BASE } from '../../config/deployTarget.js';
 
 /* Marketplace helpers */
 import { fetchOnchainListingsForCollection } from '../../core/marketplace.js';
@@ -66,9 +66,7 @@ const Grid = styled.div`
 
 /*──────── helpers ───────────────────────────────────────────*/
 const NETWORK = TARGET?.toLowerCase().includes('mainnet') ? 'mainnet' : 'ghostnet';
-const TZKT_API = NETWORK === 'mainnet'
-  ? 'https://api.tzkt.io/v1'
-  : 'https://api.ghostnet.tzkt.io/v1';
+const TZKT_API = `${TZKT_BASE}/v1`;
 
 /*──────── component ───────────────────────────────────────*/
 export default function ContractPage() {

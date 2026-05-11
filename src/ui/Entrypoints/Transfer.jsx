@@ -14,6 +14,7 @@ import PixelInput             from '../PixelInput.jsx';
 import PixelButton            from '../PixelButton.jsx';
 import LoadingSpinner         from '../LoadingSpinner.jsx';
 import TokenPreviewWindow     from './TokenPreviewWindow.jsx';
+import { TZKT_API, NETWORK_KEY } from '../../config/deployTarget.js';
 
 import listLiveTokenIds       from '../../utils/listLiveTokenIds.js';
 import { useWalletContext }   from '../../contexts/WalletContext.js';
@@ -46,7 +47,7 @@ export default function Transfer({
   const {
     address : walletAddress,
     toolkit,
-    network = 'ghostnet',
+    network = NETWORK_KEY
   } = useWalletContext() || {};
   const kit   = toolkit || window.tezosToolkit;
   const toast = (m, s='warning') => setSnackbar({ open:true, message:m, severity:s });
@@ -61,9 +62,7 @@ export default function Transfer({
       const live = await listLiveTokenIds(contractAddress, network, true);
       const ids  = live.map((t) => (typeof t === 'object' ? t.id : t)).slice(0, 100);
       const fromLive = new Map(live.map((t) => [t.id, t.name || '']));
-      const base = network === 'mainnet'
-        ? 'https://api.tzkt.io/v1'
-        : 'https://api.ghostnet.tzkt.io/v1';
+      const base = `${TZKT_API}/v1`;
       const rows = await jFetch(
         `${base}/tokens?contract=${contractAddress}`
         + `&tokenId.in=${ids.join(',')}`
@@ -121,7 +120,7 @@ export default function Transfer({
           .forEach((to_) => txs.push({ to_, token_id:Number(id), amount:Number(amount) }));
       });
       const c  = await kit.wallet.at(contractAddress);
-      const op = await c.methods.transfer([{ from_: sender, txs }]).send();
+      const op = await c.methodsObject.transfer([{ from_: sender, txs }]).send();
       toast('Transfer pending …', 'info');
       await op.confirmation();
       toast('Batch sent ✔', 'success');

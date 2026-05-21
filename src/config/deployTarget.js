@@ -77,6 +77,7 @@ const nets = {
 	  devPort: 3001,
 	  ztBase: 'https://testnet.zeroterminal.art',
 	},
+/*
   ghostnet_orig: {
     label:        'GHOSTNET',
     themeColor:   '#6f79ff',
@@ -105,6 +106,7 @@ const nets = {
     devPort:      3000,
     ztBase:       'https://testnet.zeroterminal.art',
   },
+*/
   mainnet: {
     label:        'MAINNET',
     themeColor:   '#00c48c',
@@ -118,7 +120,7 @@ const nets = {
     startUrl:     '/?source=pwa-mainnet',
     rpc: [
       // Reordered to avoid SmartPy CORS intermittency in browsers
-      'https://mainnet.tezos.ecadinfra.com',
+      //'https://mainnet.tezos.ecadinfra.com',
       'https://prod.tcinfra.net/rpc/mainnet',
       // Keep SmartPy last as a fallback
       'https://mainnet.smartpy.io',

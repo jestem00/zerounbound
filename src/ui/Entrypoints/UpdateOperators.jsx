@@ -10,7 +10,7 @@ import React, {
   useState,
 }                         from 'react';
 import { Buffer }         from 'buffer';
-import BigNumber          from 'bignumber.js';
+// import BigNumber          from 'bignumber.js';
 import styledPkg          from 'styled-components';
 
 import PixelHeading       from '../PixelHeading.jsx';
@@ -131,7 +131,8 @@ export default function UpdateOperators({
   useEffect(() => { void loadMeta(tokenId); }, [tokenId, loadMeta]);
 
   /*── core op ─────────────────────────────*/
-  const toNat = (v) => new BigNumber(v).toFixed();
+  // const toNat = (v) => new BigNumber(v).toFixed();
+  const toNat = (v) => String(v);
 
   const run = async () => {
     if (!isTz(addr))   return snack('Enter a valid operator address');
@@ -146,15 +147,24 @@ export default function UpdateOperators({
         ? { add_operator:    { owner: walletAddress, operator: addr, token_id: toNat(tokenId) } }
         : { remove_operator: { owner: walletAddress, operator: addr, token_id: toNat(tokenId) } };
 
-      const op = await c.methodsObject.update_operators([row]).send();
+      //const op = await c.methodsObject.update_operators([row]).send();
+      // Try new Taquito v20+ syntax, fallback to old
+      let op;
+      try {
+        op = await c.methods.update_operators([[row]]).send();
+      } catch (err) {
+        op = await c.methodsObject.update_operators([row]).send();
+      }
 
       setOv({ open:true, status:'Broadcasting…' });
-      await op.confirmation();
+      //await op.confirmation();
+	  await op.confirmation(1);
 
       snack(`${adding ? 'Added' : 'Removed'} ✓`, 'success');
       setAddr(''); setTokenId('');
       onMutate();
     } catch (e) {
+		console.error('Operator update error:', e);
       snack(e.message || String(e), 'error');
     } finally {
       setBusy(false);
@@ -170,7 +180,7 @@ export default function UpdateOperators({
         Grant or revoke <em>operator</em> rights on a specific token. Pick
         <strong>&nbsp;Token‑ID</strong> (dropdown or manual) → paste
         operator address → choose <strong>Add</strong> or <strong>Remove</strong>. One
-        signature packs a single FA‑2&nbsp;<code>update_operators</code> row.
+        signature packs a single FA‑2&nbsp;<code>update_operators</code> row.<br/>(Zero Sum = KT1Stfgf6H5N1idSBcAMAbo1BdPMi9K6E43M)
       </HelpBox>
 
       {/* token picker */}

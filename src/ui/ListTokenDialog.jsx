@@ -445,6 +445,8 @@ export default function ListTokenDialog(props) {
       const amountUnits = dec > 0 ? Number(qty) * (10 ** dec) : Number(qty);
 
       // Pre‑flight: if already operator, tell the user (clarity)
+	  // REMOVED FOR NEW TAQUITO VERION - WE ALWAYS SEND ADD OPERATOR NOW
+	  /*
       try {
         const market   = await getMarketContract(toolkit);
         const already  = await hasOperatorForId({
@@ -461,7 +463,8 @@ export default function ListTokenDialog(props) {
             severity: 'info',
           },
         }));
-      } catch { /* non‑fatal UX nicety */ }
+      } catch { /* non‑fatal UX nicety * / }
+	  */
 
       // Builder handles signature variants & injects update_operators when needed.
       const params = await buildListParams(toolkit, {

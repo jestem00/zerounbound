@@ -618,13 +618,31 @@ export async function hasOperatorForId({ tzktBase = tzktV1(NETWORK_KEY), nftCont
 }
 
 export async function buildUpdateOperatorParams(toolkit, nftContract, { owner, operator, tokenId }) {
-  const nft = await toolkit.wallet.at(nftContract);
+  let nft;
   try {
-    return nft.methods.update_operators([{ add_operator: { owner, operator, token_id: Number(tokenId) } }]).toTransferParams();
+    nft = await toolkit.contract.at(nftContract);
   } catch {
-    return nft.methods.update_operators([{ add_operator: { operator, owner, token_id: Number(tokenId) } }]).toTransferParams();
+    nft = await toolkit.wallet.at(nftContract);
   }
+  
+  const operatorParam = { add_operator: { owner, operator, token_id: Number(tokenId) } };
+  
+  // Use methodsObject (the property that exists)
+  if (nft.methodsObject && typeof nft.methodsObject.update_operators === 'function') {
+    try {
+      // Try double array for Taquito v20+
+      const result = nft.methodsObject.update_operators([[operatorParam]]);
+      return result.toTransferParams();
+    } catch (err) {
+      // Fallback to single array
+      const result = nft.methodsObject.update_operators([operatorParam]);
+      return result.toTransferParams();
+    }
+  }
+  
+  throw new Error(`Cannot find update_operators method on contract ${nftContract}`);
 }
+
 export async function ensureOperatorForId(toolkit, { nftContract, owner, operator, tokenId }) {
   const already = await hasOperatorForId({ nftContract, owner, operator, tokenId });
   if (already) return null;
@@ -758,13 +776,13 @@ export async function buildListParams(toolkit, {
   const txs = [{ kind: OpKind.TRANSACTION, ...transferParams }];
 
   if (sellerAddress) {
-    try {
-      const operatorAddr = c.address;
-      const upd = await ensureOperatorForId(toolkit, {
-        nftContract, owner: sellerAddress, operator: operatorAddr, tokenId: tokId,
-      });
-      if (upd) txs.unshift(upd);
-    } catch { /* proceed; chain will error if operator truly missing */ }
+	  const operatorAddr = c.address;
+	  const upd = await buildUpdateOperatorParams(toolkit, nftContract, {
+		owner: sellerAddress,
+		operator: operatorAddr,
+		tokenId: tokId
+	  });
+	  txs.unshift({ kind: OpKind.TRANSACTION, ...upd });
   }
   return txs;
 }

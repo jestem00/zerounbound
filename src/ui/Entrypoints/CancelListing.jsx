@@ -196,7 +196,7 @@ export default function CancelListing({ open, contract, tokenId, onClose = () =>
         calls.push(...params);
       }
       const op = await toolkit.wallet.batch(calls).send();
-      await op.confirmation();
+      await op.confirmation(1);
       setOv({ open: false, label: '' });
       snack('Listings cancelled');
       onClose();

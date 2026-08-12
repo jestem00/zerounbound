@@ -235,7 +235,7 @@ export const FACTORY_ADDRESS = FACTORY_ADDRESSES[TARGET];
 // Mainnet.  See src/core/marketplace.js for usage.
 // Marketplace - canonical ZeroSum contracts
 export const MARKETPLACE_ADDRESSES = {
-  //ghostnet: 'KT19yn9fWP6zTSLPntGyrPwc7JuMHnYxAn1z', // Deprecated with no Shadownet replacement
+  ghostnet: 'KT1UcmiMxUdNaTZtjD4TTUZfpDz4HcTUWjAL', // Shadownet
   mainnet : 'KT1Stfgf6H5N1idSBcAMAbo1BdPMi9K6E43M',
 };
 

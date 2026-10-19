@@ -93,27 +93,26 @@ export default function ClearUri({
   useEffect(() => { void loadMeta(tokenId); }, [tokenId, loadMeta]);
 
   /* clear op */
-	const clearUri = async (k) => {
-	  console.log('clearUri called with:', typeof k, k);
-	  if (!toolkit) return snack('Connect wallet', 'error');
-	  try {
-		setOv({ open:true, status:'Waiting for signature…' });
-		const c  = await toolkit.wallet.at(contractAddress);
-
-		// Taquito v20+: use methodsObject, positional args match pair(nat, string)
-		const op = await c.methodsObject.clear_uri(+tokenId, k).send();
-
-		setOv({ open:true, status:'Broadcasting…' });
-		await op.confirmation(1);   // v20+ requires depth arg
-
-		snack('Cleared ✓', 'success');
-		onMutate(); loadMeta(tokenId); setOv({ open:false });
-	  } catch (e) {
-		console.error('clear_uri error:', e);
-		setOv({ open:false });
-		snack(e.message || String(e), 'error');
-	  }
-	};
+  const clearUri = async (k) => {
+    if (!toolkit) return snack('Connect wallet', 'error');
+    if (!tokenId) return snack('Pick a token first', 'warning');
+    try {
+      setOv({ open:true, status:'Waiting for signature…' });
+      const c  = await toolkit.wallet.at(contractAddress);
+      const op = await c.methodsObject.clear_uri({
+        token_id: +tokenId,
+        uri_type: k,
+      }).send();
+      setOv({ open:true, status:'Broadcasting…' });
+      await op.confirmation(1);
+      snack('Cleared ✓', 'success');
+      onMutate(); loadMeta(tokenId); setOv({ open:false });
+    } catch (e) {
+      console.error('clear_uri error:', e);
+      setOv({ open:false });
+      snack(e.message || String(e), 'error');
+    }
+  };
 
   /*──────── JSX ───*/
   return (
